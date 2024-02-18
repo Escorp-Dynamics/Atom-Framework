@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+
+		<EnforceCodeStyleInBuild>True</EnforceCodeStyleInBuild>
+		<AnalysisLevel>latest-all</AnalysisLevel>
+		<CheckForOverflowUnderflow>True</CheckForOverflowUnderflow>
+		<TreatWarningsAsErrors>True</TreatWarningsAsErrors>
+		<CodeAnalysisTreatWarningsAsErrors>True</CodeAnalysisTreatWarningsAsErrors>
+		<WarningLevel>9999</WarningLevel>
+
+		<IsTrimmable>true</IsTrimmable>
+		<IsAotCompatible>true</IsAotCompatible>
+		<InvariantGlobalization>true</InvariantGlobalization>
+
+		<NoWarn>CA1003;CA1711</NoWarn>
+	</PropertyGroup>
+
+</Project>

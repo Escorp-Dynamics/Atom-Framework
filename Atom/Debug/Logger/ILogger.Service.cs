@@ -1,0 +1,225 @@
+﻿namespace Atom.Debug;
+
+public partial interface ILogger
+{
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <typeparam name="T">Тип связанных данных.</typeparam>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="mode">Режим записи в журнал.</param>
+    /// <param name="color">Цвет текста записи.</param>
+    /// <param name="data">Связанные данные.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync<T>(string? message, LogMode mode, ConsoleColor color, T? data, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <typeparam name="T">Тип связанных данных.</typeparam>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="mode">Режим записи в журнал.</param>
+    /// <param name="color">Цвет текста записи.</param>
+    /// <param name="data">Связанные данные.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync<T>(string? message, LogMode mode, ConsoleColor color, T? data) => ServiceAsync(message, mode, color, data, CancellationToken.None);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <typeparam name="T">Тип связанных данных.</typeparam>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="mode">Режим записи в журнал.</param>
+    /// <param name="data">Связанные данные.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync<T>(string? message, LogMode mode, T? data, CancellationToken cancellationToken) => ServiceAsync(message, mode, ConsoleColor.White, data, cancellationToken);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <typeparam name="T">Тип связанных данных.</typeparam>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="mode">Режим записи в журнал.</param>
+    /// <param name="data">Связанные данные.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync<T>(string? message, LogMode mode, T? data) => ServiceAsync(message, mode, data, CancellationToken.None);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <typeparam name="T">Тип связанных данных.</typeparam>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="data">Связанные данные.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync<T>(string? message, T? data, CancellationToken cancellationToken) => ServiceAsync(message, LogMode.All, data, cancellationToken);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <typeparam name="T">Тип связанных данных.</typeparam>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="data">Связанные данные.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync<T>(string? message, T? data) => ServiceAsync(message, data, CancellationToken.None);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <typeparam name="T">Тип связанных данных.</typeparam>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="color">Цвет текста записи.</param>
+    /// <param name="data">Связанные данные.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync<T>(string? message, ConsoleColor color, T? data, CancellationToken cancellationToken) => ServiceAsync(message, LogMode.All, color, data, cancellationToken);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <typeparam name="T">Тип связанных данных.</typeparam>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="messageForFile">Сообщение журнала (для записи в файл).</param>
+    /// <param name="color">Цвет текста записи.</param>
+    /// <param name="data">Связанные данные.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync<T>(string? message, string messageForFile, ConsoleColor color, T? data, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <typeparam name="T">Тип связанных данных.</typeparam>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="messageForFile">Сообщение журнала (для записи в файл).</param>
+    /// <param name="color">Цвет текста записи.</param>
+    /// <param name="data">Связанные данные.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync<T>(string? message, string messageForFile, ConsoleColor color, T? data) => ServiceAsync(message, messageForFile, color, data, CancellationToken.None);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <typeparam name="T">Тип связанных данных.</typeparam>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="messageForFile">Сообщение журнала (для записи в файл).</param>
+    /// <param name="data">Связанные данные.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync<T>(string? message, string messageForFile, T? data, CancellationToken cancellationToken) => ServiceAsync(message, messageForFile, ConsoleColor.White, data, cancellationToken);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <typeparam name="T">Тип связанных данных.</typeparam>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="messageForFile">Сообщение журнала (для записи в файл).</param>
+    /// <param name="data">Связанные данные.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync<T>(string? message, string messageForFile, T? data) => ServiceAsync(message, messageForFile, data, CancellationToken.None);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="mode">Режим записи в журнал.</param>
+    /// <param name="color">Цвет текста записи.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync(string? message, LogMode mode, ConsoleColor color, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="mode">Режим записи в журнал.</param>
+    /// <param name="color">Цвет текста записи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync(string? message, LogMode mode, ConsoleColor color) => ServiceAsync(message, mode, color, CancellationToken.None);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="mode">Режим записи в журнал.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync(string? message, LogMode mode, CancellationToken cancellationToken) => ServiceAsync(message, mode, ConsoleColor.White, cancellationToken);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="mode">Режим записи в журнал.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync(string? message, LogMode mode) => ServiceAsync(message, mode, CancellationToken.None);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync(string? message, CancellationToken cancellationToken) => ServiceAsync(message, LogMode.All, cancellationToken);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync(string? message) => ServiceAsync(message, CancellationToken.None);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="color">Цвет текста записи.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync(string? message, ConsoleColor color, CancellationToken cancellationToken) => ServiceAsync(message, LogMode.All, color, cancellationToken);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="color">Цвет текста записи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync(string? message, ConsoleColor color) => ServiceAsync(message, color, CancellationToken.None);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="messageForFile">Сообщение журнала (для записи в файл).</param>
+    /// <param name="color">Цвет текста записи.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync(string? message, string messageForFile, ConsoleColor color, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="messageForFile">Сообщение журнала (для записи в файл).</param>
+    /// <param name="color">Цвет текста записи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync(string? message, string messageForFile, ConsoleColor color) => ServiceAsync(message, messageForFile, color, CancellationToken.None);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="messageForFile">Сообщение журнала (для записи в файл).</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync(string? message, string messageForFile, CancellationToken cancellationToken) => ServiceAsync(message, messageForFile, ConsoleColor.White, cancellationToken);
+
+    /// <summary>
+    /// Делает запись служебной информации в журнал.
+    /// </summary>
+    /// <param name="message">Сообщение журнала.</param>
+    /// <param name="messageForFile">Сообщение журнала (для записи в файл).</param>
+    /// <returns></returns>
+    ValueTask ServiceAsync(string? message, string messageForFile) => ServiceAsync(message, messageForFile, CancellationToken.None);
+}
