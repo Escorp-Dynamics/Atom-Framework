@@ -21,14 +21,14 @@ public interface ILogInfo
     string Message { get; set; }
 
     /// <summary>
-    /// Время создания сообщения.
-    /// </summary>
-    DateTime Time { get; }
-
-    /// <summary>
     /// Тип записи журнала.
     /// </summary>
     LogType Type { get; }
+
+    /// <summary>
+    /// Время создания сообщения.
+    /// </summary>
+    DateTime Time { get; }
 
     /// <summary>
     /// Связанные данные.

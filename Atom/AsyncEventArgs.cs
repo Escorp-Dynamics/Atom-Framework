@@ -29,6 +29,9 @@ public class AsyncEventArgs : EventArgs
     /// </summary>
     public CancellationToken CancellationToken { get; set; } = CancellationToken.None;
 
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="AsyncEventArgs"/>.
+    /// </summary>
     protected AsyncEventArgs()
     {
         Iteration = 1;

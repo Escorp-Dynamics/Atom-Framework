@@ -32,6 +32,7 @@ public partial interface ILog
     /// <param name="message">Сообщение журнала.</param>
     /// <param name="mode">Режим записи в журнал.</param>
     /// <param name="data">Связанные данные.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns></returns>
     ValueTask CriticalAsync<T>(string message, LogMode mode, T? data, CancellationToken cancellationToken) => CriticalAsync(message, mode, ConsoleColor.Magenta, data, cancellationToken);
 
@@ -112,6 +113,7 @@ public partial interface ILog
     /// <param name="message">Сообщение журнала.</param>
     /// <param name="mode">Режим записи в журнал.</param>
     /// <param name="ex">Информация об ошибке.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns></returns>
     ValueTask CriticalAsync(string message, LogMode mode, Exception ex, CancellationToken cancellationToken) => CriticalAsync(message, mode, ConsoleColor.Magenta, ex, cancellationToken);
 
@@ -128,8 +130,8 @@ public partial interface ILog
     /// Делает запись критической информации в журнал.
     /// </summary>
     /// <param name="message">Сообщение журнала.</param>
-    /// <param name="data">Связанные данные.</param>
     /// <param name="ex">Информация об ошибке.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns></returns>
     ValueTask CriticalAsync(string message, Exception ex, CancellationToken cancellationToken) => CriticalAsync(message, LogMode.All, ex, cancellationToken);
 

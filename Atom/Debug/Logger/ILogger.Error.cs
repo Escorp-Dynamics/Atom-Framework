@@ -32,6 +32,7 @@ public partial interface ILogger
     /// <param name="message">Сообщение журнала.</param>
     /// <param name="mode">Режим записи в журнал.</param>
     /// <param name="data">Связанные данные.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns></returns>
     ValueTask ErrorAsync<T>(string? message, LogMode mode, T? data, CancellationToken cancellationToken) => ErrorAsync(message, mode, ConsoleColor.Red, data, cancellationToken);
 
@@ -156,6 +157,7 @@ public partial interface ILogger
     /// <param name="message">Сообщение журнала.</param>
     /// <param name="mode">Режим записи в журнал.</param>
     /// <param name="ex">Информация об ошибке.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns></returns>
     ValueTask ErrorAsync(string? message, LogMode mode, Exception ex, CancellationToken cancellationToken) => ErrorAsync(message, mode, ConsoleColor.Red, ex, cancellationToken);
 
@@ -172,8 +174,8 @@ public partial interface ILogger
     /// Делает запись ошибок в журнал.
     /// </summary>
     /// <param name="message">Сообщение журнала.</param>
-    /// <param name="data">Связанные данные.</param>
     /// <param name="ex">Информация об ошибке.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns></returns>
     ValueTask ErrorAsync(string? message, Exception ex, CancellationToken cancellationToken) => ErrorAsync(message, LogMode.All, ex, cancellationToken);
 

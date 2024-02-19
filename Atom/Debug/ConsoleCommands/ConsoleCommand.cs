@@ -3,6 +3,7 @@
 /// <summary>
 /// Представляет базовую реализацию консольной команды.
 /// </summary>
+/// <param name="log">Журнал событий.</param>
 /// <param name="aliases">Коллекция псевдонимов команды.</param>
 public abstract class ConsoleCommand(ILogger log, IEnumerable<string> aliases) : IConsoleCommand
 {
@@ -30,11 +31,22 @@ public abstract class ConsoleCommand(ILogger log, IEnumerable<string> aliases) :
     /// <summary>
     /// Представляет базовую реализацию консольной команды. 
     /// </summary>
-    /// <param name="aliases">Коллекция псевдонимов команды.</param>
+    /// <param name="log">Журнал событий.</param>
+    /// <param name="alias">Псевдоним команды.</param>
     protected ConsoleCommand(ILogger log, string alias) : this(log, [alias]) { }
 
+    /// <summary>
+    /// Происходит в момент парсинга команды.
+    /// </summary>
+    /// <param name="e">Аргументы события.</param>
+    /// <returns></returns>
     protected virtual ValueTask OnParsing(ParseCommandEventArgs e) => Parsing.On(this, e);
 
+    /// <summary>
+    /// Происходит в момент выполнения команды.
+    /// </summary>
+    /// <param name="e">Аргументы события.</param>
+    /// <returns></returns>
     protected virtual async ValueTask<bool> OnExecution(ExecuteCommandEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e, nameof(e));
@@ -42,6 +54,11 @@ public abstract class ConsoleCommand(ILogger log, IEnumerable<string> aliases) :
         return !e.IsCancelled && e.IsSuccess;
     }
 
+    /// <summary>
+    /// Происходит в момент отмены команды.
+    /// </summary>
+    /// <param name="e">Аргументы события.</param>
+    /// <returns></returns>
     protected virtual async ValueTask<bool> OnCancelling(ExecuteCommandEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e, nameof(e));

@@ -17,6 +17,31 @@
 		<InvariantGlobalization>true</InvariantGlobalization>
 
 		<NoWarn>CA1003;CA1711</NoWarn>
+
+		<GenerateDocumentationFile>True</GenerateDocumentationFile>
+		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+		<PackageId>Escorp.$(AssemblyName)</PackageId>
+		<Version>0.0.1</Version>
+		<Authors>Yuriy Yesin, Escorp Lab</Authors>
+		<Company>Escorp Dynamics</Company>
+		<Product>Escorp.$(AssemblyName)</Product>
+		<RepositoryUrl>https://gitflic.ru/project/escorp-lab/atom</RepositoryUrl>
+		<IncludeSymbols>True</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<PackageIcon>icon.png</PackageIcon>
+		<PackageTags>atom;framework;escorp;exomode;system;threading;log;debug;extension</PackageTags>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
+
+	<ItemGroup>
+	  <None Update="icon.png">
+	    <Pack>True</Pack>
+	    <PackagePath>\</PackagePath>
+	  </None>
+	  <None Update="README.md">
+	    <Pack>True</Pack>
+	    <PackagePath>\</PackagePath>
+	  </None>
+	</ItemGroup>
 
 </Project>

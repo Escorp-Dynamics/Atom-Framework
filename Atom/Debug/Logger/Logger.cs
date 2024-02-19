@@ -6,6 +6,9 @@ using System.Collections.Specialized;
 
 namespace Atom.Debug;
 
+/// <summary>
+/// Представляет реализацию менеджера журнала событий.
+/// </summary>
 public partial class Logger : ILogger
 {
     private const string BackgroundMessage = "Фоновое ожидание";
@@ -21,22 +24,27 @@ public partial class Logger : ILogger
     private string? lastMessage;
     private readonly ObservableCollection<IConsoleCommand> commands = [];
 
+    /// <inheritdoc/>
     public string Name => log.Name;
 
+    /// <inheritdoc/>
     public LogMode Mode
     {
         get => log.Mode;
         set => log.Mode = value;
     }
 
+    /// <inheritdoc/>
     public string? Path => log.Path;
 
+    /// <inheritdoc/>
     public bool IsFormattingEnabled
     {
         get => log.IsFormattingEnabled;
         set => log.IsFormattingEnabled = value;
     }
 
+    /// <inheritdoc/>
     public IDictionary<LogMode, LogType> Filter { get; } = new Dictionary<LogMode, LogType>
     {
         { LogMode.Console, LogType.All },
@@ -45,6 +53,7 @@ public partial class Logger : ILogger
         { LogMode.All, LogType.All },
     };
 
+    /// <inheritdoc/>
     public bool IsEnabled { get; set; }
 
     /// <inheritdoc/>
@@ -59,12 +68,21 @@ public partial class Logger : ILogger
     /// <inheritdoc/>
     public event AsyncEventHandler<ILogger, NotifyCollectionChangedEventArgs>? CommandsChanged;
 
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="Logger"/>
+    /// </summary>
+    /// <param name="name">Имя журнала.</param>
     public Logger(string? name)
     {
         log = new(name ?? "log");
         queue = new ConcurrentQueue<Tuple<LogMode, ILogInfo<object>>>();
         commands.CollectionChanged += async (s, e) => await OnCommandsChanged(e).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="Logger"/>
+    /// </summary>
+    public Logger() : this(default) { }
 
     private void AddToConsole(string? message, LogType type, ConsoleColor color, object? data)
     {
@@ -171,8 +189,16 @@ public partial class Logger : ILogger
         Add(message, LogMode.Console, LogType.Info, prefix: $"{beginWaitingTime:HH:mm:ss.fff}");
     }
 
+    /// <summary>
+    /// Происходит в момент изменения коллекции связанных команд.
+    /// </summary>
+    /// <param name="e">Аргументы события.</param>
+    /// <returns></returns>
     protected virtual ValueTask OnCommandsChanged(NotifyCollectionChangedEventArgs e) => CommandsChanged.On(this, e);
 
+    /// <summary>
+    /// Происходит в момент фоновой обработки журнала.
+    /// </summary>
     protected virtual async void OnBackground()
     {
         if (!IsEnabled) return;
@@ -189,8 +215,17 @@ public partial class Logger : ILogger
         OnBackground();
     }
 
+    /// <summary>
+    /// Происходит в момент записи в журнал.
+    /// </summary>
+    /// <param name="sender">Экземпляр журнала.</param>
+    /// <param name="e">Аргументы события.</param>
+    /// <returns></returns>
     protected virtual ValueTask OnWritting(ILog sender, LogEventArgs e) => Writting.On(sender, e);
 
+    /// <summary>
+    /// Происходит в момент ввода команды.
+    /// </summary>
     protected virtual async void OnCommand()
     {
         await Wait.UntilAsync(() => IsEnabled && !Console.KeyAvailable, TimeSpan.FromMilliseconds(50)).ConfigureAwait(false);
@@ -260,8 +295,10 @@ public partial class Logger : ILogger
     /// <inheritdoc/>
     public bool TryGetCommand<TCommand>(out TCommand? command) where TCommand : class, IConsoleCommand => (command = commands.OfType<TCommand>().FirstOrDefault()) is not null;
 
+    /// <inheritdoc/>
     public virtual ValueTask HeaderAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
 
+    /// <inheritdoc/>
     public ValueTask HeaderAsync() => HeaderAsync(CancellationToken.None);
 
     /// <inheritdoc/>
@@ -275,13 +312,7 @@ public partial class Logger : ILogger
     }
 
     /// <inheritdoc/>
-    public virtual ValueTask ResetLineAsync(int offset, CancellationToken cancellationToken) => log.ResetLineAsync(offset, cancellationToken);
-
-    /// <inheritdoc/>
-    public ValueTask ResetLineAsync(int offset) => ResetLineAsync(offset, CancellationToken.None);
-
-    /// <inheritdoc/>
-    public ValueTask ResetLineAsync(CancellationToken cancellationToken) => ResetLineAsync(0, cancellationToken);
+    public virtual ValueTask ResetLineAsync(CancellationToken cancellationToken) => log.ResetLineAsync(cancellationToken);
 
     /// <inheritdoc/>
     public ValueTask ResetLineAsync() => ResetLineAsync(CancellationToken.None);

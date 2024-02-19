@@ -32,6 +32,7 @@ public partial interface ILog
     /// <param name="message">Сообщение журнала.</param>
     /// <param name="mode">Режим записи в журнал.</param>
     /// <param name="data">Связанные данные.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns></returns>
     ValueTask SuccessAsync<T>(string message, LogMode mode, T? data, CancellationToken cancellationToken) => SuccessAsync(message, mode, ConsoleColor.Green, data, cancellationToken);
 

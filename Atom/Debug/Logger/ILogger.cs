@@ -2,6 +2,9 @@
 
 namespace Atom.Debug;
 
+/// <summary>
+/// Представляет базовый интерфейс для реализации менеджеров журнала событий.
+/// </summary>
 public partial interface ILogger : IAsyncDisposable
 {
     /// <summary>
@@ -24,10 +27,19 @@ public partial interface ILogger : IAsyncDisposable
     /// </summary>
     bool IsFormattingEnabled { get; set; }
 
+    /// <summary>
+    /// Определяет, активна ли запись в журнал событий.
+    /// </summary>
     bool IsEnabled { get; set; }
 
+    /// <summary>
+    /// Фильтр по типам записей журнала для каждого режима записи в журнал.
+    /// </summary>
     IDictionary<LogMode, LogType> Filter { get; }
 
+    /// <summary>
+    /// Коллекция связанных с журналом команд.
+    /// </summary>
     IEnumerable<IConsoleCommand> Commands { get; }
 
     /// <summary>
@@ -35,6 +47,9 @@ public partial interface ILogger : IAsyncDisposable
     /// </summary>
     event AsyncEventHandler<ILog, LogEventArgs>? Writting;
 
+    /// <summary>
+    /// Происходит в момент ввода команды.
+    /// </summary>
     event AsyncEventHandler<ILogger, InputEventArgs>? Command;
 
     /// <summary>
@@ -72,15 +87,29 @@ public partial interface ILogger : IAsyncDisposable
     /// <returns>True, если команда была подключена, иначе false.</returns>
     bool TryGetCommand<TCommand>(out TCommand? command) where TCommand : class, IConsoleCommand;
 
+    /// <summary>
+    /// Выводит заголовок журнала.
+    /// </summary>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
     ValueTask HeaderAsync(CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Выводит заголовок журнала.
+    /// </summary>
+    /// <returns></returns>
     ValueTask HeaderAsync() => HeaderAsync(CancellationToken.None);
 
-    ValueTask ResetLineAsync(int offset, CancellationToken cancellationToken);
+    /// <summary>
+    /// Переводит курсор записи на одну строку вверх.
+    /// </summary>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask ResetLineAsync(CancellationToken cancellationToken);
 
-    ValueTask ResetLineAsync(int offset) => ResetLineAsync(offset, CancellationToken.None);
-
-    ValueTask ResetLineAsync(CancellationToken cancellationToken) => ResetLineAsync(0, cancellationToken);
-
+    /// <summary>
+    /// Переводит курсор записи на одну строку вверх.
+    /// </summary>
+    /// <returns></returns>
     ValueTask ResetLineAsync() => ResetLineAsync(CancellationToken.None);
 }

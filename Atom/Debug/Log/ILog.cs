@@ -419,11 +419,16 @@ public partial interface ILog : IAsyncDisposable
 
     #endregion
 
-    ValueTask ResetLineAsync(int offset, CancellationToken cancellationToken);
+    /// <summary>
+    /// Переводит курсор записи на одну строку вверх.
+    /// </summary>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask ResetLineAsync(CancellationToken cancellationToken);
 
-    ValueTask ResetLineAsync(int offset) => ResetLineAsync(offset, CancellationToken.None);
-
-    ValueTask ResetLineAsync(CancellationToken cancellationToken) => ResetLineAsync(0, cancellationToken);
-
+    /// <summary>
+    /// Переводит курсор записи на одну строку вверх.
+    /// </summary>
+    /// <returns></returns>
     ValueTask ResetLineAsync() => ResetLineAsync(CancellationToken.None);
 }

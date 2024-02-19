@@ -119,7 +119,7 @@ public static class DebugExtensions
     /// <summary>
     /// Преобразует строковое представление стиля консоли в <see cref="ConsoleColor"/>.
     /// </summary>
-    /// <param name="color">Строковое представление стиля консоли.</param>
+    /// <param name="style">Строковое представление стиля консоли.</param>
     /// <returns>Стиль консоли.</returns>
     public static ConsoleStyle AsConsoleStyle(this string? style) => style?.ToUpperInvariant() switch
     {
@@ -133,7 +133,7 @@ public static class DebugExtensions
     /// Парсит консольный стиль из строки.
     /// </summary>
     /// <param name="name">Строковое представление стиля.</param>
-    /// <param name="color">Консольный стиль.</param>
+    /// <param name="style">Консольный стиль.</param>
     /// <returns><c>True</c>, если операция была удачной, иначе <c>false</c>.</returns>
     public static bool TryGetStyle(this string? name, out ConsoleStyle? style)
     {

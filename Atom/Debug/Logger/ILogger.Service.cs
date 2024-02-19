@@ -32,6 +32,7 @@ public partial interface ILogger
     /// <param name="message">Сообщение журнала.</param>
     /// <param name="mode">Режим записи в журнал.</param>
     /// <param name="data">Связанные данные.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns></returns>
     ValueTask ServiceAsync<T>(string? message, LogMode mode, T? data, CancellationToken cancellationToken) => ServiceAsync(message, mode, ConsoleColor.White, data, cancellationToken);
 
