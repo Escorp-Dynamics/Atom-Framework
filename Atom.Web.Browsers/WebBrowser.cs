@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
-using Atom.Threading;
 using Atom.Web.Browsers.BOM;
+using Atom.Web.Browsers.NativeMessaging;
 
 namespace Atom.Web.Browsers;
 
@@ -8,10 +8,15 @@ namespace Atom.Web.Browsers;
 /// Представляет браузер.
 /// </summary>
 /// <typeparam name="TSettings">Тип настроек браузера.</typeparam>
-public abstract class WebBrowser<TSettings> : IWebBrowser<TSettings>
+/// <typeparam name="TServer">Тип сервера браузера.</typeparam>
+public abstract class WebBrowser<TSettings, TServer> : IWebBrowser<TSettings, TServer>
     where TSettings : IWebBrowserSettings, new()
+    where TServer : IWebBrowserServer, new()
 {
     private readonly Process process;
+
+    /// <inheritdoc/>
+    public TServer Server { get; set; }
 
     /// <inheritdoc/>
     public TSettings Settings { get; init; }
@@ -20,27 +25,37 @@ public abstract class WebBrowser<TSettings> : IWebBrowser<TSettings>
     public bool IsRunning { get; protected set; }
 
     /// <summary>
-    /// Инициализирует новый экземпляр класса <see cref="WebBrowser{TSettings}"/>.
+    /// Инициализирует новый экземпляр класса <see cref="WebBrowser{TSettings, TServer}"/>.
     /// </summary>
     /// <param name="settings">Настройки браузера.</param>
     protected WebBrowser(TSettings settings)
     {
         Settings = settings;
         process = new Process();
+        Server = new TServer();
     }
 
-    private ValueTask StartProcessAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Запускает процесс браузера.
+    /// </summary>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    protected virtual async ValueTask StartProcessAsync(CancellationToken cancellationToken)
     {
+        if (IsRunning) return;
         IsRunning = true;
 
         process.StartInfo = new ProcessStartInfo(Settings.BinaryPath)
         {
+            Arguments = Settings.ToString(),
             UseShellExecute = true,
             CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
         };
 
+        await Server.StartAsync(cancellationToken).ConfigureAwait(false);
         process.Start();
-        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>

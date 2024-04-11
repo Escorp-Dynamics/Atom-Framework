@@ -1,1 +1,54 @@
- 
+{
+    "manifest_version": 2,
+    "name": "Atom",
+    "version": "0.0.1",
+    "author": "Escorp Dynamics",
+    "permissions": [
+        "activeTab",
+        "browserSettings",
+        "browsingData",
+        "contextualIdentities",
+        "cookies",
+        "geolocation",
+        "history",
+        "nativeMessaging",
+        "webRequest",
+        "webRequestBlocking",
+        "webRequestFilterResponse",
+        "webRequestFilterResponse.serviceWorkerScript",
+        "tabs",
+        "proxy",
+        "storage",
+        "unlimitedStorage",
+        "notifications",
+        "<all_urls>"
+    ],
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "atom@escorp.dynamics",
+            "strict_min_version": "124.0"
+        }
+    },
+    "background": {
+        "scripts": [
+            "assets/scripts/background/core.js",
+            "assets/scripts/background/atom.js"
+        ],
+        "persistent": true
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "assets/scripts/content/core.js",
+                "assets/scripts/content/atom.js"
+            ],
+            "run_at": "document_start"
+        }
+    ],
+    "chrome_url_overrides": {
+        "newtab": "assets/pages/newtab.html"
+    }
+}

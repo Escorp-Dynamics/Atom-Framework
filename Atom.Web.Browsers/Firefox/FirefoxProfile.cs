@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using Atom.Net.Http;
 
 namespace Atom.Web.Browsers.Firefox;
 
@@ -7,6 +8,9 @@ namespace Atom.Web.Browsers.Firefox;
 /// </summary>
 public class FirefoxProfile
 {
+    private static readonly SemaphoreSlim locker = new(1, 1);
+    private static Memory<byte> extension;
+
     /// <summary>
     /// Путь к файлу профиля.
     /// </summary>
@@ -44,14 +48,24 @@ public class FirefoxProfile
 
         var extensionsPath = System.IO.Path.Combine(Path, "extensions");
         if (!Directory.Exists(extensionsPath)) Directory.CreateDirectory(extensionsPath);
-        
+
         extensionsPath = System.IO.Path.Combine(extensionsPath, "atom.xpi");
 
         if (!File.Exists(extensionsPath))
         {
-            using var http = new HttpClient();
-            var extension = await http.GetByteArrayAsync(new Uri("https://github.com/mozilla/gecko-dev/raw/master/browser/extensions/firefox/extension.xpi"), cancellationToken).ConfigureAwait(false);
-            await File.WriteAllBytesAsync(extensionsPath, extension, cancellationToken).ConfigureAwait(false);
+            await locker.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+            if (extension.IsEmpty)
+            {
+                using var http = new SafetyHttpClient();
+                using var response = await http.GetAsync(new Uri("https://gitflic.ru/project/escorp-lab/atom/blob/raw?file=Atom.Web.Browsers/Firefox/Extension/atom.xpi?inline=false"), cancellationToken).ConfigureAwait(false);
+                extension = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            locker.Release();
+
+            if (extension.IsEmpty) throw new InvalidOperationException("Ошибка загрузки расширения");
+            await File.WriteAllBytesAsync(extensionsPath, extension.ToArray(), cancellationToken).ConfigureAwait(false);
         }
     }
 

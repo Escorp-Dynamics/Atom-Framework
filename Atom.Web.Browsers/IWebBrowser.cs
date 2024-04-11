@@ -1,4 +1,5 @@
 ﻿using Atom.Web.Browsers.BOM;
+using Atom.Web.Browsers.NativeMessaging;
 
 namespace Atom.Web.Browsers;
 
@@ -6,9 +7,16 @@ namespace Atom.Web.Browsers;
 /// Представляет базовый интерфейс для реализации браузеров.
 /// </summary>
 /// <typeparam name="TSettings">Тип настроек браузера.</typeparam>
-public interface IWebBrowser<TSettings> : IAsyncDisposable
+/// <typeparam name="TServer">Тип сервера браузера.</typeparam>
+public interface IWebBrowser<TSettings, TServer> : IAsyncDisposable
     where TSettings : IWebBrowserSettings
+    where TServer : IWebBrowserServer
 {
+    /// <summary>
+    /// Сервер браузера.
+    /// </summary>
+    TServer Server { get; set; }
+
     /// <summary>
     /// Настройки браузера.
     /// </summary>
