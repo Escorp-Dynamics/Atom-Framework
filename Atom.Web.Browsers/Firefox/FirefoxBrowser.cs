@@ -1,5 +1,4 @@
 ﻿using System.Text.Json;
-using Atom.Net.Http;
 
 namespace Atom.Web.Browsers.Firefox;
 
@@ -23,25 +22,43 @@ public class FirefoxBrowser(FirefoxSettings settings) : WebBrowser<FirefoxSettin
         if (!Directory.Exists(path)) Directory.CreateDirectory(path);
 
         path = Path.Combine(path, "policies.json");
+        const string id = "atom@escorp.dynamics";
+        string xpi = Path.Combine(Environment.CurrentDirectory, $"{id}.xpi");
 
         if (!File.Exists(path))
         {
-            var paths = new[] { Path.Combine(Environment.CurrentDirectory, "atom@escorp.dynamics.xpi") };
-            var ids = new[] { "atom@escorp.dynamics" };
+            var ids = new[] { id };
 
-            var extensions = new Dictionary<string, object?>
+            var distributionPolicies = new DistributionPolicies
             {
-                { "Install", paths },
-                { "Uninstall", ids },
-                { "Locked", ids },
+                Policies = new Extensions
+                {
+                    Install = new[] { xpi },
+                    Uninstall = ids,
+                    Locked = ids,
+                },
             };
 
-            var policies = new Dictionary<string, object?>
-            {
-                { "policies", new Dictionary<string, object?> { { "Extensions", extensions } } },
-            };
-
-            var json = JsonSerializer.Serialize(policies!, JsonHttpContext.Default.Form);
+            var json = JsonSerializer.Serialize(distributionPolicies, JsonDistributionPoliciesContext.Default.DistributionPolicies);
+            await File.WriteAllTextAsync(path, json, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+            var distributionPolicies = JsonSerializer.Deserialize(json, JsonDistributionPoliciesContext.Default.DistributionPolicies);
+            
+            if (!distributionPolicies!.Policies.Install.Any(x => x.Contains(id, StringComparison.InvariantCultureIgnoreCase)))
+                distributionPolicies.Policies.Install = distributionPolicies.Policies.Install
+                    .Where(x => !x.Contains(id, StringComparison.InvariantCultureIgnoreCase))
+                    .Append(xpi);
+            
+            if (!distributionPolicies.Policies.Uninstall.Any(x => x.Equals(id, StringComparison.OrdinalIgnoreCase)))
+                distributionPolicies.Policies.Uninstall = distributionPolicies.Policies.Install.Append(id);
+            
+            if (!distributionPolicies!.Policies.Locked.Any(x => x.Equals(id, StringComparison.OrdinalIgnoreCase)))
+                distributionPolicies.Policies.Locked = distributionPolicies.Policies.Install.Append(id);
+            
+            json = JsonSerializer.Serialize(distributionPolicies, JsonDistributionPoliciesContext.Default.DistributionPolicies);
             await File.WriteAllTextAsync(path, json, cancellationToken).ConfigureAwait(false);
         }
     }
