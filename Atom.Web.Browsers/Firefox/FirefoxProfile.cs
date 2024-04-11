@@ -9,7 +9,7 @@ namespace Atom.Web.Browsers.Firefox;
 public class FirefoxProfile
 {
     private static readonly SemaphoreSlim locker = new(1, 1);
-    private static Memory<byte> extension;
+    private static bool isExtensionDownloaded;
 
     /// <summary>
     /// Путь к файлу профиля.
@@ -41,31 +41,29 @@ public class FirefoxProfile
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     public async ValueTask SaveAsync(CancellationToken cancellationToken)
     {
+        if (!Directory.Exists(Path)) Directory.CreateDirectory(Path);
+
         var path = System.IO.Path.Combine(Path, "prefs.js");
         if (File.Exists(path)) return;
 
         await File.WriteAllTextAsync(path, ToString(), cancellationToken).ConfigureAwait(false);
 
-        var extensionsPath = System.IO.Path.Combine(Path, "extensions");
-        if (!Directory.Exists(extensionsPath)) Directory.CreateDirectory(extensionsPath);
-
-        extensionsPath = System.IO.Path.Combine(extensionsPath, "atom.xpi");
+        var extensionsPath = System.IO.Path.Combine(Environment.CurrentDirectory, "atom@escorp.dynamics.xpi");
 
         if (!File.Exists(extensionsPath))
         {
             await locker.WaitAsync(cancellationToken).ConfigureAwait(false);
 
-            if (extension.IsEmpty)
+            if (!isExtensionDownloaded)
             {
                 using var http = new SafetyHttpClient();
                 using var response = await http.GetAsync(new Uri("https://gitflic.ru/project/escorp-lab/atom/blob/raw?file=Atom.Web.Browsers/Firefox/Extension/atom.xpi?inline=false"), cancellationToken).ConfigureAwait(false);
-                extension = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+                var extension = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+                await File.WriteAllBytesAsync(extensionsPath, extension, cancellationToken).ConfigureAwait(false);
+                isExtensionDownloaded = true;
             }
 
             locker.Release();
-
-            if (extension.IsEmpty) throw new InvalidOperationException("Ошибка загрузки расширения");
-            await File.WriteAllBytesAsync(extensionsPath, extension.ToArray(), cancellationToken).ConfigureAwait(false);
         }
     }
 

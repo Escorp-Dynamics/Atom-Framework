@@ -12,7 +12,7 @@ public class WebBrowserServer : IWebBrowserServer
     /// <inheritdoc/>
     public ValueTask StartAsync(CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return ValueTask.CompletedTask; // TODO: реализовать
     }
 
     /// <inheritdoc/>
@@ -21,7 +21,7 @@ public class WebBrowserServer : IWebBrowserServer
     /// <inheritdoc/>
     public ValueTask StopAsync(CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return ValueTask.CompletedTask; // TODO: реализовать
     }
 
     /// <inheritdoc/>

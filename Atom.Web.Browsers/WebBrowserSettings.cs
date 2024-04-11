@@ -9,6 +9,9 @@ public abstract class WebBrowserSettings : IWebBrowserSettings
     public string BinaryPath { get; init; }
 
     /// <inheritdoc/>
+    public string DistributionPath { get; init; }
+
+    /// <inheritdoc/>
     public bool IsHeadless { get; init; }
 
     /// <inheritdoc/>
@@ -18,5 +21,16 @@ public abstract class WebBrowserSettings : IWebBrowserSettings
     /// Инициализирует новый экземпляр класса <see cref="WebBrowserSettings"/>.
     /// </summary>
     /// <param name="binaryPath">Путь к исполняемому файлу.</param>
-    protected WebBrowserSettings(string binaryPath) => BinaryPath = binaryPath;
+    /// <param name="distributionPath">Путь к дистрибутиву браузера.</param>
+    protected WebBrowserSettings(string binaryPath, string distributionPath)
+    {
+        BinaryPath = binaryPath;
+        DistributionPath = distributionPath;
+    }
+
+    /// <inheritdoc/>
+    public abstract string GetNativeBinaryPath();
+
+    /// <inheritdoc/>
+    public abstract string GetNativeDistributionPath();
 }

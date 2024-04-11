@@ -44,10 +44,10 @@ public abstract class WebBrowser<TSettings, TServer> : IWebBrowser<TSettings, TS
         if (IsRunning) return;
         IsRunning = true;
 
-        process.StartInfo = new ProcessStartInfo(Settings.BinaryPath)
+        process.StartInfo = new ProcessStartInfo(Settings.GetNativeBinaryPath())
         {
             Arguments = Settings.ToString(),
-            UseShellExecute = true,
+            UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,

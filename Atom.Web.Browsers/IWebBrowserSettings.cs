@@ -11,6 +11,11 @@ public interface IWebBrowserSettings
     string BinaryPath { get; }
 
     /// <summary>
+    /// Путь к дистрибутиву браузера.
+    /// </summary>
+    string DistributionPath { get; }
+
+    /// <summary>
     /// Определяет, что браузер запущен в режиме headless.
     /// </summary>
     bool IsHeadless { get; }
@@ -19,4 +24,16 @@ public interface IWebBrowserSettings
     /// Определяет, что браузер запущен в режиме incognito.
     /// </summary>
     bool IsIncognito { get; }
+
+    /// <summary>
+    /// Возвращает путь к исполняемому файлу браузера.
+    /// </summary>
+    /// <returns>Путь к исполняемому файлу браузера.</returns>
+    string GetNativeBinaryPath();
+
+    /// <summary>
+    /// Возвращает путь к дистрибутиву браузера.
+    /// </summary>
+    /// <returns>Путь к дистрибутиву браузера.</returns>
+    string GetNativeDistributionPath();
 }
