@@ -40,7 +40,7 @@ public interface ILogInfo
 /// Представляет базовый интерфейс для реализации данных записи журнала событий.
 /// </summary>
 /// <typeparam name="T">Тип связанных данных.</typeparam>
-public interface ILogInfo<T> : ILogInfo
+public interface ILogInfo<out T> : ILogInfo
 {
     /// <summary>
     /// Связанные данные.

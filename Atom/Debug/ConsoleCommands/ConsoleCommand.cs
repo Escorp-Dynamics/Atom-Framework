@@ -51,7 +51,7 @@ public abstract class ConsoleCommand(ILogger log, IEnumerable<string> aliases) :
     {
         ArgumentNullException.ThrowIfNull(e, nameof(e));
         await Execution.On(this, e).ConfigureAwait(false);
-        return !e.IsCancelled && e.IsSuccess;
+        return e is { IsCancelled: false, IsSuccess: true };
     }
 
     /// <summary>
@@ -63,7 +63,7 @@ public abstract class ConsoleCommand(ILogger log, IEnumerable<string> aliases) :
     {
         ArgumentNullException.ThrowIfNull(e, nameof(e));
         await Cancelling.On(this, e).ConfigureAwait(false);
-        return !e.IsCancelled && e.IsSuccess;
+        return e is { IsCancelled: false, IsSuccess: true };
     }
 
     /// <inheritdoc/>

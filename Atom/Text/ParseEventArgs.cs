@@ -4,7 +4,7 @@
 /// Представляет аргументы события парсинга строковых данных.
 /// </summary>
 /// <param name="origin">Исходная строка.</param>
-public class ParseEventArgs(string origin) : AsyncEventArgs()
+public class ParseEventArgs(string origin) : AsyncEventArgs
 {
     /// <summary>
     /// Исходная строка.

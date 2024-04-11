@@ -1,11 +1,13 @@
-﻿namespace Atom.Threading;
+﻿using System.Diagnostics;
+
+namespace Atom.Threading;
 
 /// <summary>
 /// Представляет механизмы ожиданий.
 /// </summary>
 public static class Wait
 {
-    private static readonly SpinWait spin;
+    private static SpinWait _spin;
 
     /// <summary>
     /// Ожидает до тех пор, пока выполняется условие <paramref name="condition"/>.
@@ -15,11 +17,13 @@ public static class Wait
     /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
     public static void Until(Func<bool> condition, int interval, int timeout)
     {
-        if (condition is null) return;
-        if (interval < 0) interval = 1;
+        ArgumentNullException.ThrowIfNull(condition, nameof(condition));
+        if (interval <= 0) interval = 1;
 
-        var startTime = DateTime.UtcNow;
-        while (condition() && (timeout is Timeout.Infinite || (DateTime.UtcNow - startTime).TotalMilliseconds < timeout)) spin.SpinOnce(interval);
+        var timer = Stopwatch.StartNew();
+        var isInfinite = timeout is Timeout.Infinite;
+
+        while (condition() && (isInfinite || timer.ElapsedMilliseconds < timeout)) _spin.SpinOnce(interval);
     }
 
     /// <summary>
@@ -28,7 +32,8 @@ public static class Wait
     /// <param name="condition">Условие ожидания.</param>
     /// <param name="interval">Интервал между итерациями ожидания.</param>
     /// <param name="timeout">Таймаут ожидания.</param>
-    public static void Until(Func<bool> condition, TimeSpan interval, TimeSpan timeout) => Until(condition, (int)interval.TotalMilliseconds, (int)timeout.TotalMilliseconds);
+    public static void Until(Func<bool> condition, TimeSpan interval, TimeSpan timeout)
+        => Until(condition, (int)interval.TotalMilliseconds, (int)timeout.TotalMilliseconds);
 
     /// <summary>
     /// Ожидает до тех пор, пока выполняется условие <paramref name="condition"/>.
@@ -60,11 +65,14 @@ public static class Wait
     /// <returns></returns>
     public static async ValueTask UntilAsync(Func<bool> condition, int interval, int timeout, CancellationToken cancellationToken)
     {
-        if (condition is null) return;
-        var startTime = DateTime.UtcNow;
+        ArgumentNullException.ThrowIfNull(condition, nameof(condition));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(interval, nameof(interval));
+        ArgumentOutOfRangeException.ThrowIfLessThan(timeout, -1, nameof(timeout));
 
-        while (condition() && (timeout is Timeout.Infinite || (DateTime.UtcNow - startTime).TotalMilliseconds < timeout))
-            await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+        var timer = Stopwatch.StartNew();
+        var isInfinite = timeout is Timeout.Infinite;
+
+        while (condition() && (isInfinite || timer.ElapsedMilliseconds < timeout)) await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -94,7 +102,8 @@ public static class Wait
     /// <param name="interval">Интервал между итерациями ожидания.</param>
     /// <param name="timeout">Таймаут ожидания.</param>
     /// <returns></returns>
-    public static ValueTask UntilAsync(Func<bool> condition, TimeSpan interval, TimeSpan timeout) => UntilAsync(condition, interval, timeout, CancellationToken.None);
+    public static ValueTask UntilAsync(Func<bool> condition, TimeSpan interval, TimeSpan timeout)
+        => UntilAsync(condition, interval, timeout, CancellationToken.None);
 
     /// <summary>
     /// Ожидает до тех пор, пока выполняется условие <paramref name="condition"/> (не блокируя поток).
@@ -103,7 +112,8 @@ public static class Wait
     /// <param name="interval">Интервал между итерациями ожидания (в миллисекундах).</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns></returns>
-    public static ValueTask UntilAsync(Func<bool> condition, int interval, CancellationToken cancellationToken) => UntilAsync(condition, interval, Timeout.Infinite, cancellationToken);
+    public static ValueTask UntilAsync(Func<bool> condition, int interval, CancellationToken cancellationToken)
+        => UntilAsync(condition, interval, Timeout.Infinite, cancellationToken);
 
     /// <summary>
     /// Ожидает до тех пор, пока выполняется условие <paramref name="condition"/> (не блокируя поток).
@@ -120,7 +130,8 @@ public static class Wait
     /// <param name="interval">Интервал между итерациями ожидания.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns></returns>
-    public static ValueTask UntilAsync(Func<bool> condition, TimeSpan interval, CancellationToken cancellationToken) => UntilAsync(condition, (int)interval.TotalMilliseconds, cancellationToken);
+    public static ValueTask UntilAsync(Func<bool> condition, TimeSpan interval, CancellationToken cancellationToken)
+        => UntilAsync(condition, (int)interval.TotalMilliseconds, cancellationToken);
 
     /// <summary>
     /// Ожидает до тех пор, пока выполняется условие <paramref name="condition"/> (не блокируя поток).

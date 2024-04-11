@@ -7,9 +7,9 @@ namespace Atom.Debug;
 /// </summary>
 public partial class Log : ILog
 {
-    private protected Stream? consoleStream;
     private FileStream? fileStream;
-
+    private Stream? consoleStream;
+    
     private readonly SemaphoreSlim locker = new(1, 1);
 
     /// <inheritdoc/>
@@ -25,7 +25,7 @@ public partial class Log : ILog
     public bool IsFormattingEnabled { get ; set; }
 
     /// <inheritdoc/>
-    public event AsyncEventHandler<ILog, LogEventArgs>? Writting;
+    public event AsyncEventHandler<ILog, LogEventArgs>? Writing;
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="Log"/>.
@@ -47,11 +47,11 @@ public partial class Log : ILog
     public Log(string name) : this(name, LogMode.All) { }
 
     /// <summary>
-    /// Происходит в момент записи сообщеня в журнал.
+    /// Происходит в момент записи сообщения в журнал.
     /// </summary>
     /// <param name="e">Аргументы события.</param>
     /// <returns></returns>
-    protected virtual ValueTask OnWriting(LogEventArgs e) => Writting.On(this, e);
+    protected virtual ValueTask OnWriting(LogEventArgs e) => Writing.On(this, e);
 
     /// <summary>
     /// Асинхронно записывает все буферы и высвобождает ресурсы.
@@ -91,22 +91,21 @@ public partial class Log : ILog
 
             for (var i = 0; i < info.Message.Length; ++i)
             {
-                if (info.Message[i] is '[')
+                switch (info.Message[i])
                 {
-                    if (isParsing)
+                    case '[':
                     {
-                        message = message.Append('[' + parsedData);
-                        parsedData = string.Empty;
-                        if (Mode.HasFlag(LogMode.Console)) outText = outText.Append('[');
+                        if (isParsing)
+                        {
+                            message = message.Append('[' + parsedData);
+                            parsedData = string.Empty;
+                            if (Mode.HasFlag(LogMode.Console)) outText = outText.Append('[');
+                        }
+
+                        isParsing = true;
+                        continue;
                     }
-
-                    isParsing = true;
-                    continue;
-                }
-
-                if (info.Message[i] is ']')
-                {
-                    if (isParsing)
+                    case ']' when isParsing:
                     {
                         var tmp = parsedData.Split(':', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
@@ -130,7 +129,7 @@ public partial class Log : ILog
                                 }
                                 else
                                 {
-                                    foregrounds.Push(color!.Value);
+                                    foregrounds.Push(color.Value);
                                     if (Mode.HasFlag(LogMode.Console)) outText = outText.Append(color.Value.AsString());
                                 }
 
@@ -362,7 +361,7 @@ public partial class Log : ILog
     #endregion
 
     /// <inheritdoc/>
-    public virtual async ValueTask ResetLineAsync(int offset, CancellationToken cancellationToken)
+    public virtual async ValueTask ResetLineAsync(CancellationToken cancellationToken)
     {
         await locker.WaitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -372,18 +371,10 @@ public partial class Log : ILog
             return;
         }
 
-        var str = "\x1b[1A\x1b[0K";
-        for (var i = 0; i < offset; ++i) str += "\x1b[1D";
-
+        const string str = "\x1b[1A\x1b[0K";
         await consoleStream.WriteAsync(Encoding.UTF8.GetBytes(str), cancellationToken).ConfigureAwait(false);
         locker.Release();
     }
-
-    /// <inheritdoc/>
-    public ValueTask ResetLineAsync(int offset) => ResetLineAsync(offset, CancellationToken.None);
-
-    /// <inheritdoc/>
-    public ValueTask ResetLineAsync(CancellationToken cancellationToken) => ResetLineAsync(0, cancellationToken);
 
     /// <inheritdoc/>
     public ValueTask ResetLineAsync() => ResetLineAsync(CancellationToken.None);

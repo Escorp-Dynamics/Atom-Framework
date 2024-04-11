@@ -4,6 +4,8 @@ using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 
+using Timer = System.Timers.Timer;
+
 namespace Atom.Debug;
 
 /// <summary>
@@ -14,7 +16,9 @@ public partial class Logger : ILogger
     private const string BackgroundMessage = "Фоновое ожидание";
 
     private readonly Log log;
+    private readonly ObservableCollection<IConsoleCommand> commands = [];
     private readonly ConcurrentQueue<Tuple<LogMode, ILogInfo<object>>> queue;
+    private readonly Timer backgroundTimer = new(TimeSpan.FromMilliseconds(50));
 
     private string? currentInput;
     private bool isNoResetLastLine;
@@ -22,8 +26,9 @@ public partial class Logger : ILogger
     private DateTime lastUpdateTime = DateTime.UtcNow;
     private DateTime beginWaitingTime = DateTime.UtcNow;
     private string? lastMessage;
-    private readonly ObservableCollection<IConsoleCommand> commands = [];
 
+    private event AsyncEventHandler<ILogger> CommandInternal; 
+    
     /// <inheritdoc/>
     public string Name => log.Name;
 
@@ -57,10 +62,13 @@ public partial class Logger : ILogger
     public bool IsEnabled { get; set; }
 
     /// <inheritdoc/>
+    public bool IsShowBackgroundMessage { get; set; }
+
+    /// <inheritdoc/>
     public virtual IEnumerable<IConsoleCommand> Commands => commands;
 
     /// <inheritdoc/>
-    public event AsyncEventHandler<ILog, LogEventArgs>? Writting;
+    public event AsyncEventHandler<ILog, LogEventArgs>? Writing;
 
     /// <inheritdoc/>
     public event AsyncEventHandler<ILogger, InputEventArgs>? Command;
@@ -74,9 +82,16 @@ public partial class Logger : ILogger
     /// <param name="name">Имя журнала.</param>
     public Logger(string? name)
     {
-        log = new(name ?? "log");
         queue = new ConcurrentQueue<Tuple<LogMode, ILogInfo<object>>>();
-        commands.CollectionChanged += async (s, e) => await OnCommandsChanged(e).ConfigureAwait(false);
+        commands.CollectionChanged += async (_, e) => await OnCommandsChanged(e).ConfigureAwait(false);
+
+        backgroundTimer.AutoReset = true;
+        backgroundTimer.Elapsed += async (_, _) => await OnBackground().ConfigureAwait(false);
+
+        CommandInternal += OnCommandInternal;
+
+        log = new Log(name ?? "log");
+        log.Writing += OnWriting;
     }
 
     /// <summary>
@@ -136,12 +151,12 @@ public partial class Logger : ILogger
             if (message is BackgroundMessage)
             {
                 var time = DateTime.UtcNow - beginWaitingTime;
-                if (time.TotalSeconds >= 1) message += $"  [dy]{time:hh\\:mm\\:ss}[/dy]";
+                if (time.TotalSeconds >= 1) message += $@"  [dy]{time:hh\:mm\:ss}[/dy]";
             }
 
             if (!isHeader)
             {
-                prefix ??= !IsEnabled || type is LogType.Service ? string.Format("{0,12}", ' ') : DateTime.UtcNow.ToString("HH:mm:ss.fff");
+                prefix ??= !IsEnabled || type is LogType.Service ? $"{' ',12}" : DateTime.UtcNow.ToString("HH:mm:ss.fff");
                 var pfx = string.Empty;
 
                 if (!mode.HasFlag(LogMode.File) && !mode.HasFlag(LogMode.Database))
@@ -164,21 +179,17 @@ public partial class Logger : ILogger
         }
 
         if (mode.HasFlag(LogMode.Console)) AddToConsole(message, type, color, data);
+        if (!mode.HasFlag(LogMode.File)) return;
+        if (isHeader) message = message?.Trim();
 
-        if (mode.HasFlag(LogMode.File))
-        {
-            if (isHeader) message = message?.Trim();
-            AddToFile(message, type, data);
-        }
+        AddToFile(message, type, data);
     }
 
     private async ValueTask ShowBackgroundMessageAsync()
     {
         if ((DateTime.UtcNow - lastUpdateTime).TotalSeconds < 1) return;
 
-        var message = BackgroundMessage;
-
-        if (message.Equals(lastMessage))
+        if (BackgroundMessage.Equals(lastMessage))
         {
             if (!isNoResetLastLine)
                 await ResetLineAsync().ConfigureAwait(false);
@@ -186,7 +197,49 @@ public partial class Logger : ILogger
                 isNoResetLastLine = default;
         }
 
-        Add(message, LogMode.Console, LogType.Info, prefix: $"{beginWaitingTime:HH:mm:ss.fff}");
+        Add(BackgroundMessage, LogMode.Console, LogType.Info, prefix: $"{beginWaitingTime:HH:mm:ss.fff}");
+    }
+
+    private async ValueTask OnCommandInternal(ILogger sender)
+    {
+        await Wait.UntilAsync(() => IsEnabled && !Console.KeyAvailable, TimeSpan.FromMilliseconds(50)).ConfigureAwait(false);
+
+        var command = string.Empty;
+        ConsoleKeyInfo keyInfo;
+
+        do
+        {
+            if (!IsEnabled) return;
+            keyInfo = Console.ReadKey(true);
+            command += keyInfo.KeyChar;
+            currentInput = command;
+        } while (keyInfo.Key is not ConsoleKey.Enter);
+
+        currentInput = default;
+        command = command.Trim();
+
+        if (string.IsNullOrEmpty(command))
+        {
+            await CommandInternal.On(sender).ConfigureAwait(false);
+            return;
+        }
+
+        var eventArgs = new InputEventArgs(command);
+        await Command.On(this, eventArgs).ConfigureAwait(false);
+
+        if (eventArgs.IsCancelled)
+        {
+            await CommandInternal.On(sender).ConfigureAwait(false);
+            return;
+        }
+
+        foreach (var c in commands)
+            if (c.TryParse(command, out var args, out var isCancellation))
+                isNoResetLastLine = !isCancellation
+                    ? await c.ExecuteAsync(args).ConfigureAwait(false)
+                    : await c.CancelAsync(args).ConfigureAwait(false);
+
+        await CommandInternal.On(sender).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -199,20 +252,11 @@ public partial class Logger : ILogger
     /// <summary>
     /// Происходит в момент фоновой обработки журнала.
     /// </summary>
-    protected virtual async void OnBackground()
+    protected virtual async ValueTask OnBackground()
     {
         if (!IsEnabled) return;
-
-        if (!queue.TryDequeue(out var info))
-        {
-            await ShowBackgroundMessageAsync().ConfigureAwait(false);
-            await Task.Delay(TimeSpan.FromMilliseconds(50)).ConfigureAwait(false);
-            OnBackground();
-            return;
-        }
-
-        await log.WriteLineAsync(info.Item2, info.Item1).ConfigureAwait(false);
-        OnBackground();
+        while (queue.TryDequeue(out var info)) await log.WriteLineAsync(info.Item2, info.Item1).ConfigureAwait(false);
+        if (IsShowBackgroundMessage) await ShowBackgroundMessageAsync().ConfigureAwait(false);
     }
 
     /// <summary>
@@ -221,62 +265,12 @@ public partial class Logger : ILogger
     /// <param name="sender">Экземпляр журнала.</param>
     /// <param name="e">Аргументы события.</param>
     /// <returns></returns>
-    protected virtual ValueTask OnWritting(ILog sender, LogEventArgs e) => Writting.On(sender, e);
+    protected virtual ValueTask OnWriting(ILog sender, LogEventArgs e) => Writing.On(sender, e);
 
     /// <summary>
-    /// Происходит в момент ввода команды.
+    /// Происходит при запуске.
     /// </summary>
-    protected virtual async void OnCommand()
-    {
-        await Wait.UntilAsync(() => IsEnabled && !Console.KeyAvailable, TimeSpan.FromMilliseconds(50)).ConfigureAwait(false);
-
-        if (!IsEnabled) return;
-
-        var command = string.Empty;
-        ConsoleKeyInfo keyInfo;
-
-        do
-        {
-            keyInfo = Console.ReadKey(true);
-            command += keyInfo.KeyChar;
-            currentInput = command;
-        } while (keyInfo.Key is not ConsoleKey.Enter);
-
-        currentInput = default;
-        command = command?.Trim();
-
-        if (string.IsNullOrEmpty(command))
-        {
-            OnCommand();
-            return;
-        }
-
-        var eventArgs = new InputEventArgs(command);
-        await Command.On(this, eventArgs).ConfigureAwait(false);
-
-        if (eventArgs.IsCancelled)
-        {
-            OnCommand();
-            return;
-        }
-
-        foreach (var c in commands)
-            if (c.TryParse(command, out var args, out var isCancellation))
-                isNoResetLastLine = !isCancellation
-                    ? await c.ExecuteAsync(args).ConfigureAwait(false)
-                    : await c.CancelAsync(args).ConfigureAwait(false);
-
-        OnCommand();
-    }
-
-    /// <inheritdoc/>
-    protected virtual void OnStarting()
-    {
-        log.Writting += OnWritting;
-
-        OnBackground();
-        OnCommand();
-    }
+    protected virtual async ValueTask OnStarting() => await CommandInternal.On(this).ConfigureAwait(false);
 
     /// <inheritdoc/>
     public virtual ILogger UseCommand<TCommand>(TCommand command) where TCommand : class, IConsoleCommand
@@ -307,6 +301,11 @@ public partial class Logger : ILogger
     /// <inheritdoc/>
     public virtual async ValueTask DisposeAsync()
     {
+        IsEnabled = false;
+
+        backgroundTimer.Stop();
+        backgroundTimer.Dispose();
+
         await log.DisposeAsync().ConfigureAwait(false);
         GC.SuppressFinalize(this);
     }
@@ -316,6 +315,12 @@ public partial class Logger : ILogger
 
     /// <inheritdoc/>
     public ValueTask ResetLineAsync() => ResetLineAsync(CancellationToken.None);
+
+    /// <inheritdoc/>
+    public async ValueTask StartAsync(CancellationToken cancellationToken) => await OnStarting().ConfigureAwait(false);
+
+    /// <inheritdoc/>
+    public ValueTask StartAsync() => StartAsync(CancellationToken.None);
 
     private static string? GetMessage(string? message, ConsoleColor color)
     {
@@ -334,6 +339,6 @@ public partial class Logger : ILogger
             _ => string.Empty,
         };
 
-        return string.Format("{0,8} {1}", prefix, message);
+        return $"{prefix,8} {message}";
     }
 }

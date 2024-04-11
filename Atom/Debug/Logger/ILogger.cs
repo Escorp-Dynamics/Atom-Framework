@@ -33,6 +33,11 @@ public partial interface ILogger : IAsyncDisposable
     bool IsEnabled { get; set; }
 
     /// <summary>
+    /// Определяет, будет ли отображаться сообщение в фоновом режиме.
+    /// </summary>
+    bool IsShowBackgroundMessage { get; set; }
+
+    /// <summary>
     /// Фильтр по типам записей журнала для каждого режима записи в журнал.
     /// </summary>
     IDictionary<LogMode, LogType> Filter { get; }
@@ -45,7 +50,7 @@ public partial interface ILogger : IAsyncDisposable
     /// <summary>
     /// Происходит в момент записи в журнал.
     /// </summary>
-    event AsyncEventHandler<ILog, LogEventArgs>? Writting;
+    event AsyncEventHandler<ILog, LogEventArgs>? Writing;
 
     /// <summary>
     /// Происходит в момент ввода команды.
@@ -70,7 +75,7 @@ public partial interface ILogger : IAsyncDisposable
     /// </summary>
     /// <typeparam name="TCommand">Тип команды.</typeparam>
     /// <returns>Экземпляр текущей фабрики журнала.</returns>
-    ILogger UseCommand<TCommand>() where TCommand : class, IConsoleCommand, new() => UseCommand(new TCommand() { Log = this, });
+    ILogger UseCommand<TCommand>() where TCommand : class, IConsoleCommand, new() => UseCommand(new TCommand { Log = this, });
 
     /// <summary>
     /// Определяет, подключена ли команда.
@@ -112,4 +117,22 @@ public partial interface ILogger : IAsyncDisposable
     /// </summary>
     /// <returns></returns>
     ValueTask ResetLineAsync() => ResetLineAsync(CancellationToken.None);
+
+    /// <summary>
+    /// Запускает журнал.
+    /// </summary>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns></returns>
+    ValueTask StartAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Запускает журнал.
+    /// </summary>
+    /// <returns></returns>
+    ValueTask StartAsync() => StartAsync(CancellationToken.None);
+
+    /// <summary>
+    /// Ожидает завершение выполнения, блокируя поток.
+    /// </summary>
+    void Flush();
 }

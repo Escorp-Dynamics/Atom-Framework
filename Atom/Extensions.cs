@@ -17,8 +17,39 @@ public static class Extensions
     public static ValueTask On<TSender, TEventArgs>(this AsyncEventHandler<TSender, TEventArgs>? handler, TSender sender, TEventArgs e)
         where TSender : class
         where TEventArgs : EventArgs
-    {
-        if (handler is null) return ValueTask.CompletedTask;
-        return handler(sender, e);
-    }
+        => handler?.Invoke(sender, e) ?? ValueTask.CompletedTask;
+
+    /// <summary>
+    /// Вызывает асинхронное событие.
+    /// </summary>
+    /// <typeparam name="TSender">Тип источника события.</typeparam>
+    /// <param name="handler">Обработчик события.</param>
+    /// <param name="sender">Источник события.</param>
+    /// <returns></returns>
+    public static ValueTask On<TSender>(this AsyncEventHandler<TSender>? handler, TSender sender)
+        where TSender : class
+        => handler?.Invoke(sender) ?? ValueTask.CompletedTask;
+
+    /// <summary>
+    /// Возвращает строку, состоящую из указанных элементов, разделённых разделителем.
+    /// </summary>
+    /// <param name="values">Объединяемые элементы.</param>
+    /// <param name="separator">Разделитель.</param>
+    /// <returns>Объединённая строка.</returns>
+    public static string Join(this IEnumerable<string> values, string separator) => string.Join(separator, values);
+
+    /// <summary>
+    /// Возвращает строку, состоящую из указанных элементов, разделённых разделителем.
+    /// </summary>
+    /// <param name="values">Объединяемые элементы.</param>
+    /// <param name="separator">Разделитель.</param>
+    /// <returns>Объединённая строка.</returns>
+    public static string Join(this IEnumerable<string> values, char separator) => string.Join(separator, values);
+
+    /// <summary>
+    /// Возвращает строку, состоящую из указанных элементов, разделённых разделителем.
+    /// </summary>
+    /// <param name="values">Объединяемые элементы.</param>
+    /// <returns>Объединённая строка.</returns>
+    public static string Join(this IEnumerable<string> values) => values.Join(", ");
 }

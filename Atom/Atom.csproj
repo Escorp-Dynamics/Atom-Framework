@@ -16,12 +16,12 @@
 		<IsAotCompatible>true</IsAotCompatible>
 		<InvariantGlobalization>true</InvariantGlobalization>
 
-		<NoWarn>CA1003;CA1711</NoWarn>
+		<NoWarn>CA1003;CA1031;CA1711</NoWarn>
 
 		<GenerateDocumentationFile>True</GenerateDocumentationFile>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageId>Escorp.$(AssemblyName)</PackageId>
-		<Version>0.0.1</Version>
+		<Version>0.0.3</Version>
 		<Authors>Yuriy Yesin, Escorp Lab</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>

@@ -28,7 +28,7 @@ public partial interface ILog : IAsyncDisposable
     /// <summary>
     /// Происходит в момент записи в журнал.
     /// </summary>
-    event AsyncEventHandler<ILog, LogEventArgs>? Writting;
+    event AsyncEventHandler<ILog, LogEventArgs>? Writing;
 
     #region Обычная запись
 
