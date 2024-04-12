@@ -7,6 +7,7 @@ public class FirefoxBrowserTests
     {
         await using var browser = new FirefoxBrowser();
         var window = await browser.OpenWindowAsync();
+
         Assert.NotNull(window);
     }
 }

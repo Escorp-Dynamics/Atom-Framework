@@ -1,5 +1,4 @@
 ﻿using System.Text;
-using Atom.Net.Http;
 
 namespace Atom.Web.Browsers.Firefox;
 
@@ -8,11 +7,10 @@ namespace Atom.Web.Browsers.Firefox;
 /// </summary>
 public class FirefoxProfile
 {
-    private static readonly SemaphoreSlim locker = new(1, 1);
-    private static bool isExtensionDownloaded;
+    private readonly SortedDictionary<string, object?> preferences = new(StringComparer.InvariantCultureIgnoreCase);
 
     /// <summary>
-    /// Путь к файлу профиля.
+    /// Путь к каталогу профиля.
     /// </summary>
     /// <value></value>
     public string Path { get; set; }
@@ -25,7 +23,11 @@ public class FirefoxProfile
     /// <summary>
     /// Создает новый экземпляр класса <see cref="FirefoxProfile"/>.
     /// </summary>
-    public FirefoxProfile() => Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), System.IO.Path.GetRandomFileName());
+    public FirefoxProfile()
+    {
+        Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), System.IO.Path.GetRandomFileName());
+        if (!Directory.Exists(Path)) Directory.CreateDirectory(Path);
+    }
 
     /// <summary>
     /// Профиль браузера Firefox по умолчанию.
@@ -36,41 +38,40 @@ public class FirefoxProfile
     };
 
     /// <summary>
-    /// Сохраняет профиль браузера Firefox в файл.
+    /// Устанавливает параметр профиля.
     /// </summary>
-    /// <param name="cancellationToken">Токен отмены задачи.</param>
-    public async ValueTask SaveAsync(CancellationToken cancellationToken)
+    /// <param name="key">Ключ параметра.</param>
+    /// <param name="value">Значение параметра.</param>
+    /// <returns>Текущий экземпляр профиля.</returns>
+    public FirefoxProfile UsePreference(string key, bool value)
     {
-        if (!Directory.Exists(Path)) Directory.CreateDirectory(Path);
-
-        var path = System.IO.Path.Combine(Path, "prefs.js");
-        if (File.Exists(path)) return;
-
-        await File.WriteAllTextAsync(path, ToString(), cancellationToken).ConfigureAwait(false);
-
-        var extensionsPath = System.IO.Path.Combine(Environment.CurrentDirectory, "atom@escorp.dynamics.xpi");
-
-        if (!File.Exists(extensionsPath))
-        {
-            await locker.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-            if (!isExtensionDownloaded)
-            {
-                using var http = new SafetyHttpClient();
-                using var response = await http.GetAsync(new Uri("https://gitflic.ru/project/escorp-lab/atom/blob/raw?file=Atom.Web.Browsers/Firefox/Extension/atom.xpi?inline=false"), cancellationToken).ConfigureAwait(false);
-                var extension = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-                await File.WriteAllBytesAsync(extensionsPath, extension, cancellationToken).ConfigureAwait(false);
-                isExtensionDownloaded = true;
-            }
-
-            locker.Release();
-        }
+        preferences[key] = value;
+        return this;
     }
 
     /// <summary>
-    /// Сохраняет профиль браузера Firefox в файл.
+    /// Устанавливает параметр профиля.
     /// </summary>
-    public ValueTask SaveAsync() => SaveAsync(CancellationToken.None);
+    /// <param name="key">Ключ параметра.</param>
+    /// <param name="value">Значение параметра.</param>
+    /// <returns>Текущий экземпляр профиля.</returns>
+    public FirefoxProfile UsePreference(string key, int value)
+    {
+        preferences[key] = value;
+        return this;
+    }
+
+    /// <summary>
+    /// Устанавливает параметр профиля.
+    /// </summary>
+    /// <param name="key">Ключ параметра.</param>
+    /// <param name="value">Значение параметра.</param>
+    /// <returns>Текущий экземпляр профиля.</returns>
+    public FirefoxProfile UsePreference(string key, string value)
+    {
+        preferences[key] = value;
+        return this;
+    }
 
     /// <summary>
     /// Преобразует текущий экземпляр <see cref="FirefoxProfile"/> в строку аргументов.
@@ -80,7 +81,11 @@ public class FirefoxProfile
     {
         var sb = new StringBuilder();
 
-        sb.Append($"user_pref(\"dom.storage.enabled\", {IsDomStorageEnabled});");
+        foreach (var pref in preferences)
+        {
+            var value = pref.Value is int or bool ? pref.Value.ToString()!.ToLowerInvariant() : $"\"{pref.Value}\"";
+            sb.AppendLine($"user_pref(\"{pref.Key}\", {value})");
+        }
 
         return sb.ToString();
     }

@@ -16,6 +16,11 @@ public interface IWebBrowserSettings
     string DistributionPath { get; }
 
     /// <summary>
+    /// Пароль администратора.
+    /// </summary>
+    string? AdminPassword { get; }
+
+    /// <summary>
     /// Определяет, что браузер запущен в режиме headless.
     /// </summary>
     bool IsHeadless { get; }
@@ -26,14 +31,14 @@ public interface IWebBrowserSettings
     bool IsIncognito { get; }
 
     /// <summary>
-    /// Возвращает путь к исполняемому файлу браузера.
+    /// Возвращает путь к исполняемому файлу браузера для текущей платформы.
     /// </summary>
-    /// <returns>Путь к исполняемому файлу браузера.</returns>
+    /// <returns>Путь к исполняемому файлу браузера для текущей платформы.</returns>
     string GetNativeBinaryPath();
 
     /// <summary>
-    /// Возвращает путь к дистрибутиву браузера.
+    /// Возвращает путь к дистрибутиву браузера для текущей платформы.
     /// </summary>
-    /// <returns>Путь к дистрибутиву браузера.</returns>
+    /// <returns>Путь к дистрибутиву браузера для текущей платформы.</returns>
     string GetNativeDistributionPath();
 }

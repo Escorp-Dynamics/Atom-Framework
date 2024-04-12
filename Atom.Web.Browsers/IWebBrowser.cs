@@ -28,6 +28,16 @@ public interface IWebBrowser<TSettings, TServer> : IAsyncDisposable
     bool IsRunning { get; }
 
     /// <summary>
+    /// Определяет, запущен ли браузер в режиме администратора.
+    /// </summary>
+    bool IsRunningAsAdmin { get; }
+
+    /// <summary>
+    /// Происходит в момент запуска процесса браузера.
+    /// </summary>
+    event AsyncEventHandler<IWebBrowser<TSettings, TServer>, BrowserProcessAsyncEventArgs>? ProcessStarted;
+
+    /// <summary>
     /// Открывает новое окно браузера.
     /// </summary>
     /// <param name="settings">Настройки браузера.</param>

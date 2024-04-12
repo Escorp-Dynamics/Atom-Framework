@@ -1,4 +1,6 @@
 ﻿using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
 using Atom.Web.Browsers.BOM;
 using Atom.Web.Browsers.NativeMessaging;
 
@@ -15,6 +17,8 @@ public abstract class WebBrowser<TSettings, TServer> : IWebBrowser<TSettings, TS
 {
     private readonly Process process;
 
+    private static bool? isRunningAsAdmin;
+
     /// <inheritdoc/>
     public TServer Server { get; set; }
 
@@ -23,6 +27,30 @@ public abstract class WebBrowser<TSettings, TServer> : IWebBrowser<TSettings, TS
 
     /// <inheritdoc/>
     public bool IsRunning { get; protected set; }
+
+    /// <inheritdoc/>
+    public bool IsRunningAsAdmin
+    {
+        get
+        {
+            if (isRunningAsAdmin.HasValue) return isRunningAsAdmin.Value;
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                var identity = WindowsIdentity.GetCurrent();
+                var principal = new WindowsPrincipal(identity);
+                return (isRunningAsAdmin = principal.IsInRole(WindowsBuiltInRole.Administrator)).Value;
+            }
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                return (isRunningAsAdmin = Environment.UserName is "root").Value;
+
+            throw new InvalidOperationException("Неподдерживаемая платформа");
+        }
+    }
+
+    /// <inheritdoc/>
+    public event AsyncEventHandler<IWebBrowser<TSettings, TServer>, BrowserProcessAsyncEventArgs>? ProcessStarted;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="WebBrowser{TSettings, TServer}"/>.
@@ -39,7 +67,7 @@ public abstract class WebBrowser<TSettings, TServer> : IWebBrowser<TSettings, TS
     /// Запускает процесс браузера.
     /// </summary>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    protected virtual async ValueTask StartProcessAsync(CancellationToken cancellationToken)
+    protected virtual async ValueTask OnProcessStarted(CancellationToken cancellationToken)
     {
         if (IsRunning) return;
         IsRunning = true;
@@ -56,13 +84,15 @@ public abstract class WebBrowser<TSettings, TServer> : IWebBrowser<TSettings, TS
 
         await Server.StartAsync(cancellationToken).ConfigureAwait(false);
         process.Start();
+
+        await ProcessStarted.On(this, new BrowserProcessAsyncEventArgs { CancellationToken = cancellationToken }).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
     public async ValueTask<IWindow> OpenWindowAsync(TSettings settings, CancellationToken cancellationToken)
     {
-        await StartProcessAsync(cancellationToken).ConfigureAwait(false);
-        throw new NotImplementedException();
+        await OnProcessStarted(cancellationToken).ConfigureAwait(false);
+        return new Window();
     }
 
     /// <inheritdoc/>
@@ -77,8 +107,9 @@ public abstract class WebBrowser<TSettings, TServer> : IWebBrowser<TSettings, TS
     /// <summary>
     /// Высвобождает ресурсы.
     /// </summary>
-    public ValueTask DisposeAsync()
+    public virtual ValueTask DisposeAsync()
     {
+        if (IsRunning) process.Kill(true);
         process.Dispose();
         GC.SuppressFinalize(this);
         return ValueTask.CompletedTask;

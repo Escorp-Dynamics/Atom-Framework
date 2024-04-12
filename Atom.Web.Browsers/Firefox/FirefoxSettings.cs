@@ -16,15 +16,15 @@ public class FirefoxSettings(string binaryPath, string distributionPath, Firefox
 {
     private const string DefaultWindowsBinaryPath = "C:\\Program Files\\Mozilla Firefox\\firefox.exe";
 
+    private const string DefaultWindowsDistributionPath = "C:\\Program Files\\Mozilla Firefox\\";
+
     private const string DefaultMacBinaryPath = "/Applications/Firefox.app/Contents/MacOS/firefox";
-
-    private const string DefaultLinuxBinaryPath = "/usr/bin/firefox";
-
-    private const string DefaultWindowsDistributionPath = "C:\\Program Files\\Mozilla Firefox";
 
     private const string DefaultMacDistributionPath = "/Applications/Firefox.app/Contents/Resources/";
 
-    private const string DefaultLinuxDistributionPath = "/usr/lib/firefox";
+    private const string DefaultLinuxBinaryPath = "/usr/bin/firefox";
+
+    private const string DefaultLinuxDistributionPath = "/usr/lib/firefox/";
 
     /// <summary>
     /// Настройки профиля для браузера Firefox.
@@ -70,6 +70,8 @@ public class FirefoxSettings(string binaryPath, string distributionPath, Firefox
 
         sb.Append($"--profile \"{Profile.Path}\" ");
         sb.Append("--no-remote ");
+        sb.Append("--new-instance ");
+        //sb.Append("--safe-mode ");
 
         if (IsHeadless) sb.Append("--headless ");
         if (IsIncognito) sb.Append("--private-window ");
