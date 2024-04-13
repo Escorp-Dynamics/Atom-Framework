@@ -50,7 +50,7 @@ public abstract class WebBrowser<TSettings, TServer> : IWebBrowser<TSettings, TS
     }
 
     /// <inheritdoc/>
-    public event AsyncEventHandler<IWebBrowser<TSettings, TServer>, BrowserProcessAsyncEventArgs>? ProcessStarted;
+    public event AsyncEventHandler<IWebBrowser<TSettings, TServer>, WebBrowserProcessAsyncEventArgs>? ProcessStarted;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="WebBrowser{TSettings, TServer}"/>.
@@ -85,7 +85,7 @@ public abstract class WebBrowser<TSettings, TServer> : IWebBrowser<TSettings, TS
         await Server.StartAsync(cancellationToken).ConfigureAwait(false);
         process.Start();
 
-        await ProcessStarted.On(this, new BrowserProcessAsyncEventArgs { CancellationToken = cancellationToken }).ConfigureAwait(false);
+        await ProcessStarted.On(this, new WebBrowserProcessAsyncEventArgs { CancellationToken = cancellationToken }).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>

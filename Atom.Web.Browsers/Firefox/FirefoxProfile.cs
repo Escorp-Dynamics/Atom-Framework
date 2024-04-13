@@ -16,6 +16,11 @@ public class FirefoxProfile
     public string Path { get; set; }
 
     /// <summary>
+    /// Определяет, будут ли файлы профиля сохраняться на диске при закрытии браузера.
+    /// </summary>
+    public bool IsPersistent { get; set; }
+
+    /// <summary>
     /// Включает или отключает DOM Storage.
     /// </summary>
     public bool IsDomStorageEnabled { get; set; }

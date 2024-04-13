@@ -35,7 +35,7 @@ public interface IWebBrowser<TSettings, TServer> : IAsyncDisposable
     /// <summary>
     /// Происходит в момент запуска процесса браузера.
     /// </summary>
-    event AsyncEventHandler<IWebBrowser<TSettings, TServer>, BrowserProcessAsyncEventArgs>? ProcessStarted;
+    event AsyncEventHandler<IWebBrowser<TSettings, TServer>, WebBrowserProcessAsyncEventArgs>? ProcessStarted;
 
     /// <summary>
     /// Открывает новое окно браузера.

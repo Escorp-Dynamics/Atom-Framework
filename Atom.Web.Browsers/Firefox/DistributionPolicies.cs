@@ -11,6 +11,15 @@ internal sealed class Policies
 {
     [JsonPropertyName("Extensions")]
     public ExtensionsPolicies Extensions { get; set; } = new();
+
+    [JsonPropertyName("ExtensionUpdate")]
+    public bool IsExtensionUpdate { get; set; } = true;
+
+    [JsonPropertyName("NoDefaultBookmarks")]
+    public bool IsNoDefaultBookmarks { get; set; } = true;
+
+    [JsonPropertyName("ShowHomeButton")]
+    public bool IsShowHomeButton { get; set; } = true;
 }
 
 internal sealed class ExtensionsPolicies
