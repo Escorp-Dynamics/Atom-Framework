@@ -69,11 +69,18 @@ public class FirefoxSettings(string binaryPath, string distributionPath, Firefox
         var sb = new StringBuilder();
 
         sb.Append($"--profile \"{Profile.Path}\" ");
+        sb.Append("--browser ");
         sb.Append("--no-remote ");
         sb.Append("--new-instance ");
         //sb.Append("--safe-mode ");
 
-        if (IsHeadless) sb.Append("--headless ");
+        if (IsHeadless)
+            sb.Append("--headless ");
+        else
+        {
+            if (IsJavaScriptConsoleEnabled) sb.Append("--jsconsole ");
+        }
+        
         if (IsIncognito) sb.Append("--private-window ");
 
         return sb.ToString().Trim();

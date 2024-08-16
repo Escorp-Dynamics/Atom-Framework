@@ -24,6 +24,15 @@ public partial class SafetyHttpClient(HttpClientHandler handler, bool disposeHan
     public IWebProxy? Proxy => handler.Proxy;
 
     /// <summary>
+    /// Получает или задает базовый URI для всех запросов, отправленных этим клиентом.
+    /// </summary>
+    public Uri? BaseAddress
+    {
+        get => client.BaseAddress;
+        set => client.BaseAddress = value;
+    }
+
+    /// <summary>
     /// Происходит в момент ошибки запроса.
     /// </summary>
     public event AsyncEventHandler<SafetyHttpClient, HttpRequestFailedEventArgs>? Failed;

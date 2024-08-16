@@ -20,7 +20,7 @@
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageId>Escorp.$(AssemblyName)</PackageId>
 		<Version>0.0.1</Version>
-		<Authors>Yuriy Yesin, Escorp Lab</Authors>
+		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
 		<RepositoryUrl>https://gitflic.ru/project/escorp-lab/atom</RepositoryUrl>

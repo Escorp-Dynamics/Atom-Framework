@@ -22,7 +22,7 @@
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     <PackageId>Escorp.$(AssemblyName)</PackageId>
     <Version>0.0.1</Version>
-    <Authors>Yuriy Yesin, Escorp Lab</Authors>
+    <Authors>Yuriy Yesin, Escorp Labs</Authors>
     <Company>Escorp Dynamics</Company>
     <Product>Escorp.$(AssemblyName)</Product>
     <RepositoryUrl>https://gitflic.ru/project/escorp-lab/atom</RepositoryUrl>
@@ -33,8 +33,12 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
+  <!--<ItemGroup>
+    <PackageReference Include="Escorp.Atom" Version="0.0.9" />
+  </ItemGroup>-->
+
   <ItemGroup>
-    <PackageReference Include="Escorp.Atom" Version="0.0.3" />
+    <ProjectReference Include="..\Atom\Atom.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -43,14 +47,14 @@
   </ItemGroup>
 
   <ItemGroup>
-	  <None Update="icon.png">
-	    <PackagePath>\</PackagePath>
-	    <Pack>True</Pack>
-	  </None>
-	  <None Update="README.md">
-	    <PackagePath>\</PackagePath>
-	    <Pack>True</Pack>
-	  </None>
-	</ItemGroup>
+    <None Update="icon.png">
+      <PackagePath>\</PackagePath>
+      <Pack>True</Pack>
+    </None>
+    <None Update="README.md">
+      <PackagePath>\</PackagePath>
+      <Pack>True</Pack>
+    </None>
+  </ItemGroup>
 
 </Project>

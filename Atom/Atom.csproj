@@ -4,29 +4,30 @@
 		<TargetFramework>net8.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-		<EnforceCodeStyleInBuild>True</EnforceCodeStyleInBuild>
+		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 		<AnalysisLevel>latest-all</AnalysisLevel>
-		<CheckForOverflowUnderflow>True</CheckForOverflowUnderflow>
-		<TreatWarningsAsErrors>True</TreatWarningsAsErrors>
-		<CodeAnalysisTreatWarningsAsErrors>True</CodeAnalysisTreatWarningsAsErrors>
+		<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+		<CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
 		<WarningLevel>9999</WarningLevel>
 
 		<IsTrimmable>true</IsTrimmable>
 		<IsAotCompatible>true</IsAotCompatible>
 		<InvariantGlobalization>true</InvariantGlobalization>
 
-		<NoWarn>CA1003;CA1031;CA1711</NoWarn>
+		<NoWarn>CA1003;CA1031;CA1040;CA1711;CA1716</NoWarn>
 
-		<GenerateDocumentationFile>True</GenerateDocumentationFile>
-		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<PackageId>Escorp.$(AssemblyName)</PackageId>
-		<Version>0.0.3</Version>
-		<Authors>Yuriy Yesin, Escorp Lab</Authors>
+		<Version>0.0.15</Version>
+		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
 		<RepositoryUrl>https://gitflic.ru/project/escorp-lab/atom</RepositoryUrl>
-		<IncludeSymbols>True</IncludeSymbols>
+		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<PackageIcon>icon.png</PackageIcon>
 		<PackageTags>atom;framework;escorp;exomode;system;threading;log;debug;extension</PackageTags>
@@ -35,11 +36,12 @@
 
 	<ItemGroup>
 	  <None Update="icon.png">
-	    <Pack>True</Pack>
+	    <Pack>true</Pack>
 	    <PackagePath>\</PackagePath>
 	  </None>
+
 	  <None Update="README.md">
-	    <Pack>True</Pack>
+	    <Pack>true</Pack>
 	    <PackagePath>\</PackagePath>
 	  </None>
 	</ItemGroup>

@@ -1,9 +1,9 @@
 ﻿namespace Atom.Web.Services.Proxy;
 
-/*/// <summary>
+/// <summary>
 /// Представляет базовый интерфейс для реализации фабрики прокси.
 /// </summary>
-public interface IProxyFactory
+public interface IProxyFactory : IWebServiceFactory<IProxyFactory, IProxyService>
 {
     /// <summary>
     /// Подключает сервис получения прокси.
@@ -19,4 +19,4 @@ public interface IProxyFactory
     /// <typeparam name="TProxyService">Тип сервиса прокси.</typeparam>
     /// <returns>Текущий экземпляр фабрики прокси.</returns>
     IProxyFactory UseService<TProxyService>() where TProxyService : IProxyService, new() => UseService(new TProxyService());
-}*/
+}

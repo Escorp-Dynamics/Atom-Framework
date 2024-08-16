@@ -1,4 +1,6 @@
-﻿using System.Text.Json.Serialization;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Runtime.Serialization;
+using System.Text.Json.Serialization;
 using Atom.Reactive;
 
 namespace Atom.Web.Analytics;
@@ -9,187 +11,215 @@ namespace Atom.Web.Analytics;
 /// <remarks>
 /// Инициализирует новый экземпляр <see cref="Currency"/>.
 /// </remarks>
+/// <param name="name">Название.</param>
+/// <param name="internationalName">Название (интернациональное).</param>
 /// <param name="code">Цифровой код валюты.</param>
-/// <param name="isoCode">Символьный код валюты.</param>
+/// <param name="isoCode">Символьный код валюты (ISO 4217).</param>
+/// <param name="taylorCode">Код Тэйлора.</param>
+/// <param name="kkb">Код KKB.</param>
+/// <param name="symbol">Символьный код (Unicode).</param>
 [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
 [JsonConverter(typeof(CurrencyJsonConverter))]
-public class Currency(ushort code, string isoCode) : Reactively, IParsable<Currency?>
+[Serializable]
+public class Currency(string name, string internationalName, ushort code, string isoCode, string? taylorCode, string? kkb, char? symbol) : Reactively, IParsable<Currency?>, IEquatable<Currency>, ISerializable
 {
-    private static readonly Lazy<Currency> Aud = new(() => new Currency(36, "AUD"), true);
-    private static readonly Lazy<Currency> Eur = new(() => new Currency(978, "EUR"), true);
-    private static readonly Lazy<Currency> Azn = new(() => new Currency(944, "AZN"), true);
-    private static readonly Lazy<Currency> All = new(() => new Currency(8, "ALL"), true);
-    private static readonly Lazy<Currency> Dzd = new(() => new Currency(12, "DZD"), true);
-    private static readonly Lazy<Currency> Xcd = new(() => new Currency(951, "XCD"), true);
-    private static readonly Lazy<Currency> Aoa = new(() => new Currency(973, "AOA"), true);
-    private static readonly Lazy<Currency> Ars = new(() => new Currency(32, "ARS"), true);
-    private static readonly Lazy<Currency> Amd = new(() => new Currency(51, "AMD"), true);
-    private static readonly Lazy<Currency> Awg = new(() => new Currency(533, "AWG"), true);
-    private static readonly Lazy<Currency> Afn = new(() => new Currency(971, "AFN"), true);
-    private static readonly Lazy<Currency> Bsd = new(() => new Currency(44, "BSD"), true);
-    private static readonly Lazy<Currency> Bdt = new(() => new Currency(50, "BDT"), true);
-    private static readonly Lazy<Currency> Bbd = new(() => new Currency(52, "BBD"), true);
-    private static readonly Lazy<Currency> Bhd = new(() => new Currency(48, "BHD"), true);
-    private static readonly Lazy<Currency> Byr = new(() => new Currency(974, "BYR"), true);
-    private static readonly Lazy<Currency> Bzd = new(() => new Currency(84, "BZD"), true);
-    private static readonly Lazy<Currency> Xof = new(() => new Currency(952, "XOF"), true);
-    private static readonly Lazy<Currency> Bmd = new(() => new Currency(60, "BMD"), true);
-    private static readonly Lazy<Currency> Bgn = new(() => new Currency(975, "BGN"), true);
-    private static readonly Lazy<Currency> Bob = new(() => new Currency(68, "BOB"), true);
-    private static readonly Lazy<Currency> Bam = new(() => new Currency(977, "BAM"), true);
-    private static readonly Lazy<Currency> Bwp = new(() => new Currency(72, "BWP"), true);
-    private static readonly Lazy<Currency> Brl = new(() => new Currency(986, "BRL"), true);
-    private static readonly Lazy<Currency> Bnd = new(() => new Currency(96, "BND"), true);
-    private static readonly Lazy<Currency> Bif = new(() => new Currency(108, "BIF"), true);
-    private static readonly Lazy<Currency> Btn = new(() => new Currency(64, "BTN"), true);
-    private static readonly Lazy<Currency> Vuv = new(() => new Currency(548, "VUV"), true);
-    private static readonly Lazy<Currency> Gbp = new(() => new Currency(826, "GBP"), true);
-    private static readonly Lazy<Currency> Huf = new(() => new Currency(348, "HUF"), true);
-    private static readonly Lazy<Currency> Veb = new(() => new Currency(862, "VEB"), true);
-    private static readonly Lazy<Currency> Idr = new(() => new Currency(360, "IDR"), true);
-    private static readonly Lazy<Currency> Vnd = new(() => new Currency(704, "VND"), true);
-    private static readonly Lazy<Currency> Xaf = new(() => new Currency(950, "XAF"), true);
-    private static readonly Lazy<Currency> Htg = new(() => new Currency(332, "HTG"), true);
-    private static readonly Lazy<Currency> Gyd = new(() => new Currency(328, "GYD"), true);
-    private static readonly Lazy<Currency> Gmd = new(() => new Currency(270, "GMD"), true);
-    private static readonly Lazy<Currency> Ghc = new(() => new Currency(288, "GHC"), true);
-    private static readonly Lazy<Currency> Gtq = new(() => new Currency(320, "GTQ"), true);
-    private static readonly Lazy<Currency> Gnf = new(() => new Currency(324, "GNF"), true);
-    private static readonly Lazy<Currency> Gip = new(() => new Currency(292, "GIP"), true);
-    private static readonly Lazy<Currency> Hnl = new(() => new Currency(340, "HNL"), true);
-    private static readonly Lazy<Currency> Hkd = new(() => new Currency(344, "HKD"), true);
-    private static readonly Lazy<Currency> Gel = new(() => new Currency(981, "GEL"), true);
-    private static readonly Lazy<Currency> Dkk = new(() => new Currency(208, "DKK"), true);
-    private static readonly Lazy<Currency> Djf = new(() => new Currency(262, "DJF"), true);
-    private static readonly Lazy<Currency> Dop = new(() => new Currency(214, "DOP"), true);
-    private static readonly Lazy<Currency> Egp = new(() => new Currency(818, "EGP"), true);
-    private static readonly Lazy<Currency> Zmk = new(() => new Currency(894, "ZMK"), true);
-    private static readonly Lazy<Currency> Zwd = new(() => new Currency(716, "ZWD"), true);
-    private static readonly Lazy<Currency> Ils = new(() => new Currency(376, "ILS"), true);
-    private static readonly Lazy<Currency> Inr = new(() => new Currency(356, "INR"), true);
-    private static readonly Lazy<Currency> Jod = new(() => new Currency(400, "JOD"), true);
-    private static readonly Lazy<Currency> Iqd = new(() => new Currency(368, "IQD"), true);
-    private static readonly Lazy<Currency> Irr = new(() => new Currency(364, "IRR"), true);
-    private static readonly Lazy<Currency> Isk = new(() => new Currency(352, "ISK"), true);
-    private static readonly Lazy<Currency> Yer = new(() => new Currency(886, "YER"), true);
-    private static readonly Lazy<Currency> Cve = new(() => new Currency(132, "CVE"), true);
-    private static readonly Lazy<Currency> Kzt = new(() => new Currency(398, "KZT"), true);
-    private static readonly Lazy<Currency> Kyd = new(() => new Currency(136, "KYD"), true);
-    private static readonly Lazy<Currency> Khr = new(() => new Currency(116, "KHR"), true);
-    private static readonly Lazy<Currency> Cad = new(() => new Currency(124, "CAD"), true);
-    private static readonly Lazy<Currency> Qar = new(() => new Currency(634, "QAR"), true);
-    private static readonly Lazy<Currency> Kes = new(() => new Currency(404, "KES"), true);
-    private static readonly Lazy<Currency> Cyp = new(() => new Currency(196, "CYP"), true);
-    private static readonly Lazy<Currency> Kgs = new(() => new Currency(417, "KGS"), true);
-    private static readonly Lazy<Currency> Cny = new(() => new Currency(156, "CNY"), true);
-    private static readonly Lazy<Currency> Kpw = new(() => new Currency(408, "KPW"), true);
-    private static readonly Lazy<Currency> Cop = new(() => new Currency(170, "COP"), true);
-    private static readonly Lazy<Currency> Kmf = new(() => new Currency(174, "KMF"), true);
-    private static readonly Lazy<Currency> Cdf = new(() => new Currency(976, "CDF"), true);
-    private static readonly Lazy<Currency> Crc = new(() => new Currency(188, "CRC"), true);
-    private static readonly Lazy<Currency> Cup = new(() => new Currency(192, "CUP"), true);
-    private static readonly Lazy<Currency> Kwd = new(() => new Currency(414, "KWD"), true);
-    private static readonly Lazy<Currency> Lak = new(() => new Currency(418, "LAK"), true);
-    private static readonly Lazy<Currency> Lvl = new(() => new Currency(428, "LVL"), true);
-    private static readonly Lazy<Currency> Lsl = new(() => new Currency(426, "LSL"), true);
-    private static readonly Lazy<Currency> Zar = new(() => new Currency(710, "ZAR"), true);
-    private static readonly Lazy<Currency> Lrd = new(() => new Currency(430, "LRD"), true);
-    private static readonly Lazy<Currency> Lbp = new(() => new Currency(422, "LBP"), true);
-    private static readonly Lazy<Currency> Lyd = new(() => new Currency(434, "LYD"), true);
-    private static readonly Lazy<Currency> Ltl = new(() => new Currency(440, "LTL"), true);
-    private static readonly Lazy<Currency> Chf = new(() => new Currency(756, "CHF"), true);
-    private static readonly Lazy<Currency> Mur = new(() => new Currency(480, "MUR"), true);
-    private static readonly Lazy<Currency> Mro = new(() => new Currency(478, "MRO"), true);
-    private static readonly Lazy<Currency> Mga = new(() => new Currency(969, "MGA"), true);
-    private static readonly Lazy<Currency> Mop = new(() => new Currency(446, "MOP"), true);
-    private static readonly Lazy<Currency> Mkd = new(() => new Currency(807, "MKD"), true);
-    private static readonly Lazy<Currency> Mwk = new(() => new Currency(454, "MWK"), true);
-    private static readonly Lazy<Currency> Myr = new(() => new Currency(458, "MYR"), true);
-    private static readonly Lazy<Currency> Mvr = new(() => new Currency(462, "MVR"), true);
-    private static readonly Lazy<Currency> Mtl = new(() => new Currency(470, "MTL"), true);
-    private static readonly Lazy<Currency> Mad = new(() => new Currency(504, "MAD"), true);
-    private static readonly Lazy<Currency> Xdr = new(() => new Currency(960, "XDR"), true);
-    private static readonly Lazy<Currency> Mxn = new(() => new Currency(484, "MXN"), true);
-    private static readonly Lazy<Currency> Mzn = new(() => new Currency(943, "MZN"), true);
-    private static readonly Lazy<Currency> Mdl = new(() => new Currency(498, "MDL"), true);
-    private static readonly Lazy<Currency> Mnt = new(() => new Currency(496, "MNT"), true);
-    private static readonly Lazy<Currency> Mmk = new(() => new Currency(104, "MMK"), true);
-    private static readonly Lazy<Currency> Nad = new(() => new Currency(516, "NAD"), true);
-    private static readonly Lazy<Currency> Npr = new(() => new Currency(524, "NPR"), true);
-    private static readonly Lazy<Currency> Ngn = new(() => new Currency(566, "NGN"), true);
-    private static readonly Lazy<Currency> Ang = new(() => new Currency(532, "ANG"), true);
-    private static readonly Lazy<Currency> Nio = new(() => new Currency(558, "NIO"), true);
-    private static readonly Lazy<Currency> Nzd = new(() => new Currency(554, "NZD"), true);
-    private static readonly Lazy<Currency> Nok = new(() => new Currency(578, "NOK"), true);
-    private static readonly Lazy<Currency> Aed = new(() => new Currency(784, "AED"), true);
-    private static readonly Lazy<Currency> Omr = new(() => new Currency(512, "OMR"), true);
-    private static readonly Lazy<Currency> Shp = new(() => new Currency(654, "SHP"), true);
-    private static readonly Lazy<Currency> Pkr = new(() => new Currency(586, "PKR"), true);
-    private static readonly Lazy<Currency> Pab = new(() => new Currency(590, "PAB"), true);
-    private static readonly Lazy<Currency> Pgk = new(() => new Currency(598, "PGK"), true);
-    private static readonly Lazy<Currency> Pyg = new(() => new Currency(600, "PYG"), true);
-    private static readonly Lazy<Currency> Pen = new(() => new Currency(604, "PEN"), true);
-    private static readonly Lazy<Currency> Pln = new(() => new Currency(985, "PLN"), true);
-    private static readonly Lazy<Currency> Rub = new(() => new Currency(643, "RUB"), true);
-    private static readonly Lazy<Currency> Rwf = new(() => new Currency(646, "RWF"), true);
-    private static readonly Lazy<Currency> Ron = new(() => new Currency(946, "RON"), true);
-    private static readonly Lazy<Currency> Wst = new(() => new Currency(882, "WST"), true);
-    private static readonly Lazy<Currency> Std = new(() => new Currency(678, "STD"), true);
-    private static readonly Lazy<Currency> Sar = new(() => new Currency(682, "SAR"), true);
-    private static readonly Lazy<Currency> Szl = new(() => new Currency(748, "SZL"), true);
-    private static readonly Lazy<Currency> Scr = new(() => new Currency(690, "SCR"), true);
-    private static readonly Lazy<Currency> Csd = new(() => new Currency(891, "CSD"), true);
-    private static readonly Lazy<Currency> Sgd = new(() => new Currency(702, "SGD"), true);
-    private static readonly Lazy<Currency> Syp = new(() => new Currency(760, "SYP"), true);
-    private static readonly Lazy<Currency> Skk = new(() => new Currency(703, "SKK"), true);
-    private static readonly Lazy<Currency> Sit = new(() => new Currency(705, "SIT"), true);
-    private static readonly Lazy<Currency> Sbd = new(() => new Currency(90, "SBD"), true);
-    private static readonly Lazy<Currency> Sos = new(() => new Currency(706, "SOS"), true);
-    private static readonly Lazy<Currency> Sdd = new(() => new Currency(736, "SDD"), true);
-    private static readonly Lazy<Currency> Srd = new(() => new Currency(968, "SRD"), true);
-    private static readonly Lazy<Currency> Usd = new(() => new Currency(840, "USD"), true);
-    private static readonly Lazy<Currency> Sll = new(() => new Currency(694, "SLL"), true);
-    private static readonly Lazy<Currency> Tjs = new(() => new Currency(972, "TJS"), true);
-    private static readonly Lazy<Currency> Thb = new(() => new Currency(764, "THB"), true);
-    private static readonly Lazy<Currency> Twd = new(() => new Currency(901, "TWD"), true);
-    private static readonly Lazy<Currency> Tzs = new(() => new Currency(834, "TZS"), true);
-    private static readonly Lazy<Currency> Top = new(() => new Currency(776, "TOP"), true);
-    private static readonly Lazy<Currency> Ttd = new(() => new Currency(780, "TTD"), true);
-    private static readonly Lazy<Currency> Tnd = new(() => new Currency(788, "TND"), true);
-    private static readonly Lazy<Currency> Tmm = new(() => new Currency(795, "TMM"), true);
-    private static readonly Lazy<Currency> Try = new(() => new Currency(949, "TRY"), true);
-    private static readonly Lazy<Currency> Ugx = new(() => new Currency(800, "UGX"), true);
-    private static readonly Lazy<Currency> Uzs = new(() => new Currency(860, "UZS"), true);
-    private static readonly Lazy<Currency> Uah = new(() => new Currency(980, "UAH"), true);
-    private static readonly Lazy<Currency> Uyu = new(() => new Currency(858, "UYU"), true);
-    private static readonly Lazy<Currency> Fjd = new(() => new Currency(242, "FJD"), true);
-    private static readonly Lazy<Currency> Php = new(() => new Currency(608, "PHP"), true);
-    private static readonly Lazy<Currency> Fkp = new(() => new Currency(238, "FKP"), true);
-    private static readonly Lazy<Currency> Xpf = new(() => new Currency(953, "XPF"), true);
-    private static readonly Lazy<Currency> Hrk = new(() => new Currency(191, "HRK"), true);
-    private static readonly Lazy<Currency> Czk = new(() => new Currency(203, "CZK"), true);
-    private static readonly Lazy<Currency> Clp = new(() => new Currency(152, "CLP"), true);
-    private static readonly Lazy<Currency> Sek = new(() => new Currency(752, "SEK"), true);
-    private static readonly Lazy<Currency> Lkr = new(() => new Currency(144, "LKR"), true);
-    private static readonly Lazy<Currency> Ern = new(() => new Currency(232, "ERN"), true);
-    private static readonly Lazy<Currency> Eek = new(() => new Currency(233, "EEK"), true);
-    private static readonly Lazy<Currency> Etb = new(() => new Currency(230, "ETB"), true);
-    //private static readonly Lazy<Currency> Yum = new(() => new Currency(891, "YUM"), true);
-    private static readonly Lazy<Currency> Krw = new(() => new Currency(410, "KRW"), true);
-    private static readonly Lazy<Currency> Jmd = new(() => new Currency(388, "JMD"), true);
-    private static readonly Lazy<Currency> Jpy = new(() => new Currency(392, "JPY"), true);
-    private static readonly Lazy<Currency> Xag = new(() => new Currency(961, "XAG"), true);
-    private static readonly Lazy<Currency> Xau = new(() => new Currency(959, "XAU"), true);
-    private static readonly Lazy<Currency> Xba = new(() => new Currency(955, "XBA"), true);
-    private static readonly Lazy<Currency> Xbb = new(() => new Currency(956, "XBB"), true);
-    private static readonly Lazy<Currency> Xbc = new(() => new Currency(957, "XBC"), true);
-    private static readonly Lazy<Currency> Xbd = new(() => new Currency(958, "XBD"), true);
-    //private static readonly Lazy<Currency> Xfo = new(() => new Currency(0, "XFO"), true);
-    //private static readonly Lazy<Currency> Xfu = new(() => new Currency(0, "XFU"), true);
-    private static readonly Lazy<Currency> Xpd = new(() => new Currency(964, "XPD"), true);
-    private static readonly Lazy<Currency> Xpt = new(() => new Currency(962, "XPT"), true);
-    private static readonly Lazy<Currency> Xts = new(() => new Currency(963, "XTS"), true);
-    private static readonly Lazy<Currency> Xxx = new(() => new Currency(999, "XXX"), true);
+    #region Инициализации
+
+    private static readonly Lazy<Currency> aed = new(() => new Currency("Дирхам (ОАЭ)", "UAE Dirham", 784, "AED"), true);
+    private static readonly Lazy<Currency> afn = new(() => new Currency("Афгани", "Afghani", 971, "AFN", '؋'), true);
+    private static readonly Lazy<Currency> all = new(() => new Currency("Лек", "Lek", 008, "ALL"), true);
+    private static readonly Lazy<Currency> amd = new(() => new Currency("Армянский драм", "Armenian Dram", 051, "AMD", '֏'), true);
+    private static readonly Lazy<Currency> ang = new(() => new Currency("Нидерландский антильский гульден", "Netherlands Antillean Guilder", 532, "ANG", 'ƒ'), true);
+    private static readonly Lazy<Currency> aoa = new(() => new Currency("Кванза", "Kwanza", 973, "AOA", "B59"), true);
+    private static readonly Lazy<Currency> ars = new(() => new Currency("Аргентинское песо", "Argentine Peso", 032, "ARS", '$'), true);
+    private static readonly Lazy<Currency> aud = new(() => new Currency("Австралийский доллар", "Australian Dollar", 036, "AUD", "B67", '$'), true);
+    private static readonly Lazy<Currency> awg = new(() => new Currency("Арубанский флорин", "Aruban Florin", 533, "AWG", 'ƒ'), true);
+    private static readonly Lazy<Currency> azn = new(() => new Currency("Азербайджанский манат", "Azerbaijanian Manat", 944, "AZN"), true);
+    private static readonly Lazy<Currency> bam = new(() => new Currency("Конвертируемая марка", "Convertible Mark", 977, "BAM"), true);
+    private static readonly Lazy<Currency> bbd = new(() => new Currency("Барбадосский доллар", "Barbados Dollar", 052, "BBD", '$'), true);
+    private static readonly Lazy<Currency> bdt = new(() => new Currency("Така", "Taka", 050, "BDT", '৳'), true);
+    private static readonly Lazy<Currency> bgn = new(() => new Currency("Болгарский лев", "Bulgarian Lev", 975, "BGN", "3"), true);
+    private static readonly Lazy<Currency> bhd = new(() => new Currency("Бахрейнский динар", "Bahraini Dinar", 048, "BHD"), true);
+    private static readonly Lazy<Currency> bif = new(() => new Currency("Бурундийский франк", "Burundi Franc", 108, "BIF"), true);
+    private static readonly Lazy<Currency> bmd = new(() => new Currency("Бермудский доллар", "Bermudian Dollar", 060, "BMD", '$'), true);
+    private static readonly Lazy<Currency> bnd = new(() => new Currency("Брунейский доллар", "Brunei Dollar", 096, "BND", '$'), true);
+    private static readonly Lazy<Currency> bob = new(() => new Currency("Боливиано", "Boliviano", 068, "BOB"), true);
+    private static readonly Lazy<Currency> bov = new(() => new Currency("Мвдол", "Mvdol", 984, "BOV"), true);
+    private static readonly Lazy<Currency> brl = new(() => new Currency("Бразильский реал", "Brazilian Real", 986, "BRL", "C42"), true);
+    private static readonly Lazy<Currency> bsd = new(() => new Currency("Багамский доллар", "Bahamian Dollar", 044, "BSD", '$'), true);
+    private static readonly Lazy<Currency> btn = new(() => new Currency("Нгултрум", "Ngultrum", 064, "BTN"), true);
+    private static readonly Lazy<Currency> bwp = new(() => new Currency("Пула", "Pula", 072, "BWP"), true);
+    private static readonly Lazy<Currency> byn = new(() => new Currency("Белорусский рубль", "Belarussian Ruble", 933, "BYN"), true);
+    private static readonly Lazy<Currency> bzd = new(() => new Currency("Белизский доллар", "Belize Dollar", 084, "BZD", '$'), true);
+    private static readonly Lazy<Currency> cad = new(() => new Currency("Канадский доллар", "Canadian Dollar", 124, "CAD", '$'), true);
+    private static readonly Lazy<Currency> cdf = new(() => new Currency("Конголезский франк", "Congolese Franc", 976, "CDF"), true);
+    private static readonly Lazy<Currency> che = new(() => new Currency("WIR-евро", "WIR Euro", 947, "CHE"), true);
+    private static readonly Lazy<Currency> chf = new(() => new Currency("Швейцарский франк", "Swiss Franc", 756, "CHF", "12"), true);
+    private static readonly Lazy<Currency> chw = new(() => new Currency("WIR-франк", "WIR Franc", 948, "CHW"), true);
+    private static readonly Lazy<Currency> clf = new(() => new Currency("Единица развития", "Unidades de Fomento", 990, "CLF"), true);
+    private static readonly Lazy<Currency> clp = new(() => new Currency("Чилийское песо", "Chilean Peso", 152, "CLP", '$'), true);
+    private static readonly Lazy<Currency> cny = new(() => new Currency("Юань", "Yuan Renminbi", 156, "CNY", '¥'), true);
+    private static readonly Lazy<Currency> cop = new(() => new Currency("Колумбийское песо", "Colombian Peso", 170, "COP", '$'), true);
+    private static readonly Lazy<Currency> cou = new(() => new Currency("Единица реальной стоимости", "Unidad de Valor Real", 970, "COU"), true);
+    private static readonly Lazy<Currency> crc = new(() => new Currency("Коста-риканский колон", "Costa Rican Colon", 188, "CRC", '₡'), true);
+    private static readonly Lazy<Currency> cuc = new(() => new Currency("Конвертируемое песо", "Peso Convertible", 931, "CUC", '$'), true);
+    private static readonly Lazy<Currency> cup = new(() => new Currency("Кубинское песо", "Cuban Peso", 192, "CUP", "2", '$'), true);
+    private static readonly Lazy<Currency> cve = new(() => new Currency("Эскудо Кабо-Верде", "Cape Verde Escudo", 132, "CVE", '$'), true);
+    private static readonly Lazy<Currency> czk = new(() => new Currency("Чешская крона", "Czech Koruna", 203, "CZK", "4"), true);
+    private static readonly Lazy<Currency> djf = new(() => new Currency("Франк Джибути", "Djibouti Franc", 262, "DJF"), true);
+    private static readonly Lazy<Currency> dkk = new(() => new Currency("Датская крона", "Danish Krone", 208, "DKK"), true);
+    private static readonly Lazy<Currency> dop = new(() => new Currency("Доминиканское песо", "Dominican Peso", 214, "DOP", '$'), true);
+    private static readonly Lazy<Currency> dzd = new(() => new Currency("Алжирский динар", "Algerian Dinar", 012, "DZD", "E71"), true);
+    private static readonly Lazy<Currency> egp = new(() => new Currency("Египетский фунт", "Egyptian Pound", 818, "EGP", '£'), true);
+    private static readonly Lazy<Currency> ern = new(() => new Currency("Накфа", "Nakfa", 232, "ERN"), true);
+    private static readonly Lazy<Currency> etb = new(() => new Currency("Эфиопский быр", "Ethiopian Birr", 230, "ETB", "C27"), true);
+    private static readonly Lazy<Currency> eur = new(() => new Currency("Евро", "Euro", 978, "EUR", "31", '€'), true);
+    private static readonly Lazy<Currency> fjd = new(() => new Currency("Доллар Фиджи", "Fiji Dollar", 242, "FJD", '$'), true);
+    private static readonly Lazy<Currency> fkp = new(() => new Currency("Фунт Фолклендских островов", "Falkland Islands Pound", 238, "FKP", '£'), true);
+    private static readonly Lazy<Currency> gbp = new(() => new Currency("Фунт стерлингов", "Pound Sterling", 826, "GBP", "27", '£'), true);
+    private static readonly Lazy<Currency> gel = new(() => new Currency("Лари", "Lari", 981, "GEL"), true);
+    private static readonly Lazy<Currency> ghs = new(() => new Currency("Ганский седи", "Ghana Cedi", 936, "GHS", '₵'), true);
+    private static readonly Lazy<Currency> gip = new(() => new Currency("Гибралтарский фунт", "Gibraltar Pound", 292, "GIP", '£'), true);
+    private static readonly Lazy<Currency> gmd = new(() => new Currency("Даласи", "Dalasi", 270, "GMD"), true);
+    private static readonly Lazy<Currency> gnf = new(() => new Currency("Гвинейский франк", "Guinea Franc", 324, "GNF"), true);
+    private static readonly Lazy<Currency> gtq = new(() => new Currency("Кетсаль", "Quetzal", 320, "GTQ"), true);
+    private static readonly Lazy<Currency> gyd = new(() => new Currency("Гайанский доллар", "Guyana Dollar", 328, "GYD", '$'), true);
+    private static readonly Lazy<Currency> hkd = new(() => new Currency("Гонконгский доллар", "Hong Kong Dollar", 344, "HKD", "2", '$'), true);
+    private static readonly Lazy<Currency> hnl = new(() => new Currency("Лемпира", "Lempira", 340, "HNL"), true);
+    private static readonly Lazy<Currency> hrk = new(() => new Currency("Хорватская куна", "Kuna", 191, "HRK"), true);
+    private static readonly Lazy<Currency> htg = new(() => new Currency("Гурд", "Gourde", 332, "HTG"), true);
+    private static readonly Lazy<Currency> huf = new(() => new Currency("Форинт", "Forint", 348, "HUF", "K85"), true);
+    private static readonly Lazy<Currency> idr = new(() => new Currency("Рупия", "Rupiah", 360, "IDR", '₨'), true);
+    private static readonly Lazy<Currency> ils = new(() => new Currency("Новый израильский шекель", "New Israeli Sheqel", 376, "ILS", '₪'), true);
+    private static readonly Lazy<Currency> inr = new(() => new Currency("Индийская рупия", "Indian Rupee", 356, "INR", "2", '₹'), true);
+    private static readonly Lazy<Currency> iqd = new(() => new Currency("Иракский динар", "Iraqi Dinar", 368, "IQD", "3"), true);
+    private static readonly Lazy<Currency> irr = new(() => new Currency("Иранский риал", "Iranian Rial", 364, "IRR", '﷼'), true);
+    private static readonly Lazy<Currency> isk = new(() => new Currency("Исландская крона", "Iceland Krona", 352, "ISK"), true);
+    private static readonly Lazy<Currency> jmd = new(() => new Currency("Ямайский доллар", "Jamaican Dollar", 388, "JMD", '$'), true);
+    private static readonly Lazy<Currency> jod = new(() => new Currency("Иорданский динар", "Jordanian Dinar", 400, "JOD"), true);
+    private static readonly Lazy<Currency> jpy = new(() => new Currency("Иена", "Yen", 392, "JPY", "2", '¥'), true);
+    private static readonly Lazy<Currency> kes = new(() => new Currency("Кенийский шиллинг", "Kenyan Shilling", 404, "KES"), true);
+    private static readonly Lazy<Currency> kgs = new(() => new Currency("Сом", "Som", 417, "KGS"), true);
+    private static readonly Lazy<Currency> khr = new(() => new Currency("Риель", "Riel", 116, "KHR", "C23", '៛'), true);
+    private static readonly Lazy<Currency> kmf = new(() => new Currency("Франк Комор", "Comoro Franc", 174, "KMF"), true);
+    private static readonly Lazy<Currency> kpw = new(() => new Currency("Северокорейская вона", "North Korean Won", 408, "KPW", "2", '₩'), true);
+    private static readonly Lazy<Currency> krw = new(() => new Currency("Вона", "Won", 410, "KRW", "K09", '₩'), true);
+    private static readonly Lazy<Currency> kwd = new(() => new Currency("Кувейтский динар", "Kuwaiti Dinar", 414, "KWD"), true);
+    private static readonly Lazy<Currency> kyd = new(() => new Currency("Доллар Островов Кайман", "Cayman Islands Dollar", 136, "KYD", '$'), true);
+    private static readonly Lazy<Currency> kzt = new(() => new Currency("Тенге", "Tenge", 398, "KZT", '₸'), true);
+    private static readonly Lazy<Currency> lak = new(() => new Currency("Кип", "Kip", 418, "LAK", '₭'), true);
+    private static readonly Lazy<Currency> lbp = new(() => new Currency("Ливанский фунт", "Lebanese Pound", 422, "LBP", '£'), true);
+    private static readonly Lazy<Currency> lkr = new(() => new Currency("Шри-ланкийская рупия", "Sri Lanka Rupee", 144, "LKR", "A43", '₨'), true);
+    private static readonly Lazy<Currency> lrd = new(() => new Currency("Либерийский доллар", "Liberian Dollar", 430, "LRD", '$'), true);
+    private static readonly Lazy<Currency> lsl = new(() => new Currency("Лоти", "Loti", 426, "LSL"), true);
+    private static readonly Lazy<Currency> ltl = new(() => new Currency("Литовский лит", "Lithuanian Litas", 440, "LTL"), true);
+    private static readonly Lazy<Currency> lyd = new(() => new Currency("Ливийский динар", "Libyan Dinar", 434, "LYD"), true);
+    private static readonly Lazy<Currency> mad = new(() => new Currency("Марокканский дирхам", "Moroccan Dirham", 504, "MAD"), true);
+    private static readonly Lazy<Currency> mdl = new(() => new Currency("Молдавский лей", "Moldovan Leu", 498, "MDL"), true);
+    private static readonly Lazy<Currency> mga = new(() => new Currency("Малагасийский ариари", "Malagasy Ariary", 969, "MGA"), true);
+    private static readonly Lazy<Currency> mkd = new(() => new Currency("Денар", "Denar", 807, "MKD"), true);
+    private static readonly Lazy<Currency> mmk = new(() => new Currency("Кьят", "Kyat", 104, "MMK"), true);
+    private static readonly Lazy<Currency> mnt = new(() => new Currency("Тугрик", "Tugrik", 496, "MNT", "4", '₮'), true);
+    private static readonly Lazy<Currency> mop = new(() => new Currency("Патака", "Pataca", 446, "MOP"), true);
+    private static readonly Lazy<Currency> mru = new(() => new Currency("Угия", "Ouguiya", 929, "MRU"), true);
+    private static readonly Lazy<Currency> mur = new(() => new Currency("Маврикийская рупия", "Mauritius Rupee", 480, "MUR", '₨'), true);
+    private static readonly Lazy<Currency> mvr = new(() => new Currency("Руфия", "Rufiyaa", 462, "MVR"), true);
+    private static readonly Lazy<Currency> mwk = new(() => new Currency("Квача", "Kwacha", 454, "MWK"), true);
+    private static readonly Lazy<Currency> mxn = new(() => new Currency("Мексиканское песо", "Mexican Peso", 484, "MXN", "E43", '$'), true);
+    private static readonly Lazy<Currency> mxv = new(() => new Currency("Мексиканская инверсионная единица", "Mexican Unidad de Inversion", 979, "MXV"), true);
+    private static readonly Lazy<Currency> myr = new(() => new Currency("Малайзийский ринггит", "Malaysian Ringgit", 458, "MYR", "A36"), true);
+    private static readonly Lazy<Currency> mzn = new(() => new Currency("Мозамбикский метикал", "Mozambique Metical", 943, "MZN"), true);
+    private static readonly Lazy<Currency> nad = new(() => new Currency("Доллар Намибии", "Namibia Dollar", 516, "NAD", '$'), true);
+    private static readonly Lazy<Currency> ngn = new(() => new Currency("Найра", "Naira", 566, "NGN", '₦'), true);
+    private static readonly Lazy<Currency> nio = new(() => new Currency("Золотая кордоба", "Cordoba Oro", 558, "NIO"), true);
+    private static readonly Lazy<Currency> nok = new(() => new Currency("Норвежская крона", "Norwegian Krone", 578, "NOK"), true);
+    private static readonly Lazy<Currency> npr = new(() => new Currency("Непальская рупия", "Nepalese Rupee", 524, "NPR", '₨'), true);
+    private static readonly Lazy<Currency> nzd = new(() => new Currency("Новозеландский доллар", "New Zealand Dollar", 554, "NZD", '$'), true);
+    private static readonly Lazy<Currency> omr = new(() => new Currency("Оманский риал", "Rial Omani", 512, "OMR", '﷼'), true);
+    private static readonly Lazy<Currency> pab = new(() => new Currency("Бальбоа", "Balboa", 590, "PAB"), true);
+    private static readonly Lazy<Currency> pen = new(() => new Currency("Соль", "Sol", 604, "PEN"), true);
+    private static readonly Lazy<Currency> pgk = new(() => new Currency("Кина", "Kina", 598, "PGK"), true);
+    private static readonly Lazy<Currency> php = new(() => new Currency("Филиппинское песо", "Philippine Peso", 608, "PHP", '₱'), true);
+    private static readonly Lazy<Currency> pkr = new(() => new Currency("Пакистанская рупия", "Pakistan Rupee", 586, "PKR", "2", '₨'), true);
+    private static readonly Lazy<Currency> pln = new(() => new Currency("Злотый", "Zloty", 985, "PLN", "3"), true);
+    private static readonly Lazy<Currency> pyg = new(() => new Currency("Гуарани", "Guarani", 600, "PYG", '₲'), true);
+    private static readonly Lazy<Currency> qar = new(() => new Currency("Катарский риал", "Qatari Rial", 634, "QAR", '﷼'), true);
+    private static readonly Lazy<Currency> ron = new(() => new Currency("Новый румынский лей", "Romanian Leu", 946, "RON", "2"), true);
+    private static readonly Lazy<Currency> rsd = new(() => new Currency("Сербский динар", "Serbian Dinar", 941, "RSD"), true);
+    private static readonly Lazy<Currency> rub = new(() => new Currency("Российский рубль", "Russian Ruble", 643, "RUB", '₽'), true);
+    private static readonly Lazy<Currency> rwf = new(() => new Currency("Франк Руанды", "Rwanda Franc", 646, "RWF"), true);
+    private static readonly Lazy<Currency> sar = new(() => new Currency("Саудовский риял", "Saudi Riyal", 682, "SAR"), true);
+    private static readonly Lazy<Currency> sbd = new(() => new Currency("Доллар Соломоновых Островов", "Solomon Islands Dollar", 090, "SBD", '$'), true);
+    private static readonly Lazy<Currency> scr = new(() => new Currency("Сейшельская рупия", "Seychelles Rupee", 690, "SCR", '₨'), true);
+    private static readonly Lazy<Currency> sdg = new(() => new Currency("Суданский фунт", "Sudanese Pound", 938, "SDG", "2", '£'), true);
+    private static readonly Lazy<Currency> sek = new(() => new Currency("Шведская крона", "Swedish Krona", 752, "SEK", "B07"), true);
+    private static readonly Lazy<Currency> sgd = new(() => new Currency("Сингапурский доллар", "Singapore Dollar", 702, "SGD", '$'), true);
+    private static readonly Lazy<Currency> shp = new(() => new Currency("Фунт Святой Елены", "Saint Helena Pound", 654, "SHP", '£'), true);
+    private static readonly Lazy<Currency> sll = new(() => new Currency("Леоне", "Leone", 694, "SLL"), true);
+    private static readonly Lazy<Currency> sos = new(() => new Currency("Сомалийский шиллинг", "Somali Shilling", 706, "SOS"), true);
+    private static readonly Lazy<Currency> srd = new(() => new Currency("Суринамский доллар", "Surinam Dollar", 968, "SRD", '$'), true);
+    private static readonly Lazy<Currency> ssp = new(() => new Currency("Южносуданский фунт", "South Sudanese Pound", 728, "SSP", '£'), true);
+    private static readonly Lazy<Currency> stn = new(() => new Currency("Добра", "Dobra", 930, "STN"), true);
+    private static readonly Lazy<Currency> svc = new(() => new Currency("Сальвадорский колон", "El Salvador Colon", 222, "SVC", '₡'), true);
+    private static readonly Lazy<Currency> syp = new(() => new Currency("Сирийский фунт", "Syrian Pound", 760, "SYP", '£'), true);
+    private static readonly Lazy<Currency> szl = new(() => new Currency("Лилангени", "Lilangeni", 748, "SZL"), true);
+    private static readonly Lazy<Currency> thb = new(() => new Currency("Бат", "Baht", 764, "THB", "B70", '฿'), true);
+    private static readonly Lazy<Currency> tjs = new(() => new Currency("Сомони", "Somoni", 972, "TJS"), true);
+    private static readonly Lazy<Currency> tmt = new(() => new Currency("Новый туркменский манат", "Turkmenistan New Manat", 934, "TMT"), true);
+    private static readonly Lazy<Currency> tnd = new(() => new Currency("Тунисский динар", "Tunisian Dinar", 788, "TND", "B76"), true);
+    private static readonly Lazy<Currency> top = new(() => new Currency("Паанга", "Pa’anga", 776, "TOP"), true);
+    private static readonly Lazy<Currency> @try = new(() => new Currency("Турецкая лира", "Turkish Lira", 949, "TRY", "A13", '₺'), true);
+    private static readonly Lazy<Currency> ttd = new(() => new Currency("Доллар Тринидада и Тобаго", "Trinidad and Tobago Dollar", 780, "TTD", '$'), true);
+    private static readonly Lazy<Currency> twd = new(() => new Currency("Новый тайваньский доллар", "New Taiwan Dollar", 901, "TWD", '$'), true);
+    private static readonly Lazy<Currency> tzs = new(() => new Currency("Танзанийский шиллинг", "Tanzanian Shilling", 834, "TZS"), true);
+    private static readonly Lazy<Currency> uah = new(() => new Currency("Гривна", "Hryvnia", 980, "UAH", '₴'), true);
+    private static readonly Lazy<Currency> ugx = new(() => new Currency("Угандийский шиллинг", "Uganda Shilling", 800, "UGX"), true);
+    private static readonly Lazy<Currency> usd = new(() => new Currency("Доллар США", "US Dollar", 840, "USD", "119", '$'), true);
+    private static readonly Lazy<Currency> usn = new(() => new Currency("Доллар следующего дня", "US Dollar (Next day)", 997, "USN", '$'), true);
+    private static readonly Lazy<Currency> uss = new(() => new Currency("Доллар того же дня", "US Dollar (Same day)", 998, "USS", '$'), true);
+    private static readonly Lazy<Currency> uyi = new(() => new Currency("Уругвайское песо в индексированных единицах", "Urguguay Peso en Unidades Indexadas", 940, "UYI", '$'), true);
+    private static readonly Lazy<Currency> uyu = new(() => new Currency("Уругвайское песо", "Peso Uruguayo", 858, "UYU", '$'), true);
+    private static readonly Lazy<Currency> uzs = new(() => new Currency("Узбекский сум", "Uzbekistan Sum", 860, "UZS"), true);
+    private static readonly Lazy<Currency> vef = new(() => new Currency("Боливар фуэрте", "Bolivar", 937, "VEF"), true);
+    private static readonly Lazy<Currency> vnd = new(() => new Currency("Донг", "Dong", 704, "VND", "2", '₫'), true);
+    private static readonly Lazy<Currency> vuv = new(() => new Currency("Вату", "Vatu", 548, "VUV"), true);
+    private static readonly Lazy<Currency> wst = new(() => new Currency("Тала", "Tala", 882, "WST"), true);
+    private static readonly Lazy<Currency> xaf = new(() => new Currency("Франк КФА BEAC", "CFA Franc BEAC", 950, "XAF", "2"), true);
+    private static readonly Lazy<Currency> xag = new(() => new Currency("Серебро (тройская унция)", "Silver", 961, "XAG", "A91"), true);
+    private static readonly Lazy<Currency> xau = new(() => new Currency("Золото (тройская унция)", "Gold", 959, "XAU", "A90"), true);
+    private static readonly Lazy<Currency> xba = new(() => new Currency("Европейская составная единица EURCO", "European Composite Unit (EURCO)", 955, "XBA"), true);
+    private static readonly Lazy<Currency> xbb = new(() => new Currency("Европейская валютная единица EMU-6", "European Monetary Unit (E.M.U.-6)", 956, "XBB"), true);
+    private static readonly Lazy<Currency> xbc = new(() => new Currency("Европейская расчётная единица EUA-9", "European Unit of Account 9 (E.U.A.-9)", 957, "XBC"), true);
+    private static readonly Lazy<Currency> xbd = new(() => new Currency("Европейская расчётная единица EUA-17", "European Unit of Account 17 (E.U.A.-17)", 958, "XBD"), true);
+    private static readonly Lazy<Currency> xcd = new(() => new Currency("Восточно-карибский доллар", "East Caribbean Dollar", 951, "XCD", '$'), true);
+    private static readonly Lazy<Currency> xdr = new(() => new Currency("СДР (специальные права заимствования)", "SDR (Special Drawing Right)", 960, "XDR"), true);
+    private static readonly Lazy<Currency> xof = new(() => new Currency("Франк КФА BCEAO", "CFA Franc BCEAO", 952, "XOF"), true);
+    private static readonly Lazy<Currency> xpd = new(() => new Currency("Палладий (тройская унция)", "Palladium", 964, "XPD", "A34"), true);
+    private static readonly Lazy<Currency> xpf = new(() => new Currency("Франк КФП", "CFP Franc", 953, "XPF"), true);
+    private static readonly Lazy<Currency> xpt = new(() => new Currency("Платина (тройская унция)", "Platinum", 962, "XPT", "A92"), true);
+    private static readonly Lazy<Currency> xsu = new(() => new Currency("Сукре", "Sucre", 994, "XSU"), true);
+    private static readonly Lazy<Currency> xts = new(() => new Currency("Тестовый код", "Testing Code", 963, "XTS"), true);
+    private static readonly Lazy<Currency> xua = new(() => new Currency("Расчётная единица ADB", "ADB Unit of Account", 965, "XUA"), true);
+    private static readonly Lazy<Currency> xxx = new(() => new Currency("Без валюты", "No Currency", 999, "XXX"), true);
+    private static readonly Lazy<Currency> yer = new(() => new Currency("Йеменский риал", "Yemeni Rial", 886, "YER", "2", '﷼'), true);
+    private static readonly Lazy<Currency> zar = new(() => new Currency("Рэнд", "Rand", 710, "ZAR"), true);
+    private static readonly Lazy<Currency> zmw = new(() => new Currency("Замбийская квача", "Zambian Kwacha", 967, "ZMW"), true);
+    private static readonly Lazy<Currency> zwl = new(() => new Currency("Доллар Зимбабве", "Zimbabwe Dollar", 932, "ZWL", '$'), true);
+    private static readonly Lazy<Currency> imp = new(() => new Currency("Фунты Острова Мэн", "Manx pound", 0, "IMP", "IMP", "B91", '£'), true);
+    private static readonly Lazy<Currency> ggp = new(() => new Currency("Гернсийский фунт", "Guernsey pound", 0, "GGP", "GGP", '£'), true);
+    private static readonly Lazy<Currency> jep = new(() => new Currency("Джерсийский фунт", "Jersey pound", 0, "JEP", "JEP", '£'), true);
+
+    #endregion
+
+    /// <summary>
+    /// Название.
+    /// </summary>
+    public string Name { get; set; } = name;
+
+    /// <summary>
+    /// Название (интернациональное).
+    /// </summary>
+    public string InternationalName { get; set; } = internationalName;
 
     /// <summary>
     /// Цифровой код валюты.
@@ -210,6 +240,33 @@ public class Currency(ushort code, string isoCode) : Reactively, IParsable<Curre
     }
 
     /// <summary>
+    /// Код Тэйлора.
+    /// </summary>
+    public string? TaylorCode
+    {
+        get => taylorCode;
+        set => SetProperty(ref taylorCode, value);
+    }
+
+    /// <summary>
+    /// Код KKB.
+    /// </summary>
+    public string? KKB
+    {
+        get => kkb;
+        set => SetProperty(ref kkb, value);
+    }
+
+    /// <summary>
+    /// Символьный код (Unicode).
+    /// </summary>
+    public char? Symbol
+    {
+        get => symbol;
+        set => SetProperty(ref symbol, value);
+    }
+
+    /// <summary>
     /// Происходит в момент изменения цифрового кода валюты.
     /// </summary>
     public event AsyncEventHandler<Currency>? CodeChanged;
@@ -219,880 +276,1003 @@ public class Currency(ushort code, string isoCode) : Reactively, IParsable<Curre
     /// </summary>
     public event AsyncEventHandler<Currency>? IsoCodeChanged;
 
-    /// <summary>
-    /// Австралийский доллар.
-    /// </summary>
-    public static Currency AUD => Aud.Value;
-
-    /// <summary>
-    /// Евро.
-    /// </summary>
-    public static Currency EUR => Eur.Value;
-
-    /// <summary>
-    /// Азербайджанский манат.
-    /// </summary>
-    public static Currency AZN => Azn.Value;
-
-    /// <summary>
-    /// Лек.
-    /// </summary>
-    public static Currency ALL => All.Value;
-
-    /// <summary>
-    /// Алжирский динар.
-    /// </summary>
-    public static Currency DZD => Dzd.Value;
-
-    /// <summary>
-    /// Восточно-карибский доллар.
-    /// </summary>
-    public static Currency XCD => Xcd.Value;
-
-    /// <summary>
-    /// Кванза.
-    /// </summary>
-    public static Currency AOA => Aoa.Value;
-
-    /// <summary>
-    /// Аргентинское песо.
-    /// </summary>
-    public static Currency ARS => Ars.Value;
-
-    /// <summary>
-    /// Армянский драм.
-    /// </summary>
-    public static Currency AMD => Amd.Value;
-
-    /// <summary>
-    /// Арубанский гульден.
-    /// </summary>
-    public static Currency AWG => Awg.Value;
-
-    /// <summary>
-    /// Афгани.
-    /// </summary>
-    public static Currency AFN => Afn.Value;
-
-    /// <summary>
-    /// Багамский доллар.
-    /// </summary>
-    public static Currency BSD => Bsd.Value;
-
-    /// <summary>
-    /// Така.
-    /// </summary>
-    public static Currency BDT => Bdt.Value;
-
-    /// <summary>
-    /// Барбадосский доллар.
-    /// </summary>
-    public static Currency BBD => Bbd.Value;
-
-    /// <summary>
-    /// Бахрейнский динар.
-    /// </summary>
-    public static Currency BHD => Bhd.Value;
-
-    /// <summary>
-    /// Белорусский рубль.
-    /// </summary>
-    public static Currency BYR => Byr.Value;
-
-    /// <summary>
-    /// Белизский доллар.
-    /// </summary>
-    public static Currency BZD => Bzd.Value;
-
-    /// <summary>
-    /// Франк КФА ВСЕАО (денежная единица Центрального Банка государств Западной Африки).
-    /// </summary>
-    public static Currency XOF => Xof.Value;
-
-    /// <summary>
-    /// Бермудский доллар.
-    /// </summary>
-    public static Currency BMD => Bmd.Value;
-
-    /// <summary>
-    /// Лев.
-    /// </summary>
-    public static Currency BGN => Bgn.Value;
-
-    /// <summary>
-    /// Боливиано.
-    /// </summary>
-    public static Currency BOB => Bob.Value;
-
-    /// <summary>
-    /// Конвертируемая марка.
-    /// </summary>
-    public static Currency BAM => Bam.Value;
-
-    /// <summary>
-    /// Пула.
-    /// </summary>
-    public static Currency BWP => Bwp.Value;
-
-    /// <summary>
-    /// Бразильский реал.
-    /// </summary>
-    public static Currency BRL => Brl.Value;
-
-    /// <summary>
-    /// Брунейский доллар.
-    /// </summary>
-    public static Currency BND => Bnd.Value;
-
-    /// <summary>
-    /// Бурундийский франк.
-    /// </summary>
-    public static Currency BIF => Bif.Value;
-
-    /// <summary>
-    /// Нгултрум.
-    /// </summary>
-    public static Currency BTN => Btn.Value;
-
-    /// <summary>
-    /// Вату.
-    /// </summary>
-    public static Currency VUV => Vuv.Value;
-
-    /// <summary>
-    /// Фунт стерлингов.
-    /// </summary>
-    public static Currency GBP => Gbp.Value;
-
-    /// <summary>
-    /// Форинт.
-    /// </summary>
-    public static Currency HUF => Huf.Value;
-
-    /// <summary>
-    /// Боливар.
-    /// </summary>
-    public static Currency VEB => Veb.Value;
-
-    /// <summary>
-    /// Рупия.
-    /// </summary>
-    public static Currency IDR => Idr.Value;
-
-    /// <summary>
-    /// Донг.
-    /// </summary>
-    public static Currency VND => Vnd.Value;
-
-    /// <summary>
-    /// Франк КФА ВЕАС (денежная единица Банка государств Центральной Африки).
-    /// </summary>
-    public static Currency XAF => Xaf.Value;
-
-    /// <summary>
-    /// Гурд.
-    /// </summary>
-    public static Currency HTG => Htg.Value;
-
-    /// <summary>
-    /// Гайанский доллар.
-    /// </summary>
-    public static Currency GYD => Gyd.Value;
-
-    /// <summary>
-    /// Даласи.
-    /// </summary>
-    public static Currency GMD => Gmd.Value;
-
-    /// <summary>
-    /// Седи.
-    /// </summary>
-    public static Currency GHC => Ghc.Value;
-
-    /// <summary>
-    /// Кетсаль.
-    /// </summary>
-    public static Currency GTQ => Gtq.Value;
-
-    /// <summary>
-    /// Гвинейский франк.
-    /// </summary>
-    public static Currency GNF => Gnf.Value;
-
-    /// <summary>
-    /// Гибралтарский фунт.
-    /// </summary>
-    public static Currency GIP => Gip.Value;
-
-    /// <summary>
-    /// Лемпира.
-    /// </summary>
-    public static Currency HNL => Hnl.Value;
-
-    /// <summary>
-    /// Гонконгский доллар.
-    /// </summary>
-    public static Currency HKD => Hkd.Value;
-
-    /// <summary>
-    /// Лари.
-    /// </summary>
-    public static Currency GEL => Gel.Value;
-
-    /// <summary>
-    /// Датская крона.
-    /// </summary>
-    public static Currency DKK => Dkk.Value;
-
-    /// <summary>
-    /// Франк Джибути.
-    /// </summary>
-    public static Currency DJF => Djf.Value;
-
-    /// <summary>
-    /// Доминиканское песо.
-    /// </summary>
-    public static Currency DOP => Dop.Value;
-
-    /// <summary>
-    /// Египетский фунт.
-    /// </summary>
-    public static Currency EGP => Egp.Value;
-
-    /// <summary>
-    /// Квача (замбийская).
-    /// </summary>
-    public static Currency ZMK => Zmk.Value;
-
-    /// <summary>
-    /// Доллар Зимбабве.
-    /// </summary>
-    public static Currency ZWD => Zwd.Value;
-
-    /// <summary>
-    /// Новый израильский шекель.
-    /// </summary>
-    public static Currency ILS => Ils.Value;
-
-    /// <summary>
-    /// Индийская рупия.
-    /// </summary>
-    public static Currency INR => Inr.Value;
-
-    /// <summary>
-    /// Иорданский динар.
-    /// </summary>
-    public static Currency JOD => Jod.Value;
-
-    /// <summary>
-    /// Иракский динар.
-    /// </summary>
-    public static Currency IQD => Iqd.Value;
-
-    /// <summary>
-    /// Иранский риал.
-    /// </summary>
-    public static Currency IRR => Irr.Value;
-
-    /// <summary>
-    /// Исландская крона.
-    /// </summary>
-    public static Currency ISK => Isk.Value;
-
-    /// <summary>
-    /// Йеменский риал.
-    /// </summary>
-    public static Currency YER => Yer.Value;
-
-    /// <summary>
-    /// Эскудо Кабо-Верде.
-    /// </summary>
-    public static Currency CVE => Cve.Value;
-
-    /// <summary>
-    /// Тенге.
-    /// </summary>
-    public static Currency KZT => Kzt.Value;
-
-    /// <summary>
-    /// Доллар Каймановых островов.
-    /// </summary>
-    public static Currency KYD => Kyd.Value;
-
-    /// <summary>
-    /// Риель.
-    /// </summary>
-    public static Currency KHR => Khr.Value;
-
-    /// <summary>
-    /// Канадский доллар.
-    /// </summary>
-    public static Currency CAD => Cad.Value;
-
-    /// <summary>
-    /// Катарский риал.
-    /// </summary>
-    public static Currency QAR => Qar.Value;
-
-    /// <summary>
-    /// Кенийский шиллинг.
-    /// </summary>
-    public static Currency KES => Kes.Value;
-
-    /// <summary>
-    /// Кипрский фунт.
-    /// </summary>
-    public static Currency CYP => Cyp.Value;
-
-    /// <summary>
-    /// Сом.
-    /// </summary>
-    public static Currency KGS => Kgs.Value;
-
-    /// <summary>
-    /// Юань жэньминьби.
-    /// </summary>
-    public static Currency CNY => Cny.Value;
-
-    /// <summary>
-    /// Северо-корейская вона.
-    /// </summary>
-    public static Currency KPW => Kpw.Value;
-
-    /// <summary>
-    /// Колумбийское песо.
-    /// </summary>
-    public static Currency COP => Cop.Value;
-
-    /// <summary>
-    /// Франк Коморских островов.
-    /// </summary>
-    public static Currency KMF => Kmf.Value;
-
-    /// <summary>
-    /// Конголезский франк.
-    /// </summary>
-    public static Currency CDF => Cdf.Value;
-
-    /// <summary>
-    /// Костариканский колон.
-    /// </summary>
-    public static Currency CRC => Crc.Value;
-
-    /// <summary>
-    /// Кубинское песо.
-    /// </summary>
-    public static Currency CUP => Cup.Value;
-
-    /// <summary>
-    /// Кувейтский динар.
-    /// </summary>
-    public static Currency KWD => Kwd.Value;
-
-    /// <summary>
-    /// Кип.
-    /// </summary>
-    public static Currency LAK => Lak.Value;
-
-    /// <summary>
-    /// Латвийский лат.
-    /// </summary>
-    public static Currency LVL => Lvl.Value;
-
-    /// <summary>
-    /// Лоти.
-    /// </summary>
-    public static Currency LSL => Lsl.Value;
-
-    /// <summary>
-    /// Рэнд.
-    /// </summary>
-    public static Currency ZAR => Zar.Value;
-
-    /// <summary>
-    /// Либерийский доллар.
-    /// </summary>
-    public static Currency LRD => Lrd.Value;
-
-    /// <summary>
-    /// Ливанский фунт.
-    /// </summary>
-    public static Currency LBP => Lbp.Value;
-
-    /// <summary>
-    /// Ливийский динар.
-    /// </summary>
-    public static Currency LYD => Lyd.Value;
-
-    /// <summary>
-    /// Литовский лит.
-    /// </summary>
-    public static Currency LTL => Ltl.Value;
-
-    /// <summary>
-    /// Швейцарский франк.
-    /// </summary>
-    public static Currency CHF => Chf.Value;
-
-    /// <summary>
-    /// Маврикийская рупия.
-    /// </summary>
-    public static Currency MUR => Mur.Value;
-
-    /// <summary>
-    /// Угия.
-    /// </summary>
-    public static Currency MRO => Mro.Value;
-
-    /// <summary>
-    /// Малагасийский франк.
-    /// </summary>
-    public static Currency MGA => Mga.Value;
-
-    /// <summary>
-    /// Патака.
-    /// </summary>
-    public static Currency MOP => Mop.Value;
-
-    /// <summary>
-    /// Динар.
-    /// </summary>
-    public static Currency MKD => Mkd.Value;
-
-    /// <summary>
-    /// Квача.
-    /// </summary>
-    public static Currency MWK => Mwk.Value;
-
-    /// <summary>
-    /// Малайзийский рингтит.
-    /// </summary>
-    public static Currency MYR => Myr.Value;
-
-    /// <summary>
-    /// Руфия.
-    /// </summary>
-    public static Currency MVR => Mvr.Value;
-
-    /// <summary>
-    /// Мальтийская лира.
-    /// </summary>
-    public static Currency MTL => Mtl.Value;
-
-    /// <summary>
-    /// Марокканский дирхам.
-    /// </summary>
-    public static Currency MAD => Mad.Value;
-
-    /// <summary>
-    /// СДР (специальные права заимствования).
-    /// </summary>
-    public static Currency XDR => Xdr.Value;
-
-    /// <summary>
-    /// Мексиканское песо.
-    /// </summary>
-    public static Currency MXN => Mxn.Value;
-
-    /// <summary>
-    /// Метикал.
-    /// </summary>
-    public static Currency MZN => Mzn.Value;
-
-    /// <summary>
-    /// Молдавский лей.
-    /// </summary>
-    public static Currency MDL => Mdl.Value;
-
-    /// <summary>
-    /// Тугрик.
-    /// </summary>
-    public static Currency MNT => Mnt.Value;
-
-    /// <summary>
-    /// Кьят.
-    /// </summary>
-    public static Currency MMK => Mmk.Value;
-
-    /// <summary>
-    /// Доллар Намибии.
-    /// </summary>
-    public static Currency NAD => Nad.Value;
-
-    /// <summary>
-    /// Непальская рупия.
-    /// </summary>
-    public static Currency NPR => Npr.Value;
-
-    /// <summary>
-    /// Найра.
-    /// </summary>
-    public static Currency NGN => Ngn.Value;
-
-    /// <summary>
-    /// Нидерландский антильский гульден.
-    /// </summary>
-    public static Currency ANG => Ang.Value;
-
-    /// <summary>
-    /// Золотая кордоба.
-    /// </summary>
-    public static Currency NIO => Nio.Value;
-
-    /// <summary>
-    /// Новозеландский доллар.
-    /// </summary>
-    public static Currency NZD => Nzd.Value;
-
-    /// <summary>
-    /// Норвежская крона.
-    /// </summary>
-    public static Currency NOK => Nok.Value;
+    #region Коды
 
     /// <summary>
     /// Дирхам (ОАЭ).
     /// </summary>
-    public static Currency AED => Aed.Value;
+    public static Currency AED => aed.Value;
 
     /// <summary>
-    /// Оманский риал.
+    /// Афгани.
     /// </summary>
-    public static Currency OMR => Omr.Value;
+    public static Currency AFN => afn.Value;
 
     /// <summary>
-    /// Фунт Острова Святой Елены.
+    /// Лек.
     /// </summary>
-    public static Currency SHP => Shp.Value;
+    public static Currency ALL => all.Value;
 
     /// <summary>
-    /// Пакистанская рупия.
+    /// Армянский драм.
     /// </summary>
-    public static Currency PKR => Pkr.Value;
+    public static Currency AMD => amd.Value;
 
     /// <summary>
-    /// Бальбоа.
+    /// Нидерландский антильский гульден.
     /// </summary>
-    public static Currency PAB => Pab.Value;
+    public static Currency ANG => ang.Value;
 
     /// <summary>
-    /// Кина.
+    /// Кванза.
     /// </summary>
-    public static Currency PGK => Pgk.Value;
+    public static Currency AOA => aoa.Value;
 
     /// <summary>
-    /// Гуарани.
+    /// Аргентинское песо.
     /// </summary>
-    public static Currency PYG => Pyg.Value;
+    public static Currency ARS => ars.Value;
 
     /// <summary>
-    /// Новый соль.
+    /// Австралийский доллар.
     /// </summary>
-    public static Currency PEN => Pen.Value;
+    public static Currency AUD => aud.Value;
 
     /// <summary>
-    /// Злотый.
+    /// Арубанский флорин.
     /// </summary>
-    public static Currency PLN => Pln.Value;
+    public static Currency AWG => awg.Value;
 
     /// <summary>
-    /// Российский рубль.
+    /// Азербайджанский манат.
     /// </summary>
-    public static Currency RUB => Rub.Value;
+    public static Currency AZN => azn.Value;
 
     /// <summary>
-    /// Франк Руанды.
+    /// Конвертируемая марка.
     /// </summary>
-    public static Currency RWF => Rwf.Value;
+    public static Currency BAM => bam.Value;
 
     /// <summary>
-    /// Лей.
+    /// Барбадосский доллар.
     /// </summary>
-    public static Currency RON => Ron.Value;
+    public static Currency BBD => bbd.Value;
 
     /// <summary>
-    /// Тала.
+    /// Така.
     /// </summary>
-    public static Currency WST => Wst.Value;
+    public static Currency BDT => bdt.Value;
 
     /// <summary>
-    /// Добра.
+    /// Болгарский лев.
     /// </summary>
-    public static Currency STD => Std.Value;
+    public static Currency BGN => bgn.Value;
 
     /// <summary>
-    /// Саудовский риял.
+    /// Бахрейнский динар.
     /// </summary>
-    public static Currency SAR => Sar.Value;
+    public static Currency BHD => bhd.Value;
 
     /// <summary>
-    /// Лилангени.
+    /// Бурундийский франк.
     /// </summary>
-    public static Currency SZL => Szl.Value;
+    public static Currency BIF => bif.Value;
 
     /// <summary>
-    /// Сейшельская рупия.
+    /// Бермудский доллар.
     /// </summary>
-    public static Currency SCR => Scr.Value;
+    public static Currency BMD => bmd.Value;
 
     /// <summary>
-    /// Сербский динар.
+    /// Брунейский доллар.
     /// </summary>
-    public static Currency CSD => Csd.Value;
+    public static Currency BND => bnd.Value;
 
     /// <summary>
-    /// Сингапурский доллар.
+    /// Боливиано.
     /// </summary>
-    public static Currency SGD => Sgd.Value;
+    public static Currency BOB => bob.Value;
 
     /// <summary>
-    /// Сирийский фунт.
+    /// Мвдол.
     /// </summary>
-    public static Currency SYP => Syp.Value;
+    public static Currency BOV => bov.Value;
 
     /// <summary>
-    /// Словацкая крона.
+    /// Бразильский реал.
     /// </summary>
-    public static Currency SKK => Skk.Value;
+    public static Currency BRL => brl.Value;
 
     /// <summary>
-    /// Толар.
+    /// Багамский доллар.
     /// </summary>
-    public static Currency SIT => Sit.Value;
+    public static Currency BSD => bsd.Value;
 
     /// <summary>
-    /// Доллар Соломоновых островов.
+    /// Нгултрум.
     /// </summary>
-    public static Currency SBD => Sbd.Value;
+    public static Currency BTN => btn.Value;
 
     /// <summary>
-    /// Сомалийский шиллинг.
+    /// Пула.
     /// </summary>
-    public static Currency SOS => Sos.Value;
+    public static Currency BWP => bwp.Value;
 
     /// <summary>
-    /// Суданский динар.
+    /// Белорусский рубль.
     /// </summary>
-    public static Currency SDD => Sdd.Value;
+    public static Currency BYN => byn.Value;
 
     /// <summary>
-    /// Суринамский доллар.
+    /// Белизский доллар.
     /// </summary>
-    public static Currency SRD => Srd.Value;
+    public static Currency BZD => bzd.Value;
 
     /// <summary>
-    /// Доллар США.
+    /// Канадский доллар.
     /// </summary>
-    public static Currency USD => Usd.Value;
+    public static Currency CAD => cad.Value;
 
     /// <summary>
-    /// Леоне.
+    /// Конголезский франк.
     /// </summary>
-    public static Currency SLL => Sll.Value;
+    public static Currency CDF => cdf.Value;
 
     /// <summary>
-    /// Сомони.
+    /// WIR-евро.
     /// </summary>
-    public static Currency TJS => Tjs.Value;
+    public static Currency CHE => che.Value;
 
     /// <summary>
-    /// Бат.
+    /// Швейцарский франк.
     /// </summary>
-    public static Currency THB => Thb.Value;
+    public static Currency CHF => chf.Value;
 
     /// <summary>
-    /// Тайваньский доллар.
+    /// WIR-франк.
     /// </summary>
-    public static Currency TWD => Twd.Value;
+    public static Currency CHW => chw.Value;
 
     /// <summary>
-    /// Танзанийский шиллинг.
+    /// Единица развития.
     /// </summary>
-    public static Currency TZS => Tzs.Value;
-
-    /// <summary>
-    /// Паанга.
-    /// </summary>
-    public static Currency TOP => Top.Value;
-
-    /// <summary>
-    /// Доллар Тринидада и Тобаго.
-    /// </summary>
-    public static Currency TTD => Ttd.Value;
-
-    /// <summary>
-    /// Тунисский динар.
-    /// </summary>
-    public static Currency TND => Tnd.Value;
-
-    /// <summary>
-    /// Манат.
-    /// </summary>
-    public static Currency TMM => Tmm.Value;
-
-    /// <summary>
-    /// Турецкая лира.
-    /// </summary>
-    public static Currency TRY => Try.Value;
-
-    /// <summary>
-    /// Угандийский шиллинг.
-    /// </summary>
-    public static Currency UGX => Ugx.Value;
-
-    /// <summary>
-    /// Узбекский сум.
-    /// </summary>
-    public static Currency UZS => Uzs.Value;
-
-    /// <summary>
-    /// Гривна.
-    /// </summary>
-    public static Currency UAH => Uah.Value;
-
-    /// <summary>
-    /// Уругвайское песо.
-    /// </summary>
-    public static Currency UYU => Uyu.Value;
-
-    /// <summary>
-    /// Доллар Фиджи.
-    /// </summary>
-    public static Currency FJD => Fjd.Value;
-
-    /// <summary>
-    /// Филиппинское песо.
-    /// </summary>
-    public static Currency PHP => Php.Value;
-
-    /// <summary>
-    /// Фунт Фолклендских островов.
-    /// </summary>
-    public static Currency FKP => Fkp.Value;
-
-    /// <summary>
-    /// Франк КФП.
-    /// </summary>
-    public static Currency XPF => Xpf.Value;
-
-    /// <summary>
-    /// Куна.
-    /// </summary>
-    public static Currency HRK => Hrk.Value;
-
-    /// <summary>
-    /// Чешская крона.
-    /// </summary>
-    public static Currency CZK => Czk.Value;
+    public static Currency CLF => clf.Value;
 
     /// <summary>
     /// Чилийское песо.
     /// </summary>
-    public static Currency CLP => Clp.Value;
+    public static Currency CLP => clp.Value;
+    /// <summary>
+    /// Юань.
+    /// </summary>
+    public static Currency CNY => cny.Value;
+    /// <summary>
+    /// Колумбийское песо.
+    /// </summary>
+    public static Currency COP => cop.Value;
+    /// <summary>
+    /// Единица реальной стоимости.
+    /// </summary>
+    public static Currency COU => cou.Value;
 
     /// <summary>
-    /// Шведская крона.
+    /// Коста-риканский колон.
     /// </summary>
-    public static Currency SEK => Sek.Value;
+    public static Currency CRC => crc.Value;
 
     /// <summary>
-    /// Шри-Ланкийская рупия.
+    /// Конвертируемое песо.
     /// </summary>
-    public static Currency LKR => Lkr.Value;
+    public static Currency CUC => cuc.Value;
+
+    /// <summary>
+    /// Кубинское песо.
+    /// </summary>
+    public static Currency CUP => cup.Value;
+
+    /// <summary>
+    /// Эскудо Кабо-Верде.
+    /// </summary>
+    public static Currency CVE => cve.Value;
+
+    /// <summary>
+    /// Чешская крона.
+    /// </summary>
+    public static Currency CZK => czk.Value;
+
+    /// <summary>
+    /// Франк Джибути.
+    /// </summary>
+    public static Currency DJF => djf.Value;
+
+    /// <summary>
+    /// Датская крона.
+    /// </summary>
+    public static Currency DKK => dkk.Value;
+
+    /// <summary>
+    /// Доминиканское песо.
+    /// </summary>
+    public static Currency DOP => dop.Value;
+
+    /// <summary>
+    /// Алжирский динар.
+    /// </summary>
+    public static Currency DZD => dzd.Value;
+
+    /// <summary>
+    /// Египетский фунт.
+    /// </summary>
+    public static Currency EGP => egp.Value;
 
     /// <summary>
     /// Накфа.
     /// </summary>
-    public static Currency ERN => Ern.Value;
-
-    /// <summary>
-    /// Эстонская крона.
-    /// </summary>
-    public static Currency EEK => Eek.Value;
+    public static Currency ERN => ern.Value;
 
     /// <summary>
     /// Эфиопский быр.
     /// </summary>
-    public static Currency ETB => Etb.Value;
-
-    ///// <summary>
-    ///// Югославский динар.
-    ///// </summary>
-    //public static Currency YUM => Yum.Value;
+    public static Currency ETB => etb.Value;
 
     /// <summary>
-    /// Вона.
+    /// Евро.
     /// </summary>
-    public static Currency KRW => Krw.Value;
+    public static Currency EUR => eur.Value;
+
+    /// <summary>
+    /// Доллар Фиджи.
+    /// </summary>
+    public static Currency FJD => fjd.Value;
+
+    /// <summary>
+    /// Фунт Фолклендских островов.
+    /// </summary>
+    public static Currency FKP => fkp.Value;
+
+    /// <summary>
+    /// Фунт стерлингов.
+    /// </summary>
+    public static Currency GBP => gbp.Value;
+
+    /// <summary>
+    /// Лари.
+    /// </summary>
+    public static Currency GEL => gel.Value;
+
+    /// <summary>
+    /// Ганский седи.
+    /// </summary>
+    public static Currency GHS => ghs.Value;
+
+    /// <summary>
+    /// Гибралтарский фунт.
+    /// </summary>
+    public static Currency GIP => gip.Value;
+
+    /// <summary>
+    /// Даласи.
+    /// </summary>
+    public static Currency GMD => gmd.Value;
+
+    /// <summary>
+    /// Гвинейский франк.
+    /// </summary>
+    public static Currency GNF => gnf.Value;
+
+    /// <summary>
+    /// Кетсаль.
+    /// </summary>
+    public static Currency GTQ => gtq.Value;
+
+    /// <summary>
+    /// Гайанский доллар.
+    /// </summary>
+    public static Currency GYD => gyd.Value;
+
+    /// <summary>
+    /// Гонконгский доллар.
+    /// </summary>
+    public static Currency HKD => hkd.Value;
+
+    /// <summary>
+    /// Лемпира.
+    /// </summary>
+    public static Currency HNL => hnl.Value;
+
+    /// <summary>
+    /// Хорватская куна.
+    /// </summary>
+    public static Currency HRK => hrk.Value;
+
+    /// <summary>
+    /// Гурд.
+    /// </summary>
+    public static Currency HTG => htg.Value;
+
+    /// <summary>
+    /// Форинт.
+    /// </summary>
+    public static Currency HUF => huf.Value;
+
+    /// <summary>
+    /// Рупия.
+    /// </summary>
+    public static Currency IDR => idr.Value;
+
+    /// <summary>
+    /// Новый израильский шекель.
+    /// </summary>
+    public static Currency ILS => ils.Value;
+
+    /// <summary>
+    /// Индийская рупия.
+    /// </summary>
+    public static Currency INR => inr.Value;
+
+    /// <summary>
+    /// Иракский динар.
+    /// </summary>
+    public static Currency IQD => iqd.Value;
+
+    /// <summary>
+    /// Иранский риал.
+    /// </summary>
+    public static Currency IRR => irr.Value;
+
+    /// <summary>
+    /// Исландская крона.
+    /// </summary>
+    public static Currency ISK => isk.Value;
 
     /// <summary>
     /// Ямайский доллар.
     /// </summary>
-    public static Currency JMD => Jmd.Value;
+    public static Currency JMD => jmd.Value;
+
+    /// <summary>
+    /// Иорданский динар.
+    /// </summary>
+    public static Currency JOD => jod.Value;
 
     /// <summary>
     /// Иена.
     /// </summary>
-    public static Currency JPY => Jpy.Value;
+    public static Currency JPY => jpy.Value;
 
     /// <summary>
-    /// Тройская унция серебра.
+    /// Кенийский шиллинг.
     /// </summary>
-    public static Currency XAG => Xag.Value;
+    public static Currency KES => kes.Value;
 
     /// <summary>
-    /// Тройская унция золота.
+    /// Сом.
     /// </summary>
-    public static Currency XAU => Xau.Value;
+    public static Currency KGS => kgs.Value;
 
     /// <summary>
-    /// Европейская составная единица EURCO.
+    /// Риель.
     /// </summary>
-    public static Currency XBA => Xba.Value;
+    public static Currency KHR => khr.Value;
 
     /// <summary>
-    /// Европейская валютная единица EMU-6.
+    /// Франк Комор.
     /// </summary>
-    public static Currency XBB => Xbb.Value;
+    public static Currency KMF => kmf.Value;
 
     /// <summary>
-    /// Расчётная единица Европейского платежного союза EUA-9.
+    /// Северокорейская вона.
     /// </summary>
-    public static Currency XBC => Xbc.Value;
+    public static Currency KPW => kpw.Value;
 
     /// <summary>
-    /// Расчётная единица Европейского платежного союза EUA-17.
+    /// Вона.
     /// </summary>
-    public static Currency XBD => Xbd.Value;
-
-    ///// <summary>
-    ///// Франк золотой (Специальная валюта для расчётов).
-    ///// </summary>
-    //public static Currency XFO => Xfo.Value;
-
-    ///// <summary>
-    ///// Франк ЮИК (Специальная валюта для расчётов).
-    ///// </summary>
-    //public static Currency XFU => Xfu.Value;
+    public static Currency KRW => krw.Value;
 
     /// <summary>
-    /// Тройская унция палладия.
+    /// Кувейтский динар.
     /// </summary>
-    public static Currency XPD => Xpd.Value;
+    public static Currency KWD => kwd.Value;
 
     /// <summary>
-    /// Тройская унция платины.
+    /// Доллар Островов Кайман.
     /// </summary>
-    public static Currency XPT => Xpt.Value;
+    public static Currency KYD => kyd.Value;
 
     /// <summary>
-    /// Код зарезервированный для тестовых целей.
+    /// Тенге.
     /// </summary>
-    public static Currency XTS => Xts.Value;
+    public static Currency KZT => kzt.Value;
 
     /// <summary>
-    /// Отсутствие валюты.
+    /// Кип.
     /// </summary>
-    public static Currency XXX => Xxx.Value;
+    public static Currency LAK => lak.Value;
+
+    /// <summary>
+    /// Ливанский фунт.
+    /// </summary>
+    public static Currency LBP => lbp.Value;
+
+    /// <summary>
+    /// Шри-ланкийская рупия.
+    /// </summary>
+    public static Currency LKR => lkr.Value;
+
+    /// <summary>
+    /// Либерийский доллар.
+    /// </summary>
+    public static Currency LRD => lrd.Value;
+
+    /// <summary>
+    /// Лоти.
+    /// </summary>
+    public static Currency LSL => lsl.Value;
+
+    /// <summary>
+    /// Литовский лит.
+    /// </summary>
+    public static Currency LTL => ltl.Value;
+
+    /// <summary>
+    /// Ливийский динар.
+    /// </summary>
+    public static Currency LYD => lyd.Value;
+
+    /// <summary>
+    /// Марокканский дирхам.
+    /// </summary>
+    public static Currency MAD => mad.Value;
+
+    /// <summary>
+    /// Молдавский лей.
+    /// </summary>
+    public static Currency MDL => mdl.Value;
+
+    /// <summary>
+    /// Малагасийский ариари.
+    /// </summary>
+    public static Currency MGA => mga.Value;
+
+    /// <summary>
+    /// Денар.
+    /// </summary>
+    public static Currency MKD => mkd.Value;
+
+    /// <summary>
+    /// Кьят.
+    /// </summary>
+    public static Currency MMK => mmk.Value;
+
+    /// <summary>
+    /// Тугрик.
+    /// </summary>
+    public static Currency MNT => mnt.Value;
+
+    /// <summary>
+    /// Патака.
+    /// </summary>
+    public static Currency MOP => mop.Value;
+
+    /// <summary>
+    /// Угия.
+    /// </summary>
+    public static Currency MRU => mru.Value;
+
+    /// <summary>
+    /// Маврикийская рупия.
+    /// </summary>
+    public static Currency MUR => mur.Value;
+
+    /// <summary>
+    /// Руфия.
+    /// </summary>
+    public static Currency MVR => mvr.Value;
+
+    /// <summary>
+    /// Квача.
+    /// </summary>
+    public static Currency MWK => mwk.Value;
+
+    /// <summary>
+    /// Мексиканское песо.
+    /// </summary>
+    public static Currency MXN => mxn.Value;
+    /// <summary>
+    /// Мексиканская инверсионная единица.
+    /// </summary>
+    public static Currency MXV => mxv.Value;
+
+    /// <summary>
+    /// Малайзийский ринггит.
+    /// </summary>
+    public static Currency MYR => myr.Value;
+
+    /// <summary>
+    /// Мозамбикский метикал.
+    /// </summary>
+    public static Currency MZN => mzn.Value;
+
+    /// <summary>
+    /// Доллар Намибии.
+    /// </summary>
+    public static Currency NAD => nad.Value;
+
+    /// <summary>
+    /// Найра.
+    /// </summary>
+    public static Currency NGN => ngn.Value;
+
+    /// <summary>
+    /// Золотая кордоба.
+    /// </summary>
+    public static Currency NIO => nio.Value;
+
+    /// <summary>
+    /// Норвежская крона.
+    /// </summary>
+    public static Currency NOK => nok.Value;
+
+    /// <summary>
+    /// Непальская рупия.
+    /// </summary>
+    public static Currency NPR => npr.Value;
+
+    /// <summary>
+    /// Новозеландский доллар.
+    /// </summary>
+    public static Currency NZD => nzd.Value;
+
+    /// <summary>
+    /// Оманский риал.
+    /// </summary>
+    public static Currency OMR => omr.Value;
+
+    /// <summary>
+    /// Бальбоа.
+    /// </summary>
+    public static Currency PAB => pab.Value;
+
+    /// <summary>
+    /// Соль.
+    /// </summary>
+    public static Currency PEN => pen.Value;
+
+    /// <summary>
+    /// Кина.
+    /// </summary>
+    public static Currency PGK => pgk.Value;
+
+    /// <summary>
+    /// Филиппинское песо.
+    /// </summary>
+    public static Currency PHP => php.Value;
+
+    /// <summary>
+    /// Пакистанская рупия.
+    /// </summary>
+    public static Currency PKR => pkr.Value;
+
+    /// <summary>
+    /// Злотый.
+    /// </summary>
+    public static Currency PLN => pln.Value;
+
+    /// <summary>
+    /// Гуарани.
+    /// </summary>
+    public static Currency PYG => pyg.Value;
+
+    /// <summary>
+    /// Катарский риал.
+    /// </summary>
+    public static Currency QAR => qar.Value;
+
+    /// <summary>
+    /// Новый румынский лей.
+    /// </summary>
+    public static Currency RON => ron.Value;
+
+    /// <summary>
+    /// Сербский динар.
+    /// </summary>
+    public static Currency RSD => rsd.Value;
+
+    /// <summary>
+    /// Российский рубль.
+    /// </summary>
+    public static Currency RUB => rub.Value;
+
+    /// <summary>
+    /// Франк Руанды.
+    /// </summary>
+    public static Currency RWF => rwf.Value;
+
+    /// <summary>
+    /// Саудовский риял.
+    /// </summary>
+    public static Currency SAR => sar.Value;
+
+    /// <summary>
+    /// Доллар Соломоновых Островов.
+    /// </summary>
+    public static Currency SBD => sbd.Value;
+
+    /// <summary>
+    /// Сейшельская рупия.
+    /// </summary>
+    public static Currency SCR => scr.Value;
+
+    /// <summary>
+    /// Суданский фунт.
+    /// </summary>
+    public static Currency SDG => sdg.Value;
+
+    /// <summary>
+    /// Шведская крона.
+    /// </summary>
+    public static Currency SEK => sek.Value;
+
+    /// <summary>
+    /// Сингапурский доллар.
+    /// </summary>
+    public static Currency SGD => sgd.Value;
+
+    /// <summary>
+    /// Фунт Святой Елены.
+    /// </summary>
+    public static Currency SHP => shp.Value;
+
+    /// <summary>
+    /// Леоне.
+    /// </summary>
+    public static Currency SLL => sll.Value;
+
+    /// <summary>
+    /// Сомалийский шиллинг.
+    /// </summary>
+    public static Currency SOS => sos.Value;
+
+    /// <summary>
+    /// Суринамский доллар.
+    /// </summary>
+    public static Currency SRD => srd.Value;
+
+    /// <summary>
+    /// Южносуданский фунт.
+    /// </summary>
+    public static Currency SSP => ssp.Value;
+
+    /// <summary>
+    /// Добра.
+    /// </summary>
+    public static Currency STN => stn.Value;
+
+    /// <summary>
+    /// Сальвадорский колон.
+    /// </summary>
+    public static Currency SVC => svc.Value;
+
+    /// <summary>
+    /// Сирийский фунт.
+    /// </summary>
+    public static Currency SYP => syp.Value;
+
+    /// <summary>
+    /// Лилангени.
+    /// </summary>
+    public static Currency SZL => szl.Value;
+
+    /// <summary>
+    /// Бат.
+    /// </summary>
+    public static Currency THB => thb.Value;
+
+    /// <summary>
+    /// Сомони.
+    /// </summary>
+    public static Currency TJS => tjs.Value;
+
+    /// <summary>
+    /// Новый туркменский манат.
+    /// </summary>
+    public static Currency TMT => tmt.Value;
+
+    /// <summary>
+    /// Тунисский динар.
+    /// </summary>
+    public static Currency TND => tnd.Value;
+
+    /// <summary>
+    /// Паанга.
+    /// </summary>
+    public static Currency TOP => top.Value;
+
+    /// <summary>
+    /// Турецкая лира.
+    /// </summary>
+    public static Currency TRY => @try.Value;
+
+    /// <summary>
+    /// Доллар Тринидада и Тобаго.
+    /// </summary>
+    public static Currency TTD => ttd.Value;
+
+    /// <summary>
+    /// Новый тайваньский доллар.
+    /// </summary>
+    public static Currency TWD => twd.Value;
+
+    /// <summary>
+    /// Танзанийский шиллинг.
+    /// </summary>
+    public static Currency TZS => tzs.Value;
+
+    /// <summary>
+    /// Гривна.
+    /// </summary>
+    public static Currency UAH => uah.Value;
+
+    /// <summary>
+    /// Угандийский шиллинг.
+    /// </summary>
+    public static Currency UGX => ugx.Value;
+
+    /// <summary>
+    /// Доллар США.
+    /// </summary>
+    public static Currency USD => usd.Value;
+
+    /// <summary>
+    /// Доллар следующего дня.
+    /// </summary>
+    public static Currency USN => usn.Value;
+    /// <summary>
+    /// Доллар того же дня.
+    /// </summary>
+    public static Currency USS => uss.Value;
+
+    /// <summary>
+    /// Уругвайское песо в индексированных единицах.
+    /// </summary>
+    public static Currency UYI => uyi.Value;
+
+    /// <summary>
+    /// Уругвайское песо.
+    /// </summary>
+    public static Currency UYU => uyu.Value;
+
+    /// <summary>
+    /// Узбекский сум.
+    /// </summary>
+    public static Currency UZS => uzs.Value;
+
+    /// <summary>
+    /// Боливар фуэрте.
+    /// </summary>
+    public static Currency VEF => vef.Value;
+
+    /// <summary>
+    /// Донг.
+    /// </summary>
+    public static Currency VND => vnd.Value;
+
+    /// <summary>
+    /// Вату.
+    /// </summary>
+    public static Currency VUV => vuv.Value;
+
+    /// <summary>
+    /// Тала.
+    /// </summary>
+    public static Currency WST => wst.Value;
+
+    /// <summary>
+    /// Франк КФА BEAC.
+    /// </summary>
+    public static Currency XAF => xaf.Value;
+
+    /// <summary>
+    /// Серебро (тройская унция).
+    /// </summary>
+    public static Currency XAG => xag.Value;
+
+    /// <summary>
+    /// Золото (тройская унция).
+    /// </summary>
+    public static Currency XAU => xau.Value;
+
+    /// <summary>
+    /// Европейская составная единица EURCO.
+    /// </summary>
+    public static Currency XBA => xba.Value;
+
+    /// <summary>
+    /// Европейская валютная единица EMU-6.
+    /// </summary>
+    public static Currency XBB => xbb.Value;
+
+    /// <summary>
+    /// Европейская расчётная единица EUA-9.
+    /// </summary>
+    public static Currency XBC => xbc.Value;
+
+    /// <summary>
+    /// Европейская расчётная единица EUA-17.
+    /// </summary>
+    public static Currency XBD => xbd.Value;
+
+    /// <summary>
+    /// Восточно-карибский доллар.
+    /// </summary>
+    public static Currency XCD => xcd.Value;
+
+    /// <summary>
+    /// СДР (специальные права заимствования).
+    /// </summary>
+    public static Currency XDR => xdr.Value;
+
+    /// <summary>
+    /// Франк КФА BCEAO.
+    /// </summary>
+    public static Currency XOF => xof.Value;
+
+    /// <summary>
+    /// Палладий (тройская унция).
+    /// </summary>
+    public static Currency XPD => xpd.Value;
+
+    /// <summary>
+    /// Франк КФП.
+    /// </summary>
+    public static Currency XPF => xpf.Value;
+
+    /// <summary>
+    /// Платина (тройская унция).
+    /// </summary>
+    public static Currency XPT => xpt.Value;
+
+    /// <summary>
+    /// Сукре.
+    /// </summary>
+    public static Currency XSU => xsu.Value;
+
+    /// <summary>
+    /// Тестовый код.
+    /// </summary>
+    public static Currency XTS => xts.Value;
+
+    /// <summary>
+    /// Расчётная единица ADB.
+    /// </summary>
+    public static Currency XUA => xua.Value;
+
+    /// <summary>
+    /// Без валюты.
+    /// </summary>
+    public static Currency XXX => xxx.Value;
+
+    /// <summary>
+    /// Йеменский риал.
+    /// </summary>
+    public static Currency YER => yer.Value;
+
+    /// <summary>
+    /// Рэнд.
+    /// </summary>
+    public static Currency ZAR => zar.Value;
+
+    /// <summary>
+    /// Замбийская квача.
+    /// </summary>
+    public static Currency ZMW => zmw.Value;
+
+    /// <summary>
+    /// Доллар Зимбабве.
+    /// </summary>
+    public static Currency ZWL => zwl.Value;
+
+    /// <summary>
+    /// Фунты Острова Мэн.
+    /// </summary>
+    public static Currency IMP => imp.Value;
+
+    /// <summary>
+    /// Гернсийский фунт.
+    /// </summary>
+    public static Currency GGP => ggp.Value;
+
+    /// <summary>
+    /// Джерсийский фунт.
+    /// </summary>
+    public static Currency JEP => jep.Value;
+
+    #endregion
+
+    /// <summary>
+    /// Коллекция всех валют.
+    /// </summary>
+    public static IEnumerable<Currency> All =>
+    [
+        AED, AFN, ALL, AMD, ANG, AOA, ARS, AUD, AWG, AZN, BAM, BBD, BDT, BGN, BHD, BIF, BMD, BND, BOB, BOV, BRL, BSD, BTN, BWP, BYN, BZD, CAD, CDF, CHE, CHF, CHW, CLF, CLP, CNY,
+        COP, COU, CRC, CUC, CUP, CVE, CZK, DJF, DKK, DOP, DZD, EGP, ERN, ETB, EUR, FJD, FKP, GBP, GEL, GHS, GIP, GMD, GNF, GTQ, GYD, HKD, HNL, HRK, HTG, HUF, IDR, ILS, INR, IQD,
+        IRR, ISK, JMD, JOD, JPY, KES, KGS, KHR, KMF, KPW, KRW, KWD, KYD, KZT, LAK, LBP, LKR, LRD, LSL, LTL, LYD, MAD, MDL, MGA, MKD, MMK, MNT, MOP, MRU, MUR, MVR, MWK, MXN, MXV,
+        MYR, MZN, NAD, NGN, NIO, NOK, NPR, NZD, OMR, PAB, PEN, PGK, PHP, PKR, PLN, PYG, QAR, RON, RSD, RUB, RWF, SAR, SBD, SCR, SDG, SEK, SGD, SHP, SLL, SOS, SRD, SSP, STN, SVC,
+        SYP, SZL, THB, TJS, TMT, TND, TOP, TRY, TTD, TWD, TZS, UAH, UGX, USD, USN, USS, UYI, UYU, UZS, VEF, VND, VUV, WST, XAF, XAG, XAU, XBA, XBB, XBC, XBD, XCD, XDR, XOF, XPD,
+        XPF, XPT, XSU, XTS, XUA, XXX, YER, ZAR, ZMW, ZWL, IMP, GGP, JEP,
+    ];
+
+    #region Конструкторы
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="Currency"/>.
+    /// </summary>
+    /// <param name="name">Название (на русском).</param>
+    /// <param name="internationalName">Название (интернациональное).</param>
+    /// <param name="code">Цифровой код валюты.</param>
+    /// <param name="isoCode">Символьный код валюты (ISO 4217).</param>
+    /// <param name="taylorCode">Код Тэйлора.</param>
+    /// <param name="kkb">Код KKB.</param>
+    public Currency(string name, string internationalName, ushort code, string isoCode, string? taylorCode, string? kkb) : this(name, internationalName, code, isoCode, taylorCode, kkb, default) { }
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="Currency"/>.
+    /// </summary>
+    /// <param name="name">Название (на русском).</param>
+    /// <param name="internationalName">Название (интернациональное).</param> 
+    /// <param name="code">Цифровой код валюты.</param>
+    /// <param name="isoCode">Символьный код валюты (ISO 4217).</param>
+    /// <param name="taylorCode">Код Тэйлора.</param>
+    /// <param name="symbol">Символьный код (Unicode).</param>
+    public Currency(string name, string internationalName, ushort code, string isoCode, string? taylorCode, char? symbol) : this(name, internationalName, code, isoCode, taylorCode, default, symbol) { }
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="Currency"/>.
+    /// </summary>
+    /// <param name="name">Название (на русском).</param>
+    /// <param name="internationalName">Название (интернациональное).</param>
+    /// <param name="code">Цифровой код валюты.</param>
+    /// <param name="isoCode">Символьный код валюты (ISO 4217).</param>
+    /// <param name="symbol">Символьный код (Unicode).</param>
+    public Currency(string name, string internationalName, ushort code, string isoCode, char? symbol) : this(name, internationalName, code, isoCode, default, symbol) { }
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="Currency"/>.
+    /// </summary>
+    /// <param name="name">Название (на русском).</param>
+    /// <param name="internationalName">Название (интернациональное).</param> 
+    /// <param name="code">Цифровой код валюты.</param>
+    /// <param name="isoCode">Символьный код валюты (ISO 4217).</param>
+    /// <param name="taylorCode">Код Тэйлора.</param>
+    public Currency(string name, string internationalName, ushort code, string isoCode, string? taylorCode) : this(name, internationalName, code, isoCode, taylorCode, default, default) { }
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="Currency"/>.
+    /// </summary>
+    /// <param name="name">Название (на русском).</param>
+    /// <param name="internationalName">Название (интернациональное).</param>
+    /// <param name="code">Цифровой код валюты.</param>
+    /// <param name="isoCode">Символьный код валюты (ISO 4217).</param>
+    public Currency(string name, string internationalName, ushort code, string isoCode) : this(name, internationalName, code, isoCode, default, default, default) { }
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="Currency"/> из данных сериализации.
+    /// </summary>
+    /// <param name="info">Объект <see cref="SerializationInfo"/>, содержащий данные о сериализации.</param>
+    /// <param name="context">Контекст потоковой передачи данных.</param>
+    protected Currency([NotNull] SerializationInfo info, StreamingContext context)
+        : this(
+            info.GetString("Name") ?? string.Empty,
+            info.GetString("InternationalName") ?? string.Empty,
+            info.GetUInt16("Code"),
+            info.GetString("IsoCode") ?? string.Empty,
+            info.GetString("TaylorCode"),
+            info.GetString("KKB"),
+            info.GetChar("Symbol"))
+    { }
+
+    #endregion
 
     /// <inheritdoc />
     protected override async void OnPropertyChanged(string? propertyName = default)
@@ -1107,10 +1287,57 @@ public class Currency(ushort code, string isoCode) : Reactively, IParsable<Curre
     }
 
     /// <summary>
+    /// Возвращает хеш-код для объекта.
+    /// </summary>
+    /// <returns>Хеш-код для объекта.</returns>
+    public override int GetHashCode() => IsoCode.GetHashCode(StringComparison.InvariantCultureIgnoreCase);
+
+    /// <summary>
+    /// Сравнивает текущий экземпляр <see cref="Currency"/> с заданным объектом.
+    /// </summary>
+    /// <param name="obj">Объект для сравнения.</param>
+    /// <returns>
+    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
+    /// </returns>
+    public override bool Equals(object? obj)
+    {
+        if (obj is null) return default;
+        if (obj is string str) return str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == IsoCode.GetHashCode(StringComparison.InvariantCultureIgnoreCase);
+        if (obj is ushort code) return code.GetHashCode() == Code.GetHashCode();
+        if (obj is Currency currency) return currency.GetHashCode() == GetHashCode();
+        return default;
+    }
+
+    /// <summary>
+    /// Сравнивает текущий экземпляр <see cref="Currency"/> с заданным экземпляром <see cref="Currency"/>.
+    /// </summary>
+    /// <param name="other">Экземпляр <see cref="Currency"/> для сравнения.</param>
+    /// <returns>
+    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
+    /// </returns>
+    public bool Equals(Currency? other) => Equals(other as object);
+
+    /// <summary>
     /// Преобразует текущий экземпляр <see cref="Currency"/> в символьный код валюты.
     /// </summary>
     /// <returns>Символьный код валюты.</returns>
     public override string ToString() => IsoCode;
+
+    /// <summary>
+    /// Заполняет <see cref="SerializationInfo"/> данными о текущем объекте <see cref="Currency"/>.
+    /// </summary>
+    /// <param name="info">Объект <see cref="SerializationInfo"/>, который наполняется данными о текущем объекте.</param>
+    /// <param name="context">Контекст потоковой передачи данных.</param>
+    public virtual void GetObjectData([NotNull] SerializationInfo info, StreamingContext context)
+    {
+        info.AddValue("Name", Name);
+        info.AddValue("InternationalName", InternationalName);
+        info.AddValue("Code", Code);
+        info.AddValue("IsoCode", IsoCode);
+        info.AddValue("TaylorCode", TaylorCode);
+        info.AddValue("KKB", KKB);
+        info.AddValue("Symbol", Symbol);
+    }
 
     /// <summary>
     /// Преобразует текущий экземпляр <see cref="Currency"/> в цифровой код валюты.
@@ -1125,185 +1352,193 @@ public class Currency(ushort code, string isoCode) : Reactively, IParsable<Curre
     /// <param name="provider">Параметры форматирования.</param>
     /// <param name="result">Экземпляр <see cref="Currency"/>.</param>
     /// <returns><c>True</c>, если экземпляр был найден, иначе <c>false</c>.</returns>
-    public static bool TryParse(string? s, IFormatProvider? provider, out Currency? result)
+    public static bool TryParse([NotNullWhen(true)] string? s, IFormatProvider? provider, [MaybeNullWhen(false)] out Currency? result)
     {
-        result = s?.ToUpperInvariant() switch
+        result = s?.Trim().ToUpperInvariant() switch
         {
-            "AUD" => AUD,
-            "EUR" => EUR,
-            "AZN" => AZN,
+            "AED" => AED,
+            "AFN" => AFN,
             "ALL" => ALL,
-            "DZD" => DZD,
-            "XCD" => XCD,
+            "AMD" => AMD,
+            "ANG" => ANG,
             "AOA" => AOA,
             "ARS" => ARS,
-            "AMD" => AMD,
+            "AUD" => AUD,
             "AWG" => AWG,
-            "AFN" => AFN,
-            "BSD" => BSD,
-            "BDT" => BDT,
-            "BBD" => BBD,
-            "BHD" => BHD,
-            "BYR" => BYR,
-            "BZD" => BZD,
-            "XOF" => XOF,
-            "BMD" => BMD,
-            "BGN" => BGN,
-            "BOB" => BOB,
+            "AZN" => AZN,
             "BAM" => BAM,
-            "BWP" => BWP,
-            "BRL" => BRL,
-            "BND" => BND,
+            "BBD" => BBD,
+            "BDT" => BDT,
+            "BGN" => BGN,
+            "BHD" => BHD,
             "BIF" => BIF,
+            "BMD" => BMD,
+            "BND" => BND,
+            "BOB" => BOB,
+            "BOV" => BOV,
+            "BRL" => BRL,
+            "BSD" => BSD,
             "BTN" => BTN,
-            "VUV" => VUV,
-            "GBP" => GBP,
-            "HUF" => HUF,
-            "VEB" => VEB,
-            "IDR" => IDR,
-            "VND" => VND,
-            "XAF" => XAF,
-            "HTG" => HTG,
-            "GYD" => GYD,
-            "GMD" => GMD,
-            "GHC" => GHC,
-            "GTQ" => GTQ,
-            "GNF" => GNF,
-            "GIP" => GIP,
-            "HNL" => HNL,
-            "HKD" => HKD,
-            "GEL" => GEL,
-            "DKK" => DKK,
+            "BWP" => BWP,
+            "BYN" => BYN,
+            "BZD" => BZD,
+            "CAD" => CAD,
+            "CDF" => CDF,
+            "CHE" => CHE,
+            "CHF" => CHF,
+            "CHW" => CHW,
+            "CLF" => CLF,
+            "CLP" => CLP,
+            "CNY" => CNY,
+            "COP" => COP,
+            "COU" => COU,
+            "CRC" => CRC,
+            "CUC" => CUC,
+            "CUP" => CUP,
+            "CVE" => CVE,
+            "CZK" => CZK,
             "DJF" => DJF,
+            "DKK" => DKK,
             "DOP" => DOP,
+            "DZD" => DZD,
             "EGP" => EGP,
-            "ZMK" => ZMK,
-            "ZWD" => ZWD,
+            "ERN" => ERN,
+            "ETB" => ETB,
+            "EUR" => EUR,
+            "FJD" => FJD,
+            "FKP" => FKP,
+            "GBP" => GBP,
+            "GEL" => GEL,
+            "GHS" => GHS,
+            "GIP" => GIP,
+            "GMD" => GMD,
+            "GNF" => GNF,
+            "GTQ" => GTQ,
+            "GYD" => GYD,
+            "HKD" => HKD,
+            "HNL" => HNL,
+            "HRK" => HRK,
+            "HTG" => HTG,
+            "HUF" => HUF,
+            "IDR" => IDR,
             "ILS" => ILS,
             "INR" => INR,
-            "JOD" => JOD,
             "IQD" => IQD,
             "IRR" => IRR,
             "ISK" => ISK,
-            "YER" => YER,
-            "CVE" => CVE,
-            "KZT" => KZT,
-            "KYD" => KYD,
-            "KHR" => KHR,
-            "CAD" => CAD,
-            "QAR" => QAR,
+            "JMD" => JMD,
+            "JOD" => JOD,
+            "JPY" => JPY,
             "KES" => KES,
-            "CYP" => CYP,
             "KGS" => KGS,
-            "CNY" => CNY,
-            "KPW" => KPW,
-            "COP" => COP,
+            "KHR" => KHR,
             "KMF" => KMF,
-            "CDF" => CDF,
-            "CRC" => CRC,
-            "CUP" => CUP,
+            "KPW" => KPW,
+            "KRW" => KRW,
             "KWD" => KWD,
+            "KYD" => KYD,
+            "KZT" => KZT,
             "LAK" => LAK,
-            "LVL" => LVL,
-            "LSL" => LSL,
-            "ZAR" => ZAR,
-            "LRD" => LRD,
             "LBP" => LBP,
-            "LYD" => LYD,
+            "LKR" => LKR,
+            "LRD" => LRD,
+            "LSL" => LSL,
             "LTL" => LTL,
-            "CHF" => CHF,
-            "MUR" => MUR,
-            "MRO" => MRO,
-            "MGA" => MGA,
-            "MOP" => MOP,
-            "MKD" => MKD,
-            "MWK" => MWK,
-            "MYR" => MYR,
-            "MVR" => MVR,
-            "MTL" => MTL,
+            "LYD" => LYD,
             "MAD" => MAD,
-            "XDR" => XDR,
-            "MXN" => MXN,
-            "MZN" => MZN,
             "MDL" => MDL,
-            "MNT" => MNT,
+            "MGA" => MGA,
+            "MKD" => MKD,
             "MMK" => MMK,
+            "MNT" => MNT,
+            "MOP" => MOP,
+            "MRU" => MRU,
+            "MUR" => MUR,
+            "MVR" => MVR,
+            "MWK" => MWK,
+            "MXN" => MXN,
+            "MXV" => MXV,
+            "MYR" => MYR,
+            "MZN" => MZN,
             "NAD" => NAD,
-            "NPR" => NPR,
             "NGN" => NGN,
-            "ANG" => ANG,
             "NIO" => NIO,
-            "NZD" => NZD,
             "NOK" => NOK,
-            "AED" => AED,
+            "NPR" => NPR,
+            "NZD" => NZD,
             "OMR" => OMR,
-            "SHP" => SHP,
-            "PKR" => PKR,
             "PAB" => PAB,
-            "PGK" => PGK,
-            "PYG" => PYG,
             "PEN" => PEN,
+            "PGK" => PGK,
+            "PHP" => PHP,
+            "PKR" => PKR,
             "PLN" => PLN,
+            "PYG" => PYG,
+            "QAR" => QAR,
+            "RON" => RON,
+            "RSD" => RSD,
             "RUB" => RUB,
             "RWF" => RWF,
-            "RON" => RON,
-            "WST" => WST,
-            "STD" => STD,
             "SAR" => SAR,
-            "SZL" => SZL,
-            "SCR" => SCR,
-            "CSD" => CSD,
-            "SGD" => SGD,
-            "SYP" => SYP,
-            "SKK" => SKK,
-            "SIT" => SIT,
             "SBD" => SBD,
-            "SOS" => SOS,
-            "SDD" => SDD,
-            "SRD" => SRD,
-            "USD" => USD,
+            "SCR" => SCR,
+            "SDG" => SDG,
+            "SEK" => SEK,
+            "SGD" => SGD,
+            "SHP" => SHP,
             "SLL" => SLL,
-            "TJS" => TJS,
+            "SOS" => SOS,
+            "SRD" => SRD,
+            "SSP" => SSP,
+            "STN" => STN,
+            "SVC" => SVC,
+            "SYP" => SYP,
+            "SZL" => SZL,
             "THB" => THB,
+            "TJS" => TJS,
+            "TMT" => TMT,
+            "TND" => TND,
+            "TOP" => TOP,
+            "TRY" => TRY,
+            "TTD" => TTD,
             "TWD" => TWD,
             "TZS" => TZS,
-            "TOP" => TOP,
-            "TTD" => TTD,
-            "TND" => TND,
-            "TMM" => TMM,
-            "TRY" => TRY,
-            "UGX" => UGX,
-            "UZS" => UZS,
             "UAH" => UAH,
+            "UGX" => UGX,
+            "USD" => USD,
+            "USN" => USN,
+            "USS" => USS,
+            "UYI" => UYI,
             "UYU" => UYU,
-            "FJD" => FJD,
-            "PHP" => PHP,
-            "FKP" => FKP,
-            "XPF" => XPF,
-            "HRK" => HRK,
-            "CZK" => CZK,
-            "CLP" => CLP,
-            "SEK" => SEK,
-            "LKR" => LKR,
-            "ERN" => ERN,
-            "EEK" => EEK,
-            "ETB" => ETB,
-            //"YUM" => YUM,
-            "KRW" => KRW,
-            "JMD" => JMD,
-            "JPY" => JPY,
+            "UZS" => UZS,
+            "VEF" => VEF,
+            "VND" => VND,
+            "VUV" => VUV,
+            "WST" => WST,
+            "XAF" => XAF,
             "XAG" => XAG,
             "XAU" => XAU,
             "XBA" => XBA,
             "XBB" => XBB,
             "XBC" => XBC,
             "XBD" => XBD,
-            //"XFO" => XFO,
-            //"XFU" => XFU,
+            "XCD" => XCD,
+            "XDR" => XDR,
+            "XOF" => XOF,
             "XPD" => XPD,
+            "XPF" => XPF,
             "XPT" => XPT,
+            "XSU" => XSU,
             "XTS" => XTS,
+            "XUA" => XUA,
             "XXX" => XXX,
+            "YER" => YER,
+            "ZAR" => ZAR,
+            "ZMW" => ZMW,
+            "ZWL" => ZWL,
+            "IMP" => IMP,
+            "GGP" => GGP,
+            "JEP" => JEP,
 
             _ => default,
         };
@@ -1317,7 +1552,7 @@ public class Currency(ushort code, string isoCode) : Reactively, IParsable<Curre
     /// <param name="s">Символьный код валюты.</param>
     /// <param name="result">Экземпляр <see cref="Currency"/>.</param>
     /// <returns><c>True</c>, если экземпляр был найден, иначе <c>false</c>.</returns>
-    public static bool TryParse(string? s, out Currency? result) => TryParse(s, default, out result);
+    public static bool TryParse([NotNullWhen(true)] string? s, [MaybeNullWhen(false)] out Currency? result) => TryParse(s, default, out result);
 
     /// <summary>
     /// Возвращает экземпляр <see cref="Currency"/> по его символьному коду. 
@@ -1342,185 +1577,191 @@ public class Currency(ushort code, string isoCode) : Reactively, IParsable<Curre
     /// <param name="code">Цифровой код валюты.</param>
     /// <param name="currency">Экземпляр <see cref="Currency"/>.</param>
     /// <returns><c>True</c>, если экземпляр был найден, иначе <c>false</c>.</returns>
-    public static bool TryParse(ushort code, out Currency? currency)
+    public static bool TryParse(ushort code, [MaybeNullWhen(false)] out Currency? currency)
     {
         currency = code switch
         {
-            36 => AUD,
-            978 => EUR,
-            944 => AZN,
-            8 => ALL,
-            12 => DZD,
-            951 => XCD,
-            973 => AOA,
-            32 => ARS,
-            51 => AMD,
-            533 => AWG,
+            784 => AED,
             971 => AFN,
-            44 => BSD,
-            50 => BDT,
-            52 => BBD,
-            48 => BHD,
-            974 => BYR,
-            84 => BZD,
-            952 => XOF,
-            60 => BMD,
-            975 => BGN,
-            68 => BOB,
+            008 => ALL,
+            051 => AMD,
+            532 => ANG,
+            973 => AOA,
+            032 => ARS,
+            036 => AUD,
+            533 => AWG,
+            944 => AZN,
             977 => BAM,
-            72 => BWP,
-            986 => BRL,
-            96 => BND,
+            052 => BBD,
+            050 => BDT,
+            975 => BGN,
+            048 => BHD,
             108 => BIF,
-            64 => BTN,
-            548 => VUV,
-            826 => GBP,
-            348 => HUF,
-            862 => VEB,
-            360 => IDR,
-            704 => VND,
-            950 => XAF,
-            332 => HTG,
-            328 => GYD,
-            270 => GMD,
-            288 => GHC,
-            320 => GTQ,
-            324 => GNF,
-            292 => GIP,
-            340 => HNL,
-            344 => HKD,
-            981 => GEL,
-            208 => DKK,
+            060 => BMD,
+            096 => BND,
+            068 => BOB,
+            984 => BOV,
+            986 => BRL,
+            044 => BSD,
+            064 => BTN,
+            072 => BWP,
+            933 => BYN,
+            084 => BZD,
+            124 => CAD,
+            976 => CDF,
+            947 => CHE,
+            756 => CHF,
+            948 => CHW,
+            990 => CLF,
+            152 => CLP,
+            156 => CNY,
+            170 => COP,
+            970 => COU,
+            188 => CRC,
+            931 => CUC,
+            192 => CUP,
+            132 => CVE,
+            203 => CZK,
             262 => DJF,
+            208 => DKK,
             214 => DOP,
+            012 => DZD,
             818 => EGP,
-            894 => ZMK,
-            716 => ZWD,
+            232 => ERN,
+            230 => ETB,
+            978 => EUR,
+            242 => FJD,
+            238 => FKP,
+            826 => GBP,
+            981 => GEL,
+            936 => GHS,
+            292 => GIP,
+            270 => GMD,
+            324 => GNF,
+            320 => GTQ,
+            328 => GYD,
+            344 => HKD,
+            340 => HNL,
+            191 => HRK,
+            332 => HTG,
+            348 => HUF,
+            360 => IDR,
             376 => ILS,
             356 => INR,
-            400 => JOD,
             368 => IQD,
             364 => IRR,
             352 => ISK,
-            886 => YER,
-            132 => CVE,
-            398 => KZT,
-            136 => KYD,
-            116 => KHR,
-            124 => CAD,
-            634 => QAR,
+            388 => JMD,
+            400 => JOD,
+            392 => JPY,
             404 => KES,
-            196 => CYP,
             417 => KGS,
-            156 => CNY,
-            408 => KPW,
-            170 => COP,
+            116 => KHR,
             174 => KMF,
-            976 => CDF,
-            188 => CRC,
-            192 => CUP,
+            408 => KPW,
+            410 => KRW,
             414 => KWD,
+            136 => KYD,
+            398 => KZT,
             418 => LAK,
-            428 => LVL,
-            426 => LSL,
-            710 => ZAR,
-            430 => LRD,
             422 => LBP,
-            434 => LYD,
+            144 => LKR,
+            430 => LRD,
+            426 => LSL,
             440 => LTL,
-            756 => CHF,
-            480 => MUR,
-            478 => MRO,
-            969 => MGA,
-            446 => MOP,
-            807 => MKD,
-            454 => MWK,
-            458 => MYR,
-            462 => MVR,
-            470 => MTL,
+            434 => LYD,
             504 => MAD,
-            960 => XDR,
-            484 => MXN,
-            943 => MZN,
             498 => MDL,
-            496 => MNT,
+            969 => MGA,
+            807 => MKD,
             104 => MMK,
+            496 => MNT,
+            446 => MOP,
+            929 => MRU,
+            480 => MUR,
+            462 => MVR,
+            454 => MWK,
+            484 => MXN,
+            979 => MXV,
+            458 => MYR,
+            943 => MZN,
             516 => NAD,
-            524 => NPR,
             566 => NGN,
-            532 => ANG,
             558 => NIO,
-            554 => NZD,
             578 => NOK,
-            784 => AED,
+            524 => NPR,
+            554 => NZD,
             512 => OMR,
-            654 => SHP,
-            586 => PKR,
             590 => PAB,
-            598 => PGK,
-            600 => PYG,
             604 => PEN,
+            598 => PGK,
+            608 => PHP,
+            586 => PKR,
             985 => PLN,
+            600 => PYG,
+            634 => QAR,
+            946 => RON,
+            941 => RSD,
             643 => RUB,
             646 => RWF,
-            946 => RON,
-            882 => WST,
-            678 => STD,
             682 => SAR,
-            748 => SZL,
+            090 => SBD,
             690 => SCR,
-            891 => CSD,
+            938 => SDG,
+            752 => SEK,
             702 => SGD,
-            760 => SYP,
-            703 => SKK,
-            705 => SIT,
-            90 => SBD,
-            706 => SOS,
-            736 => SDD,
-            968 => SRD,
-            840 => USD,
+            654 => SHP,
             694 => SLL,
-            972 => TJS,
+            706 => SOS,
+            968 => SRD,
+            728 => SSP,
+            930 => STN,
+            222 => SVC,
+            760 => SYP,
+            748 => SZL,
             764 => THB,
+            972 => TJS,
+            934 => TMT,
+            788 => TND,
+            776 => TOP,
+            949 => TRY,
+            780 => TTD,
             901 => TWD,
             834 => TZS,
-            776 => TOP,
-            780 => TTD,
-            788 => TND,
-            795 => TMM,
-            949 => TRY,
-            800 => UGX,
-            860 => UZS,
             980 => UAH,
+            800 => UGX,
+            840 => USD,
+            997 => USN,
+            998 => USS,
+            940 => UYI,
             858 => UYU,
-            242 => FJD,
-            608 => PHP,
-            238 => FKP,
-            953 => XPF,
-            191 => HRK,
-            203 => CZK,
-            152 => CLP,
-            752 => SEK,
-            144 => LKR,
-            232 => ERN,
-            233 => EEK,
-            230 => ETB,
-            //891 => YUM,
-            410 => KRW,
-            388 => JMD,
-            392 => JPY,
+            860 => UZS,
+            937 => VEF,
+            704 => VND,
+            548 => VUV,
+            882 => WST,
+            950 => XAF,
             961 => XAG,
             959 => XAU,
             955 => XBA,
             956 => XBB,
             957 => XBC,
             958 => XBD,
-            //0 => XFO,
-            //0 => XFU,
+            951 => XCD,
+            960 => XDR,
+            952 => XOF,
             964 => XPD,
+            953 => XPF,
             962 => XPT,
+            994 => XSU,
             963 => XTS,
+            965 => XUA,
             999 => XXX,
+            886 => YER,
+            710 => ZAR,
+            967 => ZMW,
+            932 => ZWL,
+
             _ => default,
         };
 
@@ -1528,7 +1769,7 @@ public class Currency(ushort code, string isoCode) : Reactively, IParsable<Curre
     }
 
     /// <summary>
-    /// Возвращает экземпляр <see cref="Currency"/> по его символьному коду. 
+    /// Возвращает экземпляр <see cref="Currency"/> по его цифровому коду. 
     /// </summary>
     /// <param name="code">Цифровой код валюты.</param>
     /// <returns>Экземпляр <see cref="Currency"/>.</returns>
@@ -1566,20 +1807,37 @@ public class Currency(ushort code, string isoCode) : Reactively, IParsable<Curre
     /// <summary>
     /// Неявно преобразует экземпляр <see cref="Currency"/> в цифровой код валюты.
     /// </summary>
-    /// <param name="currency"></param>
-    public static implicit operator ushort(Currency currency)
-    {
-        ArgumentNullException.ThrowIfNull(currency, nameof(currency));
-        return currency.ToUInt16();
-    }
+    /// <param name="currency">Экземпляр <see cref="Currency"/>.</param>
+    public static implicit operator ushort(Currency? currency) => currency is not null ? currency.ToUInt16() : default;
 
     /// <summary>
     /// Неявно преобразует экземпляр <see cref="Currency"/> в символьный код валюты.
     /// </summary>
-    /// <param name="currency"></param>
-    public static implicit operator string(Currency currency)
+    /// <param name="currency">Экземпляр <see cref="Currency"/>.</param>
+    public static implicit operator string(Currency? currency) => currency is not null ? currency.ToString() : string.Empty;
+
+    /// <summary>
+    /// Сравнивает экземпляр <see cref="Currency"/> с заданной строкой.
+    /// </summary>
+    /// <param name="currency">Экземпляр <see cref="Currency"/>.</param>
+    /// <param name="str">Строка для сравнения.</param>
+    /// <returns>
+    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
+    /// </returns>
+    public static bool operator ==(Currency? currency, string? str)
     {
-        ArgumentNullException.ThrowIfNull(currency, nameof(currency));
-        return currency.ToString();
+        if (currency is null && str is null) return true;
+        if (currency is null || str is null) return false;
+        return currency.Equals(str);
     }
+
+    /// <summary>
+    /// Сравнивает экземпляр <see cref="Currency"/> с заданной строкой.
+    /// </summary>
+    /// <param name="currency">Экземпляр <see cref="Currency"/>.</param>
+    /// <param name="str">Строка для сравнения.</param>
+    /// <returns>
+    /// <c>True</c>, если хеш-коды объектов не совпадают, иначе <c>false</c>.
+    /// </returns>
+    public static bool operator !=(Currency? currency, string? str) => !(currency == str);
 }

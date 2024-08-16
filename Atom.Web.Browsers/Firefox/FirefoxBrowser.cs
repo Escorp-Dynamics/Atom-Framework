@@ -15,8 +15,9 @@ public class FirefoxBrowser(FirefoxSettings settings) : WebBrowser<FirefoxSettin
 {
     private const string ExtensionId = "atom@escorp.dynamics";
 
-    private const string ExtensionLink = $"https://gitflic.ru/project/escorp-lab/atom/blob/raw?file=Atom.Web.Browsers%2FFirefox%2FExtension%2Fatom%40escorp.dynamics.xpi&inline=false";
-
+    //private const string ExtensionLink = $"https://gitflic.ru/project/escorp-lab/atom/blob/raw?file=Atom.Web.Browsers%2FFirefox%2FExtension%2Fatom%40escorp.dynamics.xpi&inline=false";
+    private const string ExtensionLink = "file:///mnt/Works/EscorpDynamics/Lab/Atom/Atom.Web.Browsers/Firefox/Extension/atom@escorp.dynamics.xpi";
+    
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="FirefoxBrowser"/>.
     /// </summary>

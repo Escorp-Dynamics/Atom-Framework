@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Atom.Threading;
 
@@ -7,7 +8,7 @@ namespace Atom.Threading;
 /// </summary>
 public static class Wait
 {
-    private static SpinWait _spin;
+    private static SpinWait spin;
 
     /// <summary>
     /// Ожидает до тех пор, пока выполняется условие <paramref name="condition"/>.
@@ -23,7 +24,7 @@ public static class Wait
         var timer = Stopwatch.StartNew();
         var isInfinite = timeout is Timeout.Infinite;
 
-        while (condition() && (isInfinite || timer.ElapsedMilliseconds < timeout)) _spin.SpinOnce(interval);
+        while (condition() && (isInfinite || timer.ElapsedMilliseconds < timeout)) spin.SpinOnce(interval);
     }
 
     /// <summary>
@@ -63,9 +64,8 @@ public static class Wait
     /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns></returns>
-    public static async ValueTask UntilAsync(Func<bool> condition, int interval, int timeout, CancellationToken cancellationToken)
+    public static async ValueTask UntilAsync([NotNull] Func<bool> condition, int interval, int timeout, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(condition, nameof(condition));
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(interval, nameof(interval));
         ArgumentOutOfRangeException.ThrowIfLessThan(timeout, -1, nameof(timeout));
 

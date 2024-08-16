@@ -31,6 +31,11 @@ public interface IWebBrowserSettings
     bool IsIncognito { get; }
 
     /// <summary>
+    /// Определяет, включена ли консоль отладки javascript (если <see cref="IsHeadless"/> <b>true</b>, то игнорируется).
+    /// </summary>
+    bool IsJavaScriptConsoleEnabled { get; }
+
+    /// <summary>
     /// Возвращает путь к исполняемому файлу браузера для текущей платформы.
     /// </summary>
     /// <returns>Путь к исполняемому файлу браузера для текущей платформы.</returns>

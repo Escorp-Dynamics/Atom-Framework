@@ -23,4 +23,5 @@ namespace Atom.Web.Analytics.Tests;
 [JsonSerializable(typeof(Guid))]
 [JsonSerializable(typeof(IReadOnlyDictionary<string, object?>), TypeInfoPropertyName = "Form")]
 [JsonSerializable(typeof(Currency))]
+[JsonSerializable(typeof(Country))]
 public partial class JsonTestsContext : JsonSerializerContext;

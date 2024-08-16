@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Serialization;
+﻿using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Atom.Net.Http;
 
@@ -24,5 +25,6 @@ namespace Atom.Net.Http;
 [JsonSerializable(typeof(decimal))]
 [JsonSerializable(typeof(bool))]
 [JsonSerializable(typeof(Guid))]
+[JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(IReadOnlyDictionary<string, object?>), TypeInfoPropertyName = "Form")]
 public partial class JsonHttpContext : JsonSerializerContext;

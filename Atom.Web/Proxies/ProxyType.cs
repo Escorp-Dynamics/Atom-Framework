@@ -1,4 +1,4 @@
-﻿namespace Atom.Web.Services.Proxy;
+﻿namespace Atom.Web.Proxies;
 
 /// <summary>
 /// Тип прокси.

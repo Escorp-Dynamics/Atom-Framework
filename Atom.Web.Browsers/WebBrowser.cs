@@ -107,11 +107,12 @@ public abstract class WebBrowser<TSettings, TServer> : IWebBrowser<TSettings, TS
     /// <summary>
     /// Высвобождает ресурсы.
     /// </summary>
-    public virtual ValueTask DisposeAsync()
+    public virtual async ValueTask DisposeAsync()
     {
         if (IsRunning) process.Kill(true);
         process.Dispose();
+
+        await Server.DisposeAsync().ConfigureAwait(false);
         GC.SuppressFinalize(this);
-        return ValueTask.CompletedTask;
     }
 }

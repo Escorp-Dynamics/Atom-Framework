@@ -1,6 +1,6 @@
 ﻿namespace Atom.Web.Services.Proxy;
 
-/*public interface IProxyService
+public interface IProxyService : IWebService
 {
 
-}*/
+}

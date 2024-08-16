@@ -1,9 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
-using Atom.Web.Analytics;
-using Atom.Web.Analytics.Tests;
 
-namespace Atom.Web.Tests;
+namespace Atom.Web.Analytics.Tests;
 
 public class Test1
 {

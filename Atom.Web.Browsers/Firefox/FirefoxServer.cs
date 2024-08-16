@@ -1,5 +1,4 @@
 ﻿using System.Runtime.InteropServices;
-using System.Text.Json;
 using Atom.Web.Browsers.NativeMessaging;
 using Microsoft.Win32;
 
@@ -17,6 +16,7 @@ public class FirefoxServer(Manifest manifest) : WebBrowserServer(manifest)
     public FirefoxServer() : this(new Manifest
     {
         Name = "Atom",
+        Description = "Atom",
         AllowedExtensions = ["atom@escorp.dynamics"],
     })
     { }
@@ -29,7 +29,7 @@ public class FirefoxServer(Manifest manifest) : WebBrowserServer(manifest)
             using var key = Registry.CurrentUser;
             using var subKey = key.CreateSubKey("Software\\Mozilla\\NativeMessagingHosts", true);
 
-            subKey.SetValue("atom", GetManifestPath());
+            subKey.SetValue(Manifest.Name, GetManifestPath());
 
             subKey.Close();
             key.Close();
@@ -48,22 +48,22 @@ public class FirefoxServer(Manifest manifest) : WebBrowserServer(manifest)
 
             if (subKey is not null)
             {
-                subKey.DeleteValue("atom", false);
+                subKey.DeleteValue(Manifest.Name, false);
                 subKey.Close();
             }
 
             key.Close();
         }
 
-        await base.OnStarted(cancellationToken).ConfigureAwait(false);
+        await base.OnStopped(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
     protected override string GetManifestPath()
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return Path.Combine(Environment.CurrentDirectory, "manifest.json");
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library/Application Support/Mozilla/NativeMessagingHosts/atom.json");
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mozilla/native-messaging-hosts/atom.json");
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), $"Library/Application Support/Mozilla/NativeMessagingHosts/{Manifest.Name}.json");
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), $".mozilla/native-messaging-hosts/{Manifest.Name}.json");
         throw new InvalidOperationException("Неподдерживаемая платформа");
     }
 }

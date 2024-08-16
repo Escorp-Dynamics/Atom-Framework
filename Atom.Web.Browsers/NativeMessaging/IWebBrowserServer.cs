@@ -1,4 +1,6 @@
-﻿namespace Atom.Web.Browsers.NativeMessaging;
+﻿using Atom.Web.Browsers.NativeMessaging.Signals;
+
+namespace Atom.Web.Browsers.NativeMessaging;
 
 /// <summary>
 /// Представляет базовый интерфейс для сервера веб-браузера.
@@ -11,6 +13,11 @@ public interface IWebBrowserServer : IAsyncDisposable
     Manifest Manifest { get; }
 
     /// <summary>
+    /// Определяет, запущен ли сервер.
+    /// </summary>
+    bool IsRunning { get; }
+
+    /// <summary>
     /// Происходит в момент запуска сервера.
     /// </summary>
     event AsyncEventHandler<IWebBrowserServer>? Started;
@@ -19,6 +26,16 @@ public interface IWebBrowserServer : IAsyncDisposable
     /// Происходит в момент остановки сервера.
     /// </summary>
     event AsyncEventHandler<IWebBrowserServer>? Stopped;
+
+    /// <summary>
+    /// Происходит в момент получения сигнала с клиента.
+    /// </summary>
+    event AsyncEventHandler<IWebBrowserServer, SignalReceivedAsyncEventArgs>? SignalReceived;
+
+    /// <summary>
+    /// Происходит в момент неудачного получения сигнала.
+    /// </summary>
+    event AsyncEventHandler<IWebBrowserServer, FailedEventArgs>? SignalReceiveFailed;
 
     /// <summary>
     /// Запускает сервер веб-браузера.

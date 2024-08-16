@@ -20,6 +20,9 @@ public abstract class WebBrowserSettings : IWebBrowserSettings
     /// <inheritdoc/>
     public bool IsIncognito { get; init; }
 
+    /// <inheritdoc/>
+    public bool IsJavaScriptConsoleEnabled { get; init; }
+
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="WebBrowserSettings"/>.
     /// </summary>

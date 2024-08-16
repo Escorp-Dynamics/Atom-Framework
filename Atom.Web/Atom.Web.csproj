@@ -16,13 +16,13 @@
 		<IsAotCompatible>true</IsAotCompatible>
 		<InvariantGlobalization>true</InvariantGlobalization>
 
-		<NoWarn>CA1003</NoWarn>
+		<NoWarn>CA1003;CA1708</NoWarn>
 
 		<GenerateDocumentationFile>True</GenerateDocumentationFile>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageId>Escorp.$(AssemblyName)</PackageId>
-		<Version>0.0.1</Version>
-		<Authors>Yuriy Yesin, Escorp Lab</Authors>
+		<Version>0.0.8</Version>
+		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
 		<RepositoryUrl>https://gitflic.ru/project/escorp-lab/atom</RepositoryUrl>
@@ -34,22 +34,22 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-    <PackageReference Include="Escorp.Atom" Version="0.0.3" />
-  </ItemGroup>
-
-	<ItemGroup>
-	  <None Update="icon.png">
-	    <PackagePath>\</PackagePath>
-	    <Pack>True</Pack>
-	  </None>
-	  <None Update="README.md">
-	    <PackagePath>\</PackagePath>
-	    <Pack>True</Pack>
-	  </None>
+		<PackageReference Include="Escorp.Atom" Version="0.0.15" />
 	</ItemGroup>
 
+	<!--<ItemGroup>
+		<ProjectReference Include="..\Atom\Atom.csproj" />
+	</ItemGroup>-->
+
 	<ItemGroup>
-	  <Folder Include="Analytics\Geolocation\" />
+		<None Update="icon.png">
+			<PackagePath>\</PackagePath>
+			<Pack>True</Pack>
+		</None>
+		<None Update="README.md">
+			<PackagePath>\</PackagePath>
+			<Pack>True</Pack>
+		</None>
 	</ItemGroup>
 
 </Project>
