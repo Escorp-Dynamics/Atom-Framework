@@ -1,12 +1,14 @@
 ﻿namespace Atom.Web.Services.Email.Temporary.Tests;
 
+[TestFixture]
 public class MailTmServiceTests
 {
-    [Fact]
+    [Test]
     public async Task GetDomainsTest()
     {
         var domain = await MailTmService.Factory.GetNextDomainAsync();
-        Assert.NotNull(domain);
-        Assert.NotEmpty(domain);
+        
+        Assert.That(domain, Is.Not.Null);
+        Assert.That(domain, Is.Not.Empty);
     }
 }

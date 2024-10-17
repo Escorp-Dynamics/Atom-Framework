@@ -85,7 +85,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// Добавляет задачу в очередь задач для последовательного выполнения.
     /// </summary>
     /// <param name="task">Делегат, представляющий задачу для добавления в очередь.</param>
-    public void Add([NotNull] Action task) => tasks.Enqueue(task);
+    public void Add(Action task) => tasks.Enqueue(task);
 
     /// <summary>
     /// Добавляет массив задач в очередь задач для последовательного выполнения.
@@ -132,6 +132,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 
         if (timer.Change(Interval, Timeout.InfiniteTimeSpan)) IsRunning = true;
         locker.Release();
+        OnTimerElapsed(default);
     }
 
     /// <summary>
@@ -186,14 +187,20 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="task">Делегат, наличие которого ожидается.</param>
     /// <param name="interval">Интервал ожидания.</param>
     /// <param name="cancellationToken">Токен отмены для отслеживания запросов на отмену.</param>
-    public ValueTask WaitAsync(Action task, TimeSpan interval, CancellationToken cancellationToken) => Wait.UntilAsync(() => IsRunning && tasks.Contains(task), interval, cancellationToken);
+    /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
+    public async ValueTask<bool> WaitAsync(Action task, TimeSpan interval, CancellationToken cancellationToken)
+    {
+        await Wait.UntilAsync(() => IsRunning && tasks.Contains(task), interval, cancellationToken).ConfigureAwait(false);
+        return !IsRunning;
+    }
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен, с заданным интервалом.
     /// </summary>
     /// <param name="task">Делегат, наличие которого ожидается.</param>
     /// <param name="interval">Интервал ожидания.</param>
-    public ValueTask WaitAsync(Action task, TimeSpan interval) => WaitAsync(task, interval, CancellationToken.None);
+    /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
+    public ValueTask<bool> WaitAsync(Action task, TimeSpan interval) => WaitAsync(task, interval, CancellationToken.None);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен, с заданным интервалом в миллисекундах.
@@ -201,27 +208,31 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="task">Делегат, наличие которого ожидается.</param>
     /// <param name="interval">Интервал ожидания в миллисекундах.</param>
     /// <param name="cancellationToken">Токен отмены для отслеживания запросов на отмену.</param>
-    public ValueTask WaitAsync(Action task, int interval, CancellationToken cancellationToken) => WaitAsync(task, TimeSpan.FromMilliseconds(interval), cancellationToken);
+    /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
+    public ValueTask<bool> WaitAsync(Action task, int interval, CancellationToken cancellationToken) => WaitAsync(task, TimeSpan.FromMilliseconds(interval), cancellationToken);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен, с заданным интервалом в миллисекундах.
     /// </summary>
     /// <param name="task">Делегат, наличие которого ожидается.</param> 
     /// <param name="interval">Интервал ожидания в миллисекундах.</param>
-    public ValueTask WaitAsync(Action task, int interval) => WaitAsync(task, interval, CancellationToken.None);
+    /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
+    public ValueTask<bool> WaitAsync(Action task, int interval) => WaitAsync(task, interval, CancellationToken.None);
 
     /// <summary>
-    /// Асинхронно ожидает, пока таймер не будет выключен, с интервалом в 500 мс.
+    /// Асинхронно ожидает, пока таймер не будет выключен, с интервалом в 100 мс.
     /// </summary>
     /// <param name="task">Делегат, наличие которого ожидается.</param>
     /// <param name="cancellationToken">Токен отмены для отслеживания запросов на отмену.</param>
-    public ValueTask WaitAsync(Action task, CancellationToken cancellationToken) => WaitAsync(task, 500, cancellationToken);
+    /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
+    public ValueTask<bool> WaitAsync(Action task, CancellationToken cancellationToken) => WaitAsync(task, 100, cancellationToken);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен, с интервалом в 500 мс.
     /// </summary>
     /// <param name="task">Делегат, наличие которого ожидается.</param>
-    public ValueTask WaitAsync(Action task) => WaitAsync(task, CancellationToken.None);
+    /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
+    public ValueTask<bool> WaitAsync(Action task) => WaitAsync(task, CancellationToken.None);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен, с заданным интервалом.
@@ -271,11 +282,12 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Асинхронно освобождает неуправляемые ресурсы, используемые <see cref="Sequencer"/>, и предотвращает его удаление сборщиком мусора.
+    /// Освобождает неуправляемые ресурсы, используемые <see cref="Sequencer"/>, и предотвращает его удаление сборщиком мусора.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
         await timer.DisposeAsync().ConfigureAwait(false);
+        locker.Dispose();
         GC.SuppressFinalize(this);
     }
 }

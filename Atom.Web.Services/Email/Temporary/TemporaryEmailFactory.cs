@@ -27,11 +27,13 @@ public class TemporaryEmailFactory : WebServiceFactory<TemporaryEmailFactory, IT
         if (domains.IsEmpty)
         {
             foreach (var service in Services)
-                await foreach (var d in service.GetDomainsAsync(cancellationToken))
+            {
+                await foreach (var d in service.GetDomainsAsync(cancellationToken).ConfigureAwait(false))
                 {
                     var kv = new KeyValuePair<string, string>(service.GetType().FullName!, d);
                     if (!domains.Contains(kv)) domains.Enqueue(kv);
                 }
+            }
         }
 
         _ = domains.TryDequeue(out var domain);

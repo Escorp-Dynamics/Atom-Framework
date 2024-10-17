@@ -1,0 +1,13 @@
+/// <summary>
+/// Тестовый интерфейс
+/// </summary>
+[Test]
+public interface ITest
+{
+    Int32 TestProperty1 { get; }
+
+    event AsyncEventHandler<FailedEventArgs?>? TestEvent;
+
+    void TestMethod() { }
+
+}

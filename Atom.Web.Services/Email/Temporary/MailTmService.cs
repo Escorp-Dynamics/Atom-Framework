@@ -82,10 +82,7 @@ public class MailTmService : ITemporaryEmailService
     public IAsyncEnumerable<string> GetDomainsAsync() => GetDomainsAsync(CancellationToken.None);
 
     /// <inheritdoc/>
-    public ValueTask<TemporaryEmailAccount?> CreateAccountAsync(string login, string password, CancellationToken cancellationToken)
-    {
-        throw new NotImplementedException();
-    }
+    public ValueTask<TemporaryEmailAccount?> CreateAccountAsync(string login, string password, CancellationToken cancellationToken) => throw new NotImplementedException();
 
     /// <inheritdoc/>
     public ValueTask<TemporaryEmailAccount?> CreateAccountAsync(string login, string password) => CreateAccountAsync(login, password, CancellationToken.None);

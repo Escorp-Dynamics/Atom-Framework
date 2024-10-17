@@ -1,0 +1,12 @@
+[Test]
+add => Test += OnTest;
+
+[Test]
+add 
+{
+    SomeMethod();
+    Test += OnTest;
+}
+
+[Test]
+add;

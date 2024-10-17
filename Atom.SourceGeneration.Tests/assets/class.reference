@@ -1,0 +1,15 @@
+/// <summary>
+/// Тестовый класс
+/// </summary>
+[Test]
+public partial class Test
+{
+    Object? field
+
+    Object? TestProperty1 { get; }
+
+    event Action? TestEvent;
+
+    void TestMethod() { }
+
+}

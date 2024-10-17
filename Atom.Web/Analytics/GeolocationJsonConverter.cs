@@ -1,11 +1,11 @@
-using System.Text.Json;
+/*using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Atom.Web.Analytics;
 
 // TODO: Закончить.
-/*
-public class GeolocationJsonConverter : JsonConverter<Geolocation>
+
+internal class GeolocationJsonConverter : JsonConverter<Geolocation>
 {
     public override Geolocation? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
@@ -15,7 +15,7 @@ public class GeolocationJsonConverter : JsonConverter<Geolocation>
             var coords = doc.RootElement.EnumerateArray().Select(x => x.GetDouble()).ToArray();
             return new Geolocation(coords[0], coords[1]);
         }
-        
+
         if (reader.TokenType is JsonTokenType.String && Geolocation.TryParse(reader.GetString(), out var geolocation)) return geolocation;
         if (reader.TokenType is not JsonTokenType.StartObject) return default;
 
@@ -28,8 +28,5 @@ public class GeolocationJsonConverter : JsonConverter<Geolocation>
         return default;
     }
 
-    public override void Write(Utf8JsonWriter writer, Geolocation value, JsonSerializerOptions options)
-    {
-        JsonSerializer.Serialize(writer, value, options);
-    }
+    public override void Write(Utf8JsonWriter writer, Geolocation value, JsonSerializerOptions options) => JsonSerializer.Serialize(writer, value, options);
 }*/

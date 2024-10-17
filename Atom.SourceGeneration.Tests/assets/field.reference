@@ -1,0 +1,5 @@
+/// <summary>
+/// Тестовое поле
+/// </summary>
+[Test]
+private static readonly volatile ref testField = 5;

@@ -1,5 +1,4 @@
 ﻿using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
 using System.Runtime.Serialization;
 using System.Text.Json.Serialization;
 using Atom.Reactive;
@@ -162,7 +161,7 @@ public class Country(string name, string internationalName, ushort code, string 
     private static readonly Lazy<Country> mtq = new(() => new Country("Мартиника", "Martinique", 474, "MQ", "MTQ", new TimeSpan(-4, 0, 0), 0, ".mq"), true);
     private static readonly Lazy<Country> mhl = new(() => new Country("Маршалловы Острова", "Marshall Islands", 584, "MH", "MHL", new TimeSpan(12, 0, 0), 692, ".mh", "MHL"), true);
     private static readonly Lazy<Country> mex = new(() => new Country("Мексика", "Mexico", 484, "MX", "MEX", new TimeSpan(-6, 0, 0), [Currency.MXN, Currency.MXV], 52, ".mx", "MEX"), true);
-    private static readonly Lazy<Country> fsm = new(() => new Country("Федеративные Штаты Микронезии", "Federated States of Micronesia", 583, "FM", "FSM", new TimeSpan(10 , 0, 0), 691, ".fm", "FSM"), true);
+    private static readonly Lazy<Country> fsm = new(() => new Country("Федеративные Штаты Микронезии", "Federated States of Micronesia", 583, "FM", "FSM", new TimeSpan(10, 0, 0), 691, ".fm", "FSM"), true);
     private static readonly Lazy<Country> moz = new(() => new Country("Мозамбик", "Mozambique", 508, "MZ", "MOZ", new TimeSpan(2, 0, 0), Currency.MZN, 258, ".mz", "MOZ"), true);
     private static readonly Lazy<Country> mda = new(() => new Country("Молдавия", "Moldova", 498, "MD", "MDA", new TimeSpan(2, 0, 0), Currency.MDL, 373, ".md", "MDA"), true);
     private static readonly Lazy<Country> mco = new(() => new Country("Монако", "Principality of Monaco", 492, "MC", "MCO", new TimeSpan(1, 0, 0), 377, ".mc", "MON"), true);
@@ -280,7 +279,7 @@ public class Country(string name, string internationalName, ushort code, string 
     private static readonly Lazy<Country> jpn = new(() => new Country("Япония", "Japan", 392, "JP", "JPN", new TimeSpan(9, 0, 0), Currency.JPY, 81, ".jp", "JPN"), true);
 
     #endregion
-    
+
     /// <summary>
     /// Название.
     /// </summary>
@@ -2964,7 +2963,7 @@ public class Country(string name, string internationalName, ushort code, string 
     /// <param name="domain">Домен.</param>
     public Country(string name, string internationalName, ushort code, string isoCode2, string isoCode3, TimeSpan timeZoneOffset, ushort dialCode, string? domain)
         : this(name, internationalName, code, isoCode2, isoCode3, timeZoneOffset, dialCode, domain, default) { }
-    
+
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="Country"/> из данных сериализации.
     /// </summary>
@@ -2995,6 +2994,7 @@ public class Country(string name, string internationalName, ushort code, string 
             case "Code": await CodeChanged.On(this).ConfigureAwait(false); break;
             case "IsoCode": await IsoCodeChanged.On(this).ConfigureAwait(false); break;
             case "IsoCode2": await IsoCode2Changed.On(this).ConfigureAwait(false); break;
+            default: break;
         }
     }
 
@@ -3011,25 +3011,13 @@ public class Country(string name, string internationalName, ushort code, string 
     /// <returns>
     /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
     /// </returns>
-    public override bool Equals(object? obj)
-    {
-        if (obj is null) return default;
-
-        if (obj is string str)
-        {
-            if (str.Length is 2)
-                return str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == IsoCode2.GetHashCode(StringComparison.InvariantCultureIgnoreCase);
-            else if (str.Length is 3)
-                return str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == GetHashCode();
-            else
-                return default;
-        }
-
-        if (obj is ushort code) return code.GetHashCode() == Code.GetHashCode();
-        if (obj is Country country) return country.GetHashCode() == GetHashCode();
-
-        return default;
-    }
+    public override bool Equals(object? obj) => obj is not null && (obj is string str
+        ? str.Length is 2
+            ? str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == IsoCode2.GetHashCode(StringComparison.InvariantCultureIgnoreCase)
+            : str.Length is 3 && str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == GetHashCode()
+        : obj is ushort code
+        ? code.GetHashCode() == Code.GetHashCode()
+        : obj is Country country && country.GetHashCode() == GetHashCode());
 
     /// <summary>
     /// Сравнивает текущий экземпляр <see cref="Country"/> с заданным экземпляром <see cref="Country"/>.
@@ -3933,12 +3921,7 @@ public class Country(string name, string internationalName, ushort code, string 
     /// <returns>
     /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
     /// </returns>
-    public static bool operator ==(Country? country, string? str)
-    {
-        if (country is null && str is null) return true;
-        if (country is null || str is null) return false;
-        return country.Equals(str);
-    }
+    public static bool operator ==(Country? country, string? str) => (country is null && str is null) || (country is not null && str is not null && country.Equals(str));
 
     /// <summary>
     /// Сравнивает экземпляр <see cref="Country"/> с заданной строкой.

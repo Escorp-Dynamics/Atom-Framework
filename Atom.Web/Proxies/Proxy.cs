@@ -1,10 +1,14 @@
 using System.Net;
+using System.Text.Json.Serialization;
 
 namespace Atom.Web.Proxies;
 
 /// <summary>
 /// Представляет расширенную реализацию <see cref="WebProxy"/>.
 /// </summary>
+[JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+[JsonConverter(typeof(ProxyJsonConverter))]
+[Serializable]
 public class Proxy : WebProxy
 {
     private string Scheme => Type switch
@@ -28,6 +32,7 @@ public class Proxy : WebProxy
     /// <summary>
     /// Хост прокси-сервера, если адрес не пустой, иначе пустая строка.
     /// </summary>
+    [JsonInclude]
     public string Host
     {
         get => Address?.Host ?? string.Empty;
@@ -42,6 +47,7 @@ public class Proxy : WebProxy
     /// <summary>
     /// Порт прокси-сервера, если адрес не пустой, иначе 0.
     /// </summary>
+    [JsonInclude]
     public int Port
     {
         get => Address?.Port ?? 0;
@@ -94,6 +100,7 @@ public class Proxy : WebProxy
     /// <summary>
     /// Определяет, защищен ли прокси-сервер паролем и именем пользователя.
     /// </summary>
+    [JsonIgnore]
     public bool IsProtected => !string.IsNullOrEmpty(UserName) && !string.IsNullOrEmpty(Password);
 
     /// <summary>

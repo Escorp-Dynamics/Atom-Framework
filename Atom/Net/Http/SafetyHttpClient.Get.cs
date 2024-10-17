@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Serialization.Metadata;
+﻿using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Atom.Net.Http;
 
@@ -13,14 +14,14 @@ public partial class SafetyHttpClient
     /// <param name="completionOption">Режим чтения ответа.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns>Данные ответа.</returns>
-    public virtual ValueTask<HttpResponseMessage> GetAsync(Uri url, IReadOnlyDictionary<string, string>? headers, Version version, HttpCompletionOption completionOption, CancellationToken cancellationToken)
+    public virtual async ValueTask<HttpResponseMessage> GetAsync(Uri url, IReadOnlyDictionary<string, string>? headers, Version version, HttpCompletionOption completionOption, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
 
         request.Version = version;
-        request.Headers.AddRange(headers);
+        if (headers is not null) request.Headers.Add(headers);
 
-        return SendAsync(request, completionOption, cancellationToken);
+        return await SendAsync(request, completionOption, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -172,14 +173,14 @@ public partial class SafetyHttpClient
     /// <param name="responseTypeInfo">Метаданные типа ответа.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns>Данные ответа JSON, десериализованные в объект.</returns>
-    public ValueTask<TResponse?> GetAsync<TResponse>(Uri url, IReadOnlyDictionary<string, string>? headers, Version version, JsonTypeInfo<TResponse> responseTypeInfo, CancellationToken cancellationToken)
+    public async ValueTask<TResponse?> GetAsync<TResponse>(Uri url, IReadOnlyDictionary<string, string>? headers, Version version, JsonTypeInfo<TResponse> responseTypeInfo, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
 
         request.Version = version;
-        request.Headers.AddRange(headers);
+        if (headers is not null) request.Headers.Add(headers);
 
-        return SendAsync(request, responseTypeInfo, cancellationToken);
+        return await SendAsync(request, responseTypeInfo, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -267,14 +268,15 @@ public partial class SafetyHttpClient
     /// <param name="responseTypeInfo">Метаданные типа ответа.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns>Данные ответа JSON, десериализованные в коллекцию объектов.</returns>
-    public IAsyncEnumerable<TResponse?> GetAsyncEnumerable<TResponse>(Uri url, IReadOnlyDictionary<string, string>? headers, Version version, JsonTypeInfo<TResponse> responseTypeInfo, CancellationToken cancellationToken)
+    public async IAsyncEnumerable<TResponse?> GetAsyncEnumerable<TResponse>(Uri url, IReadOnlyDictionary<string, string>? headers, Version version, JsonTypeInfo<TResponse> responseTypeInfo, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
 
         request.Version = version;
-        request.Headers.AddRange(headers);
+        if (headers is not null) request.Headers.Add(headers);
 
-        return SendAsyncEnumerable(request, responseTypeInfo, cancellationToken);
+        await foreach (var item in SendAsyncEnumerable(request, responseTypeInfo, cancellationToken).ConfigureAwait(false)) yield return item;
+        yield break;
     }
 
     /// <summary>

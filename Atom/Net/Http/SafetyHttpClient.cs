@@ -1,8 +1,10 @@
 ﻿#pragma warning disable CA2000  // Ссылка на обработчик всегда удаляется в HttpClient.
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using Atom.Architect.Reactive;
 
 namespace Atom.Net.Http;
 
@@ -83,8 +85,9 @@ public partial class SafetyHttpClient(HttpClientHandler handler, bool disposeHan
             if (failedEventArgs.Timeout != default) await Task.Delay(failedEventArgs.Timeout, cancellationToken).ConfigureAwait(false);
             failedEventArgs.Reset();
 
-            if (failedEventArgs is { IsCancelled: false, IsRetry: true }) return await SendAsync(failedEventArgs, request, completionOption, cancellationToken).ConfigureAwait(false);
-            return new HttpResponseMessage(default);
+            return failedEventArgs is { IsCancelled: false, IsRetry: true }
+                ? await SendAsync(failedEventArgs, request, completionOption, cancellationToken).ConfigureAwait(false)
+                : new HttpResponseMessage(default);
         }
     }
 
@@ -93,14 +96,14 @@ public partial class SafetyHttpClient(HttpClientHandler handler, bool disposeHan
     /// </summary>
     /// <param name="e">Аргументы события.</param>
     /// <returns></returns>
-    protected virtual ValueTask OnFailed(HttpRequestFailedEventArgs e) => Failed.On(this, e);
+    protected virtual ValueTask OnFailed(HttpRequestFailedEventArgs e) => Failed?.Invoke(this, e) ?? ValueTask.CompletedTask;
 
     /// <summary>
     /// Происходит в момент получения ответа от сервера.
     /// </summary>
     /// <param name="e">Аргументы события.</param>
     /// <returns></returns>
-    protected virtual ValueTask OnRequested(HttpRequestEventArgs e) => Requested.On(this, e);
+    protected virtual ValueTask OnRequested(HttpRequestEventArgs e) => Requested?.Invoke(this, e) ?? ValueTask.CompletedTask;
 
     /// <summary>
     /// Высвобождает ресурсы, используемые экземпляром <see cref="SafetyHttpClient"/>.
@@ -114,6 +117,40 @@ public partial class SafetyHttpClient(HttpClientHandler handler, bool disposeHan
     }
 
     /// <summary>
+    /// Осуществляет запрос.
+    /// </summary>
+    /// <param name="request">Параметры запроса.</param>
+    /// <param name="completionOption">Режим чтения ответа.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns>Параметры ответа.</returns>
+    public virtual ValueTask<HttpResponseMessage> SendAsync([NotNull] HttpRequestMessage request, HttpCompletionOption completionOption, CancellationToken cancellationToken)
+        => SendAsync(default, request, completionOption, cancellationToken);
+
+    /// <summary>
+    /// Осуществляет запрос.
+    /// </summary>
+    /// <param name="request">Параметры запроса.</param>
+    /// <param name="completionOption">Режим чтения ответа.</param>
+    /// <returns>Параметры ответа.</returns>
+    public ValueTask<HttpResponseMessage> SendAsync(HttpRequestMessage request, HttpCompletionOption completionOption) => SendAsync(request, completionOption, CancellationToken.None);
+
+    /// <summary>
+    /// Осуществляет запрос.
+    /// </summary>
+    /// <param name="request">Параметры запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns>Параметры ответа.</returns>
+    public ValueTask<HttpResponseMessage> SendAsync([NotNull] HttpRequestMessage request, CancellationToken cancellationToken)
+        => SendAsync(default, request, HttpCompletionOption.ResponseContentRead, cancellationToken);
+
+    /// <summary>
+    /// Осуществляет запрос.
+    /// </summary>
+    /// <param name="request">Параметры запроса.</param>
+    /// <returns>Параметры ответа.</returns>
+    public ValueTask<HttpResponseMessage> SendAsync(HttpRequestMessage request) => SendAsync(request, CancellationToken.None);
+
+    /// <summary>
     /// Осуществляет запрос и возвращает данные ответа JSON, десериализованные в объект.
     /// </summary>
     /// <typeparam name="TResponse">Тип данных ответа.</typeparam>
@@ -123,8 +160,6 @@ public partial class SafetyHttpClient(HttpClientHandler handler, bool disposeHan
     /// <returns>Данные ответа JSON, десериализованные в объект.</returns>
     public virtual async ValueTask<TResponse?> SendAsync<TResponse>(HttpRequestMessage request, JsonTypeInfo<TResponse> responseTypeInfo, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(request, nameof(request));
-
         using var response = await SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
         if (response.Content.Headers.ContentLength is 0) return default;
 
@@ -173,8 +208,6 @@ public partial class SafetyHttpClient(HttpClientHandler handler, bool disposeHan
     /// <returns>Данные ответа JSON, десериализованные в коллекцию объектов.</returns>
     public virtual async IAsyncEnumerable<TResponse?> SendAsyncEnumerable<TResponse>(HttpRequestMessage request, JsonTypeInfo<TResponse> responseTypeInfo, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(request, nameof(request));
-
         using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (response.Content.Headers.ContentLength is 0) yield break;
 
@@ -182,6 +215,7 @@ public partial class SafetyHttpClient(HttpClientHandler handler, bool disposeHan
         var iterator = enumerable.GetAsyncEnumerator();
 
         await using (iterator)
+        {
             while (iterator.Current is not null)
             {
                 yield return iterator.Current;
@@ -211,6 +245,7 @@ public partial class SafetyHttpClient(HttpClientHandler handler, bool disposeHan
                     yield break;
                 }
             }
+        }
     }
 
     /// <summary>
@@ -221,31 +256,6 @@ public partial class SafetyHttpClient(HttpClientHandler handler, bool disposeHan
     /// <param name="responseTypeInfo">Метаданные типа ответа.</param>
     /// <returns>Данные ответа JSON, десериализованные в коллекцию объектов.</returns>
     public IAsyncEnumerable<TResponse?> SendAsyncEnumerable<TResponse>(HttpRequestMessage request, JsonTypeInfo<TResponse> responseTypeInfo) => SendAsyncEnumerable(request, responseTypeInfo, CancellationToken.None);
-
-    /// <summary>
-    /// Осуществляет запрос.
-    /// </summary>
-    /// <param name="request">Параметры запроса.</param>
-    /// <param name="completionOption">Режим чтения ответа.</param>
-    /// <param name="cancellationToken">Токен отмены задачи.</param>
-    /// <returns>Параметры ответа.</returns>
-    public virtual ValueTask<HttpResponseMessage> SendAsync(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(request, nameof(request));
-        return SendAsync(default, request, completionOption, cancellationToken);
-    }
-
-    /// <summary>
-    /// Осуществляет запрос.
-    /// </summary>
-    /// <param name="request">Параметры запроса.</param>
-    /// <param name="cancellationToken">Токен отмены задачи.</param>
-    /// <returns>Параметры ответа.</returns>
-    public ValueTask<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(request, nameof(request));
-        return SendAsync(default, request, HttpCompletionOption.ResponseContentRead, cancellationToken);
-    }
 
     /// <summary>
     /// Высвобождает ресурсы, используемые экземпляром <see cref="SafetyHttpClient"/>.

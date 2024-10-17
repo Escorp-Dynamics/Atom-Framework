@@ -1,0 +1,4 @@
+/// <summary>
+/// Тестовая константа
+/// </summary>
+private const TestConst = 5;

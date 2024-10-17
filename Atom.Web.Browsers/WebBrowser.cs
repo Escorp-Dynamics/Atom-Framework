@@ -1,118 +1,188 @@
-﻿using System.Diagnostics;
-using System.Runtime.InteropServices;
-using System.Security.Principal;
+using System.Diagnostics.CodeAnalysis;
+using System.Net;
 using Atom.Web.Browsers.BOM;
-using Atom.Web.Browsers.NativeMessaging;
 
 namespace Atom.Web.Browsers;
 
 /// <summary>
-/// Представляет браузер.
+/// Представляет веб-браузер.
 /// </summary>
-/// <typeparam name="TSettings">Тип настроек браузера.</typeparam>
-/// <typeparam name="TServer">Тип сервера браузера.</typeparam>
-public abstract class WebBrowser<TSettings, TServer> : IWebBrowser<TSettings, TServer>
-    where TSettings : IWebBrowserSettings, new()
-    where TServer : IWebBrowserServer, new()
+public class WebBrowser : IWebBrowser
 {
-    private readonly Process process;
+    private readonly SemaphoreSlim locker = new(1, 1);
+    private readonly List<IWebBrowserContext> contexts = [];
 
-    private static bool? isRunningAsAdmin;
-
-    /// <inheritdoc/>
-    public TServer Server { get; set; }
+    private bool isDisposed;
 
     /// <inheritdoc/>
-    public TSettings Settings { get; init; }
+    public event AsyncEventHandler<IWebBrowserContext>? ContextCreated;
 
     /// <inheritdoc/>
-    public bool IsRunning { get; protected set; }
+    public event AsyncEventHandler<IWebBrowserContext>? ContextClosed;
 
     /// <inheritdoc/>
-    public bool IsRunningAsAdmin
+    public event AsyncEventHandler<IWebPage>? PageOpened;
+
+    /// <inheritdoc/>
+    public event AsyncEventHandler<IWebPage>? PageClosed;
+
+    /// <inheritdoc/>
+    public IWebBrowserSettings Settings { get; set; }
+
+    /// <inheritdoc/>
+    public IEnumerable<IWebBrowserContext> Contexts => contexts;
+
+    /// <inheritdoc/>
+    public IEnumerable<IWebPage> Pages => Contexts.SelectMany(x => x.Pages);
+
+    /// <inheritdoc/>
+    public IWebBrowserContext CurrentContext { get; set; }
+
+    /// <inheritdoc/>
+    public IWebPage CurrentPage
     {
-        get
+        get => CurrentContext.CurrentPage;
+
+        set
         {
-            if (isRunningAsAdmin.HasValue) return isRunningAsAdmin.Value;
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                var identity = WindowsIdentity.GetCurrent();
-                var principal = new WindowsPrincipal(identity);
-                return (isRunningAsAdmin = principal.IsInRole(WindowsBuiltInRole.Administrator)).Value;
-            }
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                return (isRunningAsAdmin = Environment.UserName is "root").Value;
-
-            throw new InvalidOperationException("Неподдерживаемая платформа");
+            ArgumentNullException.ThrowIfNull(value);
+            CurrentContext = value.Context;
         }
     }
 
     /// <inheritdoc/>
-    public event AsyncEventHandler<IWebBrowser<TSettings, TServer>, WebBrowserProcessAsyncEventArgs>? ProcessStarted;
+    public string Source => CurrentPage.Source;
+
+    /// <inheritdoc/>
+    public IConsole Console => CurrentPage.Console;
+
+    /// <inheritdoc/>
+    public bool IsClosed { get; protected set; }
+
+    /// <inheritdoc/>
+    public CookieContainer Cookies => CurrentPage.Cookies;
 
     /// <summary>
-    /// Инициализирует новый экземпляр класса <see cref="WebBrowser{TSettings, TServer}"/>.
+    /// Инициализирует новый экземпляр <see cref="WebBrowser"/>.
     /// </summary>
-    /// <param name="settings">Настройки браузера.</param>
-    protected WebBrowser(TSettings settings)
+    /// <param name="settings">Настройки веб-браузера.</param>
+    public WebBrowser([NotNull] IWebBrowserSettings settings)
     {
         Settings = settings;
-        process = new Process();
-        Server = new TServer();
+        CurrentContext = CreateContextAsync(WebBrowserContextSettings.FromBrowserSettings(settings)).AsTask().GetAwaiter().GetResult();
+        CurrentPage = CurrentContext.CurrentPage;
     }
 
     /// <summary>
-    /// Запускает процесс браузера.
+    /// Инициализирует новый экземпляр <see cref="WebBrowser"/>.
     /// </summary>
-    /// <param name="cancellationToken">Токен отмены задачи.</param>
-    protected virtual async ValueTask OnProcessStarted(CancellationToken cancellationToken)
-    {
-        if (IsRunning) return;
-        IsRunning = true;
+    public WebBrowser() : this(WebBrowserSettings.Default) { }
 
-        process.StartInfo = new ProcessStartInfo(Settings.GetNativeBinaryPath())
+    /// <summary>
+    /// Происходит в момент создания контекста веб-браузера.
+    /// </summary>
+    /// <param name="context">Контекст веб-браузера.</param>
+    protected virtual ValueTask OnContextCreated(IWebBrowserContext context) => ContextCreated.On(context);
+
+    /// <summary>
+    /// Происходит в момент закрытия контекста веб-браузера.
+    /// </summary>
+    /// <param name="context">Контекст веб-браузера.</param>
+    protected virtual ValueTask OnContextClosed(IWebBrowserContext context) => ContextClosed.On(context);
+
+    /// <summary>
+    /// Происходит в момент открытия веб-страницы.
+    /// </summary>
+    /// <param name="page">Веб-страница.</param>
+    protected virtual ValueTask OnPageOpened(IWebPage page) => PageOpened.On(page);
+
+    /// <summary>
+    /// Происходит в момент закрытия веб-страницы.
+    /// </summary>
+    /// <param name="page">Веб-страница.</param>
+    protected virtual ValueTask OnPageClosed(IWebPage page) => PageClosed.On(page);
+
+    /// <inheritdoc/>
+    public async ValueTask<IWebBrowserContext> CreateContextAsync(IWebBrowserContextSettings contextSettings, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(isDisposed || IsClosed, this);
+
+        var context = new WebBrowserContext(this, contextSettings);
+        context.PageOpened += OnPageOpened;
+        context.PageClosed += OnPageClosed;
+
+        context.Closed += async () =>
         {
-            Arguments = Settings.ToString(),
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            await locker.WaitAsync(cancellationToken).ConfigureAwait(false);
+            contexts.Remove(context);
+            locker.Release();
+            await OnContextClosed(context).ConfigureAwait(false);
         };
 
-        await Server.StartAsync(cancellationToken).ConfigureAwait(false);
-        process.Start();
+        await locker.WaitAsync(cancellationToken).ConfigureAwait(false);
+        contexts.Add(context);
+        await OnContextCreated(context).ConfigureAwait(false);
+        locker.Release();
 
-        await ProcessStarted.On(this, new WebBrowserProcessAsyncEventArgs { CancellationToken = cancellationToken }).ConfigureAwait(false);
+        return CurrentContext = context;
     }
 
     /// <inheritdoc/>
-    public async ValueTask<IWindow> OpenWindowAsync(TSettings settings, CancellationToken cancellationToken)
+    public ValueTask<IWebBrowserContext> CreateContextAsync(IWebBrowserContextSettings contextSettings) => CreateContextAsync(contextSettings, CancellationToken.None);
+
+    /// <inheritdoc/>
+    public ValueTask<IWebBrowserContext> CreateContextAsync(CancellationToken cancellationToken) => CreateContextAsync(WebBrowserContextSettings.FromBrowserSettings(Settings), cancellationToken);
+
+    /// <inheritdoc/>
+    public ValueTask<IWebBrowserContext> CreateContextAsync() => CreateContextAsync(CancellationToken.None);
+
+    /// <inheritdoc/>
+    public ValueTask<IWebPage> OpenPageAsync(IWebPageSettings pageSettings, CancellationToken cancellationToken)
     {
-        await OnProcessStarted(cancellationToken).ConfigureAwait(false);
-        return new Window();
+        ObjectDisposedException.ThrowIf(isDisposed && !IsClosed, this);
+        return CurrentContext.OpenPageAsync(pageSettings, cancellationToken);
     }
 
     /// <inheritdoc/>
-    public ValueTask<IWindow> OpenWindowAsync(TSettings settings) => OpenWindowAsync(settings, CancellationToken.None);
+    public ValueTask<IWebPage> OpenPageAsync(IWebPageSettings pageSettings) => OpenPageAsync(pageSettings, CancellationToken.None);
 
     /// <inheritdoc/>
-    public ValueTask<IWindow> OpenWindowAsync(CancellationToken cancellationToken) => OpenWindowAsync(Settings, cancellationToken);
+    public ValueTask<IWebPage> OpenPageAsync(CancellationToken cancellationToken) => OpenPageAsync(WebPageSettings.FromContextSettings(CurrentContext.Settings), cancellationToken);
 
     /// <inheritdoc/>
-    public ValueTask<IWindow> OpenWindowAsync() => OpenWindowAsync(CancellationToken.None);
+    public ValueTask<IWebPage> OpenPageAsync() => OpenPageAsync(CancellationToken.None);
 
-    /// <summary>
-    /// Высвобождает ресурсы.
-    /// </summary>
+    /// <inheritdoc/>
+    public ValueTask<HttpStatusCode> GoToAsync(Uri url, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(isDisposed || IsClosed, this);
+        return CurrentPage.GoToAsync(url, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public ValueTask<HttpStatusCode> GoToAsync(Uri url) => GoToAsync(url, CancellationToken.None);
+
+    /// <inheritdoc/>
+    public async ValueTask CloseAsync(CancellationToken cancellationToken)
+    {
+        if (IsClosed) return;
+        IsClosed = true;
+
+        for (var i = 0; i < contexts.Count; ++i) await contexts[i].CloseAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public ValueTask CloseAsync() => CloseAsync(CancellationToken.None);
+
+    /// <inheritdoc/>
     public virtual async ValueTask DisposeAsync()
     {
-        if (IsRunning) process.Kill(true);
-        process.Dispose();
+        ObjectDisposedException.ThrowIf(isDisposed, this);
+        isDisposed = true;
 
-        await Server.DisposeAsync().ConfigureAwait(false);
+        await CloseAsync().ConfigureAwait(false);
+        locker.Dispose();
+
         GC.SuppressFinalize(this);
     }
 }

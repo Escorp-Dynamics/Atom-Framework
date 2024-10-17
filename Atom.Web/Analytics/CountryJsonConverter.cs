@@ -19,18 +19,18 @@ public class CountryJsonConverter<T> : JsonConverter<Country>
         var jsonDocument = JsonDocument.ParseValue(ref reader);
         var rootElement = jsonDocument.RootElement;
 
-        if (rootElement.TryGetProperty("code", out var valueElement) && valueElement.TryGetUInt16(out code) && Country.TryParse(code, out country)) return country;
-        if (rootElement.TryGetProperty("isoCode", out valueElement) && Country.TryParse(valueElement.GetString(), out country)) return country;
-        if (rootElement.TryGetProperty("isoCode2", out valueElement) && Country.TryParse(valueElement.GetString(), out country)) return country;
-
-        return default;
+        return rootElement.TryGetProperty("code", out var valueElement) && valueElement.TryGetUInt16(out code) && Country.TryParse(code, out country)
+            ? country
+            : rootElement.TryGetProperty("isoCode", out valueElement) && Country.TryParse(valueElement.GetString(), out country)
+            ? country
+            : rootElement.TryGetProperty("isoCode2", out valueElement) && Country.TryParse(valueElement.GetString(), out country)
+            ? country
+            : default;
     }
 
     /// <inheritdoc />
     public override void Write(Utf8JsonWriter writer, Country? value, JsonSerializerOptions options)
     {
-        ArgumentNullException.ThrowIfNull(writer, nameof(writer));
-
         if (value is null)
         {
             writer.WriteNullValue();
@@ -55,7 +55,36 @@ public class CountryJsonConverter<T> : JsonConverter<Country>
             case TypeCode.String:
                 writer.WriteStringValue(value.IsoCode);
                 break;
-
+            case TypeCode.Empty:
+                break;
+            case TypeCode.DBNull:
+                break;
+            case TypeCode.Boolean:
+                break;
+            case TypeCode.Char:
+                break;
+            case TypeCode.SByte:
+                break;
+            case TypeCode.Byte:
+                break;
+            case TypeCode.Int16:
+                break;
+            case TypeCode.Int32:
+                break;
+            case TypeCode.UInt32:
+                break;
+            case TypeCode.Int64:
+                break;
+            case TypeCode.UInt64:
+                break;
+            case TypeCode.Single:
+                break;
+            case TypeCode.Double:
+                break;
+            case TypeCode.Decimal:
+                break;
+            case TypeCode.DateTime:
+                break;
             default:
                 writer.WriteNullValue();
                 break;

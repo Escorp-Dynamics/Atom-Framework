@@ -15,7 +15,8 @@ namespace Atom.Net.Http;
 /// <param name="proxy">Прокси запроса.</param>
 /// <param name="ex">Исключение, возникшее в процессе выполнения процедуры.</param>
 /// <param name="cancellationToken">Токен отмены задачи.</param>
-public class HttpRequestFailedEventArgs(Uri? url, HttpMethod method, IDictionary<string, string> requestHeaders, Version requestVersion, IWebProxy? proxy, Exception? ex, CancellationToken cancellationToken)
+public class HttpRequestFailedEventArgs(Uri? url, HttpMethod method, IDictionary<string, string> requestHeaders, Version requestVersion, IWebProxy? proxy,
+    Exception? ex, CancellationToken cancellationToken)
     : HttpRequestEventArgs(url, method, requestHeaders, requestVersion, proxy, cancellationToken)
 {
     /// <summary>
@@ -42,7 +43,8 @@ public class HttpRequestFailedEventArgs(Uri? url, HttpMethod method, IDictionary
     /// <param name="requestVersion">Версия запроса.</param>
     /// <param name="proxy">Прокси запроса.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    public HttpRequestFailedEventArgs(Uri? url, HttpMethod method, IDictionary<string, string> requestHeaders, Version requestVersion, IWebProxy? proxy, CancellationToken cancellationToken)
+    public HttpRequestFailedEventArgs(Uri? url, HttpMethod method, IDictionary<string, string> requestHeaders, Version requestVersion, IWebProxy? proxy,
+        CancellationToken cancellationToken)
         : this(url, method, requestHeaders, requestVersion, proxy, default, cancellationToken) { }
 
     /// <summary>
@@ -54,7 +56,8 @@ public class HttpRequestFailedEventArgs(Uri? url, HttpMethod method, IDictionary
     /// <param name="requestVersion">Версия запроса.</param>
     /// <param name="ex">Исключение, возникшее в процессе выполнения процедуры.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    public HttpRequestFailedEventArgs(Uri? url, HttpMethod method, IDictionary<string, string> requestHeaders, Version requestVersion, Exception? ex, CancellationToken cancellationToken)
+    public HttpRequestFailedEventArgs(Uri? url, HttpMethod method, IDictionary<string, string> requestHeaders, Version requestVersion, Exception? ex,
+        CancellationToken cancellationToken)
         : this(url, method, requestHeaders, requestVersion, default, ex, cancellationToken) { }
 
     /// <summary>
@@ -74,5 +77,6 @@ public class HttpRequestFailedEventArgs(Uri? url, HttpMethod method, IDictionary
     /// <param name="method">Метод запроса.</param>
     /// <param name="requestVersion">Версия запроса.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    public HttpRequestFailedEventArgs(HttpMethod method, Version requestVersion, CancellationToken cancellationToken) : this(default, method, new Dictionary<string, string>(), requestVersion, cancellationToken) { }
+    public HttpRequestFailedEventArgs(HttpMethod method, Version requestVersion, CancellationToken cancellationToken) : this(default, method,
+        new Dictionary<string, string>(), requestVersion, cancellationToken) { }
 }

@@ -1,0 +1,9 @@
+namespace Test;
+
+public partial class TestClass
+{
+    Int32 TestProperty { get; }
+
+    ValueTask OnPropertyChanged() { }
+
+}

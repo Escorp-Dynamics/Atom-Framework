@@ -1283,6 +1283,7 @@ public class Currency(string name, string internationalName, ushort code, string
         {
             case "Code": await CodeChanged.On(this).ConfigureAwait(false); break;
             case "IsoCode": await IsoCodeChanged.On(this).ConfigureAwait(false); break;
+            default: break;
         }
     }
 
@@ -1299,14 +1300,11 @@ public class Currency(string name, string internationalName, ushort code, string
     /// <returns>
     /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
     /// </returns>
-    public override bool Equals(object? obj)
-    {
-        if (obj is null) return default;
-        if (obj is string str) return str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == IsoCode.GetHashCode(StringComparison.InvariantCultureIgnoreCase);
-        if (obj is ushort code) return code.GetHashCode() == Code.GetHashCode();
-        if (obj is Currency currency) return currency.GetHashCode() == GetHashCode();
-        return default;
-    }
+    public override bool Equals(object? obj) => obj is not null && (obj is string str
+        ? str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == IsoCode.GetHashCode(StringComparison.InvariantCultureIgnoreCase)
+        : obj is ushort code
+        ? code.GetHashCode() == Code.GetHashCode()
+        : obj is Currency currency && currency.GetHashCode() == GetHashCode());
 
     /// <summary>
     /// Сравнивает текущий экземпляр <see cref="Currency"/> с заданным экземпляром <see cref="Currency"/>.
@@ -1824,12 +1822,7 @@ public class Currency(string name, string internationalName, ushort code, string
     /// <returns>
     /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
     /// </returns>
-    public static bool operator ==(Currency? currency, string? str)
-    {
-        if (currency is null && str is null) return true;
-        if (currency is null || str is null) return false;
-        return currency.Equals(str);
-    }
+    public static bool operator ==(Currency? currency, string? str) => (currency is null && str is null) || (currency is not null && str is not null && currency.Equals(str));
 
     /// <summary>
     /// Сравнивает экземпляр <see cref="Currency"/> с заданной строкой.

@@ -1,0 +1,55 @@
+/// <summary>
+/// Тестовое событие
+/// </summary>
+[Test]
+internal new virtual event Int32 TestEvent { add; }
+
+/// <summary>
+/// Тестовое событие
+/// </summary>
+internal new virtual event Object? TestEvent { remove; }
+
+public new virtual event Int32 Test2 { add; }
+
+public new virtual event Int32 Test2 { remove; }
+
+/// <summary>
+/// Тестовое событие
+/// </summary>
+public new virtual event Object? TestEvent => SomeEvent += value;
+
+/// <summary>
+/// Тестовое событие
+/// </summary>
+protected internal new virtual event Object? TestEvent
+{
+    add => SomeEvent += value;
+    remove => SomeEvent -= value;
+}
+
+/// <summary>
+/// Тестовое событие
+/// </summary>
+public new virtual event Object? TestEvent
+{
+    add 
+    {
+        var value = SomeMethod();
+        SomeEvent += value;
+    }
+}
+
+/// <summary>
+/// Тестовое событие
+/// </summary>
+protected internal new virtual event Object? TestEvent
+{
+    add => SomeEvent += value;
+    remove 
+    {
+        SomeMethod(value);
+        SomeEvent -= value;
+    }
+}
+
+public new virtual event Type? SimpleEvent;

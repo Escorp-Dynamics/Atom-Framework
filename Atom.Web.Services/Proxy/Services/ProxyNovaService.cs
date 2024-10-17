@@ -1,6 +1,6 @@
-﻿namespace Atom.Web.Services.Proxy;
+﻿/*namespace Atom.Web.Services.Proxy;
 
-/*public class ProxyNovaService : ProxyService
+public class ProxyNovaService : ProxyService
 {
 
 }*/

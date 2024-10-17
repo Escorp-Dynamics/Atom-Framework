@@ -1,0 +1,55 @@
+/// <summary>
+/// Тестовое свойство
+/// </summary>
+[Test]
+internal new virtual Int32 TestProperty { get; }
+
+/// <summary>
+/// Тестовое свойство
+/// </summary>
+internal Object? TestProperty { set; }
+
+public Int32 Test2 { get; } = "str";
+
+public Int32 Test2 { get; } = anotherVar;
+
+public Int32 Test2 { init; }
+
+/// <summary>
+/// Тестовое свойство
+/// </summary>
+public Object? TestProperty => field;
+
+/// <summary>
+/// Тестовое свойство
+/// </summary>
+protected internal Object? TestProperty
+{
+    get => field;
+    set => field = value;
+}
+
+/// <summary>
+/// Тестовое свойство
+/// </summary>
+public Object? TestProperty
+{
+    get 
+    {
+        var value = SomeMethod();
+        return value;
+    }
+}
+
+/// <summary>
+/// Тестовое свойство
+/// </summary>
+protected internal Object? TestProperty
+{
+    get => field;
+    set 
+    {
+        SomeMethod(value);
+        field = value;
+    }
+}

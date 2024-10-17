@@ -1,0 +1,40 @@
+/// <summary>
+/// Тестовое перечисление
+/// </summary>
+[Test]
+[Flags]
+internal enum TestEnum : Int16
+{
+    /// <summary>
+    /// Значение 1
+    /// </summary>
+    Value1 = 0,
+    /// <summary>
+    /// Значение 2
+    /// </summary>
+    Value2 = 1,
+    /// <summary>
+    /// Значение 3
+    /// </summary>
+    Value3 = 2,
+}
+
+/// <summary>
+/// Тестовое перечисление
+/// </summary>
+[Test]
+internal enum TestEnum
+{
+    /// <summary>
+    /// Значение 1
+    /// </summary>
+    Value1,
+    /// <summary>
+    /// Значение 2
+    /// </summary>
+    Value2,
+    /// <summary>
+    /// Значение 3
+    /// </summary>
+    Value3,
+}

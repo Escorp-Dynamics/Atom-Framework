@@ -1,14 +1,13 @@
-using Atom.Text;
+namespace Atom.Text.Tests;
 
-namespace Atom.Tests.Text;
-
+[TestFixture]
 public class UniqueCombinationGeneratorTests
 {
-    [Fact]
+    [Test]
     public async Task BaseTest()
     {
         var generator = new UniqueCombinationGenerator(3);
         await generator.FillAsync();
-        Assert.Equal(generator.Limit, generator.Size);
+        Assert.That(generator.Size, Is.EqualTo(generator.Limit));
     }
 }

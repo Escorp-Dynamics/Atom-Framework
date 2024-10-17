@@ -16,19 +16,26 @@ public class Test1
     WriteIndented = true
 )]
 [JsonSerializable(typeof(Test1))]
-public partial class JsonTestContext : JsonSerializerContext;
+public partial class JsonCurrencyTestContext : JsonSerializerContext;
 
+[TestFixture]
 public class CurrencyTests
 {
-    [Fact]
+    [Test]
     public void ParseTest()
     {
-        Assert.True(Currency.TryParse("RUB", out var currency));
-        Assert.NotNull(currency);
-        Assert.True(currency.IsoCode is "RUB");
+        var result = Currency.TryParse("RUB", out var currency);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result, Is.True);
+            Assert.That(currency, Is.Not.Null);
+        });
+
+        Assert.That(currency.IsoCode, Is.EqualTo("RUB"));
     }
 
-    [Fact]
+    [Test]
     public void SerializeTest()
     {
         var currency = Currency.RUB;
@@ -39,11 +46,11 @@ public class CurrencyTests
         };
 
         var element = JsonSerializer.Serialize(form!, JsonTestsContext.Default.Form);
-        Assert.True(element is "{\n  \"currency\": \"RUB\"\n}");
+        Assert.That(element, Is.EqualTo("{\n  \"currency\": \"RUB\"\n}"));
 
         var test1 = new Test1 { Currency = currency, };
 
-        element = JsonSerializer.Serialize(test1, JsonTestContext.Default.Test1);
-        Assert.True(element is "{\n  \"currency\": \"RUB\"\n}");
+        element = JsonSerializer.Serialize(test1, JsonCurrencyTestContext.Default.Test1);
+        Assert.That(element, Is.EqualTo("{\n  \"currency\": \"RUB\"\n}"));
     }
 }

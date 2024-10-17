@@ -1,0 +1,12 @@
+[Test]
+remove => Test -= OnTest;
+
+[Test]
+remove 
+{
+    SomeMethod();
+    Test -= OnTest;
+}
+
+[Test]
+remove;

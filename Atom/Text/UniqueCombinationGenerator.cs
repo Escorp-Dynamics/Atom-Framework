@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Text;
+using Atom.Buffers;
 
 namespace Atom.Text;
 
@@ -70,23 +72,28 @@ public class UniqueCombinationGenerator(int length, string characters)
     public string? Next()
     {
         if (generatedCombinations.Count >= Limit) return default;
-        var randomBytes = new byte[Length];
-        string combination;
-
+        var randomBytes = SpanPool<byte>.Shared.Rent(Length);
+        var sb = ObjectPool<StringBuilder>.Shared.Rent();
+        string? combination;
+        
         do
         {
             RandomNumberGenerator.Fill(randomBytes);
-            combination = string.Empty;
+            sb.Clear();
 
             for (var i = 0; i < Length; ++i)
             {
                 var index = randomBytes[i] % Characters.Length;
-                combination += Characters[index];
+                sb.Append(Characters[index]);
             }
+
+            combination = sb.ToString();
         }
         while (generatedCombinations.Contains(combination));
 
         generatedCombinations.Enqueue(combination);
+        ObjectPool<StringBuilder>.Shared.Return(sb);
+
         return combination;
     }
 

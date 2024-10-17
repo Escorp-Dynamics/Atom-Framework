@@ -1,0 +1,16 @@
+namespace Atom.Web.Browsers.DOM;
+
+/// <summary>
+/// Состояние видимости документа.
+/// </summary>
+public enum DocumentVisibilityState
+{
+    /// <summary>
+    /// Документ виден.
+    /// </summary>
+    Visible,
+    /// <summary>
+    /// Документ скрыт.
+    /// </summary>
+    Hidden,
+}

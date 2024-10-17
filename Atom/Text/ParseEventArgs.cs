@@ -1,4 +1,6 @@
-﻿namespace Atom.Text;
+﻿using Atom.Architect.Reactive;
+
+namespace Atom.Text;
 
 /// <summary>
 /// Представляет аргументы события парсинга строковых данных.

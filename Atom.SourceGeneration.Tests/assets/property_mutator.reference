@@ -1,0 +1,12 @@
+[Test]
+set => test = value;
+
+[Test]
+set 
+{
+    SomeMethod(value);
+    test = value;
+}
+
+[Test]
+set;

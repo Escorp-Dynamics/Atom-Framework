@@ -1,0 +1,37 @@
+[*.cs]
+
+# IDE0022: Использовать тело блока для метода
+csharp_style_expression_bodied_methods = when_on_single_line
+
+# IDE0160: Преобразовать в namespace с заданной областью видимости блока
+csharp_style_namespace_declarations = file_scoped
+
+# IDE0130: Пространство имен (namespace) не соответствует структуре папок.
+dotnet_style_namespace_match_folder = false
+
+# IDE0011: Добавить фигурные скобки
+csharp_prefer_braces = when_multiline
+
+# IDE0023: Использовать текст блока для оператора преобразования
+csharp_style_expression_bodied_operators = when_on_single_line
+
+# IDE0008: Использование явного типа
+csharp_style_var_for_built_in_types = true
+
+# IDE0008: Использование явного типа
+csharp_style_var_when_type_is_apparent = true
+
+# IDE0008: Использование явного типа
+csharp_style_var_elsewhere = true
+
+# IDE0072: Добавить отсутствующие варианты
+dotnet_diagnostic.IDE0072.severity = none
+
+# IDE0058: Значение выражения никогда не используется
+dotnet_diagnostic.IDE0058.severity = none
+
+# IDE0021: Использовать тело блока для конструктора
+csharp_style_expression_bodied_constructors = when_on_single_line
+
+# IDE0010: Добавить отсутствующие варианты
+dotnet_diagnostic.IDE0010.severity = none

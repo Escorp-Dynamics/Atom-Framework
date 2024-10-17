@@ -1,0 +1,12 @@
+[Test]
+readonly get => test;
+
+[Test]
+readonly get 
+{
+    SomeMethod();
+    return test;
+}
+
+[Test]
+get;

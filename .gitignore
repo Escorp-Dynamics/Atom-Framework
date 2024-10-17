@@ -4,5 +4,5 @@
 
 /.vs
 **/obj
-**/bin/Debug
+**/bin
 **/TestResults

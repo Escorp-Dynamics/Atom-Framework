@@ -1,0 +1,50 @@
+/// <summary>
+/// Тестовый метод
+/// </summary>
+/// <param name="arg1">Булев аргумент</param>
+/// <param name="arg2">Строковый аргумент</param>
+protected abstract Int32 TestMethod(Boolean arg1, [NotNull] String? arg2);
+
+/// <summary>
+/// Тестовый метод
+/// </summary>
+/// <param name="arg1">Булев аргумент</param>
+/// <param name="arg2">Строковый аргумент</param>
+protected internal virtual void TestMethod(Boolean arg1, [NotNull][Test] String? arg2) { }
+
+/// <summary>
+/// Тестовый метод
+/// </summary>
+/// <param name="arg1">Булев аргумент</param>
+/// <param name="arg2">Строковый аргумент</param>
+protected internal virtual void TestMethod(Boolean arg1, [NotNull][Test] String? arg2) { }
+
+/// <summary>
+/// Тестовый метод
+/// </summary>
+/// <param name="arg1">Булев аргумент</param>
+/// <param name="arg2">Строковый аргумент</param>
+public Boolean TestMethod(Boolean arg1, String? arg2) => arg1 && !string.IsNullOrEmpty(arg2);
+
+/// <summary>
+/// Тестовый метод
+/// </summary>
+/// <param name="arg1">Булев аргумент</param>
+/// <param name="arg2">Строковый аргумент</param>
+public static void TestMethod(Boolean arg1, String? arg2)
+{
+    var test = arg1 && !string.IsNullOrEmpty(arg2);
+    SomeMethod(test);
+}
+
+/// <summary>
+/// Тестовый метод
+/// </summary>
+/// <param name="arg1">Булев аргумент</param>
+/// <param name="arg2">Строковый аргумент</param>
+/// <typeparam name="T">Тестовый тип</typeparam>
+public static void TestMethod<T>(Boolean arg1, String? arg2) where T : struct
+{
+    var test = arg1 && !string.IsNullOrEmpty(arg2);
+    SomeMethod(test);
+}

@@ -10,18 +10,16 @@ public abstract class WebServiceFactory<TFactory, TService> : IWebServiceFactory
     where TFactory : IFactory
     where TService : IWebService
 {
-    private readonly SemaphoreSlim locker = new(1, 1);
-
     private bool isDisposed;
 
     /// <summary>
     /// Блокировщик.
     /// </summary>
-    protected SemaphoreSlim Locker => locker;
-    
+    protected SemaphoreSlim Locker { get; } = new(1, 1);
+
     /// <inheritdoc/>
     public IEnumerable<TService> Services { get; protected set; } = [];
-    
+
     /// <summary>
     /// Освобождает неуправляемые ресурсы и выполняет другие задачи очистки.
     /// </summary>
@@ -34,7 +32,7 @@ public abstract class WebServiceFactory<TFactory, TService> : IWebServiceFactory
         if (disposing)
         {
             foreach (var service in Services) service?.Dispose();
-            locker.Dispose();
+            Locker.Dispose();
         }
     }
 

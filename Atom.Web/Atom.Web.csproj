@@ -4,6 +4,8 @@
 		<TargetFramework>net8.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
+		<OptimizationPreference>speed</OptimizationPreference>
+		<AssemblyName>Escorp.Atom.Web</AssemblyName>
 
 		<EnforceCodeStyleInBuild>True</EnforceCodeStyleInBuild>
 		<AnalysisLevel>latest-all</AnalysisLevel>
@@ -15,14 +17,18 @@
 		<IsTrimmable>true</IsTrimmable>
 		<IsAotCompatible>true</IsAotCompatible>
 		<InvariantGlobalization>true</InvariantGlobalization>
+		<JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+
+		<IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
+		<IlcOptimizationPreference>Size</IlcOptimizationPreference>
 
 		<NoWarn>CA1003;CA1708</NoWarn>
 
 		<GenerateDocumentationFile>True</GenerateDocumentationFile>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
-		<PackageId>Escorp.$(AssemblyName)</PackageId>
-		<Version>0.0.8</Version>
-		<Authors>Yuriy Yesin, Escorp Labs</Authors>
+		<PackageId>$(AssemblyName)</PackageId>
+		<Version>0.0.13</Version>
+		<Authors>Yuriy Yesin, Escorp Labs, Jenya Rostov</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
 		<RepositoryUrl>https://gitflic.ru/project/escorp-lab/atom</RepositoryUrl>
@@ -33,13 +39,13 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
-	<ItemGroup>
-		<PackageReference Include="Escorp.Atom" Version="0.0.15" />
-	</ItemGroup>
-
 	<!--<ItemGroup>
-		<ProjectReference Include="..\Atom\Atom.csproj" />
+		<PackageReference Include="Escorp.Atom" Version="0.1.10" />
 	</ItemGroup>-->
+
+	<ItemGroup>
+		<ProjectReference Include="..\Atom\Atom.csproj" />
+	</ItemGroup>
 
 	<ItemGroup>
 		<None Update="icon.png">

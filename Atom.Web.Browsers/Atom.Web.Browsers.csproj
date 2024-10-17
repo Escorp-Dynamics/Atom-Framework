@@ -4,6 +4,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <OptimizationPreference>speed</OptimizationPreference>
+    <AssemblyName>Escorp.Atom.Web.Browsers</AssemblyName>
 
     <EnforceCodeStyleInBuild>True</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-all</AnalysisLevel>
@@ -15,12 +17,16 @@
     <IsTrimmable>true</IsTrimmable>
     <IsAotCompatible>true</IsAotCompatible>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
 
-    <NoWarn>CA1003;CA1711;CA1720</NoWarn>
+		<IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
+		<IlcOptimizationPreference>Size</IlcOptimizationPreference>
+
+    <NoWarn>CA1003;CA1027;CA1028;CA1711;CA1716;CA1720;CA1724;CA2217</NoWarn>
 
     <GenerateDocumentationFile>True</GenerateDocumentationFile>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
-    <PackageId>Escorp.$(AssemblyName)</PackageId>
+    <PackageId>$(AssemblyName)</PackageId>
     <Version>0.0.1</Version>
     <Authors>Yuriy Yesin, Escorp Labs</Authors>
     <Company>Escorp Dynamics</Company>
@@ -33,17 +39,9 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
-  <!--<ItemGroup>
-    <PackageReference Include="Escorp.Atom" Version="0.0.9" />
-  </ItemGroup>-->
-
   <ItemGroup>
-    <ProjectReference Include="..\Atom\Atom.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="BOM/Fingerprints/" />
-    <Folder Include="DOM/" />
+    <!--<PackageReference Include="Escorp.Atom.Web" Version="0.0.10" />-->
+    <PackageReference Include="Microsoft.ClearScript.V8" Version="7.4.5" />
   </ItemGroup>
 
   <ItemGroup>
@@ -55,6 +53,10 @@
       <PackagePath>\</PackagePath>
       <Pack>True</Pack>
     </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Atom.Web\Atom.Web.csproj" />
   </ItemGroup>
 
 </Project>

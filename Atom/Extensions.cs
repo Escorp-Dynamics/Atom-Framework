@@ -1,34 +1,53 @@
-﻿namespace Atom;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using System.Text;
+using Atom.Buffers;
+
+namespace Atom;
 
 /// <summary>
 /// Представляет системные расширения.
 /// </summary>
 public static class Extensions
 {
-    /// <summary>
-    /// Вызывает асинхронное событие.
-    /// </summary>
-    /// <typeparam name="TSender">Тип источника события.</typeparam>
-    /// <typeparam name="TEventArgs">Тип аргументов события.</typeparam>
-    /// <param name="handler">Обработчик события.</param>
-    /// <param name="sender">Источник события.</param>
-    /// <param name="e">Аргументы события.</param>
-    /// <returns></returns>
-    public static ValueTask On<TSender, TEventArgs>(this AsyncEventHandler<TSender, TEventArgs>? handler, TSender sender, TEventArgs e)
-        where TSender : class
-        where TEventArgs : EventArgs
-        => handler?.Invoke(sender, e) ?? ValueTask.CompletedTask;
+    private static readonly Lazy<char[]> upperCaseTable = new(() => CreateTable(true), true);
+    private static readonly Lazy<char[]> invariantUpperCaseTable = new(() => CreateTable(true, true), true);
+    private static readonly Lazy<char[]> lowerCaseTable = new(() => CreateTable(), true);
+    private static readonly Lazy<char[]> invariantLowerCaseTable = new(() => CreateTable(default, true), true);
 
-    /// <summary>
-    /// Вызывает асинхронное событие.
-    /// </summary>
-    /// <typeparam name="TSender">Тип источника события.</typeparam>
-    /// <param name="handler">Обработчик события.</param>
-    /// <param name="sender">Источник события.</param>
-    /// <returns></returns>
-    public static ValueTask On<TSender>(this AsyncEventHandler<TSender>? handler, TSender sender)
-        where TSender : class
-        => handler?.Invoke(sender) ?? ValueTask.CompletedTask;
+    private static char[] CreateTable(bool upper = default, bool invariant = default)
+    {
+        var table = new char[ushort.MaxValue + 1];
+        Func<char, char> handler;
+
+        if (upper)
+            handler = invariant ? char.ToUpperInvariant : char.ToUpper;
+        else
+            handler = invariant ? char.ToLowerInvariant : char.ToLower;
+
+        for (var i = 0; i < table.Length; ++i) table[i] = handler((char)i);
+
+        return table;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static char GetChar(char c, char[] table) => c >= 'a' && c <= 'z' ? (char)(c - 'a' + 'A') : table[c];
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static char GetLowerChar(char c, StringComparison comparison) => comparison switch
+    {
+        StringComparison.InvariantCultureIgnoreCase => GetChar(c, invariantLowerCaseTable.Value),
+        StringComparison.CurrentCultureIgnoreCase or StringComparison.OrdinalIgnoreCase => GetChar(c, lowerCaseTable.Value),
+        _ => c,
+    };
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static char GetUpperChar(char c, StringComparison comparison) => comparison switch
+    {
+        StringComparison.InvariantCultureIgnoreCase => GetChar(c, invariantUpperCaseTable.Value),
+        StringComparison.CurrentCultureIgnoreCase or StringComparison.OrdinalIgnoreCase => GetChar(c, upperCaseTable.Value),
+        _ => c,
+    };
 
     /// <summary>
     /// Возвращает строку, состоящую из указанных элементов, разделённых разделителем.
@@ -36,6 +55,7 @@ public static class Extensions
     /// <param name="values">Объединяемые элементы.</param>
     /// <param name="separator">Разделитель.</param>
     /// <returns>Объединённая строка.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string Join(this IEnumerable<string> values, string separator) => string.Join(separator, values);
 
     /// <summary>
@@ -44,6 +64,7 @@ public static class Extensions
     /// <param name="values">Объединяемые элементы.</param>
     /// <param name="separator">Разделитель.</param>
     /// <returns>Объединённая строка.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string Join(this IEnumerable<string> values, char separator) => string.Join(separator, values);
 
     /// <summary>
@@ -51,5 +72,59 @@ public static class Extensions
     /// </summary>
     /// <param name="values">Объединяемые элементы.</param>
     /// <returns>Объединённая строка.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string Join(this IEnumerable<string> values) => values.Join(", ");
+
+    /// <summary>
+    /// Сравнивает два символа с учетом указанного способа сравнения.
+    /// </summary>
+    /// <param name="c1">Первый символ.</param>
+    /// <param name="c2">Второй символ.</param>
+    /// <param name="comparison">Способ сравнения.</param>
+    /// <returns><c>true</c>, если символы равны, иначе <c>false</c>.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool Equals(this char c1, char c2, StringComparison comparison) => GetUpperChar(c1, comparison) == GetUpperChar(c2, comparison);
+
+    /// <summary>
+    /// Определяет, является ли тип допускающим <c>null</c>.
+    /// </summary>
+    /// <param name="type">Метаданные типа.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsNullable([NotNull] this Type type) => !type.IsValueType || Nullable.GetUnderlyingType(type) is not null;
+
+    /// <summary>
+    /// Получает имя типа.
+    /// </summary>
+    /// <param name="type">Метаданные типа.</param>
+    public static string GetFriendlyName([NotNull] this Type type)
+    {
+        var name = type.Name;
+
+        if (!type.IsGenericType)
+        {
+            if (type.IsNullable()) name += '?';
+            return name;
+        }
+
+        var index = name.IndexOf('`');
+        var genericArgs = type.GetGenericArguments();
+        var sb = ObjectPool<StringBuilder>.Shared.Rent();
+
+        sb.Append(index > 0 ? name[..index] : name);
+        sb.Append('<');
+
+        for (var i = 0; i < genericArgs.Length; ++i)
+        {
+            if (i > 0) sb.Append(", ");
+            sb.Append(GetFriendlyName(genericArgs[i]));
+        }
+
+        sb.Append('>');
+        if (type.IsNullable()) sb.Append('?');
+
+        var result = sb.ToString();
+        ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
+
+        return result;
+    }
 }

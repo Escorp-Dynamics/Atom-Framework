@@ -1,38 +1,34 @@
-﻿namespace Atom.Web.Browsers;
+using System.Net;
+using Atom.Web.Proxies;
+
+namespace Atom.Web.Browsers;
 
 /// <summary>
 /// Представляет настройки браузера.
 /// </summary>
-public abstract class WebBrowserSettings : IWebBrowserSettings
+public class WebBrowserSettings : IWebBrowserSettings
 {
     /// <inheritdoc/>
-    public string BinaryPath { get; init; }
+    public HttpClientHandler Handler { get; set; } = new HttpClientHandler();
 
     /// <inheritdoc/>
-    public string DistributionPath { get; init; }
+    public Proxy? Proxy
+    {
+        get => Handler.Proxy as Proxy;
+        set => Handler.Proxy = value;
+    }
 
     /// <inheritdoc/>
-    public string? AdminPassword { get; init; }
+    public IEnumerable<Cookie> Cookies { get; set; } = [];
 
     /// <inheritdoc/>
-    public bool IsHeadless { get; init; }
+    public bool IsDOMEnabled { get; set; } = true;
 
     /// <inheritdoc/>
-    public bool IsIncognito { get; init; }
-
-    /// <inheritdoc/>
-    public bool IsJavaScriptConsoleEnabled { get; init; }
+    public bool IsJavaScriptEnabled { get; set; } = true;
 
     /// <summary>
-    /// Инициализирует новый экземпляр класса <see cref="WebBrowserSettings"/>.
+    /// Настройки браузера по умолчанию.
     /// </summary>
-    /// <param name="binaryPath">Путь к исполняемому файлу браузера.</param>
-    /// <param name="distributionPath">Путь к дистрибутиву браузера.</param>
-    protected WebBrowserSettings(string binaryPath, string distributionPath) => (BinaryPath, DistributionPath) = (binaryPath, distributionPath);
-
-    /// <inheritdoc/>
-    public abstract string GetNativeBinaryPath();
-
-    /// <inheritdoc/>
-    public abstract string GetNativeDistributionPath();
+    public static WebBrowserSettings Default => new();
 }

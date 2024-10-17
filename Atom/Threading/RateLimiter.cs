@@ -6,11 +6,16 @@ namespace Atom.Threading;
 /// <summary>
 /// Представляет механизм ограничения числа потоков в единицу времени.
 /// </summary>
-public sealed class RateLimiter : IDisposable
+/// <remarks>
+/// Инициализирует новый экземпляр <see cref="RateLimiter"/>.
+/// </remarks>
+/// <param name="limit">Максимальное число потоков, работающих в единицу времени <see cref="Rate"/>.</param>
+/// <param name="rate">Единица времени, за которое будет запущено <see cref="Limit"/> потоков.</param>
+public sealed class RateLimiter(int limit, TimeSpan rate) : IDisposable
 {
-    private int limit;
+    private int limit = limit;
     private readonly Stopwatch timer = Stopwatch.StartNew();
-    private readonly SemaphoreSlim locker;
+    private readonly SemaphoreSlim locker = new SemaphoreSlim(limit);
 
     /// <summary>
     /// Максимальное число потоков, работающих в единицу времени <see cref="Rate"/>.
@@ -25,28 +30,20 @@ public sealed class RateLimiter : IDisposable
             var difference = limit - locker.CurrentCount;
 
             if (difference > 0)
+            {
                 locker.Release(difference);
+            }
             else if (difference < 0)
-                for (var i = 0; i < -difference; ++i)
-                    locker.Wait();
+            {
+                for (var i = 0; i < -difference; ++i) locker.Wait();
+            }
         }
     }
 
     /// <summary>
     /// Единица времени, за которое будет запущено <see cref="Limit"/> потоков.
     /// </summary>
-    public TimeSpan Rate { get; set; }
-
-    /// <summary>
-    /// Инициализирует новый экземпляр <see cref="RateLimiter"/>.
-    /// </summary>
-    /// <param name="limit">Максимальное число потоков, работающих в единицу времени <see cref="Rate"/>.</param>
-    /// <param name="rate">Единица времени, за которое будет запущено <see cref="Limit"/> потоков.</param>
-    public RateLimiter(int limit, TimeSpan rate)
-    {
-        locker = new SemaphoreSlim(this.limit = limit);
-        Rate = rate;
-    }
+    public TimeSpan Rate { get; set; } = rate;
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="RateLimiter"/>.
@@ -63,14 +60,14 @@ public sealed class RateLimiter : IDisposable
     public void Call([NotNull] Action callback)
     {
         if (timer.Elapsed > Rate)
-            while (locker.CurrentCount < locker.AvailableWaitHandle.SafeWaitHandle.DangerousGetHandle().ToInt32())
+            while (locker.CurrentCount < (locker.CurrentCount + locker.CurrentCount))
                 locker.Release();
 
         locker.Wait();
 
         try
         {
-            callback();
+            callback.Invoke();
         }
         finally
         {
@@ -89,7 +86,7 @@ public sealed class RateLimiter : IDisposable
     public T Call<T>([NotNull] Func<T> callback)
     {
         if (timer.Elapsed > Rate)
-            while (locker.CurrentCount < locker.AvailableWaitHandle.SafeWaitHandle.DangerousGetHandle().ToInt32())
+            while (locker.CurrentCount < (locker.CurrentCount + locker.CurrentCount))
                 locker.Release();
 
         locker.Wait();
@@ -115,7 +112,7 @@ public sealed class RateLimiter : IDisposable
     public async ValueTask CallAsync([NotNull] Func<ValueTask> callback, CancellationToken cancellationToken)
     {
         if (timer.Elapsed > Rate)
-            while (locker.CurrentCount < locker.AvailableWaitHandle.SafeWaitHandle.DangerousGetHandle().ToInt32())
+            while (locker.CurrentCount < (locker.CurrentCount + locker.CurrentCount))
                 locker.Release();
 
         await locker.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -150,11 +147,11 @@ public sealed class RateLimiter : IDisposable
     public async ValueTask<T> CallAsync<T>([NotNull] Func<ValueTask<T>> callback, CancellationToken cancellationToken)
     {
         if (timer.Elapsed > Rate)
-            while (locker.CurrentCount < locker.AvailableWaitHandle.SafeWaitHandle.DangerousGetHandle().ToInt32())
+            while (locker.CurrentCount < (locker.CurrentCount + locker.CurrentCount))
                 locker.Release();
 
         await locker.WaitAsync(cancellationToken).ConfigureAwait(false);
-        
+
         try
         {
             var result = await callback().ConfigureAwait(false);

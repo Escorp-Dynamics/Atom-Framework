@@ -8,21 +8,19 @@ namespace Atom.Threading;
 /// </summary>
 public static class Wait
 {
-    private static SpinWait spin;
-
     /// <summary>
     /// Ожидает до тех пор, пока выполняется условие <paramref name="condition"/>.
     /// </summary>
     /// <param name="condition">Условие ожидания.</param>
     /// <param name="interval">Интервал между итерациями ожидания (в миллисекундах).</param>
     /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
-    public static void Until(Func<bool> condition, int interval, int timeout)
+    public static void Until([NotNull] Func<bool> condition, int interval, int timeout)
     {
-        ArgumentNullException.ThrowIfNull(condition, nameof(condition));
         if (interval <= 0) interval = 1;
 
         var timer = Stopwatch.StartNew();
         var isInfinite = timeout is Timeout.Infinite;
+        SpinWait spin = default;
 
         while (condition() && (isInfinite || timer.ElapsedMilliseconds < timeout)) spin.SpinOnce(interval);
     }
@@ -66,8 +64,8 @@ public static class Wait
     /// <returns></returns>
     public static async ValueTask UntilAsync([NotNull] Func<bool> condition, int interval, int timeout, CancellationToken cancellationToken)
     {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(interval, nameof(interval));
-        ArgumentOutOfRangeException.ThrowIfLessThan(timeout, -1, nameof(timeout));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(interval);
+        ArgumentOutOfRangeException.ThrowIfLessThan(timeout, -1);
 
         var timer = Stopwatch.StartNew();
         var isInfinite = timeout is Timeout.Infinite;

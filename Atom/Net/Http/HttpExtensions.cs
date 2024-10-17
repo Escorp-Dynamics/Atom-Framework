@@ -1,9 +1,10 @@
 ﻿using Atom.Collections;
-
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using System.Web;
 
 namespace Atom.Net.Http;
 
@@ -57,7 +58,7 @@ public static class HttpExtensions
                 JsonValueKind.False => false,
                 JsonValueKind.True => true,
                 JsonValueKind.Number => TryGetNumber(element),
-                JsonValueKind.String => element.Deserialize(JsonHttpContext.Default.String),
+                JsonValueKind.String => element.GetString(),
                 _ => value,
             };
 
@@ -73,8 +74,8 @@ public static class HttpExtensions
     /// <param name="request">Данные запроса.</param>
     /// <returns>Словарь всех заголовков запроса.</returns>
     public static IDictionary<string, string>? GetHeaders(this HttpRequestMessage? request) => request?.Headers
-        .ToDictionary(KeySelector, ValueSelector)
-        .AddRange(request.Content?.Headers.ToDictionary(KeySelector, ValueSelector));
+        .ToDictionary(KeySelector, ValueSelector, StringComparer.OrdinalIgnoreCase)
+        .AddRange(request.Content?.Headers.ToDictionary(KeySelector, ValueSelector, StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
     /// Возвращает словарь всех заголовков ответа.
@@ -82,8 +83,8 @@ public static class HttpExtensions
     /// <param name="response">Данные ответа.</param>
     /// <returns>Словарь всех заголовков ответа.</returns>
     public static IDictionary<string, string>? GetHeaders(this HttpResponseMessage? response) => response?.Headers
-        .ToDictionary(KeySelector, ValueSelector)
-        .AddRange(response.Content.Headers.ToDictionary(KeySelector, ValueSelector));
+        .ToDictionary(KeySelector, ValueSelector, StringComparer.OrdinalIgnoreCase)
+        .AddRange(response.Content.Headers.ToDictionary(KeySelector, ValueSelector, StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
     /// Преобразует содержимое ответа JSON в объект.
@@ -130,8 +131,10 @@ public static class HttpExtensions
         var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 
         await using (stream.ConfigureAwait(false))
+        {
             await foreach (var item in JsonSerializer.DeserializeAsyncEnumerable(stream, typeInfo, cancellationToken).ConfigureAwait(false))
                 yield return Deserialize(item);
+        }
     }
 
     /// <summary>
@@ -148,20 +151,22 @@ public static class HttpExtensions
     /// </summary>
     /// <param name="headers">Исходный словарь.</param>
     /// <param name="items">Добавляемые элементы.</param>
-    public static HttpRequestHeaders? AddRange(this HttpRequestHeaders? headers, IEnumerable<KeyValuePair<string, string>>? items)
+    public static HttpRequestHeaders? Add(this HttpRequestHeaders? headers, IReadOnlyDictionary<string, string> items)
     {
         if (headers is null || items is null) return headers;
 
         foreach (var item in items)
-            headers.Add(item.Key, item.Value);
+            headers.TryAddWithoutValidation(item.Key, item.Value);
 
         return headers;
     }
 
     /// <summary>
-    /// Добавляет несколько элементов в словарь.
+    /// Преобразует body формы запроса в <see cref="FormUrlEncodedContent"/>.
     /// </summary>
-    /// <param name="headers">Исходный словарь.</param>
-    /// <param name="items">Добавляемые элементы.</param>
-    public static HttpRequestHeaders? AddRange(this HttpRequestHeaders? headers, params KeyValuePair<string, string>[]? items) => headers.AddRange(items as IEnumerable<KeyValuePair<string, string>>);
+    /// <param name="body">Исходная строка body формы запроса.</param>
+    /// <returns>Экземпляр <see cref="FormUrlEncodedContent"/>.</returns>
+    public static FormUrlEncodedContent AsFormUrlEncodedContent([NotNull] this string body) => new(body.Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(x => x.Split('=', 2, StringSplitOptions.TrimEntries))
+        .ToDictionary(x => HttpUtility.UrlDecode(x[0]), x => HttpUtility.UrlDecode(x[1]), StringComparer.OrdinalIgnoreCase));
 }

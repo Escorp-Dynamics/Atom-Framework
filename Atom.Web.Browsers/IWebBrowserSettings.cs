@@ -1,4 +1,7 @@
-﻿namespace Atom.Web.Browsers;
+using System.Net;
+using Atom.Web.Proxies;
+
+namespace Atom.Web.Browsers;
 
 /// <summary>
 /// Представляет базовый интерфейс для реализации настроек браузера.
@@ -6,44 +9,27 @@
 public interface IWebBrowserSettings
 {
     /// <summary>
-    /// Путь к исполняемому файлу браузера.
+    /// Обработчик HTTP-запросов.
     /// </summary>
-    string BinaryPath { get; }
+    HttpClientHandler Handler { get; set; }
 
     /// <summary>
-    /// Путь к дистрибутиву браузера.
+    /// Прокси.
     /// </summary>
-    string DistributionPath { get; }
+    Proxy? Proxy { get; set; }
 
     /// <summary>
-    /// Пароль администратора.
+    /// Импортируемые куки.
     /// </summary>
-    string? AdminPassword { get; }
+    IEnumerable<Cookie> Cookies { get; set; }
 
     /// <summary>
-    /// Определяет, что браузер запущен в режиме headless.
+    /// Флаг, указывающий, является ли DOM доступным.
     /// </summary>
-    bool IsHeadless { get; }
+    bool IsDOMEnabled { get; set; }
 
     /// <summary>
-    /// Определяет, что браузер запущен в режиме incognito.
+    /// Флаг, указывающий, включен ли JavaScript.
     /// </summary>
-    bool IsIncognito { get; }
-
-    /// <summary>
-    /// Определяет, включена ли консоль отладки javascript (если <see cref="IsHeadless"/> <b>true</b>, то игнорируется).
-    /// </summary>
-    bool IsJavaScriptConsoleEnabled { get; }
-
-    /// <summary>
-    /// Возвращает путь к исполняемому файлу браузера для текущей платформы.
-    /// </summary>
-    /// <returns>Путь к исполняемому файлу браузера для текущей платформы.</returns>
-    string GetNativeBinaryPath();
-
-    /// <summary>
-    /// Возвращает путь к дистрибутиву браузера для текущей платформы.
-    /// </summary>
-    /// <returns>Путь к дистрибутиву браузера для текущей платформы.</returns>
-    string GetNativeDistributionPath();
+    bool IsJavaScriptEnabled { get; set; }
 }

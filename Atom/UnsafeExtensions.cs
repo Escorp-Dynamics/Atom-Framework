@@ -13,12 +13,13 @@ public static class UnsafeExtensions
     /// </summary>
     /// <param name="sourcePointer">Указатель на строку в неуправляемом коде.</param>
     /// <returns>Управляемая строка, соответствующая указателю.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static unsafe string? AsString(this nint sourcePointer)
     {
         if (sourcePointer == nint.Zero) return default;
 
         var length = 0;
-        while (*(ushort*)(sourcePointer + length * 2) is not 0) ++length;
+        while (*(ushort*)(sourcePointer + (length * 2)) is not 0) ++length;
 
         return new string((char*)sourcePointer, 0, length);
     }
@@ -29,6 +30,7 @@ public static class UnsafeExtensions
     /// <typeparam name="T">Тип структуры.</typeparam>
     /// <param name="sourcePointer">Указатель на массив структур в неуправляемом коде.</param>
     /// <returns>Перечислитель управляемых структур, соответствующих указателю.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static unsafe IEnumerable<T> AsEnumerable<T>(this nint sourcePointer)
     {
         var size = Unsafe.SizeOf<T>();
@@ -53,6 +55,7 @@ public static class UnsafeExtensions
     /// </summary>
     /// <param name="sourcePointer">Указатель на структуру версии в неуправляемом коде.</param>
     /// <returns>Управляемая структура Version, соответствующая указателю.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static unsafe Version AsVersion(this nint sourcePointer)
     {
         var major = Unsafe.Read<int>(sourcePointer.ToPointer());
@@ -82,6 +85,7 @@ public static class UnsafeExtensions
     /// <param name="value">Значение, которое нужно преобразовать.</param>
     /// <param name="sourcePointer">Указатель, который нужно освободить, если он не равен нулю.</param>
     /// <returns>Указатель на значение в неуправляемом коде.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static nint AsPointer<T>(this T value, ref nint sourcePointer)
     {
         if (sourcePointer != nint.Zero) sourcePointer.Free();
@@ -94,14 +98,13 @@ public static class UnsafeExtensions
     /// <typeparam name="T">Тип элементов коллекции.</typeparam>
     /// <param name="source">Коллекция для преобразования.</param>
     /// <returns>Указатель на неуправляемый массив.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static unsafe nint AsPointer<T>(this IEnumerable<T> source)
     {
         if (source is null) return nint.Zero;
 
         var elements = source.ToArray();
-        if (elements.Length is 0) return nint.Zero;
-
-        return GCHandle.Alloc(elements, GCHandleType.Pinned).AddrOfPinnedObject();
+        return elements.Length is 0 ? nint.Zero : GCHandle.Alloc(elements, GCHandleType.Pinned).AddrOfPinnedObject();
     }
 
     /// <summary>
@@ -113,6 +116,7 @@ public static class UnsafeExtensions
     /// <param name="sourcePointer">Указатель на неуправляемый массив, 
     /// который будет освобожден, если он не равен нулю.</param>
     /// <returns>Указатель на неуправляемый массив.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static unsafe nint AsPointer<T>(this IEnumerable<T> source, ref nint sourcePointer)
     {
         if (source is null) return sourcePointer = nint.Zero;
@@ -125,6 +129,7 @@ public static class UnsafeExtensions
     /// </summary>
     /// <param name="sourcePointer">Указатель на память, которую нужно освободить.</param>
     /// <param name="isEnumerable">Указывает, является ли указатель указателем на массив.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static unsafe void Free(this nint sourcePointer, bool isEnumerable)
     {
         if (sourcePointer != nint.Zero) return;
@@ -148,5 +153,6 @@ public static class UnsafeExtensions
     /// Освобождает память, выделенную на указателе.
     /// </summary>
     /// <param name="sourcePointer">Указатель на память, которую нужно освободить.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static unsafe void Free(this nint sourcePointer) => Free(sourcePointer, default);
 }

@@ -4,9 +4,10 @@ using System.Net.Http.Json;
 
 namespace Atom.Tests.Net.Http;
 
+[TestFixture]
 public class HttpTests
 {
-    [Fact]
+    [Test]
     public async Task AsJsonTest()
     {
         var form = new Dictionary<string, object?>
@@ -15,14 +16,14 @@ public class HttpTests
             { "param2", true },
             { "param3", 5 }
         }.AsReadOnly();
-        
+
         using var content = JsonContent.Create(form!, JsonHttpContext.Default.Form);
         var form2 = await content.AsJsonAsync(JsonHttpContext.Default.Form);
 
-        Assert.Equivalent(form, form2);
+        Assert.That(form2, Is.EquivalentTo(form));
     }
 
-    [Fact]
+    [Test]
     public async Task AsJsonEnumerableTest()
     {
         var data = new List<IReadOnlyDictionary<string, object?>>
@@ -45,6 +46,6 @@ public class HttpTests
         var i = 0;
 
         await foreach (var item in content.AsJsonAsyncEnumerable(JsonHttpContext.Default.Form))
-            Assert.Equivalent(data[i++], item);
+            Assert.That(item, Is.EquivalentTo(data[i++]));
     }
 }

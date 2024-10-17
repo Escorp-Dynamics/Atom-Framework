@@ -4,6 +4,8 @@
 		<TargetFramework>net8.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
+		<OptimizationPreference>speed</OptimizationPreference>
+		<AssemblyName>Escorp.Atom.Web.Services</AssemblyName>
 
 		<EnforceCodeStyleInBuild>True</EnforceCodeStyleInBuild>
 		<AnalysisLevel>latest-all</AnalysisLevel>
@@ -15,10 +17,14 @@
 		<IsTrimmable>true</IsTrimmable>
 		<IsAotCompatible>true</IsAotCompatible>
 		<InvariantGlobalization>true</InvariantGlobalization>
+		<JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+
+		<IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
+		<IlcOptimizationPreference>Size</IlcOptimizationPreference>
 
 		<GenerateDocumentationFile>True</GenerateDocumentationFile>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
-		<PackageId>Escorp.$(AssemblyName)</PackageId>
+		<PackageId>$(AssemblyName)</PackageId>
 		<Version>0.0.1</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
@@ -27,13 +33,14 @@
 		<IncludeSymbols>True</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<PackageIcon>icon.png</PackageIcon>
-		<PackageTags>atom;framework;escorp;exomode;system;threading;log;debug;extension;services;web;proxy</PackageTags>
+		<PackageTags>
+			atom;framework;escorp;exomode;system;threading;log;debug;extension;services;web;proxy</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
 	<!-- <ItemGroup>
-    <PackageReference Include="Escorp.Atom.Web" Version="0.0.1" />
-  </ItemGroup> -->
+    	<PackageReference Include="Escorp.Atom.Web" Version="0.0.1" />
+  	</ItemGroup> -->
 
 	<ItemGroup>
 		<None Update="icon.png">
@@ -47,7 +54,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <ProjectReference Include="..\Atom.Web\Atom.Web.csproj" />
+		<ProjectReference Include="..\Atom.Web\Atom.Web.csproj" />
 	</ItemGroup>
 
 </Project>
