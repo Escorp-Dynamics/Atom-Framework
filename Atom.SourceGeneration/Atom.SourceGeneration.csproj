@@ -16,7 +16,7 @@
 		<CompilerGeneratedFilesOutputPath>generated</CompilerGeneratedFilesOutputPath>
 		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
 		<PreserveCompilationContext>true</PreserveCompilationContext>
-        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
 
 		<EnforceCodeStyleInBuild>True</EnforceCodeStyleInBuild>
 		<AnalysisLevel>latest-all</AnalysisLevel>
@@ -33,7 +33,7 @@
 		<IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
 		<IlcOptimizationPreference>Size</IlcOptimizationPreference>
 
-		<NoWarn>CA1716;RS1041;NU5128</NoWarn>
+		<NoWarn>CA1031;CA1716;RS1041;NU5128</NoWarn>
 
 		<GenerateDocumentationFile>True</GenerateDocumentationFile>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
@@ -51,7 +51,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Escorp.Atom" Version="0.2.3" GeneratePathProperty="true" PrivateAssets="all" />
+		<PackageReference Include="Escorp.Atom" Version="0.2.7" GeneratePathProperty="true" PrivateAssets="all" />
 		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
 		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" PrivateAssets="all" />
 	</ItemGroup>

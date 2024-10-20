@@ -5,7 +5,7 @@ namespace Atom.SourceGeneration.Tests;
 
 public class SourceBuilderTests(ILogger logger) : BenchmarkTest<SourceBuilderTests>(logger)
 {
-    private static string? classReference;
+    private static string? sourceReference;
 
     public override bool IsBenchmarkDisabled => true;
 
@@ -13,8 +13,8 @@ public class SourceBuilderTests(ILogger logger) : BenchmarkTest<SourceBuilderTes
 
     private static void SetUp()
     {
-        if (string.IsNullOrEmpty(classReference) && File.Exists("assets/source.reference"))
-            classReference = File.ReadAllText("assets/source.reference");
+        if (string.IsNullOrEmpty(sourceReference) && File.Exists("assets/source.reference"))
+            sourceReference = File.ReadAllText("assets/source.reference");
     }
 
     public override void GlobalSetUp()
@@ -30,7 +30,7 @@ public class SourceBuilderTests(ILogger logger) : BenchmarkTest<SourceBuilderTes
     }
 
     [TestCase(TestName = "Тест сборки исходника"), Benchmark]
-    public void ClassTest()
+    public void SourceTest()
     {
         var src = SourceBuilder.Create()
             .WithNamespace("Test")
@@ -44,7 +44,7 @@ public class SourceBuilderTests(ILogger logger) : BenchmarkTest<SourceBuilderTes
         if (IsTest)
         {
             Assert.That(src, Is.Not.Null);
-            Assert.That(src, Is.EqualTo(classReference));
+            Assert.That(src, Is.EqualTo(sourceReference));
         }
     }
 }

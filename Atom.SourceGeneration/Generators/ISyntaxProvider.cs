@@ -22,12 +22,12 @@ public interface ISyntaxProvider<TSymbol, TSyntaxNode> where TSymbol : ISymbol w
     /// </summary>
     /// <param name="context">Контекст генерации кода.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    SyntaxProviderNodeInfo<TSymbol, TSyntaxNode> Transform(GeneratorSyntaxContext context, CancellationToken cancellationToken);
+    ISyntaxProviderInfo<TSymbol, TSyntaxNode> Transform(GeneratorSyntaxContext context, CancellationToken cancellationToken);
 
     /// <summary>
     /// Выполняет генерацию кода.
     /// </summary>
     /// <param name="context">Контекст генерации.</param>
     /// <param name="sources">Доступные источники.</param>
-    void Execute(SourceProductionContext context, ImmutableArray<SyntaxProviderNodeInfo<TSymbol, TSyntaxNode>> sources);
+    void Execute(SourceProductionContext context, ImmutableArray<ISyntaxProviderInfo<TSymbol, TSyntaxNode>> sources);
 }

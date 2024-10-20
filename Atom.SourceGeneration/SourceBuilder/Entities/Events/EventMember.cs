@@ -69,7 +69,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
 
         var isAuto = adder?.EndsWith("add;") is true || remover?.EndsWith("remove;") is true;
         var isSimpleAuto = adder?.EndsWith("add;") is true && remover?.EndsWith("remove;") is true;
-        var isSimpleAdder = Adder is not null && Remover is null && !isAuto && adder?.Contains("=>") is true;
+        var isSimpleAdder = Adder is not null && Remover is null && !isAuto && adder?.Trim().StartsWith("add =>") is true;
 
         if (!isSimpleAuto)
         {
@@ -186,6 +186,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
         .WithAttributes(attributes)
         .WithCode(body)
         .AsReadOnly(isReadOnly)
+        .WithAccessModifier(AccessModifier)
     );
 
     /// <inheritdoc/>
@@ -212,6 +213,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
         .WithAttributes(attributes)
         .WithCode(body)
         .WithComment(comment)
+        .WithAccessModifier(AccessModifier)
     );
 
     /// <inheritdoc/>
@@ -255,7 +257,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     }
 
     /// <inheritdoc/>
-    public override EventMember WithComment(string comment)
+    public override EventMember WithComment(string? comment)
     {
         Comment = comment;
         return this;
@@ -281,6 +283,10 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
             x.Remover = default;
             x.IsReadOnly = default;
             x.IsUnsafe = default;
+            x.IsAbstract = default;
+            x.IsNew = default;
+            x.IsOverride = default;
+            x.IsVirtual = default;
         });
     }
 
@@ -296,7 +302,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
             if (isAuto)
                 sb.Append($" {adder.TrimStart()}");
             else
-                sb.Append($"{spaces}{adder}");
+                sb.Append($"{adder}");
         }
 
         if (!string.IsNullOrEmpty(remover))
@@ -304,7 +310,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
             if (isAuto)
                 sb.Append($" {remover.TrimStart()}");
             else
-                sb.Append($"{spaces}{remover}");
+                sb.Append($"{remover}");
         }
 
         if (isAuto)

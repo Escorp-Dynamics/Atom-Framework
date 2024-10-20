@@ -144,7 +144,7 @@ public class GenericEntity : Entity<GenericEntity>
     }
 
     /// <inheritdoc/>
-    public override GenericEntity WithComment(string comment)
+    public override GenericEntity WithComment(string? comment)
     {
         Comment = comment;
         return this;

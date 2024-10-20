@@ -95,7 +95,7 @@ public class EventAddMember : Entity<EventAddMember>
     }
 
     /// <inheritdoc/>
-    public override EventAddMember WithComment(string comment)
+    public override EventAddMember WithComment(string? comment)
     {
         Comment = comment;
         return this;

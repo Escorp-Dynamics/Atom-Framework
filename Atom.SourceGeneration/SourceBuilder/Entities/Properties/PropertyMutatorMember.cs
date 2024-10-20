@@ -80,7 +80,7 @@ public class PropertyMutatorMember : Entity<PropertyMutatorMember>
     }
 
     /// <inheritdoc/>
-    public override PropertyMutatorMember WithComment(string comment)
+    public override PropertyMutatorMember WithComment(string? comment)
     {
         Comment = comment;
         return this;

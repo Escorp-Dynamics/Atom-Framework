@@ -297,7 +297,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
-    public override ClassEntity WithComment(string comment)
+    public override ClassEntity WithComment(string? comment)
     {
         Comment = comment;
         return this;

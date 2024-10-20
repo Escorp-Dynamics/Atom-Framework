@@ -1,3 +1,5 @@
+#pragma warning disable RS2008
+
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
@@ -14,6 +16,15 @@ namespace Atom.SourceGeneration;
 /// <typeparam name="TSyntaxNode">Тип синтаксического узла провайдера.</typeparam>
 public abstract class SyntaxProvider<TSymbol, TSyntaxNode> : ISyntaxProvider<TSymbol, TSyntaxNode> where TSymbol : ISymbol where TSyntaxNode : MemberDeclarationSyntax
 {
+    private static readonly DiagnosticDescriptor UnhandledException = new(
+        "A1000",
+        "Необработанное исключение генератора",
+        "Генератор вызвал исключение {0}: {1}",
+        "Usage",
+        DiagnosticSeverity.Error,
+        true
+    );
+
     /// <summary>
     /// Используемые атрибуты.
     /// </summary>
@@ -46,13 +57,13 @@ public abstract class SyntaxProvider<TSymbol, TSyntaxNode> : ISyntaxProvider<TSy
     /// <param name="entityName">Имя сущности.</param>
     /// <param name="sources">Источники генерации.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected abstract void OnExecute(SourceProductionContext context, string entityName, ImmutableArray<SyntaxProviderNodeInfo<TSymbol, TSyntaxNode>> sources);
+    protected abstract void OnExecute(SourceProductionContext context, string entityName, ImmutableArray<ISyntaxProviderInfo<TSymbol, TSyntaxNode>> sources);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual bool Predicate(SyntaxNode node, CancellationToken cancellationToken)
     {
-        if (node is not MemberDeclarationSyntax member) return default;
+        if (node is not TSyntaxNode member) return default;
         if (Attributes.IsEmpty) return true;
         if (member.AttributeLists.Count is 0) return default;
 
@@ -60,8 +71,7 @@ public abstract class SyntaxProvider<TSymbol, TSyntaxNode> : ISyntaxProvider<TSy
             foreach (var attribute in attributeLists.Attributes)
             {
                 var attr = attribute.Name.ToString();
-                if (string.IsNullOrEmpty(attr)) continue;
-                if (Attributes.Any(x => attr.Equals(x, StringComparison.InvariantCultureIgnoreCase))) return true;
+                if (!string.IsNullOrEmpty(attr) && Attributes.Any(x => attr.Equals(x, StringComparison.InvariantCultureIgnoreCase))) return true;
             }
 
         return default;
@@ -69,33 +79,52 @@ public abstract class SyntaxProvider<TSymbol, TSyntaxNode> : ISyntaxProvider<TSy
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public virtual SyntaxProviderNodeInfo<TSymbol, TSyntaxNode> Transform(GeneratorSyntaxContext context, CancellationToken cancellationToken)
-        => new((TSyntaxNode)context.Node);
+    public virtual ISyntaxProviderInfo<TSymbol, TSyntaxNode> Transform(GeneratorSyntaxContext context, CancellationToken cancellationToken)
+        => new SyntaxProviderInfo<TSymbol, TSyntaxNode>((TSyntaxNode)context.Node);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public virtual void Execute(SourceProductionContext context, ImmutableArray<SyntaxProviderNodeInfo<TSymbol, TSyntaxNode>> sources)
+    public virtual void Execute(SourceProductionContext context, ImmutableArray<ISyntaxProviderInfo<TSymbol, TSyntaxNode>> sources)
     {
-        var members = new Dictionary<string, List<SyntaxProviderNodeInfo<TSymbol, TSyntaxNode>>>();
-
-        foreach (var target in sources)
+        try
         {
-            var entityName = GetEntityName(target.Node);
-            if (string.IsNullOrEmpty(entityName)) continue;
+            var members = new Dictionary<string, List<ISyntaxProviderInfo<TSymbol, TSyntaxNode>>>();
 
-            if (!members.TryGetValue(entityName, out var value))
+            foreach (var target in sources)
             {
-                value = [];
-                members[entityName] = [];
+                var entityName = GetEntityName(target.Node);
+                if (string.IsNullOrEmpty(entityName)) continue;
+
+                if (!members.TryGetValue(entityName, out var value))
+                {
+                    value = [];
+                    members[entityName] = value;
+                }
+
+                value.Add(target);
             }
 
-            value.Add(target);
+            foreach (var kv in members)
+            {
+                if (kv.Value.Count is 0) continue;
+                OnExecute(context, kv.Key, [.. kv.Value]);
+            }
         }
-
-        foreach (var kv in members)
+        catch (Exception ex)
         {
-            if (kv.Value.Count is 0) continue;
-            OnExecute(context, kv.Key, [.. kv.Value]);
+            ReportExceptionDiagnostic(context, ex, e => CreateExceptionDiagnostic(e, null));
         }
+    }
+
+    private static Diagnostic CreateExceptionDiagnostic(Exception exception, Location? location)
+        => Diagnostic.Create(UnhandledException, location, exception?.GetType(), exception?.Message);
+
+    private static void ReportExceptionDiagnostic(SourceProductionContext context, Exception exception, Func<Exception, Diagnostic> diagnosticFactory)
+    {
+        var diagnostic = diagnosticFactory(exception);
+        context.ReportDiagnostic(diagnostic);
+
+        var exceptionInfo = "#error " + exception.ToString().Replace("\n", "\n//");
+        context.AddSource("!" + diagnostic.Descriptor.Id + "-" + Guid.NewGuid(), exceptionInfo);
     }
 }

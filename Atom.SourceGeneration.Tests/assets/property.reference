@@ -2,28 +2,28 @@
 /// Тестовое свойство
 /// </summary>
 [Test]
-internal new virtual Int32 TestProperty { get; }
+internal new virtual System.Int32 TestProperty { get; }
 
 /// <summary>
 /// Тестовое свойство
 /// </summary>
-internal Object? TestProperty { set; }
+internal System.Object? TestProperty { set; }
 
-public Int32 Test2 { get; } = "str";
+System.Int32 Test2 { get; } = "str";
 
-public Int32 Test2 { get; } = anotherVar;
+System.Int32 Test2 { get; } = anotherVar;
 
-public Int32 Test2 { init; }
-
-/// <summary>
-/// Тестовое свойство
-/// </summary>
-public Object? TestProperty => field;
+System.Int32 Test2 { init; }
 
 /// <summary>
 /// Тестовое свойство
 /// </summary>
-protected internal Object? TestProperty
+public System.Object? TestProperty => field;
+
+/// <summary>
+/// Тестовое свойство
+/// </summary>
+protected internal System.Object? TestProperty
 {
     get => field;
     set => field = value;
@@ -32,7 +32,7 @@ protected internal Object? TestProperty
 /// <summary>
 /// Тестовое свойство
 /// </summary>
-public Object? TestProperty
+public System.Object? TestProperty
 {
     get 
     {
@@ -44,7 +44,7 @@ public Object? TestProperty
 /// <summary>
 /// Тестовое свойство
 /// </summary>
-protected internal Object? TestProperty
+protected internal System.Object? TestProperty
 {
     get => field;
     set 

@@ -231,7 +231,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
     }
 
     /// <inheritdoc/>
-    public override InterfaceEntity WithComment(string comment)
+    public override InterfaceEntity WithComment(string? comment)
     {
         Comment = comment;
         return this;

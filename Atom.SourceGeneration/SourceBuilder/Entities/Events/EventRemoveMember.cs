@@ -75,7 +75,7 @@ public class EventRemoveMember : Entity<EventRemoveMember>
     }
 
     /// <inheritdoc/>
-    public override EventRemoveMember WithComment(string comment)
+    public override EventRemoveMember WithComment(string? comment)
     {
         Comment = comment;
         return this;

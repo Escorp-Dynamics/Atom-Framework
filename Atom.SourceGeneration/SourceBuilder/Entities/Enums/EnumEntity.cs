@@ -49,7 +49,7 @@ public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
     }
 
     /// <inheritdoc/>
-    public override EnumEntity WithComment(string comment)
+    public override EnumEntity WithComment(string? comment)
     {
         Comment = comment;
         return this;

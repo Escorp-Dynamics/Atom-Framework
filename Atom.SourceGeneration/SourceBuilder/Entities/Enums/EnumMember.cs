@@ -27,7 +27,7 @@ public class EnumMember : Entity<EnumMember>
     }
 
     /// <inheritdoc/>
-    public override EnumMember WithComment(string comment)
+    public override EnumMember WithComment(string? comment)
     {
         Comment = comment;
         return this;

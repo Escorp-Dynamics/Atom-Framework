@@ -15,6 +15,7 @@ public static class Extensions
     private static readonly Lazy<char[]> lowerCaseTable = new(() => CreateTable(), true);
     private static readonly Lazy<char[]> invariantLowerCaseTable = new(() => CreateTable(default, true), true);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static char[] CreateTable(bool upper = default, bool invariant = default)
     {
         var table = new char[ushort.MaxValue + 1];
@@ -32,6 +33,35 @@ public static class Extensions
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static char GetChar(char c, char[] table) => c >= 'a' && c <= 'z' ? (char)(c - 'a' + 'A') : table[c];
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static string GetGenericName(Type type, string name, bool withNamespaces)
+    {
+        var index = name.IndexOf('`');
+        name = index > 0 ? name[..index] : name;
+
+        var genericArgs = type.GetGenericArguments();
+        var sb = ObjectPool<StringBuilder>.Shared.Rent();
+
+        if (name is not "System.Nullable" and not "Nullable")
+        {
+            sb.Append(name);
+            sb.Append('<');
+        }
+
+        for (var i = 0; i < genericArgs.Length; ++i)
+        {
+            if (i > 0) sb.Append(", ");
+            sb.Append(GetFriendlyName(genericArgs[i], withNamespaces));
+        }
+
+        if (name is not "System.Nullable" and not "Nullable") sb.Append('>');
+
+        var result = sb.ToString();
+        ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
+
+        return result;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static char GetLowerChar(char c, StringComparison comparison) => comparison switch
@@ -96,35 +126,21 @@ public static class Extensions
     /// Получает имя типа.
     /// </summary>
     /// <param name="type">Метаданные типа.</param>
-    public static string GetFriendlyName([NotNull] this Type type)
+    /// <param name="withNamespaces">Указывает, нужно ли возвращать полное имя типа с пространством имён.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static string GetFriendlyName([NotNull] this Type type, bool withNamespaces)
     {
-        var name = type.Name;
+        var name = withNamespaces && !string.IsNullOrEmpty(type.FullName) ? type.FullName : type.Name;
+        if (!type.IsGenericType) return type.IsNullable() ? name + '?' : name;
 
-        if (!type.IsGenericType)
-        {
-            if (type.IsNullable()) name += '?';
-            return name;
-        }
-
-        var index = name.IndexOf('`');
-        var genericArgs = type.GetGenericArguments();
-        var sb = ObjectPool<StringBuilder>.Shared.Rent();
-
-        sb.Append(index > 0 ? name[..index] : name);
-        sb.Append('<');
-
-        for (var i = 0; i < genericArgs.Length; ++i)
-        {
-            if (i > 0) sb.Append(", ");
-            sb.Append(GetFriendlyName(genericArgs[i]));
-        }
-
-        sb.Append('>');
-        if (type.IsNullable()) sb.Append('?');
-
-        var result = sb.ToString();
-        ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
-
-        return result;
+        var genericName = GetGenericName(type, name, withNamespaces);
+        return type.IsNullable() ? genericName + '?' : genericName;
     }
+
+    /// <summary>
+    /// Получает имя типа.
+    /// </summary>
+    /// <param name="type">Метаданные типа.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static string GetFriendlyName([NotNull] this Type type) => type.GetFriendlyName(true);
 }

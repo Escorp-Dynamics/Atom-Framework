@@ -191,7 +191,7 @@ public class MethodArgumentMember : Entity<MethodArgumentMember>
     }
 
     /// <inheritdoc/>
-    public override MethodArgumentMember WithComment(string comment)
+    public override MethodArgumentMember WithComment(string? comment)
     {
         Comment = comment;
         return this;

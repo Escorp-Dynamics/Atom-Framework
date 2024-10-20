@@ -1,9 +1,11 @@
+#nullable enable
+
 namespace Test;
 
 public partial class TestClass
 {
-    Int32 TestProperty { get; }
+    System.Int32 TestProperty { get; }
 
-    ValueTask OnPropertyChanged() { }
+    System.Threading.Tasks.ValueTask OnPropertyChanged() { }
 
 }

@@ -12,7 +12,7 @@ public partial class VirtualCamera : Reactively
     /// <summary>
     /// Разрешение камеры.
     /// </summary>
-    [Reactively]
+    [Reactively("Resolution", AccessModifier.Public, true)]
     private Size resolution;
 
     /// <summary>

@@ -52,15 +52,15 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\Atom.Media\Atom.Media.csproj" />
-		<ProjectReference
+		<!--<ProjectReference
 			Include="..\Atom.SourceGeneration\Atom.SourceGeneration.csproj"
 			PrivateAssets="all"
-			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />-->
 	</ItemGroup>
 
 	<ItemGroup>
-		<!--<PackageReference Include="Escorp.Atom.SourceGeneration" Version="0.0.14"
-			PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />-->
+		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="0.0.14"
+			PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
 	<PropertyGroup>

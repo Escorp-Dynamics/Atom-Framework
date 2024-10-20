@@ -385,7 +385,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    public override MethodMember WithComment(string comment)
+    public override MethodMember WithComment(string? comment)
     {
         Comment = comment;
         return this;
@@ -431,6 +431,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
             x.IsAbstract = default;
             x.IsVirtual = default;
             x.IsOverride = default;
+            x.Code = string.Empty;
         });
     }
 

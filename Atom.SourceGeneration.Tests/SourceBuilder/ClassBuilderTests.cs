@@ -1,7 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Loggers;
 
-namespace Atom.SourceGeneration;
+namespace Atom.SourceGeneration.Tests;
 
 public class ClassBuilderTests(ILogger logger) : BenchmarkTest<ClassBuilderTests>(logger)
 {

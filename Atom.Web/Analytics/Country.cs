@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Serialization;
 using System.Text.Json.Serialization;
+using Atom.Architect.Reactive;
 using Atom.Reactive;
 
 namespace Atom.Web.Analytics;
@@ -24,7 +25,7 @@ namespace Atom.Web.Analytics;
 [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
 [JsonConverter(typeof(CountryJsonConverter))]
 [Serializable]
-public class Country(string name, string internationalName, ushort code, string isoCode2, string isoCode3, TimeSpan timeZoneOffset, IEnumerable<Currency> currencies, ushort dialCode, string? domain, string? ioc) : Reactively, IParsable<Country?>, IEquatable<Country>, ISerializable
+public class Country(string name, string internationalName, [Reactively] ushort code, string isoCode2, string isoCode3, TimeSpan timeZoneOffset, IEnumerable<Currency> currencies, ushort dialCode, string? domain, string? ioc) : Reactively, IParsable<Country?>, IEquatable<Country>, ISerializable
 {
     #region Инициализации
 

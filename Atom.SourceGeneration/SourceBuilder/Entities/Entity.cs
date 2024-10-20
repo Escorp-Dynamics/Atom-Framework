@@ -13,7 +13,7 @@ public abstract class Entity : IEntity
     private readonly SparseArray<string> attributes = new(128);
 
     /// <inheritdoc/>
-    public string Comment { get; protected set; } = string.Empty;
+    public string? Comment { get; protected set; }
 
     /// <inheritdoc/>
     public IEnumerable<string> Attributes => attributes;
@@ -130,7 +130,7 @@ public abstract class Entity<T> : Entity, IEntity<T> where T : IEntity
     public abstract T WithName(string name);
 
     /// <inheritdoc/>
-    public abstract T WithComment(string comment);
+    public abstract T WithComment(string? comment);
 
     /// <inheritdoc/>
     public abstract T WithAttributes(params string[] attributes);

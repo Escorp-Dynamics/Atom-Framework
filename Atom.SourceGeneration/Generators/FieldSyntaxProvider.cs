@@ -34,7 +34,7 @@ public abstract class FieldSyntaxProvider : SyntaxProvider<IFieldSymbol, FieldDe
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override SyntaxProviderNodeInfo<IFieldSymbol, FieldDeclarationSyntax> Transform(GeneratorSyntaxContext context, CancellationToken cancellationToken)
+    public override ISyntaxProviderInfo<IFieldSymbol, FieldDeclarationSyntax> Transform(GeneratorSyntaxContext context, CancellationToken cancellationToken)
     {
         var member = base.Transform(context, cancellationToken);
         var field = member.Node;
@@ -43,7 +43,7 @@ public abstract class FieldSyntaxProvider : SyntaxProvider<IFieldSymbol, FieldDe
         {
             if (!TryGetFieldSymbol(context, variable, cancellationToken, out var symbol) || symbol is null) continue;
 
-            if (!Attributes.IsEmpty)
+            if (Attributes.IsEmpty)
             {
                 member.Symbol = symbol;
                 return member;
@@ -57,7 +57,7 @@ public abstract class FieldSyntaxProvider : SyntaxProvider<IFieldSymbol, FieldDe
             }
         }
 
-        return default;
+        return default(SyntaxProviderInfo<IFieldSymbol, FieldDeclarationSyntax>);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

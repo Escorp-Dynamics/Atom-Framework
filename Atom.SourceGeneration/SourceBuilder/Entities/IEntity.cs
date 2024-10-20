@@ -8,7 +8,7 @@ public interface IEntity
     /// <summary>
     /// Комментарий.
     /// </summary>
-    string Comment { get; }
+    string? Comment { get; }
 
     /// <summary>
     /// Аттрибуты.
@@ -74,7 +74,7 @@ public interface IEntity<out T> : IEntity where T : IEntity
     /// Добавляет комментарий.
     /// </summary>
     /// <param name="comment">Комментарий.</param>
-    T WithComment(string comment);
+    T WithComment(string? comment);
 
     /// <summary>
     /// Добавляет название.

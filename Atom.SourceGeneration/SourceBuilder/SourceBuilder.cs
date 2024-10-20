@@ -70,9 +70,11 @@ public class SourceBuilder : ISourceBuilder
 
         var sb = ObjectPool<StringBuilder>.Shared.Rent();
 
+        sb.AppendLine("#nullable enable\n");
+
         if (Usings.Any())
         {
-            foreach (var ns in usings) sb.AppendLine(CultureInfo.InvariantCulture, $"{ns};");
+            foreach (var ns in usings) sb.AppendLine(CultureInfo.InvariantCulture, $"using {ns};");
             sb.AppendLine();
         }
 

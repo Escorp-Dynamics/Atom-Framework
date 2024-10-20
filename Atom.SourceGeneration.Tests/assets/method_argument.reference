@@ -1,1 +1,1 @@
-Int32 arg1, in String? arg2, out Char arg3, ref Boolean arg4, params Byte[]? arg5
+System.Int32 arg1, in System.String? arg2, out System.Char arg3, ref System.Boolean arg4, params System.Byte[]? arg5

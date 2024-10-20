@@ -86,7 +86,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
         var setter = Setter?.Build(tabs);
 
         var isAuto = (!string.IsNullOrEmpty(getter) && getter.EndsWith("get;")) || (!string.IsNullOrEmpty(setter) && (setter.EndsWith("set;") || setter.EndsWith("init;")));
-        var isSimpleGetter = Getter is not null && Setter is null && !isAuto && !string.IsNullOrEmpty(getter) && getter.Contains("=>");
+        var isSimpleGetter = Getter is not null && Setter is null && !isAuto && !string.IsNullOrEmpty(getter) && getter.Trim().StartsWith("get =>");
 
         if (isSimpleGetter)
             sb.AppendLine(getter!.Trim()[3..]);
@@ -106,7 +106,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
             if (isAuto)
                 sb.Append($" {getter.TrimStart()}");
             else
-                sb.Append($"{spaces}{getter}");
+                sb.Append($"{getter}");
         }
 
         if (!string.IsNullOrEmpty(setter))
@@ -114,7 +114,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
             if (isAuto)
                 sb.Append($" {setter.TrimStart()}");
             else
-                sb.Append($"{spaces}{setter}");
+                sb.Append($"{setter}");
         }
 
         if (isAuto)
@@ -261,6 +261,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
         .WithAttributes(attributes)
         .WithCode(body)
         .AsReadOnly(isReadOnly)
+        .WithAccessModifier(AccessModifier)
     );
 
     /// <inheritdoc/>
@@ -288,6 +289,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
         .WithCode(body)
         .AsInit(isInit)
         .WithComment(comment)
+        .WithAccessModifier(AccessModifier)
     );
 
     /// <inheritdoc/>
@@ -359,7 +361,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    public override PropertyMember WithComment(string comment)
+    public override PropertyMember WithComment(string? comment)
     {
         Comment = comment;
         return this;

@@ -122,7 +122,7 @@ public class FieldMember : Member<FieldMember>, IFieldMember<FieldMember>
     }
 
     /// <inheritdoc/>
-    public override FieldMember WithComment(string comment)
+    public override FieldMember WithComment(string? comment)
     {
         Comment = comment;
         return this;

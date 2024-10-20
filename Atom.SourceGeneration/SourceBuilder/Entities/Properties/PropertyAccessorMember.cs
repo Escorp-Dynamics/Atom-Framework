@@ -87,7 +87,7 @@ public class PropertyAccessorMember : Entity<PropertyAccessorMember>
     }
 
     /// <inheritdoc/>
-    public override PropertyAccessorMember WithComment(string comment)
+    public override PropertyAccessorMember WithComment(string? comment)
     {
         Comment = comment;
         return this;

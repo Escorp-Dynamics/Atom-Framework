@@ -1,0 +1,63 @@
+#nullable enable
+
+using System.ComponentModel;
+
+namespace Atom.Media.Video;
+
+public partial class VirtualCamera
+{
+    /// <summary>
+    /// Разрешение камеры.
+    /// </summary>
+    public virtual global::System.Drawing.Size Resolution
+    {
+        get => resolution;
+        set => SetProperty(ref resolution, value);
+    }
+
+    /// <summary>
+    /// Частота кадров.
+    /// </summary>
+    public int FrameRate
+    {
+        get => frameRate;
+        set => SetProperty(ref frameRate, value);
+    }
+
+    /// <summary>
+    /// Происходит в момент изменения свойства <see cref="Resolution"/>.
+    /// </summary>
+    public virtual event System.ComponentModel.PropertyChangingEventHandler? ResolutionChanging
+    {
+        add => PropertyChanging += value;
+        remove => PropertyChanging -= value;
+    }
+
+    /// <summary>
+    /// Происходит после изменения свойства <see cref="Resolution"/>.
+    /// </summary>
+    public virtual event System.ComponentModel.PropertyChangedEventHandler? ResolutionChanged
+    {
+        add => PropertyChanged += value;
+        remove => PropertyChanged -= value;
+    }
+
+    /// <summary>
+    /// Происходит в момент изменения свойства <see cref="FrameRate"/>.
+    /// </summary>
+    public event System.ComponentModel.PropertyChangingEventHandler? FrameRateChanging
+    {
+        add => PropertyChanging += value;
+        remove => PropertyChanging -= value;
+    }
+
+    /// <summary>
+    /// Происходит после изменения свойства <see cref="FrameRate"/>.
+    /// </summary>
+    public event System.ComponentModel.PropertyChangedEventHandler? FrameRateChanged
+    {
+        add => PropertyChanged += value;
+        remove => PropertyChanged -= value;
+    }
+
+}
