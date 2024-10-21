@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -29,7 +30,7 @@ public class CountryJsonConverter<T> : JsonConverter<Country>
     }
 
     /// <inheritdoc />
-    public override void Write(Utf8JsonWriter writer, Country? value, JsonSerializerOptions options)
+    public override void Write([NotNull] Utf8JsonWriter writer, Country? value, JsonSerializerOptions options)
     {
         if (value is null)
         {

@@ -27,7 +27,7 @@
 		<GenerateDocumentationFile>True</GenerateDocumentationFile>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.0.13</Version>
+		<Version>0.0.15</Version>
 		<Authors>Yuriy Yesin, Escorp Labs, Jenya Rostov</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -39,12 +39,13 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
-	<!--<ItemGroup>
-		<PackageReference Include="Escorp.Atom" Version="0.1.10" />
-	</ItemGroup>-->
+	<ItemGroup>
+		<PackageReference Include="Escorp.Atom" Version="0.2.7" />
+	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\Atom\Atom.csproj" />
+		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="0.0.15"
+			PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -57,5 +58,9 @@
 			<Pack>True</Pack>
 		</None>
 	</ItemGroup>
+
+	<PropertyGroup>
+		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+	</PropertyGroup>
 
 </Project>

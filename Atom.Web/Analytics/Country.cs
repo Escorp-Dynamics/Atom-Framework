@@ -2,7 +2,6 @@
 using System.Runtime.Serialization;
 using System.Text.Json.Serialization;
 using Atom.Architect.Reactive;
-using Atom.Reactive;
 
 namespace Atom.Web.Analytics;
 
@@ -24,9 +23,79 @@ namespace Atom.Web.Analytics;
 /// <param name="ioc">Международный олимпийский код.</param>
 [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
 [JsonConverter(typeof(CountryJsonConverter))]
-[Serializable]
-public class Country(string name, string internationalName, [Reactively] ushort code, string isoCode2, string isoCode3, TimeSpan timeZoneOffset, IEnumerable<Currency> currencies, ushort dialCode, string? domain, string? ioc) : Reactively, IParsable<Country?>, IEquatable<Country>, ISerializable
+public sealed partial class Country(
+    string name,
+    string internationalName,
+    ushort code,
+    string isoCode2,
+    string isoCode3,
+    TimeSpan timeZoneOffset,
+    IEnumerable<Currency> currencies,
+    ushort dialCode,
+    string? domain,
+    string? ioc
+) : Reactively, IParsable<Country?>, IEquatable<Country>
 {
+    /// <summary>
+    /// Название.
+    /// </summary>
+    [Reactively]
+    private string name = name;
+
+    /// <summary>
+    /// Название (интернациональное).
+    /// </summary>
+    [Reactively]
+    private string internationalName = internationalName;
+
+    /// <summary>
+    /// Цифровой код страны.
+    /// </summary>
+    [Reactively]
+    private ushort code = code;
+
+    /// <summary>
+    /// Двухсимвольный код страны.
+    /// </summary>
+    [Reactively]
+    private string isoCode2 = isoCode2;
+
+    /// <summary>
+    /// Трёхсимвольный код страны.
+    /// </summary>
+    [Reactively]
+    private string isoCode = isoCode3;
+
+    /// <summary>
+    /// Валюты страны.
+    /// </summary>
+    [Reactively]
+    private IEnumerable<Currency> currencies = currencies;
+
+    /// <summary>
+    /// Международный телефонный код страны.
+    /// </summary>
+    [Reactively]
+    private ushort dialCode = dialCode;
+
+    /// <summary>
+    /// Домен.
+    /// </summary>
+    [Reactively]
+    private string? domain = domain;
+
+    /// <summary>
+    /// Международный олимпийский код.
+    /// </summary>
+    [Reactively]
+    private string? ioc = ioc;
+
+    /// <summary>
+    /// Смещение часового пояса от UTC.
+    /// </summary>
+    [Reactively]
+    private TimeSpan timeZoneOffset = timeZoneOffset;
+
     #region Инициализации
 
     private static readonly Lazy<Country> aus = new(() => new Country("Австралия", "Australia", 036, "AU", "AUS", new TimeSpan(10, 0, 0), Currency.AUD, 61, ".au", "AUS"), true);
@@ -282,111 +351,14 @@ public class Country(string name, string internationalName, [Reactively] ushort 
     #endregion
 
     /// <summary>
-    /// Название.
-    /// </summary>
-    public string Name { get; set; } = name;
-
-    /// <summary>
-    /// Название (интернациональное).
-    /// </summary>
-    public string InternationalName { get; set; } = internationalName;
-
-    /// <summary>
-    /// Цифровой код страны.
-    /// </summary>
-    public ushort Code
-    {
-        get => code;
-        set => SetProperty(ref code, value);
-    }
-
-    /// <summary>
-    /// Двухсимвольный код страны.
-    /// </summary>
-    public string IsoCode2
-    {
-        get => isoCode2;
-        set => SetProperty(ref isoCode2, value);
-    }
-
-    /// <summary>
-    /// Трёхсимвольный код страны.
-    /// </summary>
-    public string IsoCode
-    {
-        get => isoCode3;
-        set => SetProperty(ref isoCode3, value);
-    }
-
-    /// <summary>
-    /// Валюта страны.
-    /// </summary>
-    public IEnumerable<Currency> Currencies
-    {
-        get => currencies;
-        set => SetProperty(ref currencies, value);
-    }
-
-    /// <summary>
     /// Основная валюта страны.
     /// </summary>
-    public Currency? Currency => Currencies.FirstOrDefault();
-
-    /// <summary>
-    /// Международный телефонный код страны.
-    /// </summary>
-    public ushort DialCode
-    {
-        get => dialCode;
-        set => SetProperty(ref dialCode, value);
-    }
-
-    /// <summary>
-    /// Домен.
-    /// </summary>
-    public string? Domain
-    {
-        get => domain;
-        set => SetProperty(ref domain, value);
-    }
-
-    /// <summary>
-    /// Международный олимпийский код.
-    /// </summary>
-    public string? IOC
-    {
-        get => ioc;
-        set => SetProperty(ref ioc, value);
-    }
+    public Currency? Currency => currencies.FirstOrDefault();
 
     /// <summary>
     /// Информация о часовом поясе.
     /// </summary>
     public TimeZoneInfo? TimeZone => TimeZoneInfo.GetSystemTimeZones().FirstOrDefault(t => t.BaseUtcOffset == TimeZoneOffset);
-
-    /// <summary>
-    /// Смещение часового пояса от UTC.
-    /// </summary>
-    public TimeSpan TimeZoneOffset
-    {
-        get => timeZoneOffset;
-        set => SetProperty(ref timeZoneOffset, value);
-    }
-
-    /// <summary>
-    /// Происходит в момент изменения двухсимвольного кода страны.
-    /// </summary>
-    public event AsyncEventHandler<Country>? CodeChanged;
-
-    /// <summary>
-    /// Происходит в момент изменения трехсимвольного кода страны.
-    /// </summary>
-    public event AsyncEventHandler<Country>? IsoCodeChanged;
-
-    /// <summary>
-    /// Происходит в момент изменения трехсимвольного кода страны.
-    /// </summary>
-    public event AsyncEventHandler<Country>? IsoCode2Changed;
 
     #region Коды
 
@@ -2965,39 +2937,7 @@ public class Country(string name, string internationalName, [Reactively] ushort 
     public Country(string name, string internationalName, ushort code, string isoCode2, string isoCode3, TimeSpan timeZoneOffset, ushort dialCode, string? domain)
         : this(name, internationalName, code, isoCode2, isoCode3, timeZoneOffset, dialCode, domain, default) { }
 
-    /// <summary>
-    /// Инициализирует новый экземпляр <see cref="Country"/> из данных сериализации.
-    /// </summary>
-    /// <param name="info">Объект <see cref="SerializationInfo"/>, содержащий данные о сериализации.</param>
-    /// <param name="context">Контекст потоковой передачи данных.</param>
-    public Country([NotNull] SerializationInfo info, StreamingContext context)
-        : this(
-            info.GetString("Name") ?? string.Empty,
-            info.GetString("InternationalName") ?? string.Empty,
-            info.GetUInt16("Code"),
-            info.GetString("IsoCode2") ?? string.Empty,
-            info.GetString("IsoCode") ?? string.Empty,
-            TimeSpan.FromHours(info.GetDouble("TimeZoneOffset")),
-            info.GetUInt16("DialCode"),
-            info.GetString("Domain"),
-            info.GetString("IOC"))
-    { }
-
     #endregion
-
-    /// <inheritdoc />
-    protected override async void OnPropertyChanged(string? propertyName = default)
-    {
-        base.OnPropertyChanged(propertyName);
-
-        switch (propertyName)
-        {
-            case "Code": await CodeChanged.On(this).ConfigureAwait(false); break;
-            case "IsoCode": await IsoCodeChanged.On(this).ConfigureAwait(false); break;
-            case "IsoCode2": await IsoCode2Changed.On(this).ConfigureAwait(false); break;
-            default: break;
-        }
-    }
 
     /// <summary>
     /// Возвращает хеш-код для объекта.
@@ -3012,13 +2952,22 @@ public class Country(string name, string internationalName, [Reactively] ushort 
     /// <returns>
     /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
     /// </returns>
-    public override bool Equals(object? obj) => obj is not null && (obj is string str
-        ? str.Length is 2
-            ? str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == IsoCode2.GetHashCode(StringComparison.InvariantCultureIgnoreCase)
-            : str.Length is 3 && str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == GetHashCode()
-        : obj is ushort code
-        ? code.GetHashCode() == Code.GetHashCode()
-        : obj is Country country && country.GetHashCode() == GetHashCode());
+    public override bool Equals(object? obj)
+    {
+        if (obj is string str)
+        {
+            if (str.Length is 2)
+                return str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == IsoCode2.GetHashCode(StringComparison.InvariantCultureIgnoreCase);
+            else if (str.Length is 3)
+                return str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == GetHashCode();
+            return false;
+        }
+
+        if (obj is ushort c) return c.GetHashCode() == Code.GetHashCode();
+        if (obj is Country country) return country.GetHashCode() == GetHashCode();
+
+        return false;
+    }
 
     /// <summary>
     /// Сравнивает текущий экземпляр <see cref="Country"/> с заданным экземпляром <see cref="Country"/>.
@@ -3039,25 +2988,7 @@ public class Country(string name, string internationalName, [Reactively] ushort 
     /// Преобразует текущий экземпляр <see cref="Country"/> в цифровой код страны.
     /// </summary>
     /// <returns>Цифровой код страны.</returns>
-    public virtual ushort ToUInt16() => Code;
-
-    /// <summary>
-    /// Заполняет <see cref="SerializationInfo"/> данными о текущем объекте <see cref="Country"/>.
-    /// </summary>
-    /// <param name="info">Объект <see cref="SerializationInfo"/>, который наполняется данными о текущем объекте.</param>
-    /// <param name="context">Контекст потоковой передачи данных.</param>
-    public virtual void GetObjectData([NotNull] SerializationInfo info, StreamingContext context)
-    {
-        info.AddValue("Name", Name);
-        info.AddValue("InternationalName", InternationalName);
-        info.AddValue("Code", Code);
-        info.AddValue("IsoCode2", IsoCode2);
-        info.AddValue("IsoCode", IsoCode);
-        info.AddValue("TimeZoneOffset", TimeZoneOffset.TotalHours);
-        info.AddValue("DialCode", DialCode);
-        info.AddValue("Domain", Domain);
-        info.AddValue("IOC", IOC);
-    }
+    public ushort ToUInt16() => Code;
 
     /// <summary>
     /// Возвращает экземпляр <see cref="Country"/> по его символьному коду.
@@ -3584,23 +3515,6 @@ public class Country(string name, string internationalName, [Reactively] ushort 
     public static bool TryParse([NotNullWhen(true)] string? s, [MaybeNullWhen(false)] out Country? result) => TryParse(s, default, out result);
 
     /// <summary>
-    /// Возвращает экземпляр <see cref="Country"/> по его символьному коду. 
-    /// </summary>
-    /// <param name="s">Символьный код страны.</param>
-    /// <param name="provider">Параметры форматирования.</param>
-    /// <returns>Экземпляр <see cref="Country"/>.</returns>
-    /// <exception cref="FormatException" />
-    public static Country Parse(string s, IFormatProvider? provider) => !TryParse(s, provider, out var result) || result is null ? throw new FormatException() : result;
-
-    /// <summary>
-    /// Возвращает экземпляр <see cref="Country"/> по его символьному коду. 
-    /// </summary>
-    /// <param name="s">Символьный код страны.</param>
-    /// <returns>Экземпляр <see cref="Country"/>.</returns>
-    /// <exception cref="FormatException" />
-    public static Country Parse(string s) => Parse(s, default);
-
-    /// <summary>
     /// Возвращает экземпляр <see cref="Country"/> по его цифровому коду.
     /// </summary>
     /// <param name="code">Цифровой код страны.</param>
@@ -3865,6 +3779,23 @@ public class Country(string name, string internationalName, [Reactively] ushort 
 
         return country is not null;
     }
+
+    /// <summary>
+    /// Возвращает экземпляр <see cref="Country"/> по его символьному коду. 
+    /// </summary>
+    /// <param name="s">Символьный код страны.</param>
+    /// <param name="provider">Параметры форматирования.</param>
+    /// <returns>Экземпляр <see cref="Country"/>.</returns>
+    /// <exception cref="FormatException" />
+    public static Country Parse(string s, IFormatProvider? provider) => !TryParse(s, provider, out var result) || result is null ? throw new FormatException() : result;
+
+    /// <summary>
+    /// Возвращает экземпляр <see cref="Country"/> по его символьному коду. 
+    /// </summary>
+    /// <param name="s">Символьный код страны.</param>
+    /// <returns>Экземпляр <see cref="Country"/>.</returns>
+    /// <exception cref="FormatException" />
+    public static Country Parse(string s) => Parse(s, default);
 
     /// <summary>
     /// Возвращает экземпляр <see cref="Currency"/> по его цифровому коду. 

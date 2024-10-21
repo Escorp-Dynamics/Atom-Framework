@@ -8,7 +8,6 @@ namespace Atom.Web.Proxies;
 /// </summary>
 [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
 [JsonConverter(typeof(ProxyJsonConverter))]
-[Serializable]
 public class Proxy : WebProxy
 {
     private string Scheme => Type switch

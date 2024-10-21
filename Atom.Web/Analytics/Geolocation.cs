@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Serialization;
 using System.Text.Json.Serialization;
-using Atom.Reactive;
+using Atom.Architect.Reactive;
 
 namespace Atom.Web.Analytics;
 
@@ -10,8 +10,7 @@ namespace Atom.Web.Analytics;
 /// </summary>
 [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
 //[JsonConverter(typeof(GeolocationJsonConverter))]
-[Serializable]
-public class Geolocation : Reactively, IParsable<Geolocation?>, IEquatable<Geolocation>, ISerializable
+public class Geolocation : Reactively, IParsable<Geolocation?>, IEquatable<Geolocation>
 {
     /// <summary>
     /// Широта геолокации.

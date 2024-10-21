@@ -30,8 +30,10 @@ public class ReactivelyFieldSyntaxProvider : FieldSyntaxProvider
         foreach (var field in sources)
         {
             var node = field.Node;
-            var type = field.Symbol?.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) ?? node.Declaration.Type.ToString();
 
+            var type = field.Symbol?.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) ?? node.Declaration.Type.ToString();
+            if (!type.EndsWith('?') && field.Symbol?.Type.NullableAnnotation is NullableAnnotation.Annotated) type += "?";
+            
             var comment = string.Empty;
             field.Symbol?.TryParseXmlDocumentation(out comment);
 

@@ -40,7 +40,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!--<PackageReference Include="Escorp.Atom.Web" Version="0.0.10" />-->
+    <!--<PackageReference Include="Escorp.Atom.Web" Version="0.0.15" />-->
     <PackageReference Include="Microsoft.ClearScript.V8" Version="7.4.5" />
   </ItemGroup>
 

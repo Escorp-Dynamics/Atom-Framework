@@ -1,4 +1,3 @@
-#pragma warning disable CA1823, IDE0051, CS0169
 using Atom.Architect.Reactive;
 using System.Drawing;
 

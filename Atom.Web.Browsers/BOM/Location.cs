@@ -1,4 +1,4 @@
-using Atom.Reactive;
+using Atom.Architect.Reactive;
 using Atom.Web.Browsers.DOM;
 using Microsoft.ClearScript;
 

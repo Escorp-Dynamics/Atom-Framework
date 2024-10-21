@@ -1,7 +1,7 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Serialization;
 using System.Text.Json.Serialization;
-using Atom.Reactive;
+using Atom.Architect.Reactive;
 
 namespace Atom.Web.Analytics;
 
@@ -20,9 +20,59 @@ namespace Atom.Web.Analytics;
 /// <param name="symbol">Символьный код (Unicode).</param>
 [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
 [JsonConverter(typeof(CurrencyJsonConverter))]
-[Serializable]
-public class Currency(string name, string internationalName, ushort code, string isoCode, string? taylorCode, string? kkb, char? symbol) : Reactively, IParsable<Currency?>, IEquatable<Currency>, ISerializable
+public sealed partial class Currency
+(
+    string name,
+    string internationalName,
+    ushort code,
+    string isoCode,
+    string? taylorCode,
+    string? kkb,
+    char? symbol
+) : Reactively, IParsable<Currency?>, IEquatable<Currency>
 {
+    /// <summary>
+    /// Название.
+    /// </summary>
+    [Reactively]
+    private string name = name;
+
+    /// <summary>
+    /// Название (интернациональное).
+    /// </summary>
+    [Reactively]
+    private string internationalName = internationalName;
+
+    /// <summary>
+    /// Цифровой код валюты.
+    /// </summary>
+    [Reactively]
+    private ushort code = code;
+
+    /// <summary>
+    /// Символьный код валюты.
+    /// </summary>
+    [Reactively]
+    private string isoCode = isoCode;
+
+    /// <summary>
+    /// Код Тэйлора.
+    /// </summary>
+    [Reactively]
+    private string? taylorCode = taylorCode;
+
+    /// <summary>
+    /// Код KKB.
+    /// </summary>
+    [Reactively]
+    private string? kkb = kkb;
+
+    /// <summary>
+    /// Символьный код (Unicode).
+    /// </summary>
+    [Reactively]
+    private char? symbol = symbol;
+
     #region Инициализации
 
     private static readonly Lazy<Currency> aed = new(() => new Currency("Дирхам (ОАЭ)", "UAE Dirham", 784, "AED"), true);
@@ -210,71 +260,6 @@ public class Currency(string name, string internationalName, ushort code, string
     private static readonly Lazy<Currency> jep = new(() => new Currency("Джерсийский фунт", "Jersey pound", 0, "JEP", "JEP", '£'), true);
 
     #endregion
-
-    /// <summary>
-    /// Название.
-    /// </summary>
-    public string Name { get; set; } = name;
-
-    /// <summary>
-    /// Название (интернациональное).
-    /// </summary>
-    public string InternationalName { get; set; } = internationalName;
-
-    /// <summary>
-    /// Цифровой код валюты.
-    /// </summary>
-    public ushort Code
-    {
-        get => code;
-        set => SetProperty(ref code, value);
-    }
-
-    /// <summary>
-    /// Символьный код валюты.
-    /// </summary>
-    public string IsoCode
-    {
-        get => isoCode;
-        set => SetProperty(ref isoCode, value);
-    }
-
-    /// <summary>
-    /// Код Тэйлора.
-    /// </summary>
-    public string? TaylorCode
-    {
-        get => taylorCode;
-        set => SetProperty(ref taylorCode, value);
-    }
-
-    /// <summary>
-    /// Код KKB.
-    /// </summary>
-    public string? KKB
-    {
-        get => kkb;
-        set => SetProperty(ref kkb, value);
-    }
-
-    /// <summary>
-    /// Символьный код (Unicode).
-    /// </summary>
-    public char? Symbol
-    {
-        get => symbol;
-        set => SetProperty(ref symbol, value);
-    }
-
-    /// <summary>
-    /// Происходит в момент изменения цифрового кода валюты.
-    /// </summary>
-    public event AsyncEventHandler<Currency>? CodeChanged;
-
-    /// <summary>
-    /// Происходит в момент изменения символьного кода валюты.
-    /// </summary>
-    public event AsyncEventHandler<Currency>? IsoCodeChanged;
 
     #region Коды
 
@@ -1256,36 +1241,7 @@ public class Currency(string name, string internationalName, ushort code, string
     /// <param name="isoCode">Символьный код валюты (ISO 4217).</param>
     public Currency(string name, string internationalName, ushort code, string isoCode) : this(name, internationalName, code, isoCode, default, default, default) { }
 
-    /// <summary>
-    /// Инициализирует новый экземпляр <see cref="Currency"/> из данных сериализации.
-    /// </summary>
-    /// <param name="info">Объект <see cref="SerializationInfo"/>, содержащий данные о сериализации.</param>
-    /// <param name="context">Контекст потоковой передачи данных.</param>
-    protected Currency([NotNull] SerializationInfo info, StreamingContext context)
-        : this(
-            info.GetString("Name") ?? string.Empty,
-            info.GetString("InternationalName") ?? string.Empty,
-            info.GetUInt16("Code"),
-            info.GetString("IsoCode") ?? string.Empty,
-            info.GetString("TaylorCode"),
-            info.GetString("KKB"),
-            info.GetChar("Symbol"))
-    { }
-
     #endregion
-
-    /// <inheritdoc />
-    protected override async void OnPropertyChanged(string? propertyName = default)
-    {
-        base.OnPropertyChanged(propertyName);
-
-        switch (propertyName)
-        {
-            case "Code": await CodeChanged.On(this).ConfigureAwait(false); break;
-            case "IsoCode": await IsoCodeChanged.On(this).ConfigureAwait(false); break;
-            default: break;
-        }
-    }
 
     /// <summary>
     /// Возвращает хеш-код для объекта.
@@ -1300,11 +1256,13 @@ public class Currency(string name, string internationalName, ushort code, string
     /// <returns>
     /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
     /// </returns>
-    public override bool Equals(object? obj) => obj is not null && (obj is string str
-        ? str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == IsoCode.GetHashCode(StringComparison.InvariantCultureIgnoreCase)
-        : obj is ushort code
-        ? code.GetHashCode() == Code.GetHashCode()
-        : obj is Currency currency && currency.GetHashCode() == GetHashCode());
+    public override bool Equals(object? obj)
+    {
+        if (obj is string str) return str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == IsoCode.GetHashCode(StringComparison.InvariantCultureIgnoreCase);
+        else if (obj is ushort с) return с.GetHashCode() == Code.GetHashCode();
+        else if (obj is Currency currency) return currency.GetHashCode() == GetHashCode();
+        else return false;
+    }
 
     /// <summary>
     /// Сравнивает текущий экземпляр <see cref="Currency"/> с заданным экземпляром <see cref="Currency"/>.
@@ -1322,26 +1280,10 @@ public class Currency(string name, string internationalName, ushort code, string
     public override string ToString() => IsoCode;
 
     /// <summary>
-    /// Заполняет <see cref="SerializationInfo"/> данными о текущем объекте <see cref="Currency"/>.
-    /// </summary>
-    /// <param name="info">Объект <see cref="SerializationInfo"/>, который наполняется данными о текущем объекте.</param>
-    /// <param name="context">Контекст потоковой передачи данных.</param>
-    public virtual void GetObjectData([NotNull] SerializationInfo info, StreamingContext context)
-    {
-        info.AddValue("Name", Name);
-        info.AddValue("InternationalName", InternationalName);
-        info.AddValue("Code", Code);
-        info.AddValue("IsoCode", IsoCode);
-        info.AddValue("TaylorCode", TaylorCode);
-        info.AddValue("KKB", KKB);
-        info.AddValue("Symbol", Symbol);
-    }
-
-    /// <summary>
     /// Преобразует текущий экземпляр <see cref="Currency"/> в цифровой код валюты.
     /// </summary>
     /// <returns>Цифровой код валюты.</returns>
-    public virtual ushort ToUInt16() => Code;
+    public ushort ToUInt16() => Code;
 
     /// <summary>
     /// Возвращает экземпляр <see cref="Currency"/> по его символьному коду.
@@ -1553,23 +1495,6 @@ public class Currency(string name, string internationalName, ushort code, string
     public static bool TryParse([NotNullWhen(true)] string? s, [MaybeNullWhen(false)] out Currency? result) => TryParse(s, default, out result);
 
     /// <summary>
-    /// Возвращает экземпляр <see cref="Currency"/> по его символьному коду. 
-    /// </summary>
-    /// <param name="s">Символьный код валюты.</param>
-    /// <param name="provider">Параметры форматирования.</param>
-    /// <returns>Экземпляр <see cref="Currency"/>.</returns>
-    /// <exception cref="FormatException" />
-    public static Currency Parse(string s, IFormatProvider? provider) => !TryParse(s, provider, out var result) || result is null ? throw new FormatException() : result;
-
-    /// <summary>
-    /// Возвращает экземпляр <see cref="Currency"/> по его символьному коду. 
-    /// </summary>
-    /// <param name="s">Символьный код валюты.</param>
-    /// <returns>Экземпляр <see cref="Currency"/>.</returns>
-    /// <exception cref="FormatException" />
-    public static Currency Parse(string s) => Parse(s, default);
-
-    /// <summary>
     /// Возвращает экземпляр <see cref="Currency"/> по его цифровому коду.
     /// </summary>
     /// <param name="code">Цифровой код валюты.</param>
@@ -1765,6 +1690,23 @@ public class Currency(string name, string internationalName, ushort code, string
 
         return currency is not null;
     }
+
+    /// <summary>
+    /// Возвращает экземпляр <see cref="Currency"/> по его символьному коду. 
+    /// </summary>
+    /// <param name="s">Символьный код валюты.</param>
+    /// <param name="provider">Параметры форматирования.</param>
+    /// <returns>Экземпляр <see cref="Currency"/>.</returns>
+    /// <exception cref="FormatException" />
+    public static Currency Parse(string s, IFormatProvider? provider) => !TryParse(s, provider, out var result) || result is null ? throw new FormatException() : result;
+
+    /// <summary>
+    /// Возвращает экземпляр <see cref="Currency"/> по его символьному коду. 
+    /// </summary>
+    /// <param name="s">Символьный код валюты.</param>
+    /// <returns>Экземпляр <see cref="Currency"/>.</returns>
+    /// <exception cref="FormatException" />
+    public static Currency Parse(string s) => Parse(s, default);
 
     /// <summary>
     /// Возвращает экземпляр <see cref="Currency"/> по его цифровому коду. 

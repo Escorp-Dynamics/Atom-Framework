@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Atom.Web.Analytics;
@@ -27,7 +28,7 @@ public class CurrencyJsonConverter<T> : JsonConverter<Currency>
     }
 
     /// <inheritdoc />
-    public override void Write(Utf8JsonWriter writer, Currency? value, JsonSerializerOptions options)
+    public override void Write([NotNull] Utf8JsonWriter writer, Currency? value, JsonSerializerOptions options)
     {
         if (value is null)
         {

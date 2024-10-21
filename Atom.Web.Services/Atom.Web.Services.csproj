@@ -39,7 +39,7 @@
 	</PropertyGroup>
 
 	<!-- <ItemGroup>
-    	<PackageReference Include="Escorp.Atom.Web" Version="0.0.1" />
+    	<PackageReference Include="Escorp.Atom.Web" Version="0.0.15" />
   	</ItemGroup> -->
 
 	<ItemGroup>
