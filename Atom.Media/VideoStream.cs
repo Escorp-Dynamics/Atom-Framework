@@ -85,7 +85,7 @@ public class VideoStream : Stream
     /// <param name="pixelFormat">Формат пикселей видео.</param>
     public VideoStream(string path, Size resolution, PixelFormat pixelFormat)
     {
-        var result = FFmpeg.OpenInput(out var formatContext, path, nint.Zero, nint.Zero);
+        var result = FFmpeg.OpenInput(out formatContext, path, nint.Zero, nint.Zero);
         if (result < 0) throw new IOException("Не удалось открыть входной поток");
 
         result = FFmpeg.FindStreamInfo(formatContext, nint.Zero);
@@ -95,18 +95,14 @@ public class VideoStream : Stream
         if (index < 0) throw new IOException("Медиапоток не найден");
 
         var stream = Marshal.ReadIntPtr(formatContext + 64 + (index * IntPtr.Size));
-        var codecContext = Marshal.ReadIntPtr(stream + 32);
+        codecContext = Marshal.ReadIntPtr(stream + 32);
 
         result = FFmpeg.Open2(formatContext, IntPtr.Zero, IntPtr.Zero);
         if (result < 0) throw new IOException("Не удалось открыть кодек");
 
-        var frame = FFmpeg.AllocFrame();
-        var packet = FFmpeg.AllocPacket();
+        frame = FFmpeg.AllocFrame();
+        packet = FFmpeg.AllocPacket();
 
-        this.formatContext = formatContext;
-        this.codecContext = codecContext;
-        this.frame = frame;
-        this.packet = packet;
         this.resolution = resolution;
         this.pixelFormat = pixelFormat;
     }

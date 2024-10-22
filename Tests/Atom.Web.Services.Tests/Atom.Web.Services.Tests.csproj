@@ -4,7 +4,6 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <DefineConstants>$(DefineConstants);BENCHMARKS</DefineConstants>
 
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
 
@@ -32,19 +31,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Atom\Atom.csproj" />
+    <Folder Include="Proxy\" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="assets\text\short.txt">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-    </None>
-
-    <None Update="assets\text\long.txt">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-    </None>
+    <ProjectReference Include="..\Atom.Tests\Atom.Tests.csproj" />
+    <ProjectReference Include="..\..\Atom.Web.Services\Atom.Web.Services.csproj" />
   </ItemGroup>
 
 </Project>

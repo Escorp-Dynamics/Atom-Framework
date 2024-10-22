@@ -4,54 +4,34 @@ namespace Atom.Media.Video;
 
 internal static partial class V4L2
 {
-    private const string LibC = "libc";
+    private const string Lib = "libv4l2.so.0";
 
-    [LibraryImport(LibC, EntryPoint = "open", StringMarshalling = StringMarshalling.Utf8)]
+    public const uint VIDIOC_S_FMT = 0x40000000 + 51;
+    public const uint VIDIOC_S_CTRL = 0x40000000 + 28;
+    public const uint BUF_TYPE_VIDEO_CAPTURE = 1;
+    public const uint PIX_FMT_YUV420 = 0x32315659;
+    public const uint FIELD_NONE = 1;
+
+    public const int CID_BASE = 0x00980900;
+    public const int CID_NAME = CID_BASE + 1;
+    public const int CID_VERSION = CID_BASE + 2;
+    public const int CID_MANUFACTURER = CID_BASE + 3;
+
+    [LibraryImport(Lib, EntryPoint = "v4l2_open", StringMarshalling = StringMarshalling.Utf8)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    public static partial int Open(string path, int flags);
+    public static partial int Open(string device, int flags);
 
-    [LibraryImport(LibC, EntryPoint = "close")]
+    [LibraryImport(Lib, EntryPoint = "v4l2_close", StringMarshalling = StringMarshalling.Utf8)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     public static partial int Close(int fd);
 
-    [LibraryImport(LibC, EntryPoint = "ioctl", SetLastError = true)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    public static partial int Ioctl(int fd, uint request, ref Capability cap);
-
-    [LibraryImport(LibC, EntryPoint = "ioctl", SetLastError = true)]
+    [LibraryImport(Lib, EntryPoint = "v4l2_ioctl", StringMarshalling = StringMarshalling.Utf8)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     public static partial int Ioctl(int fd, uint request, ref Format fmt);
 
-    [LibraryImport(LibC, EntryPoint = "ioctl", SetLastError = true)]
+    [LibraryImport(Lib, EntryPoint = "v4l2_ioctl", StringMarshalling = StringMarshalling.Utf8)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    public static partial int Ioctl(int fd, uint request, ref Buffer buf);
-
-    [LibraryImport(LibC, EntryPoint = "mmap", SetLastError = true)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    public static partial nint Mmap(nint addr, uint length, int prot, int flags, int fd, uint offset);
-
-    [LibraryImport(LibC, EntryPoint = "munmap", SetLastError = true)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    public static partial int Munmap(nint addr, uint length);
-
-    [LibraryImport(LibC, EntryPoint = "write")]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    public static partial int Write(int fd, nint buf, uint count);
-
-    [LibraryImport(LibC, EntryPoint = "read")]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    public static partial int Read(int fd, nint buf, uint count);
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct Capability
-    {
-        public uint driver;
-        public uint card;
-        public uint bus_info;
-        public uint version;
-        public uint capabilities;
-        public uint reserved;
-    }
+    public static partial int Ioctl(int fd, uint request, ref Control ctrl);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct Format
@@ -65,7 +45,7 @@ internal static partial class V4L2
     {
         public uint width;
         public uint height;
-        public uint pixelformat;
+        public uint pixelFormat;
         public uint field;
         public uint bytesperline;
         public uint sizeimage;
@@ -74,26 +54,9 @@ internal static partial class V4L2
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct Buffer
+    public struct Control
     {
-        public uint index;
-        public uint type;
-        public uint bytesused;
-        public uint flags;
-        public uint field;
-        public uint timestamp_sec;
-        public uint timestamp_usec;
-        public uint timecode_type;
-        public uint timecode_flags;
-        public uint timecode_frames;
-        public uint timecode_seconds;
-        public uint timecode_minutes;
-        public uint timecode_hours;
-        public uint timecode_userbits;
-        public uint sequence;
-        public uint memory;
-        public nint m;
-        public uint length;
-        public uint reserved;
+        public uint id;
+        public int value;
     }
 }

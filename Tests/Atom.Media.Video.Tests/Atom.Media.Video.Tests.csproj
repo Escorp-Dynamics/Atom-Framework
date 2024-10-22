@@ -31,12 +31,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Atom.Web.Services\Atom.Web.Services.csproj" />
     <ProjectReference Include="..\Atom.Tests\Atom.Tests.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Proxy\" />
+    <ProjectReference Include="..\..\Atom.Media.Video\Atom.Media.Video.csproj" />
   </ItemGroup>
 
 </Project>
