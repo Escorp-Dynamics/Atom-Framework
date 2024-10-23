@@ -17,7 +17,7 @@ public class PackageManager
     public ValueTask<bool> CheckExistsAsync(string packageName, CancellationToken cancellationToken) => distribution switch
     {
         Distributive.Debian or Distributive.Ubuntu => OS.Terminal.RunAsync($"dpkg -s {packageName} 2>/dev/null | grep -q 'Status: install ok installed'", cancellationToken),
-        Distributive.Arch => OS.Terminal.RunAsync($"pacman -Qi {packageName} >/dev/null 2>&1", cancellationToken),
+        Distributive.Arch or Distributive.Manjaro => OS.Terminal.RunAsync($"pacman -Qi {packageName} >/dev/null 2>&1", cancellationToken),
         Distributive.Fedora => OS.Terminal.RunAsync($"rpm -q {packageName} >/dev/null 2>&1", cancellationToken),
         _ => throw new UnsupportedDistributiveException(),
     };
@@ -36,7 +36,7 @@ public class PackageManager
     public ValueTask<bool> InstallAsync(string packageName, CancellationToken cancellationToken) => distribution switch
     {
         Distributive.Debian or Distributive.Ubuntu => OS.Terminal.RunAsync($"apt-get install -y {packageName}", cancellationToken),
-        Distributive.Arch => OS.Terminal.RunAsync($"pacman -S --noconfirm {packageName}", cancellationToken),
+        Distributive.Arch or Distributive.Manjaro => OS.Terminal.RunAsync($"pacman -S --noconfirm {packageName}", cancellationToken),
         Distributive.Fedora => OS.Terminal.RunAsync($"sudo dnf install -y {packageName}", cancellationToken),
         _ => throw new UnsupportedDistributiveException(),
     };

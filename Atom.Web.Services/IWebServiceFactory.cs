@@ -1,4 +1,7 @@
-﻿namespace Atom.Web.Services;
+﻿using Atom.Architect;
+using Atom.Architect.Components;
+
+namespace Atom.Web.Services;
 
 /// <summary>
 /// Представляет базовый интерфейс для реализации фабрик для работы с веб-сервисами.

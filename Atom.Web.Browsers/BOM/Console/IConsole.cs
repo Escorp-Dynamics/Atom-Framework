@@ -1,3 +1,4 @@
+using Atom.Architect.Reactive;
 using Microsoft.ClearScript;
 
 namespace Atom.Web.Browsers.BOM;

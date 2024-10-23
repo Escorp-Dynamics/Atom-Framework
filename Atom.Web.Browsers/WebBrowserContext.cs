@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
+using Atom.Architect.Reactive;
 using Atom.Web.Browsers.BOM;
 
 namespace Atom.Web.Browsers;
@@ -68,17 +69,17 @@ public class WebBrowserContext : IWebBrowserContext
     /// <summary>
     /// Происходит в момент открытия веб-страницы.
     /// </summary>
-    protected virtual ValueTask OnPageOpened(IWebPage page) => PageOpened.On(page);
+    protected virtual ValueTask OnPageOpened(IWebPage page) => PageOpened?.Invoke(page) ?? ValueTask.CompletedTask;
 
     /// <summary>
     /// Происходит в момент закрытия веб-страницы.
     /// </summary>
-    protected virtual ValueTask OnPageClosed(IWebPage page) => PageClosed.On(page);
+    protected virtual ValueTask OnPageClosed(IWebPage page) => PageClosed?.Invoke(page) ?? ValueTask.CompletedTask;
 
     /// <summary>
     /// Происходит в момент закрытия контекста веб-браузера.
     /// </summary>
-    protected virtual ValueTask OnClosed() => Closed.On();
+    protected virtual ValueTask OnClosed() => Closed?.Invoke() ?? ValueTask.CompletedTask;
 
     /// <inheritdoc/>
     public async ValueTask<IWebPage> OpenPageAsync(IWebPageSettings settings, CancellationToken cancellationToken)

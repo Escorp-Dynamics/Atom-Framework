@@ -1,3 +1,5 @@
+using Atom.Architect.Reactive;
+
 namespace Atom.Web.Browsers.BOM;
 
 /// <summary>

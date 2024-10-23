@@ -26,6 +26,10 @@ public enum Distributive
     /// </summary>
     Arch,
     /// <summary>
+    /// Manjaro.
+    /// </summary>
+    Manjaro,
+    /// <summary>
     /// Fedora.
     /// </summary>
     Fedora,

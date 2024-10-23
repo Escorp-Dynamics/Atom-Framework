@@ -3,7 +3,7 @@ namespace Atom.Media.Video;
 /// <summary>
 /// Представляет исключение виртуальной камеры.
 /// </summary>
-public class VirtualCameraException : Exception
+public class VirtualCameraException : NativeException
 {
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="VirtualCameraException"/>.

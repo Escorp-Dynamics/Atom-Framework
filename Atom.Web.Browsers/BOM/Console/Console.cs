@@ -1,3 +1,4 @@
+using Atom.Architect.Reactive;
 using Microsoft.ClearScript;
 
 namespace Atom.Web.Browsers.BOM;
@@ -16,7 +17,7 @@ public class Console : IConsole
     /// </summary>
     /// <param name="e">Аргументы события.</param>
     [ScriptMember(ScriptAccess.None)]
-    protected virtual ValueTask OnMessage(ConsoleMessageEventArgs e) => Message.On(e);
+    protected virtual ValueTask OnMessage(ConsoleMessageEventArgs e) => Message?.Invoke(e) ?? ValueTask.CompletedTask;
 
     /// <inheritdoc/>
     [ScriptMember]

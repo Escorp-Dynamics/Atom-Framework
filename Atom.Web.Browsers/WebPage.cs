@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
+using Atom.Architect.Reactive;
 using Atom.Net.Http;
 using Atom.Web.Browsers.BOM;
 
@@ -72,19 +73,19 @@ public class WebPage : IWebPage
     /// <summary>
     /// Происходит в момент закрытия веб-страницы.
     /// </summary>
-    protected virtual ValueTask OnClosed() => Closed.On();
+    protected virtual ValueTask OnClosed() => Closed?.Invoke() ?? ValueTask.CompletedTask;
 
     /// <summary>
     /// Происходит в момент начала навигации по странице.
     /// </summary>
     /// <param name="url">Адрес навигации.</param>
-    protected virtual ValueTask OnNavigate(Uri url) => Navigate.On(url);
+    protected virtual ValueTask OnNavigate(Uri url) => Navigate?.Invoke(url) ?? ValueTask.CompletedTask;
 
     /// <summary>
     /// Происходит в момент окончания навигации по странице.
     /// </summary>
     /// <param name="url">Адрес навигации.</param>
-    protected virtual ValueTask OnNavigated(Uri url) => Navigated.On(url);
+    protected virtual ValueTask OnNavigated(Uri url) => Navigated?.Invoke(url) ?? ValueTask.CompletedTask;
 
     /// <inheritdoc/>
     public async ValueTask<HttpStatusCode> GoToAsync(Uri url, CancellationToken cancellationToken)

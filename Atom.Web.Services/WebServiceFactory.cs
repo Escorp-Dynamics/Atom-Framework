@@ -1,4 +1,6 @@
-﻿
+﻿using Atom.Architect;
+using Atom.Architect.Components;
+
 namespace Atom.Web.Services;
 
 /// <summary>

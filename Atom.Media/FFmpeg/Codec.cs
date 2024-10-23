@@ -1,0 +1,82 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+
+namespace Atom.Media;
+
+internal partial class FFmpeg
+{
+    public unsafe static partial class Codec
+    {
+        const string Dll = "avcodec";
+
+        [LibraryImport(Dll, EntryPoint = "avcodec_send_packet", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int SendPacket(CodecContext* context, MediaPacket* packet);
+
+        [LibraryImport(Dll, EntryPoint = "avcodec_receive_frame", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int ReceiveFrame(CodecContext* context, MediaFrame* frame);
+
+        [LibraryImport(Dll, EntryPoint = "av_packet_unref", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int UnRefPacket(MediaPacket* packet);
+
+        [LibraryImport(Dll, EntryPoint = "avcodec_alloc_context3", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial CodecContext* AllocContext3(MediaPacket* packet);
+
+        [LibraryImport(Dll, EntryPoint = "avcodec_find_decoder", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial MediaPacket* FindDecoder(int codecId);
+
+        [LibraryImport(Dll, EntryPoint = "avcodec_parameters_to_context", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int ParametersToContext(CodecContext* context, CodecParameters* parameters);
+
+        [LibraryImport(Dll, EntryPoint = "avcodec_open2", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int Open2(CodecContext* context, MediaPacket* codec, void* options);
+        
+        [LibraryImport(Dll, EntryPoint = "avcodec_find_decoder", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial MediaPacket* FindEncoder(int codecId);
+        
+        [LibraryImport(Dll, EntryPoint = "avcodec_parameters_to_context", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int ParametersFromContext(CodecParameters* parameters, CodecContext* context);
+
+        [LibraryImport(Dll, EntryPoint = "avcodec_send_frame", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int SendFrame(CodecContext* context, MediaFrame* frame);
+
+        [LibraryImport(Dll, EntryPoint = "avcodec_receive_packet", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int ReceivePacket(CodecContext* context, MediaPacket* packet);
+
+        [LibraryImport(Dll, EntryPoint = "av_packet_rescale_ts", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial void PacketRescaleTS(MediaPacket* packet, Ratio srcTimeBase, Ratio dstTimeBase);
+
+        [LibraryImport(Dll, EntryPoint = "avcodec_free_context", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial void FreeContext(CodecContext** context);
+        
+        [LibraryImport(Dll, EntryPoint = "av_packet_free", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial void PacketFree(MediaPacket** packet);
+    }
+}

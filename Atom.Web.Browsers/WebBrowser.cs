@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
+using Atom.Architect.Reactive;
 using Atom.Web.Browsers.BOM;
 
 namespace Atom.Web.Browsers;
@@ -82,25 +83,25 @@ public class WebBrowser : IWebBrowser
     /// Происходит в момент создания контекста веб-браузера.
     /// </summary>
     /// <param name="context">Контекст веб-браузера.</param>
-    protected virtual ValueTask OnContextCreated(IWebBrowserContext context) => ContextCreated.On(context);
+    protected virtual ValueTask OnContextCreated(IWebBrowserContext context) => ContextCreated?.Invoke(context) ?? ValueTask.CompletedTask;
 
     /// <summary>
     /// Происходит в момент закрытия контекста веб-браузера.
     /// </summary>
     /// <param name="context">Контекст веб-браузера.</param>
-    protected virtual ValueTask OnContextClosed(IWebBrowserContext context) => ContextClosed.On(context);
+    protected virtual ValueTask OnContextClosed(IWebBrowserContext context) => ContextClosed?.Invoke(context) ?? ValueTask.CompletedTask;
 
     /// <summary>
     /// Происходит в момент открытия веб-страницы.
     /// </summary>
     /// <param name="page">Веб-страница.</param>
-    protected virtual ValueTask OnPageOpened(IWebPage page) => PageOpened.On(page);
+    protected virtual ValueTask OnPageOpened(IWebPage page) => PageOpened?.Invoke(page) ?? ValueTask.CompletedTask;
 
     /// <summary>
     /// Происходит в момент закрытия веб-страницы.
     /// </summary>
     /// <param name="page">Веб-страница.</param>
-    protected virtual ValueTask OnPageClosed(IWebPage page) => PageClosed.On(page);
+    protected virtual ValueTask OnPageClosed(IWebPage page) => PageClosed?.Invoke(page) ?? ValueTask.CompletedTask;
 
     /// <inheritdoc/>
     public async ValueTask<IWebBrowserContext> CreateContextAsync(IWebBrowserContextSettings contextSettings, CancellationToken cancellationToken)
