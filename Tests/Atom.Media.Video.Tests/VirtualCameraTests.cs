@@ -35,7 +35,6 @@ public class VirtualCameraTests(ILogger logger) : BenchmarkTest<VirtualCameraTes
 
     private static void SetUp()
     {
-        Distribution.OS.Terminal.RootPassword = "@1b2C3d4@";
         VirtualCamera.InitAsync().AsTask().GetAwaiter().GetResult();
     }
 }
