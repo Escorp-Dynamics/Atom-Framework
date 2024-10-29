@@ -35,9 +35,9 @@ public class PackageManager
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     public ValueTask<bool> InstallAsync(string packageName, CancellationToken cancellationToken) => distribution switch
     {
-        Distributive.Debian or Distributive.Ubuntu => OS.Terminal.RunAsync($"apt-get install -y {packageName}", cancellationToken),
-        Distributive.Arch or Distributive.Manjaro => OS.Terminal.RunAsync($"pacman -S --noconfirm {packageName}", cancellationToken),
-        Distributive.Fedora => OS.Terminal.RunAsync($"sudo dnf install -y {packageName}", cancellationToken),
+        Distributive.Debian or Distributive.Ubuntu => OS.Terminal.RunAsAdministratorAsync($"apt-get install -y {packageName}", cancellationToken),
+        Distributive.Arch or Distributive.Manjaro => OS.Terminal.RunAsAdministratorAsync($"pacman -Syu --noconfirm {packageName}", cancellationToken),
+        Distributive.Fedora => OS.Terminal.RunAsAdministratorAsync($"dnf install -y {packageName}", cancellationToken),
         _ => throw new UnsupportedDistributiveException(),
     };
 

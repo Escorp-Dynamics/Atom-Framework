@@ -12,6 +12,6 @@ internal static partial class FFmpeg
         [LibraryImport(Dll, EntryPoint = "avdevice_register_all", SetLastError = true)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-        public static partial int RegisterAll();
+        public static partial void RegisterAll();
     }
 }

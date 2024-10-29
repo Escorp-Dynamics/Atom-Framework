@@ -36,4 +36,16 @@
     <ProjectReference Include="..\..\Atom.Media.Video\Atom.Media.Video.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="assets\test.mov">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </None>
+
+    <None Update="assets\test.mp4">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </None>
+  </ItemGroup>
+
 </Project>

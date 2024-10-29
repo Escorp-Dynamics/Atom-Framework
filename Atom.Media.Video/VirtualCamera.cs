@@ -14,11 +14,6 @@ public partial class VirtualCamera : Reactively, IAsyncDisposable
     private readonly VideoStream stream;
 
     private bool isDisposed;
-    private int cameraId = -1;
-
-    private static readonly SemaphoreSlim locker = new(1, 1);
-    private static readonly string[] packages = ["ffmpeg", "libv4l-dev", "v4l2loopback-dkms", "v4l2loopback-utils"];
-    private static bool isPackagesInstalled;
 
     /// <summary>
     /// Разрешение камеры.
@@ -51,21 +46,33 @@ public partial class VirtualCamera : Reactively, IAsyncDisposable
     private string vendor = "Escorp Labs";
 
     /// <summary>
+    /// Определяет, будет ли камера с выключенным звуком.
+    /// </summary>
+    [Reactively]
+    private bool isMuted;
+
+    /// <summary>
+    /// Номер камеры в системе.
+    /// </summary>
+    public int Number { get; }
+
+    /// <summary>
     /// Путь к устройству камеры.
     /// </summary>
-    public string Path { get; }
+    public string Path => $"/dev/video{Number}";
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="VirtualCamera"/>.
     /// </summary>
     public VirtualCamera()
     {
-        Path = GetPath();
-        stream = new VideoStream(resolution, MediaFormat.YUYV, 30);
+        Number = GetCameraNumber();
+        stream = new VideoStream(resolution);
         ResolutionChanged += (sender, args) => OnResolutionChanged(resolution);
         NameChanged += (sender, args) => OnNameChanged(name);
         VersionChanged += (sender, args) => OnVersionChanged(version);
         VendorChanged += (sender, args) => OnVendorChanged(vendor);
+        IsMutedChanged += (sender, args) => OnIsMutedChanged(isMuted);
     }
 
     /// <summary>
@@ -78,35 +85,89 @@ public partial class VirtualCamera : Reactively, IAsyncDisposable
     /// Происходит в момент изменения названия камеры.
     /// </summary>
     /// <param name="name">Новое название камеры.</param>
-    protected virtual void OnNameChanged([NotNull] string name) => V4L2.SetInfo(cameraId, Name, version, vendor);
+    protected virtual void OnNameChanged([NotNull] string name) { }
 
     /// <summary>
     /// Происходит в момент изменения версии камеры.
     /// </summary>
     /// <param name="version">Новая версия камеры.</param>
-    protected virtual void OnVersionChanged([NotNull] Version version) => V4L2.SetInfo(cameraId, Name, version, vendor);
+    protected virtual void OnVersionChanged([NotNull] Version version) { }
 
     /// <summary>
     /// Происходит в момент изменения поставщика камеры.
     /// </summary>
     /// <param name="vendor">Новый поставщик камеры.</param>
-    protected virtual void OnVendorChanged([NotNull] string vendor) => V4L2.SetInfo(cameraId, Name, version, vendor);
+    protected virtual void OnVendorChanged([NotNull] string vendor) { }
+
+    /// <summary>
+    /// Происходит в момент изменения параметра использования звука.
+    /// </summary>
+    /// <param name="isMuted">Указывает, используется ли звук.</param>
+    protected virtual void OnIsMutedChanged(bool isMuted) => stream.IsMuted = isMuted;
 
     /// <summary>
     /// Начинает захват видеопотока с камеры.
     /// </summary>
-    public unsafe virtual void StartCapture()
+    /// <param name="path">Путь к файлу видеозахвата.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    public virtual async ValueTask StartCaptureAsync(string path, CancellationToken cancellationToken)
     {
-        Wait.Until(() => !isPackagesInstalled || !File.Exists(Path));
+        if (!await OS.Terminal.RunAsAdministratorAsync($"modprobe v4l2loopback devices=1 video_nr={Number} card_label='{name}' exclusive_caps=1 width={resolution.Width} height={resolution.Height} framerate={frameRate}/1 pixel_format=MJPG", cancellationToken).ConfigureAwait(false))
+            throw new VirtualCameraException("Не удалось запустить камеру");
+
+        //if (!await OS.Terminal.RunAsAdministratorAsync($"v4l2loopback-ctl set-caps {Path} YUV420P:{resolution.Width}x{resolution.Height}@{frameRate}/1", cancellationToken).ConfigureAwait(false))
+        //    throw new VirtualCameraException("Не удалось установить fps");
+
+        if (!await OS.Terminal.RunAsAdministratorAsync($"chmod 777 {Path}", cancellationToken).ConfigureAwait(false))
+            throw new VirtualCameraException("Не удалось установить права доступа к камере");
+
+        await Wait.UntilAsync(() => !File.Exists(Path), cancellationToken).ConfigureAwait(false);
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
-        cameraId = V4L2.Open(Path);
-
-        V4L2.SetInfo(cameraId, Name, version, vendor);
-        V4L2.SetFormat(cameraId, resolution, MediaFormat.YUYV);
-        
+        if (!string.IsNullOrEmpty(path)) stream.Input = path;
         stream.Output = Path;
     }
+
+    /// <summary>
+    /// Начинает захват видеопотока с камеры.
+    /// </summary>
+    /// <param name="path">Путь к файлу видеозахвата.</param>
+    public ValueTask StartCaptureAsync(string path) => StartCaptureAsync(path, CancellationToken.None);
+
+    /// <summary>
+    /// Начинает захват видеопотока с камеры.
+    /// </summary>
+    /// <param name="url">Ссылка к файлу видеозахвата.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    public virtual ValueTask StartCaptureAsync([NotNull] Uri url, CancellationToken cancellationToken) => StartCaptureAsync(url.AbsoluteUri, cancellationToken);
+
+    /// <summary>
+    /// Начинает захват видеопотока с камеры.
+    /// </summary>
+    /// <param name="url">Ссылка к файлу видеозахвата.</param>
+    public ValueTask StartCaptureAsync(Uri url) => StartCaptureAsync(url, CancellationToken.None);
+
+    /// <summary>
+    /// Начинает захват видеопотока с камеры.
+    /// </summary>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    public virtual ValueTask StartCaptureAsync(CancellationToken cancellationToken) => StartCaptureAsync(string.Empty, cancellationToken);
+
+    /// <summary>
+    /// Начинает захват видеопотока с камеры.
+    /// </summary>
+    public ValueTask StartCaptureAsync() => StartCaptureAsync(CancellationToken.None);
+
+    /// <summary>
+    /// Ожидает завершения захвата видеопотока.
+    /// </summary>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    public ValueTask WaitForCaptureAsync(CancellationToken cancellationToken) => stream.WaitForEndingAsync(cancellationToken);
+
+    /// <summary>
+    /// Ожидает завершения захвата видеопотока.
+    /// </summary>
+    public ValueTask WaitForCaptureAsync() => WaitForCaptureAsync(CancellationToken.None);
 
     /// <summary>
     /// Высвобождает ресурсы.
@@ -116,58 +177,20 @@ public partial class VirtualCamera : Reactively, IAsyncDisposable
         if (isDisposed) return;
         isDisposed = true;
 
-        if (cameraId >= 0) V4L2.Close(cameraId);
-        await OS.Terminal.RunAsync($"v4l2loopback-ctl remove {Path}").ConfigureAwait(false);
+        await OS.Terminal.RunAsAdministratorAsync($"v4l2loopback-ctl remove {Path}").ConfigureAwait(false);
 
         await stream.DisposeAsync().ConfigureAwait(false);
         GC.SuppressFinalize(this);
     }
 
-    private static string GetPath()
+    private static int GetCameraNumber()
     {
         for (var i = 0; i < int.MaxValue; ++i)
         {
             var path = $"/dev/video{i}";
-            if (!File.Exists(path)) return path;
+            if (!File.Exists(path)) return i;
         }
 
         throw new VirtualCameraException("Превышен лимит допустимых камер");
     }
-
-    /// <summary>
-    /// Инициализирует устройства.
-    /// </summary>
-    /// <param name="cancellationToken">Токен отмены задачи.</param>
-    public static async ValueTask InitAsync(CancellationToken cancellationToken)
-    {
-        await locker.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        if (!isPackagesInstalled)
-        {
-            foreach (var package in packages)
-                if (!await OS.PM.CheckExistsAsync(package, cancellationToken).ConfigureAwait(false))
-                    await OS.PM.InstallAsync(package, cancellationToken).ConfigureAwait(false);
-
-            if (!await OS.Terminal.RunAsync($"modprobe -r v4l2loopback", cancellationToken).ConfigureAwait(false))
-            {
-                locker.Release();
-                throw new VirtualCameraException("Не удалось очистить список устройств");
-            }
-
-            if (!await OS.Terminal.RunAsync($"modprobe v4l2loopback", cancellationToken).ConfigureAwait(false))
-            {
-                locker.Release();
-                throw new VirtualCameraException("Не удалось инициализировать устройства");
-            }
-
-            isPackagesInstalled = true;
-        }
-
-        locker.Release();
-    }
-
-    /// <summary>
-    /// Инициализирует устройства.
-    /// </summary>
-    public static ValueTask InitAsync() => InitAsync(CancellationToken.None);
 }

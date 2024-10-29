@@ -2,15 +2,13 @@ namespace Atom.Media;
 
 internal static class Extensions
 {
-    public static int AsCodecID(this MediaFormat mediaFormat) => mediaFormat switch
+    public static SampleFormat ToSampleFormat(this MediaCodec codec) => codec switch
     {
-        MediaFormat.YUYV => 20,
-        _ => 0,
-    };
-
-    public static int AsPixelFormat(this MediaFormat mediaFormat) => mediaFormat switch
-    {
-        MediaFormat.YUYV => 0,
-        _ => -1,
+        MediaCodec.AAC => SampleFormat.FLTP,
+        MediaCodec.VORBIS  => SampleFormat.FLTP,
+        MediaCodec.MP2 => SampleFormat.S16,
+        MediaCodec.MP3 => SampleFormat.S16,
+        MediaCodec.WMAV2 => SampleFormat.S16,
+        _ => throw new NotSupportedException("Неподдерживаемый формат аудиокодека"),
     };
 }
