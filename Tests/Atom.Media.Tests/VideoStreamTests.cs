@@ -254,7 +254,9 @@ public class VideoStreamTests(ILogger logger) : BenchmarkTest<VideoStreamTests>(
     private static void V4L2Test(string inputFormat, string outputDevice)
     {
         if (!string.IsNullOrEmpty(inputFormat)) inputFormat = Path.GetFullPath($"assets/test.{inputFormat}");
-        using var stream = new VideoStream(inputFormat, outputDevice);
+        using var stream = new VideoStream(inputFormat, outputDevice) { IsMuted = true, IsLooped = true, };
         stream.WaitForEnding();
+        
+        Assert.Pass();
     }
 }

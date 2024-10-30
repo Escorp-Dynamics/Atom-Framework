@@ -8,7 +8,7 @@ internal unsafe struct CodecContext
     public readonly void* av_class;
     public int log_level_offset;
     public int codec_type;
-    public void* codec;
+    public AVCodec* codec;
     public MediaCodec Kind;
     public uint codec_tag;
     public void* priv_data;

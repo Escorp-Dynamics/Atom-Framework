@@ -4,15 +4,15 @@ namespace Atom.Media;
 
 internal sealed unsafe class WhiteNoiseGenerator
 {
-    private long pts;
+    private long videoPts;
     private long audioPts;
 
-    public void WriteVideoFrame(CodecContext* context, FormatContext* outputContext)
+    public void WriteVideoFrame(CodecContext* context, FormatContext* outputContext, int streamIndex)
     {
         var frame = FFmpeg.Util.FrameAlloc();
         if (frame is null) throw new VideoStreamException("Не удалось выделить память для фрейма");
 
-        frame->Format = context->Format;
+        frame->Format = (int)context->Format;
         frame->width = context->width;
         frame->height = context->height;
 
@@ -22,100 +22,126 @@ internal sealed unsafe class WhiteNoiseGenerator
         var packet = FFmpeg.Codec.PacketAlloc();
         if (packet is null) throw new VideoStreamException("Не удалось выделить память для пакета");
 
-        var data = GenerateWhiteNoiseVideo(context);
+        GenerateWhiteNoiseVideo(context, frame);
 
-        fixed (byte* ptr = data)
-        {
-            Buffer.MemoryCopy(ptr, frame->data[0], frame->linesize[0], frame->linesize[0]);
-            Buffer.MemoryCopy(ptr + frame->linesize[0], frame->data[1], frame->linesize[1], frame->linesize[1]);
-            Buffer.MemoryCopy(ptr + frame->linesize[0] + frame->linesize[1], frame->data[2], frame->linesize[2], frame->linesize[2]);
-
-            //frame->extended_data = &ptr;
-        }
-
-        frame->pts = FFmpeg.Util.ReScaleQ(pts, context->time_base, outputContext->streams[0]->time_base);
-        frame->pkt_dts = frame->pts;
-        frame->duration = FFmpeg.Util.ReScaleQ(1, context->time_base, outputContext->streams[0]->time_base);
-        //frame->key_frame = (frame->pict_type is 1) ? 1 : 0;
-        frame->pict_type = (pts is 0) ? 1 : 2;
+        frame->pts = videoPts;
+        frame->duration = 1;
+        frame->pict_type = (videoPts is 0) ? 1 : 2;
         frame->flags = 0;
         frame->time_base = context->time_base;
 
         FFmpeg.Codec.SendFrame(context, frame).ThrowIfErrors("Не удалось отправить фрейм в кодек");
-        FFmpeg.Codec.ReceivePacket(context, packet).ThrowIfErrors("Ошибка при получении пакета из кодека");
 
-        packet->pts = FFmpeg.Util.ReScaleQ(pts, context->time_base, outputContext->streams[0]->time_base);
+        var result = FFmpeg.Codec.ReceivePacket(context, packet);
+        const string error = "Не удалось освободить пакет";
+
+        if (result is -11 or -541_478_725)
+        {
+            videoPts += FFmpeg.Util.ReScaleQ(1, context->time_base, context->time_base);
+
+            FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors(error);
+            FFmpeg.Codec.PacketFree(&packet);
+            FFmpeg.Util.FrameFree(&frame);
+
+            WriteVideoFrame(context, outputContext, streamIndex);
+            return;
+        }
+
+        result.ThrowIfErrors("Ошибка при получении пакета из кодека");
+
+        packet->pts = FFmpeg.Util.ReScaleQ(videoPts, context->time_base, outputContext->streams[streamIndex]->time_base);
         packet->dts = packet->pts;
-        packet->duration = FFmpeg.Util.ReScaleQ(1, context->time_base, outputContext->streams[0]->time_base);
-        packet->stream_index = outputContext->streams[0]->index;
+        packet->duration = FFmpeg.Util.ReScaleQ(1, context->time_base, outputContext->streams[streamIndex]->time_base);
+        packet->stream_index = outputContext->streams[streamIndex]->index;
 
         FFmpeg.Format.InterleavedWriteFrame(outputContext, packet).ThrowIfErrors("Не удалось записать фрейм");
 
-        pts += FFmpeg.Util.ReScaleQ(1, context->time_base, context->time_base);
+        videoPts += FFmpeg.Util.ReScaleQ(1, context->time_base, context->time_base);
+
+        FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors(error);
+        FFmpeg.Codec.PacketFree(&packet);
+        FFmpeg.Util.FrameFree(&frame);
+    }
+
+    public void WriteAudioFrame(CodecContext* context, FormatContext* outputContext, int streamIndex)
+    {
+        var frame = FFmpeg.Util.FrameAlloc();
+        if (frame is null) throw new VideoStreamException("Не удалось выделить память для фрейма");
+
+        frame->nb_samples = context->frame_size;
+        frame->Format = (int)context->SampleFormat;
+        frame->ChannelLayout = context->ChannelLayout;
+
+        FFmpeg.Util.FrameGetBuffer(frame, 0).ThrowIfErrors("Ошибка выделения буфера для фрейма");
+        FFmpeg.Util.FrameMakeWritable(frame).ThrowIfErrors("Не удалось разрешить запись в фрейм");
+
+        var packet = FFmpeg.Codec.PacketAlloc();
+        if (packet is null) throw new VideoStreamException("Не удалось выделить память для пакета");
+
+        GenerateWhiteNoiseAudio(context, frame);
+
+        frame->pts = audioPts;
+        frame->duration = context->frame_size;
+
+        FFmpeg.Codec.SendFrame(context, frame).ThrowIfErrors("Не удалось отправить фрейм в кодек");
+
+        var result = FFmpeg.Codec.ReceivePacket(context, packet);
+
+        if (result is -11 or -541_478_725)
+        {
+            audioPts += FFmpeg.Util.ReScaleQ(frame->nb_samples, context->time_base, context->time_base);
+
+            FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors("Не удалось освободить пакет");
+            FFmpeg.Codec.PacketFree(&packet);
+            FFmpeg.Util.FrameFree(&frame);
+            WriteAudioFrame(context, outputContext, streamIndex);
+            return;
+        }
+
+        result.ThrowIfErrors("Ошибка при получении пакета из кодека");
+
+        packet->pts = FFmpeg.Util.ReScaleQ(audioPts, context->time_base, outputContext->streams[streamIndex]->time_base);
+        packet->dts = packet->pts;
+        packet->duration = FFmpeg.Util.ReScaleQ(frame->nb_samples, context->time_base, outputContext->streams[streamIndex]->time_base);
+        packet->stream_index = outputContext->streams[streamIndex]->index;
+
+        FFmpeg.Format.InterleavedWriteFrame(outputContext, packet).ThrowIfErrors("Не удалось записать фрейм");
+
+        audioPts += FFmpeg.Util.ReScaleQ(frame->nb_samples, context->time_base, context->time_base);
 
         FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors("Не удалось освободить пакет");
         FFmpeg.Codec.PacketFree(&packet);
         FFmpeg.Util.FrameFree(&frame);
     }
 
-    public void WriteAudioFrame(CodecContext* context, FormatContext* outputContext)
-    {
-        var packet = FFmpeg.Codec.PacketAlloc();
-        if (packet is null) throw new VideoStreamException("Не удалось выделить память для пакета");
-
-        var data = GenerateWhiteNoiseAudio(context);
-        var frameSize = context->frame_size > 0 ? context->frame_size : context->sample_rate / context->framerate.num * 100;
-
-        if (data.Length > frameSize * sizeof(short) * context->ChannelLayout.nb_channels)
-            throw new VideoStreamException("Сгенерированный аудиофрейм превышает допустимый размер буфера.");
-
-        fixed (byte* ptr = data) packet->data = ptr;
-        packet->size = data.Length;
-        packet->pts = FFmpeg.Util.ReScaleQ(audioPts, context->time_base, outputContext->streams[1]->time_base);
-        packet->dts = packet->pts;
-        packet->duration = FFmpeg.Util.ReScaleQ(frameSize, context->time_base, outputContext->streams[1]->time_base);
-        packet->stream_index = outputContext->streams[1]->index;
-
-        FFmpeg.Format.InterleavedWriteFrame(outputContext, packet).ThrowIfErrors("Не удалось записать фрейм");
-        audioPts += frameSize;
-
-        FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors("Не удалось освободить пакет");
-        FFmpeg.Codec.PacketFree(&packet);
-    }
-
-    private static ReadOnlySpan<byte> GenerateWhiteNoiseVideo(CodecContext* context)
+    private static void GenerateWhiteNoiseVideo(CodecContext* context, MediaFrame* frame)
     {
         using var rng = RandomNumberGenerator.Create();
 
         if (context->Format is PixelFormat.YUV420P)
         {
-            var frame = new byte[context->width * context->height + 2 * (context->width / 2 * context->height / 2)];
-
             var ySize = context->width * context->height;
             var uvSize = context->width / 2 * (context->height / 2);
 
-            rng.GetBytes(frame, 0, ySize);
-            rng.GetBytes(frame, ySize, uvSize);
-            rng.GetBytes(frame, ySize + uvSize, uvSize);
+            rng.GetBytes(new Span<byte>(frame->data[0], ySize));
+            rng.GetBytes(new Span<byte>(frame->data[1], uvSize));
+            rng.GetBytes(new Span<byte>(frame->data[2], uvSize));
 
-            return frame;
-        }
-        else if (context->Format is PixelFormat.RGB24)
-        {
-            var frame = new byte[context->width * context->height * 3];
-            rng.GetBytes(frame);
-            return frame.AsSpan();
+            return;
         }
 
         throw new NotSupportedException($"Формат пикселей {context->Format} не поддерживается");
     }
 
-    private static ReadOnlySpan<byte> GenerateWhiteNoiseAudio(CodecContext* context)
+    private static void GenerateWhiteNoiseAudio(CodecContext* context, MediaFrame* frame)
     {
         using var rng = RandomNumberGenerator.Create();
-        var audio = new byte[context->sample_rate * context->ChannelLayout.nb_channels * 2].AsSpan();
+        var totalSamples = frame->nb_samples * context->ChannelLayout.nb_channels;
+        var audioData = new Span<short>((short*)frame->data[0], totalSamples);
 
-        rng.GetBytes(audio);
-        return audio;
+        var randomBytes = new byte[totalSamples * sizeof(short)];
+        rng.GetBytes(randomBytes);
+
+        for (var i = 0; i < totalSamples; ++i) audioData[i] = BitConverter.ToInt16(randomBytes, i * sizeof(short));
     }
 }

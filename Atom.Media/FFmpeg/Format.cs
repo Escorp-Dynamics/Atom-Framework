@@ -19,6 +19,11 @@ internal static partial class FFmpeg
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         public static partial int ReadFrame(FormatContext* context, MediaPacket* packet);
 
+        [LibraryImport(Dll, EntryPoint = "av_seek_frame", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int SeekFrame(FormatContext* context, int streamIndex, long timestamp, int flags);
+
         [LibraryImport(Dll, EntryPoint = "avformat_open_input", SetLastError = true)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]

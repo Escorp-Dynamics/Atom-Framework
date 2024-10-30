@@ -2,54 +2,54 @@ using System.Runtime.InteropServices;
 
 namespace Atom.Media;
 
-[StructLayout(LayoutKind.Explicit)]
+[StructLayout(LayoutKind.Sequential)]
 internal unsafe struct MediaFrame
 {
-    [FieldOffset(0)] public Fixed<byte> data;    // 64
-    [FieldOffset(64)] public fixed int linesize[8];
-    [FieldOffset(96)] public byte** extended_data;
-    [FieldOffset(104)] public int width;
-    [FieldOffset(108)] public int height;
-    [FieldOffset(112)] public int nb_samples;
-    [FieldOffset(116)] public PixelFormat Format;
-    [Obsolete][FieldOffset(120)] public int key_frame;
-    [FieldOffset(124)] public int pict_type;
-    [FieldOffset(128)] public Ratio sample_aspect_ratio;    // 8
-    [FieldOffset(136)] public long pts;
-    [FieldOffset(144)] public long pkt_dts;
-    [FieldOffset(152)] public Ratio time_base;  // 8
-    [FieldOffset(160)] public int quality;
-    [FieldOffset(164)] public void* opaque;
-    [FieldOffset(172)] public int repeat_pict;
-    [Obsolete][FieldOffset(176)] public int interlaced_frame;
-    [Obsolete][FieldOffset(180)] public int top_field_first;
-    [Obsolete][FieldOffset(184)] public int palette_has_changed;
-    [FieldOffset(188)] public int sample_rate;
-    [FieldOffset(192)] public Fixed<AVBufferRef> buf;    // 64
-    [FieldOffset(256)] public AVBufferRef** extended_buf;
-    [FieldOffset(264)] public int nb_extended_buf;
-    [FieldOffset(268)] public void** side_data;
-    [FieldOffset(276)] public int nb_side_data;
-    [FieldOffset(280)] public int flags;
-    [FieldOffset(284)] public int color_range;
-    [FieldOffset(288)] public int color_primaries;
-    [FieldOffset(292)] public int color_trc;
-    [FieldOffset(296)] public int colorSpace;
-    [FieldOffset(300)] public int chroma_location;
-    [FieldOffset(304)] public long best_effort_timestamp;
-    [Obsolete][FieldOffset(312)] public long pkt_pos;
-    [FieldOffset(320)] public void* metadata;
-    [FieldOffset(328)] public int decode_error_flags;
-    [Obsolete][FieldOffset(332)] public int pkt_size;
-    [FieldOffset(336)] public AVBufferRef* hw_frames_ctx;
-    [FieldOffset(344)] public AVBufferRef* opaque_ref;
-    [FieldOffset(352)] public ulong crop_top;
-    [FieldOffset(360)] public ulong crop_bottom;
-    [FieldOffset(368)] public ulong crop_left;
-    [FieldOffset(376)] public ulong crop_right;
-    [FieldOffset(384)] public AVBufferRef* private_ref;
-    [FieldOffset(392)] public ChannelLayout ChannelLayout;  // 24
-    [FieldOffset(416)] public long duration;
+    public Fixed<byte> data;
+    public fixed int linesize[8];
+    public byte** extended_data;
+    public int width;
+    public int height;
+    public int nb_samples;
+    public int Format;
+    [Obsolete] public int key_frame;
+    public int pict_type;
+    public Ratio sample_aspect_ratio;
+    public long pts;
+    public long pkt_dts;
+    public Ratio time_base;
+    public int quality;
+    public void* opaque;
+    public int repeat_pict;
+    [Obsolete] public int interlaced_frame;
+    [Obsolete] public int top_field_first;
+    [Obsolete] public int palette_has_changed;
+    public int sample_rate;
+    public Fixed<AVBufferRef> buf;
+    public AVBufferRef** extended_buf;
+    public int nb_extended_buf;
+    public void** side_data;
+    public int nb_side_data;
+    public int flags;
+    public int color_range;
+    public int color_primaries;
+    public int color_trc;
+    public int colorSpace;
+    public int chroma_location;
+    public long best_effort_timestamp;
+    [Obsolete] public long pkt_pos;
+    public void* metadata;
+    public int decode_error_flags;
+    [Obsolete] public int pkt_size;
+    public AVBufferRef* hw_frames_ctx;
+    public AVBufferRef* opaque_ref;
+    public ulong crop_top;
+    public ulong crop_bottom;
+    public ulong crop_left;
+    public ulong crop_right;
+    public AVBufferRef* private_ref;
+    public ChannelLayout ChannelLayout;
+    public long duration;
 }
 
 #pragma warning disable CA1823, CS0169

@@ -65,6 +65,11 @@ internal static partial class FFmpeg
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         public static partial byte* MemoryAllocZ(int size);
 
+        [LibraryImport(Dll, EntryPoint = "av_get_bytes_per_sample", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int GetBytesPerSample(SampleFormat format);
+
         public static string GetErrorDescription(int errorCode)
         {
             const int size = 1024;

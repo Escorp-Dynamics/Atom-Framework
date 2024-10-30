@@ -29,10 +29,10 @@ internal partial class FFmpeg
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         public static partial CodecContext* AllocContext3(AVCodec* codec);
 
-        [LibraryImport(Dll, EntryPoint = "avcodec_find_decoder", SetLastError = true)]
+        [LibraryImport(Dll, EntryPoint = "avcodec_find_encoder", SetLastError = true)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-        public static partial AVCodec* FindDecoder(MediaCodec codecId);
+        public static partial AVCodec* FindEncoder(MediaCodec codecId);
 
         [LibraryImport(Dll, EntryPoint = "avcodec_parameters_to_context", SetLastError = true)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
@@ -47,7 +47,7 @@ internal partial class FFmpeg
         [LibraryImport(Dll, EntryPoint = "avcodec_find_decoder", SetLastError = true)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-        public static partial AVCodec* FindEncoder(MediaCodec codecId);
+        public static partial AVCodec* FindDecoder(MediaCodec codecId);
         
         [LibraryImport(Dll, EntryPoint = "avcodec_parameters_from_context", SetLastError = true)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
@@ -98,5 +98,20 @@ internal partial class FFmpeg
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         public static partial int EncodeVideo2(CodecContext* context, MediaPacket* packet, MediaFrame* frame, out int gotPacketPtr);
+
+        [LibraryImport(Dll, EntryPoint = "avcodec_is_open", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int IsOpen(CodecContext* context);
+
+        [LibraryImport(Dll, EntryPoint = "av_codec_is_encoder", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int IsEncoder(AVCodec* context);
+
+        [LibraryImport(Dll, EntryPoint = "av_codec_is_decoder", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int IsDecoder(AVCodec* context);
     }
 }
