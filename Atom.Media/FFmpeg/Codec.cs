@@ -5,9 +5,9 @@ namespace Atom.Media;
 
 internal partial class FFmpeg
 {
-    public unsafe static partial class Codec
+    public static unsafe partial class Codec
     {
-        const string Dll = "avcodec";
+        private const string Dll = "avcodec";
 
         [LibraryImport(Dll, EntryPoint = "avcodec_send_packet", SetLastError = true)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
@@ -43,12 +43,12 @@ internal partial class FFmpeg
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         public static partial int Open2(CodecContext* context, AVCodec* codec, void* options);
-        
+
         [LibraryImport(Dll, EntryPoint = "avcodec_find_decoder", SetLastError = true)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         public static partial AVCodec* FindDecoder(MediaCodec codecId);
-        
+
         [LibraryImport(Dll, EntryPoint = "avcodec_parameters_from_context", SetLastError = true)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
@@ -83,7 +83,7 @@ internal partial class FFmpeg
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         public static partial MediaPacket* PacketAlloc();
-        
+
         [LibraryImport(Dll, EntryPoint = "av_packet_free", SetLastError = true)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
@@ -113,5 +113,10 @@ internal partial class FFmpeg
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         public static partial int IsDecoder(AVCodec* context);
+
+        [LibraryImport(Dll, EntryPoint = "avcodec_close", SetLastError = true)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static partial int Close(CodecContext* context);
     }
 }

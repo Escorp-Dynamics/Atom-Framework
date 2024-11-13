@@ -52,9 +52,11 @@ public class PropertyMutatorMember : Entity<PropertyMutatorMember>
         if (!string.IsNullOrEmpty(Code))
         {
             sb.Append(' ');
-            
+
             if (Code.CountOf(';') is 1)
+            {
                 sb.AppendLine($"=> {Code}");
+            }
             else
             {
                 sb.AppendLine($"\n{spaces}{{");
@@ -66,7 +68,9 @@ public class PropertyMutatorMember : Entity<PropertyMutatorMember>
             }
         }
         else
+        {
             sb.Append(';');
+        }
     }
 
     /// <summary>

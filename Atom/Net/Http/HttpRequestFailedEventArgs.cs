@@ -78,5 +78,6 @@ public class HttpRequestFailedEventArgs(Uri? url, HttpMethod method, IDictionary
     /// <param name="requestVersion">Версия запроса.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     public HttpRequestFailedEventArgs(HttpMethod method, Version requestVersion, CancellationToken cancellationToken) : this(default, method,
-        new Dictionary<string, string>(), requestVersion, cancellationToken) { }
+        new Dictionary<string, string>(), requestVersion, cancellationToken)
+    { }
 }

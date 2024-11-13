@@ -39,7 +39,7 @@ public class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTyp
         var ctor = type.GetConstructor(Type.EmptyTypes) ?? throw new InvalidOperationException($"Тип {type.FullName} не имеет конструктора без параметров.");
         var newExpression = Expression.New(ctor);
         var lambda = Expression.Lambda<Func<T>>(newExpression);
-        
+
         factory = lambda.Compile();
         pool = ArrayPool<T>.Shared.Rent(capacity);
         this.capacity = capacity;

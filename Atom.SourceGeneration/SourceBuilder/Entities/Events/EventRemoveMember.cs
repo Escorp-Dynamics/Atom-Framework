@@ -49,7 +49,9 @@ public class EventRemoveMember : Entity<EventRemoveMember>
             sb.Append(' ');
 
             if (Code.CountOf(';') is 1)
+            {
                 sb.AppendLine($"=> {Code}");
+            }
             else
             {
                 sb.AppendLine($"\n{spaces}{{");
@@ -61,7 +63,9 @@ public class EventRemoveMember : Entity<EventRemoveMember>
             }
         }
         else
+        {
             sb.Append(';');
+        }
     }
 
     /// <summary>
@@ -106,7 +110,7 @@ public class EventRemoveMember : Entity<EventRemoveMember>
     public override void Release()
     {
         base.Release();
-        
+
         ObjectPool<EventRemoveMember>.Shared.Return(this, x =>
         {
             x.ParentAccessModifier = default;

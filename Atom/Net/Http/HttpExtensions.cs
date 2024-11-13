@@ -1,4 +1,6 @@
-﻿using Atom.Collections;
+﻿#pragma warning disable IDE0046
+
+using Atom.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;

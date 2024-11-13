@@ -6,9 +6,9 @@ namespace Atom.Media;
 
 internal static partial class FFmpeg
 {
-    public unsafe static partial class Util
+    public static unsafe partial class Util
     {
-        const string Dll = "avutil";
+        private const string Dll = "avutil";
 
         [LibraryImport(Dll, EntryPoint = "av_strerror", SetLastError = true)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

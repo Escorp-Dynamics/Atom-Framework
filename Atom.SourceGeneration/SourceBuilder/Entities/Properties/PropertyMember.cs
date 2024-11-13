@@ -77,7 +77,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
 
     private void AppendAccessors(StringBuilder sb, string spaces)
     {
-        var tabs = spaces.Length / 4 + 1;
+        var tabs = (spaces.Length / 4) + 1;
 
         if (Getter is not null) Getter.ParentAccessModifier = AccessModifier;
         if (Setter is not null) Setter.ParentAccessModifier = AccessModifier;

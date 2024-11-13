@@ -19,12 +19,9 @@ public static class Extensions
     private static char[] CreateTable(bool upper = default, bool invariant = default)
     {
         var table = new char[ushort.MaxValue + 1];
-        Func<char, char> handler;
-
-        if (upper)
-            handler = invariant ? char.ToUpperInvariant : char.ToUpper;
-        else
-            handler = invariant ? char.ToLowerInvariant : char.ToLower;
+        Func<char, char> upperFunc = invariant ? char.ToUpperInvariant : char.ToUpper;
+        Func<char, char> lowerFunc = invariant ? char.ToLowerInvariant : char.ToLower;
+        var handler = upper ? upperFunc : lowerFunc;
 
         for (var i = 0; i < table.Length; ++i) table[i] = handler((char)i);
 
@@ -32,7 +29,7 @@ public static class Extensions
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static char GetChar(char c, char[] table) => c >= 'a' && c <= 'z' ? (char)(c - 'a' + 'A') : table[c];
+    private static char GetChar(char c, char[] table) => c is >= 'a' and <= 'z' ? (char)(c - 'a' + 'A') : table[c];
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string GetGenericName(Type type, string name, bool withNamespaces)

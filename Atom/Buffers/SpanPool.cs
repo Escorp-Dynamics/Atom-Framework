@@ -63,7 +63,7 @@ public class SpanPool<T> : IDisposable
     public virtual void Return(ReadOnlySpan<T> span, bool clearArray)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
-        if (span == default) return;
+        if (span.IsEmpty) return;
 
         var count = Interlocked.Decrement(ref rentedCount) + 1;
 
@@ -76,11 +76,13 @@ public class SpanPool<T> : IDisposable
         var index = -1;
 
         for (var i = 0; i <= count; ++i)
+        {
             if (span.SequenceEqual(rented[i].AsSpan(0, span.Length)))
             {
                 index = i;
                 break;
             }
+        }
 
         if (index is -1) throw new InvalidDataException("Сегмент памяти не был арендован в этом пуле");
         pool.Return(rented[index], clearArray);

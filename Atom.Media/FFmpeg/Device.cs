@@ -7,7 +7,7 @@ internal static partial class FFmpeg
 {
     public static partial class Device
     {
-        const string Dll = "avdevice";
+        private const string Dll = "avdevice";
 
         [LibraryImport(Dll, EntryPoint = "avdevice_register_all", SetLastError = true)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

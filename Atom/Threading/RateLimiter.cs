@@ -13,21 +13,20 @@ namespace Atom.Threading;
 /// <param name="rate">Единица времени, за которое будет запущено <see cref="Limit"/> потоков.</param>
 public sealed class RateLimiter(int limit, TimeSpan rate) : IDisposable
 {
-    private int limit = limit;
     private readonly Stopwatch timer = Stopwatch.StartNew();
-    private readonly SemaphoreSlim locker = new SemaphoreSlim(limit);
+    private readonly SemaphoreSlim locker = new(limit);
 
     /// <summary>
     /// Максимальное число потоков, работающих в единицу времени <see cref="Rate"/>.
     /// </summary>
     public int Limit
     {
-        get => limit;
+        get;
 
         set
         {
-            limit = value;
-            var difference = limit - locker.CurrentCount;
+            field = value;
+            var difference = field - locker.CurrentCount;
 
             if (difference > 0)
             {
@@ -38,7 +37,7 @@ public sealed class RateLimiter(int limit, TimeSpan rate) : IDisposable
                 for (var i = 0; i < -difference; ++i) locker.Wait();
             }
         }
-    }
+    } = limit;
 
     /// <summary>
     /// Единица времени, за которое будет запущено <see cref="Limit"/> потоков.
@@ -60,8 +59,9 @@ public sealed class RateLimiter(int limit, TimeSpan rate) : IDisposable
     public void Call([NotNull] Action callback)
     {
         if (timer.Elapsed > Rate)
-            while (locker.CurrentCount < (locker.CurrentCount + locker.CurrentCount))
-                locker.Release();
+        {
+            while (locker.CurrentCount < (locker.CurrentCount + locker.CurrentCount)) locker.Release();
+        }
 
         locker.Wait();
 
@@ -86,8 +86,9 @@ public sealed class RateLimiter(int limit, TimeSpan rate) : IDisposable
     public T Call<T>([NotNull] Func<T> callback)
     {
         if (timer.Elapsed > Rate)
-            while (locker.CurrentCount < (locker.CurrentCount + locker.CurrentCount))
-                locker.Release();
+        {
+            while (locker.CurrentCount < (locker.CurrentCount + locker.CurrentCount)) locker.Release();
+        }
 
         locker.Wait();
 
@@ -112,8 +113,9 @@ public sealed class RateLimiter(int limit, TimeSpan rate) : IDisposable
     public async ValueTask CallAsync([NotNull] Func<ValueTask> callback, CancellationToken cancellationToken)
     {
         if (timer.Elapsed > Rate)
-            while (locker.CurrentCount < (locker.CurrentCount + locker.CurrentCount))
-                locker.Release();
+        {
+            while (locker.CurrentCount < (locker.CurrentCount + locker.CurrentCount)) locker.Release();
+        }
 
         await locker.WaitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -147,8 +149,9 @@ public sealed class RateLimiter(int limit, TimeSpan rate) : IDisposable
     public async ValueTask<T> CallAsync<T>([NotNull] Func<ValueTask<T>> callback, CancellationToken cancellationToken)
     {
         if (timer.Elapsed > Rate)
-            while (locker.CurrentCount < (locker.CurrentCount + locker.CurrentCount))
-                locker.Release();
+        {
+            while (locker.CurrentCount < (locker.CurrentCount + locker.CurrentCount)) locker.Release();
+        }
 
         await locker.WaitAsync(cancellationToken).ConfigureAwait(false);
 

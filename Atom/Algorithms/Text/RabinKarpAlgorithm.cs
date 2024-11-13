@@ -21,8 +21,8 @@ public class RabinKarpAlgorithm : TextAlgorithm
 
         for (var i = 0; i < target.Length; ++i)
         {
-            targetHash = (targetHash * 256 + Extensions.GetUpperChar(target[i], comparison)) % Prime;
-            sourceHash = (sourceHash * 256 + Extensions.GetUpperChar(source[i], comparison)) % Prime;
+            targetHash = ((targetHash * 256) + Extensions.GetUpperChar(target[i], comparison)) % Prime;
+            sourceHash = ((sourceHash * 256) + Extensions.GetUpperChar(source[i], comparison)) % Prime;
             if (i > 0) power = power * 256 % Prime;
         }
 
@@ -35,7 +35,7 @@ public class RabinKarpAlgorithm : TextAlgorithm
 
                 if (i < source.Length - target.Length)
                 {
-                    sourceHash = ((sourceHash - Extensions.GetUpperChar(source[i], comparison) * power) * 256 + Extensions.GetUpperChar(source[i + target.Length], comparison)) % Prime;
+                    sourceHash = (((sourceHash - (Extensions.GetUpperChar(source[i], comparison) * power)) * 256) + Extensions.GetUpperChar(source[i + target.Length], comparison)) % Prime;
                     if (sourceHash < 0) sourceHash += Prime;
                 }
             }
@@ -56,8 +56,8 @@ public class RabinKarpAlgorithm : TextAlgorithm
 
         for (var i = 0; i < target.Length; ++i)
         {
-            targetHash = (targetHash * 256 + Extensions.GetUpperChar(target[i], comparison)) % Prime;
-            sourceHash = (sourceHash * 256 + Extensions.GetUpperChar(source[i], comparison)) % Prime;
+            targetHash = ((targetHash * 256) + Extensions.GetUpperChar(target[i], comparison)) % Prime;
+            sourceHash = ((sourceHash * 256) + Extensions.GetUpperChar(source[i], comparison)) % Prime;
             if (i > 0) power = power * 256 % Prime;
         }
 
@@ -74,7 +74,7 @@ public class RabinKarpAlgorithm : TextAlgorithm
 
                 if (i < source.Length - target.Length)
                 {
-                    sourceHash = ((sourceHash - Extensions.GetUpperChar(source[i], comparison) * power) * 256 + Extensions.GetUpperChar(source[i + target.Length], comparison)) % Prime;
+                    sourceHash = (((sourceHash - (Extensions.GetUpperChar(source[i], comparison) * power)) * 256) + Extensions.GetUpperChar(source[i + target.Length], comparison)) % Prime;
                     if (sourceHash < 0) sourceHash += Prime;
                 }
             }
@@ -87,9 +87,10 @@ public class RabinKarpAlgorithm : TextAlgorithm
     private static unsafe bool CompareStrings(char* sourcePtr, char* targetPtr, int length, StringComparison comparison)
     {
         for (var i = 0; i < length; ++i)
-            if (!(*(sourcePtr + i)).Equals(*(targetPtr + i), comparison))
-                return default;
-        
+        {
+            if (!(*(sourcePtr + i)).Equals(*(targetPtr + i), comparison)) return default;
+        }
+
         return true;
     }
 }

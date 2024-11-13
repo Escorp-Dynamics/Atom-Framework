@@ -68,11 +68,13 @@ public abstract class SyntaxProvider<TSymbol, TSyntaxNode> : ISyntaxProvider<TSy
         if (member.AttributeLists.Count is 0) return default;
 
         foreach (var attributeLists in member.AttributeLists)
+        {
             foreach (var attribute in attributeLists.Attributes)
             {
                 var attr = attribute.Name.ToString();
                 if (!string.IsNullOrEmpty(attr) && Attributes.Any(x => attr.Equals(x, StringComparison.InvariantCultureIgnoreCase))) return true;
             }
+        }
 
         return default;
     }

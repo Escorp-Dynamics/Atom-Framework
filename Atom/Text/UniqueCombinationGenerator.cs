@@ -75,7 +75,7 @@ public class UniqueCombinationGenerator(int length, string characters)
         var randomBytes = SpanPool<byte>.Shared.Rent(Length);
         var sb = ObjectPool<StringBuilder>.Shared.Rent();
         string? combination;
-        
+
         do
         {
             RandomNumberGenerator.Fill(randomBytes);

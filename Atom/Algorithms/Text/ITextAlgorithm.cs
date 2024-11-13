@@ -8,7 +8,7 @@ public interface ITextAlgorithm
     /// <summary>
     /// Общий экземпляр алгоритма.
     /// </summary>
-    abstract static ITextAlgorithm Shared { get; set; }
+    static abstract ITextAlgorithm Shared { get; set; }
 
     /// <summary>
     /// Возвращает число найденных вхождений подстроки.

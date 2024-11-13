@@ -1,3 +1,5 @@
+#pragma warning disable IDE0060
+
 using Atom.Architect.Reactive;
 using Atom.Distribution;
 using Atom.Threading;
@@ -62,6 +64,11 @@ public partial class VirtualCamera : Reactively, IAsyncDisposable
     public string Path => $"/dev/video{Number}";
 
     /// <summary>
+    /// Определяет, активен ли захват видеопотока.
+    /// </summary>
+    public bool IsCapturing { get; protected set; }
+
+    /// <summary>
     /// Инициализирует новый экземпляр <see cref="VirtualCamera"/>.
     /// </summary>
     public VirtualCamera()
@@ -109,10 +116,19 @@ public partial class VirtualCamera : Reactively, IAsyncDisposable
     /// Начинает захват видеопотока с камеры.
     /// </summary>
     /// <param name="path">Путь к файлу видеозахвата.</param>
+    /// <param name="isLooped">Указывает, является ли захват зацикленным.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    public virtual async ValueTask StartCaptureAsync(string path, CancellationToken cancellationToken)
+    public virtual async ValueTask StartCaptureAsync(string path, bool isLooped, CancellationToken cancellationToken)
     {
-        if (!await OS.Terminal.RunAsAdministratorAsync($"modprobe v4l2loopback devices=1 video_nr={Number} card_label='{name}' exclusive_caps=1 width={resolution.Width} height={resolution.Height} framerate={frameRate}/1 pixel_format=MJPG", cancellationToken).ConfigureAwait(false))
+        ObjectDisposedException.ThrowIf(isDisposed, this);
+
+        if (!string.IsNullOrEmpty(path)) stream.Input = path;
+        if (IsCapturing) return;
+
+        IsCapturing = true;
+        stream.IsLooped = isLooped;
+
+        if (!await OS.Terminal.RunAsAdministratorAsync($"modprobe v4l2loopback devices=1 video_nr={Number} card_label='{name} {Number}' exclusive_caps=1 width={resolution.Width} height={resolution.Height} framerate={frameRate}/1 pixel_format=MJPG", cancellationToken).ConfigureAwait(false))
             throw new VirtualCameraException("Не удалось запустить камеру");
 
         //if (!await OS.Terminal.RunAsAdministratorAsync($"v4l2loopback-ctl set-caps {Path} YUV420P:{resolution.Width}x{resolution.Height}@{frameRate}/1", cancellationToken).ConfigureAwait(false))
@@ -124,7 +140,6 @@ public partial class VirtualCamera : Reactively, IAsyncDisposable
         await Wait.UntilAsync(() => !File.Exists(Path), cancellationToken).ConfigureAwait(false);
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
-        if (!string.IsNullOrEmpty(path)) stream.Input = path;
         stream.Output = Path;
     }
 
@@ -132,31 +147,110 @@ public partial class VirtualCamera : Reactively, IAsyncDisposable
     /// Начинает захват видеопотока с камеры.
     /// </summary>
     /// <param name="path">Путь к файлу видеозахвата.</param>
-    public ValueTask StartCaptureAsync(string path) => StartCaptureAsync(path, CancellationToken.None);
+    /// <param name="isLooped">Указывает, является ли захват зацикленным.</param>
+    public ValueTask StartCaptureAsync(string path, bool isLooped) => StartCaptureAsync(path, isLooped, CancellationToken.None);
+
+    /// <summary>
+    /// Начинает захват видеопотока с камеры.
+    /// </summary>
+    /// <param name="path">Путь к файлу видеозахвата.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    public ValueTask StartCaptureAsync(string path, CancellationToken cancellationToken) => StartCaptureAsync(path, default, cancellationToken);
+
+    /// <summary>
+    /// Начинает захват видеопотока с камеры.
+    /// </summary>
+    /// <param name="path">Путь к файлу видеозахвата.</param>
+    public ValueTask StartCaptureAsync(string path) => StartCaptureAsync(path, default, CancellationToken.None);
+
+    /// <summary>
+    /// Начинает захват видеопотока с камеры.
+    /// </summary>
+    /// <param name="url">Ссылка к файлу видеозахвата.</param>
+    /// <param name="isLooped">Указывает, является ли захват зацикленным.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    public ValueTask StartCaptureAsync([NotNull] Uri url, bool isLooped, CancellationToken cancellationToken) => StartCaptureAsync(url.AbsoluteUri, isLooped, cancellationToken);
+
+    /// <summary>
+    /// Начинает захват видеопотока с камеры.
+    /// </summary>
+    /// <param name="url">Ссылка к файлу видеозахвата.</param>
+    /// <param name="isLooped">Указывает, является ли захват зацикленным.</param>
+    public ValueTask StartCaptureAsync(Uri url, bool isLooped) => StartCaptureAsync(url, isLooped, CancellationToken.None);
 
     /// <summary>
     /// Начинает захват видеопотока с камеры.
     /// </summary>
     /// <param name="url">Ссылка к файлу видеозахвата.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    public virtual ValueTask StartCaptureAsync([NotNull] Uri url, CancellationToken cancellationToken) => StartCaptureAsync(url.AbsoluteUri, cancellationToken);
+    public ValueTask StartCaptureAsync([NotNull] Uri url, CancellationToken cancellationToken) => StartCaptureAsync(url, default, cancellationToken);
 
     /// <summary>
     /// Начинает захват видеопотока с камеры.
     /// </summary>
     /// <param name="url">Ссылка к файлу видеозахвата.</param>
-    public ValueTask StartCaptureAsync(Uri url) => StartCaptureAsync(url, CancellationToken.None);
+    public ValueTask StartCaptureAsync([NotNull] Uri url) => StartCaptureAsync(url, default, CancellationToken.None);
 
     /// <summary>
     /// Начинает захват видеопотока с камеры.
     /// </summary>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    public virtual ValueTask StartCaptureAsync(CancellationToken cancellationToken) => StartCaptureAsync(string.Empty, cancellationToken);
+    public ValueTask StartCaptureAsync(CancellationToken cancellationToken) => StartCaptureAsync(string.Empty, cancellationToken);
 
     /// <summary>
     /// Начинает захват видеопотока с камеры.
     /// </summary>
     public ValueTask StartCaptureAsync() => StartCaptureAsync(CancellationToken.None);
+
+    /// <summary>
+    /// Останавливает захват видеопотока.
+    /// </summary>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    public ValueTask StopCaptureAsync(CancellationToken cancellationToken)
+    {
+        IsCapturing = default;
+        stream.Input = stream.Output = string.Empty;
+        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Останавливает захват видеопотока.
+    /// </summary>
+    public ValueTask StopCaptureAsync() => StopCaptureAsync(CancellationToken.None);
+
+    /// <summary>
+    /// Начинает захват видеопотока и ожидает завершения.
+    /// </summary>
+    /// <param name="path">Путь к файлу видеозахвата.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    public async ValueTask WaitForCaptureAsync(string path, CancellationToken cancellationToken)
+    {
+        await StartCaptureAsync(path, cancellationToken).ConfigureAwait(false);
+        await WaitForCaptureAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Начинает захват видеопотока и ожидает завершения.
+    /// </summary>
+    /// <param name="path">Путь к файлу видеозахвата.</param>
+    public ValueTask WaitForCaptureAsync(string path) => WaitForCaptureAsync(path, CancellationToken.None);
+
+    /// <summary>
+    /// Начинает захват видеопотока и ожидает завершения.
+    /// </summary>
+    /// <param name="url">Ссылка к файлу видеозахвата.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    public async ValueTask WaitForCaptureAsync(Uri url, CancellationToken cancellationToken)
+    {
+        await StartCaptureAsync(url, cancellationToken).ConfigureAwait(false);
+        await WaitForCaptureAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Начинает захват видеопотока и ожидает завершения.
+    /// </summary>
+    /// <param name="url">Ссылка к файлу видеозахвата.</param>
+    public ValueTask WaitForCaptureAsync(Uri url) => WaitForCaptureAsync(url, CancellationToken.None);
 
     /// <summary>
     /// Ожидает завершения захвата видеопотока.

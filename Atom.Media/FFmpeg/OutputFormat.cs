@@ -15,4 +15,6 @@ internal unsafe struct OutputFormat
     public int flags;
     public readonly void* codec_tag;
     public readonly void* av_class;
+
+    public readonly bool IsImage => Marshal.PtrToStringAnsi((nint)name) is "image2" or "mjpeg" or "singlejpeg" or "png" or "webp";
 }

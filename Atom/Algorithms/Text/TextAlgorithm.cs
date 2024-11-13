@@ -1,7 +1,5 @@
 #pragma warning disable CS8618
 
-using System.Runtime.CompilerServices;
-
 namespace Atom.Algorithms.Text;
 
 /// <summary>

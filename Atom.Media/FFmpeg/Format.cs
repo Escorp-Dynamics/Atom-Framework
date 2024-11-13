@@ -5,9 +5,9 @@ namespace Atom.Media;
 
 internal static partial class FFmpeg
 {
-    public unsafe static partial class Format
+    public static unsafe partial class Format
     {
-        const string Dll = "avformat";
+        private const string Dll = "avformat";
 
         [LibraryImport(Dll, EntryPoint = "avformat_network_init", SetLastError = true)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

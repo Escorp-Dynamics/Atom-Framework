@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Xml.Linq;
@@ -190,8 +189,6 @@ public static class Extensions
         var namedArg = attribute.NamedArguments
             .FirstOrDefault(arg => name.Equals(arg.Key, StringComparison.InvariantCultureIgnoreCase)).Value;
 
-        if (!namedArg.IsNull) return TryConvertTo<T>(namedArg.Value);
-
-        return default;
+        return !namedArg.IsNull ? TryConvertTo<T>(namedArg.Value) : default;
     }
 }

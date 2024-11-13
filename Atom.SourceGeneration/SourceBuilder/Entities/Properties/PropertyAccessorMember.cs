@@ -59,9 +59,13 @@ public class PropertyAccessorMember : Entity<PropertyAccessorMember>
             sb.Append(' ');
 
             if (Code.StartsWith("return"))
+            {
                 sb.AppendLine($"=> {Code[6..].TrimStart()}");
+            }
             else if (Code.CountOf(';') is 1)
+            {
                 sb.AppendLine($"=> {Code}");
+            }
             else
             {
                 sb.AppendLine($"\n{spaces}{{");
@@ -73,7 +77,9 @@ public class PropertyAccessorMember : Entity<PropertyAccessorMember>
             }
         }
         else
+        {
             sb.Append(';');
+        }
     }
 
     /// <summary>

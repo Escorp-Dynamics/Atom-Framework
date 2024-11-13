@@ -101,7 +101,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     private void AppendEntities(StringBuilder sb, string spaces)
     {
         sb.AppendLine($"\n{spaces}{{");
-        var tabs = spaces.Length / 4 + 1;
+        var tabs = (spaces.Length / 4) + 1;
 
         foreach (var field in fields)
         {
@@ -337,7 +337,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
             x.IsStatic = default;
         });
     }
-    
+
     /// <summary>
     /// Создаёт новый экземпляр строителя интерфейса.
     /// </summary>

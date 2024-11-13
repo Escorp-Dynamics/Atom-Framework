@@ -55,7 +55,7 @@ internal unsafe struct MediaFrame
 #pragma warning disable CA1823, CS0169
 internal unsafe struct Fixed<T> where T : unmanaged
 {
-    const uint Size = 8;
+    private const uint Size = 8;
 
     private readonly T* data0;
 
@@ -72,6 +72,14 @@ internal unsafe struct Fixed<T> where T : unmanaged
     private readonly T* data6;
 
     private readonly T* data7;
+
+    public readonly T** Source
+    {
+        get
+        {
+            fixed (T** ptr = &data0) return ptr;
+        }
+    }
 
     public readonly T* this[uint i]
     {
@@ -112,6 +120,5 @@ internal unsafe struct Fixed<T> where T : unmanaged
         }
     }
 
-    public unsafe static implicit operator T*[](Fixed<T> @struct) => @struct.ToArray();
+    public static unsafe implicit operator T*[](Fixed<T> @struct) => @struct.ToArray();
 }
-#pragma warning restore CA1823, CS0169

@@ -12,22 +12,22 @@ public class VideoStream : Stream
 {
     private const string DevNull = "/dev/null";
 
-    private readonly WhiteNoiseGenerator noiseGenerator = new();
+    private readonly SemaphoreSlim locker = new(1, 1);
 
-    private unsafe readonly FormatContext* input = null;
-    private unsafe readonly FormatContext* output = null;
+    private readonly unsafe FormatContext* input = null;
+    private readonly unsafe FormatContext* output = null;
 
     private int inputVideoStreamIndex = -1;
     private int inputAudioStreamIndex = -1;
 
-    private unsafe CodecContext* inputVideoCodecContext;
-    private unsafe CodecContext* inputAudioCodecContext;
+    private unsafe CodecContext* videoDecoder;
+    private unsafe CodecContext* audioDecoder;
 
     private int outputVideoStreamIndex = -1;
     private int outputAudioStreamIndex = -1;
 
-    private unsafe CodecContext* outputVideoCodecContext = null;
-    private unsafe CodecContext* outputAudioCodecContext = null;
+    private unsafe CodecContext* videoEncoder = null;
+    private unsafe CodecContext* audioEncoder = null;
 
     private Task? processingTask;
     private CancellationTokenSource cts;
@@ -66,7 +66,7 @@ public class VideoStream : Stream
     public override bool CanWrite => !string.IsNullOrEmpty(outputPath) && outputPath is not DevNull && isOutputReady;
 
     /// <inheritdoc/>
-    public override long Length => throw new NotSupportedException();
+    public override long Length => readyFrames;
 
     /// <inheritdoc/>
     public override long Position
@@ -85,7 +85,7 @@ public class VideoStream : Stream
         set
         {
             resolution = value;
-            SetUpOutput();
+            SetUpVideoEncoder();
         }
     }
 
@@ -99,7 +99,7 @@ public class VideoStream : Stream
         set
         {
             inputPath = value;
-            SetUpInput();
+            SetUpDecoder();
         }
     }
 
@@ -113,7 +113,7 @@ public class VideoStream : Stream
         set
         {
             outputPath = value;
-            SetUpOutput();
+            SetUpEncoder();
         }
     }
 
@@ -137,7 +137,7 @@ public class VideoStream : Stream
         set
         {
             frameRate = value;
-            if (output is not null) outputVideoCodecContext->framerate = new Ratio { num = 1, den = frameRate };
+            SetUpVideoEncoder();
         }
     }
 
@@ -151,7 +151,7 @@ public class VideoStream : Stream
         set
         {
             audioSampleRate = value;
-            if (output is not null) outputAudioCodecContext->sample_rate = audioSampleRate;
+            SetUpAudioEncoder();
         }
     }
 
@@ -165,15 +165,7 @@ public class VideoStream : Stream
         set
         {
             audioChannels = value;
-
-            if (output is not null)
-                outputAudioCodecContext->ChannelLayout = new ChannelLayout
-                {
-                    nb_channels = audioChannels,
-                    opaque = outputAudioCodecContext->ChannelLayout.opaque,
-                    order = outputAudioCodecContext->ChannelLayout.order,
-                    u = outputAudioCodecContext->ChannelLayout.u,
-                };
+            SetUpAudioEncoder();
         }
     }
 
@@ -196,8 +188,8 @@ public class VideoStream : Stream
 
         cts = new CancellationTokenSource();
 
-        SetUpInput();
-        SetUpOutput();
+        if (!string.IsNullOrEmpty(inputPath)) SetUpDecoder();
+        if (!string.IsNullOrEmpty(outputPath)) SetUpEncoder();
     }
 
     /// <summary>
@@ -240,413 +232,455 @@ public class VideoStream : Stream
     /// </summary>
     ~VideoStream() => Dispose(disposing: false);
 
-    unsafe static VideoStream()
+    static unsafe VideoStream()
     {
-        FFmpeg.Util.SetLogLevel(64);
+#if DEBUG
+        FFmpeg.Util.SetLogLevel(40);
+#else
+        FFmpeg.Util.SetLogLevel(0);
+#endif
         FFmpeg.Util.SetLogFlags(2);
         FFmpeg.Device.RegisterAll();
         FFmpeg.Format.NetworkInit();
     }
 
-    private unsafe bool ProcessInput()
+    private unsafe void SetUpVideoDecoder()
     {
-        var packet = FFmpeg.Codec.PacketAlloc();
-        if (packet is null) throw new VideoStreamException("Не удалось выделить память для пакета");
+        locker.Wait();
 
-        const string packetError = "Не удалось освободить пакет";
-
-        if (FFmpeg.Format.ReadFrame(input, packet) < 0)
+        fixed (CodecContext** ctx = &videoDecoder)
         {
-            if (IsLooped) FFmpeg.Format.SeekFrame(input, -1, 0, 1).ThrowIfErrors("Ошибка перемещения указателя на начало");
-
-            FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors(packetError);
-            FFmpeg.Codec.PacketFree(&packet);
-            return IsLooped;
-        }
-
-        if (packet->stream_index == inputAudioStreamIndex && IsMuted)
-        {
-            FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors(packetError);
-            FFmpeg.Codec.PacketFree(&packet);
-            return true;
-        }
-
-        var frame = FFmpeg.Util.FrameAlloc();
-        if (frame is null) throw new VideoStreamException("Не удалось выделить память для фрейма");
-
-        FFmpeg.Util.FrameMakeWritable(frame);
-
-        var inputStreamIndex = packet->stream_index == inputAudioStreamIndex ? inputAudioStreamIndex : inputVideoStreamIndex;
-        var outputStreamIndex = packet->stream_index == inputAudioStreamIndex ? outputAudioStreamIndex : outputVideoStreamIndex;
-
-        var inputStream = input->streams[inputStreamIndex];
-        var outputStream = output->streams[outputStreamIndex];
-
-        var decoder = packet->stream_index == inputVideoStreamIndex ? inputVideoCodecContext : inputAudioCodecContext;
-        var encoder = packet->stream_index == inputVideoStreamIndex ? outputVideoCodecContext : outputAudioCodecContext;
-
-        var result = FFmpeg.Codec.SendPacket(decoder, packet);
-
-        if (result is -11 or -541_478_725)
-        {
-            FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors(packetError);
-            FFmpeg.Codec.PacketFree(&packet);
-            FFmpeg.Util.FrameFree(&frame);
-            Thread.Sleep(10);
-            return true;
-        }
-
-        result.ThrowIfErrors("Не удалось отправить пакет на декодер");
-        result = FFmpeg.Codec.ReceiveFrame(decoder, frame);
-
-        if (result is -11 or -541_478_725)
-        {
-            FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors(packetError);
-            FFmpeg.Codec.PacketFree(&packet);
-            FFmpeg.Util.FrameFree(&frame);
-            Thread.Sleep(10);
-            return true;
-        }
-
-        result.ThrowIfErrors("Не удалось получить фрейм из декодера");
-
-        var pts = packet->stream_index == inputVideoStreamIndex ? videoPts : audioPts;
-
-        frame->pts = FFmpeg.Util.ReScaleQ(pts, inputStream->time_base, outputStream->time_base);
-        frame->pict_type = (videoPts is 0) ? 1 : 2;
-        frame->flags = 0;
-        frame->time_base = outputStream->time_base;
-
-        if (packet->stream_index == inputVideoStreamIndex)
-            videoPts += FFmpeg.Util.ReScaleQ(1, inputStream->time_base, outputStream->time_base);
-        else
-            audioPts += FFmpeg.Util.ReScaleQ(frame->nb_samples, inputStream->time_base, outputStream->time_base);
-
-        var outputPacket = FFmpeg.Codec.PacketAlloc();
-        result = FFmpeg.Codec.SendFrame(encoder, frame);
-
-        if (result is not 0)
-        {
-            FFmpeg.Util.FrameFree(&frame);
-            return true;
-        }
-
-        result = FFmpeg.Codec.ReceivePacket(encoder, outputPacket);
-
-        if (result is -11 or -541_478_725)
-        {
-            FFmpeg.Codec.UnRefPacket(outputPacket).ThrowIfErrors(packetError);
-            FFmpeg.Codec.PacketFree(&outputPacket);
-            FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors(packetError);
-            FFmpeg.Codec.PacketFree(&packet);
-            FFmpeg.Util.FrameFree(&frame);
-            Thread.Sleep(10);
-            return true;
-        }
-
-        result.ThrowIfErrors("Не удалось получить пакет из энкодера");
-
-        outputPacket->stream_index = outputStreamIndex;
-        //outputPacket->pts = FFmpeg.Util.ReScaleQRnd(frame->pts, inputStream->time_base, outputStream->time_base, 5 | 8192);
-        //outputPacket->dts = outputPacket->pts;
-        //outputPacket->duration = FFmpeg.Util.ReScaleQ(packet->duration, inputStream->time_base, outputStream->time_base);
-        //outputPacket->pos = -1;
-
-        FFmpeg.Format.InterleavedWriteFrame(output, outputPacket).ThrowIfErrors("Не удалось записать фрейм");
-
-        FFmpeg.Codec.UnRefPacket(outputPacket).ThrowIfErrors(packetError);
-
-        FFmpeg.Codec.PacketFree(&outputPacket);
-        FFmpeg.Util.FrameFree(&frame);
-
-        FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors("Не удалось освободить пакет");
-        FFmpeg.Codec.PacketFree(&packet);
-
-        ++readyFrames;
-
-        if (isDevice) Thread.Sleep(1000 / frameRate);
-        return true;
-    }
-
-    private unsafe bool ProcessWhiteNoise()
-    {
-        if (outputVideoCodecContext is not null) noiseGenerator.WriteVideoFrame(outputVideoCodecContext, output, outputVideoStreamIndex);
-        if (!IsMuted && outputAudioCodecContext is not null) noiseGenerator.WriteAudioFrame(outputAudioCodecContext, output, outputAudioStreamIndex);
-
-        ++readyFrames;
-
-        if (neededFrames <= 0 || isDevice) Thread.Sleep(1000 / frameRate);
-        return neededFrames <= 0 || readyFrames <= neededFrames;
-    }
-
-    private unsafe void Process(CancellationToken cancellationToken)
-    {
-        Wait.Until(() => !CanWrite && !cancellationToken.IsCancellationRequested && !isDisposed);
-
-        if (cancellationToken.IsCancellationRequested || isDisposed) return;
-
-        while (!cancellationToken.IsCancellationRequested && !isDisposed)
-        {
-            if (!CanRead)
+            if (ctx is not null)
             {
-                if (!ProcessWhiteNoise()) break;
-                continue;
+                FFmpeg.Codec.Close(videoDecoder);
+                FFmpeg.Codec.FreeContext(ctx);
+                videoDecoder = default;
             }
-
-            if (!ProcessInput()) break;
         }
 
-        if (cancellationToken.IsCancellationRequested) return;
-
-        cts.Cancel();
-        processingTask?.Wait(CancellationToken.None);
-        processingTask = default;
-    }
-
-    private unsafe void SetUpVideoInput()
-    {
         AVCodec* decoder = null;
 
         inputVideoStreamIndex = FFmpeg.Format.FindBestStream(input, 0, -1, -1, &decoder, 0);
-        if (inputVideoStreamIndex < 0) return;
 
-        var inputVideoStream = input->streams[inputVideoStreamIndex];
-        if (inputVideoStream is null) throw new VideoStreamException("Не удалось найти входной видеопоток");
+        if (inputVideoStreamIndex < 0)
+        {
+            locker.Release();
+            return;
+        }
 
-        inputVideoCodecContext = FFmpeg.Codec.AllocContext3(decoder);
-        if (inputVideoCodecContext is null) throw new VideoStreamException("Не удалось выделить контекст кодека входного видеопотока");
+        var inputStream = input->streams[inputVideoStreamIndex];
 
-        FFmpeg.Codec.ParametersToContext(inputVideoCodecContext, inputVideoStream->codecpar)
-            .ThrowIfErrors("Не удалось передать параметры в контекст входного формата видеопотока");
+        if (inputStream is null)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось найти входной видеопоток");
+        }
 
-        FFmpeg.Codec.Open2(inputVideoCodecContext, decoder, default)
-            .ThrowIfErrors("Не удалось открыть кодек входного формата видеопотока");
+        videoDecoder = FFmpeg.Codec.AllocContext3(decoder);
 
-        if (FFmpeg.Codec.IsOpen(inputVideoCodecContext).ThrowIfErrors("Не удалось проверить открытие кодировщика") is 0)
-            throw new VideoStreamException("Не удалось открыть кодировщик");
+        if (videoDecoder is null)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось выделить контекст кодека входного видеопотока");
+        }
 
-        if (FFmpeg.Codec.IsDecoder(inputVideoCodecContext->codec).ThrowIfErrors("Не удалось проверить кодировщик") is 0)
-            throw new VideoStreamException("Не удалось проверить кодировщик");
+        FFmpeg.Codec.ParametersToContext(videoDecoder, inputStream->codecpar)
+            .ThrowIfErrors("Не удалось передать параметры в контекст входного формата видеопотока", locker);
+
+        FFmpeg.Codec.Open2(videoDecoder, decoder, default)
+            .ThrowIfErrors("Не удалось открыть кодек входного формата видеопотока", locker);
+
+        if (FFmpeg.Codec.IsOpen(videoDecoder).ThrowIfErrors("Не удалось проверить открытие декодировщика", locker) is 0)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось открыть декодировщик");
+        }
+
+        if (FFmpeg.Codec.IsDecoder(videoDecoder->codec).ThrowIfErrors("Не удалось проверить декодировщик", locker) is 0)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось проверить декодировщик");
+        }
+
+        locker.Release();
+        SetUpVideoEncoder();
     }
 
-    private unsafe void SetUpAudioInput()
+    private unsafe void SetUpAudioDecoder()
     {
+        locker.Wait();
+
+        fixed (CodecContext** ctx = &audioDecoder)
+        {
+            if (ctx is not null)
+            {
+                FFmpeg.Codec.Close(audioDecoder);
+                FFmpeg.Codec.FreeContext(ctx);
+                audioDecoder = default;
+            }
+        }
+
         AVCodec* decoder = null;
 
         inputAudioStreamIndex = FFmpeg.Format.FindBestStream(input, 1, -1, -1, &decoder, 0);
-        if (inputAudioStreamIndex < 0) return;
 
-        var inputAudioStream = input->streams[inputAudioStreamIndex];
-        if (inputAudioStream is null) throw new VideoStreamException("Не удалось найти входной аудиопоток");
+        if (inputAudioStreamIndex < 0)
+        {
+            locker.Release();
+            return;
+        }
 
-        inputAudioCodecContext = FFmpeg.Codec.AllocContext3(decoder);
-        if (inputAudioCodecContext is null) throw new VideoStreamException("Не удалось выделить контекст кодека входного аудиопотока");
+        var inputStream = input->streams[inputAudioStreamIndex];
 
-        FFmpeg.Codec.ParametersToContext(inputAudioCodecContext, inputAudioStream->codecpar)
-                    .ThrowIfErrors("Не удалось передать параметры в контекст входного формата аудиопотока");
+        if (inputStream is null)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось найти входной аудиопоток");
+        }
 
-        FFmpeg.Codec.Open2(inputAudioCodecContext, decoder, default)
-            .ThrowIfErrors("Не удалось открыть кодек входного формата аудиопотока");
+        audioDecoder = FFmpeg.Codec.AllocContext3(decoder);
+
+        if (audioDecoder is null)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось выделить контекст кодека входного аудиопотока");
+        }
+
+        FFmpeg.Codec.ParametersToContext(audioDecoder, inputStream->codecpar)
+            .ThrowIfErrors("Не удалось передать параметры в контекст входного формата аудиопотока", locker);
+
+        FFmpeg.Codec.Open2(audioDecoder, decoder, default)
+            .ThrowIfErrors("Не удалось открыть кодек входного формата аудиопотока", locker);
+
+        if (FFmpeg.Codec.IsOpen(videoDecoder).ThrowIfErrors("Не удалось проверить открытие декодировщика", locker) is 0)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось открыть декодировщик");
+        }
+
+        if (FFmpeg.Codec.IsDecoder(videoDecoder->codec).ThrowIfErrors("Не удалось проверить декодировщик", locker) is 0)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось проверить декодировщик");
+        }
+
+        locker.Release();
+        SetUpAudioEncoder();
     }
 
-    private void SetUpInput()
+    private void SetUpDecoder()
     {
-        videoPts = default;
-        audioPts = default;
+        locker.Wait();
+
+        inputVideoStreamIndex = -1;
+        inputAudioStreamIndex = -1;
         isInputReady = default;
 
         if (processingTask is not null)
         {
             cts.Cancel();
-            processingTask.Wait();
-            CloseInput();
+            processingTask = default;
         }
 
+        CloseDecoder();
         cts = new CancellationTokenSource();
         processingTask = Task.Run(() => Process(cts.Token));
+
+        locker.Release();
 
         if (string.IsNullOrEmpty(inputPath) || inputPath is DevNull) return;
 
         unsafe
         {
-            fixed (FormatContext** ctx = &input) FFmpeg.Format.OpenInput(ctx, inputPath, default, default)
+            fixed (FormatContext** ctx = &input)
+            {
+                FFmpeg.Format.OpenInput(ctx, inputPath, default, default)
                 .ThrowIfErrors("Не удалось инициализировать контекст входного формата");
+            }
 
             FFmpeg.Format.FindStreamInfo(input, default).ThrowIfErrors("Не удалось найти информацию о входном потоке");
 
-            SetUpVideoInput();
-            SetUpAudioInput();
+            SetUpVideoDecoder();
+            SetUpAudioDecoder();
 
-            if (inputVideoCodecContext is null && inputAudioCodecContext is null) throw new VideoStreamException("Не удалось найти ни одного аудио и видео потока");
-            if (resolution == default && inputVideoCodecContext is not null) resolution = new Size(inputVideoCodecContext->width, inputVideoCodecContext->height);
+            if (videoDecoder is null && audioDecoder is null) throw new VideoStreamException("Не удалось найти ни одного аудио и видео потока");
+            if (resolution == default && videoDecoder is not null) resolution = new Size(videoDecoder->width, videoDecoder->height);
         }
 
         isInputReady = true;
     }
 
-    private unsafe void SetUpVideoOutput()
+    private unsafe void SetUpVideoEncoder()
     {
-        if (output->oformat->VideoCodec is MediaCodec.NONE) return;
+        locker.Wait();
 
-        MediaStream* inputVideoStream = default;
+        fixed (CodecContext** ctx = &videoEncoder)
+        {
+            if (ctx is not null)
+            {
+                FFmpeg.Codec.Close(videoEncoder);
+                FFmpeg.Codec.FreeContext(ctx);
+                videoEncoder = default;
+            }
+        }
+
+        if (output is null || output->oformat->VideoCodec is MediaCodec.NONE)
+        {
+            locker.Release();
+            return;
+        }
+
+        MediaStream* inputStream = default;
 
         if (input is not null)
         {
-            inputVideoStream = input->streams[inputVideoStreamIndex];
-            if (inputVideoStream is null) throw new VideoStreamException("Не удалось найти входной видеопоток");
+            inputStream = input->streams[inputVideoStreamIndex];
+
+            if (inputStream is null)
+            {
+                locker.Release();
+                throw new VideoStreamException("Не удалось найти входной видеопоток");
+            }
         }
 
-        var outputVideoStream = FFmpeg.Format.NewStream(output, default);
-        if (outputVideoStream is null) throw new VideoStreamException("Не удалось открыть поток записи видео");
+        var outputStream = outputVideoStreamIndex < 0
+            ? FFmpeg.Format.NewStream(output, default)
+            : output->streams[outputVideoStreamIndex];
+
+        if (outputStream is null)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось открыть поток записи видео");
+        }
 
         var codec = FFmpeg.Codec.FindEncoder(output->oformat->VideoCodec);
-        if (codec is null) throw new VideoStreamException("Не удалось найти декодер формата для выходного видеопотока");
 
-        outputVideoCodecContext = FFmpeg.Codec.AllocContext3(codec);
-        if (outputVideoCodecContext is null) throw new VideoStreamException("Не удалось выделить контекст кодека выходного видеопотока");
-
-        if (inputVideoStream is null)
+        if (codec is null)
         {
-            outputVideoCodecContext->bit_rate = 4000000;
-            outputVideoCodecContext->rc_buffer_size = 230 * 1024;
-            outputVideoCodecContext->rc_min_rate = 512 * 1024;
-            outputVideoCodecContext->rc_max_rate = 1024 * 1024;
-            outputVideoCodecContext->width = resolution.Width;
-            outputVideoCodecContext->height = resolution.Height;
-            outputVideoCodecContext->Format = PixelFormat.YUV420P;
-            outputVideoCodecContext->time_base = new Ratio { num = 1, den = frameRate };
-            outputVideoCodecContext->framerate = new Ratio { num = frameRate, den = 1 };
-            outputVideoCodecContext->gop_size = 12;
-            outputVideoCodecContext->max_b_frames = 2;
+            locker.Release();
+            throw new VideoStreamException("Не удалось найти декодер формата для выходного видеопотока");
+        }
 
-            if (output->oformat->VideoCodec is MediaCodec.MPEG4)
-            {
-                outputVideoCodecContext->flags |= 262144; // AV_CODEC_FLAG_INTERLACED_DCT
-                outputVideoCodecContext->flags |= 536870912; // AV_CODEC_FLAG_INTERLACED_ME
-            }
+        videoEncoder = FFmpeg.Codec.AllocContext3(codec);
+
+        if (videoEncoder is null)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось выделить контекст кодека выходного видеопотока");
+        }
+
+        if (inputStream is null)
+        {
+            videoEncoder->bit_rate = 4000000;
+            videoEncoder->rc_buffer_size = 230 * 1024;
+            videoEncoder->rc_min_rate = 512 * 1024;
+            videoEncoder->rc_max_rate = 1024 * 1024;
+            videoEncoder->width = resolution.Width;
+            videoEncoder->height = resolution.Height;
+            videoEncoder->gop_size = 12;
+            videoEncoder->max_b_frames = 2;
         }
         else
         {
-            outputVideoCodecContext->bit_rate = inputVideoCodecContext->bit_rate;
-            outputVideoCodecContext->rc_buffer_size = inputVideoCodecContext->rc_buffer_size;
-            outputVideoCodecContext->rc_min_rate = inputVideoCodecContext->rc_min_rate;
-            outputVideoCodecContext->rc_max_rate = inputVideoCodecContext->rc_max_rate;
-            outputVideoCodecContext->width = inputVideoCodecContext->width;
-            outputVideoCodecContext->height = inputVideoCodecContext->height;
-            outputVideoCodecContext->Format = inputVideoCodecContext->Format;
-            outputVideoCodecContext->time_base = inputVideoCodecContext->time_base;
-            outputVideoCodecContext->framerate = inputVideoCodecContext->framerate;
-            outputVideoCodecContext->gop_size = inputVideoCodecContext->gop_size;
-            outputVideoCodecContext->max_b_frames = inputVideoCodecContext->max_b_frames;
-            outputVideoCodecContext->flags = inputVideoCodecContext->flags;
+            videoEncoder->bit_rate = videoDecoder->bit_rate;
+            videoEncoder->rc_buffer_size = videoDecoder->rc_buffer_size;
+            videoEncoder->rc_min_rate = videoDecoder->rc_min_rate;
+            videoEncoder->rc_max_rate = videoDecoder->rc_max_rate;
+            videoEncoder->width = videoDecoder->width;
+            videoEncoder->height = videoDecoder->height;
+            videoEncoder->gop_size = videoDecoder->gop_size;
+            videoEncoder->max_b_frames = videoDecoder->max_b_frames;
+            videoEncoder->flags = videoDecoder->flags;
         }
 
-        if (outputVideoCodecContext->time_base.num is 0) outputVideoCodecContext->time_base = new Ratio { num = 1, den = frameRate };
-        if (inputVideoStream is not null) outputVideoStream->time_base = inputVideoStream->time_base;
+        videoEncoder->PixelFormat = videoEncoder->Kind.ToPixelFormat();
+
+        if (videoEncoder->Kind is MediaCodec.MJPEG)
+        {
+            videoEncoder->max_b_frames = default;
+            videoEncoder->bit_rate = videoEncoder->rc_min_rate = videoEncoder->rc_max_rate;
+        }
+        else if (videoEncoder->Kind is MediaCodec.WEBP)
+        {
+            videoEncoder->bit_rate = default;
+            videoEncoder->flags |= 1;
+            videoEncoder->flags |= 2;
+            videoEncoder->flags |= 524288;
+        }
+        else if (videoEncoder->Kind is MediaCodec.H264)
+        {
+            videoEncoder->width = (videoEncoder->width % 2 is 0) ? videoEncoder->width : videoEncoder->width + 1;
+            videoEncoder->height = (videoEncoder->height % 2 is 0) ? videoEncoder->height : videoEncoder->height + 1;
+        }
+
+        videoEncoder->time_base = new Ratio { num = 1, den = frameRate };
+        videoEncoder->framerate = new Ratio { num = frameRate, den = 1 };
+        videoEncoder->delay = default;
+        outputStream->time_base = videoEncoder->time_base;
 
         if ((output->oformat->flags & 64) is not 0)
         {
-            outputVideoCodecContext->flags |= 4194304;
+            videoEncoder->flags |= 4194304;
             output->flags |= 4194304;
         }
 
-        FFmpeg.Codec.Open2(outputVideoCodecContext, codec, default)
-            .ThrowIfErrors("Не удалось открыть кодек выходного формата видеопотока");
+        FFmpeg.Codec.Open2(videoEncoder, codec, default)
+            .ThrowIfErrors("Не удалось открыть кодек выходного формата видеопотока", locker);
 
-        if (FFmpeg.Codec.IsOpen(outputVideoCodecContext).ThrowIfErrors("Не удалось проверить открытие декодировщика") is 0)
+        if (FFmpeg.Codec.IsOpen(videoEncoder).ThrowIfErrors("Не удалось проверить открытие кодировщика", locker) is 0)
+        {
+            locker.Release();
             throw new VideoStreamException("Не удалось открыть кодировщик");
+        }
 
-        if (FFmpeg.Codec.IsEncoder(outputVideoCodecContext->codec).ThrowIfErrors("Не удалось проверить декодировщик") is 0)
+        if (FFmpeg.Codec.IsEncoder(videoEncoder->codec).ThrowIfErrors("Не удалось проверить кодировщик", locker) is 0)
+        {
+            locker.Release();
             throw new VideoStreamException("Не удалось проверить кодировщик");
+        }
 
-        if (inputVideoStream is not null && !isDevice && inputVideoCodecContext->Kind == outputVideoCodecContext->Kind)
-            FFmpeg.Codec.ParametersCopy(outputVideoStream->codecpar, inputVideoStream->codecpar)
-                .ThrowIfErrors("Не удалось скопировать параметры выходного видеопотока");
-        else
-            FFmpeg.Codec.ParametersFromContext(outputVideoStream->codecpar, outputVideoCodecContext)
-                .ThrowIfErrors("Не удалось передать параметры в контекст выходного формата видеопотока");
+        FFmpeg.Codec.ParametersFromContext(outputStream->codecpar, videoEncoder)
+            .ThrowIfErrors("Не удалось передать параметры в контекст выходного формата видеопотока", locker);
 
-        outputVideoStreamIndex = outputVideoStream->index;
+        outputVideoStreamIndex = outputStream->index;
+        locker.Release();
     }
 
-    private unsafe void SetUpAudioOutput()
+    private unsafe void SetUpAudioEncoder()
     {
-        if (output->oformat->AudioCodec is MediaCodec.NONE) return;
+        locker.Wait();
 
-        MediaStream* inputAudioStream = default;
+        fixed (CodecContext** ctx = &audioEncoder)
+        {
+            if (ctx is not null)
+            {
+                FFmpeg.Codec.Close(audioEncoder);
+                FFmpeg.Codec.FreeContext(ctx);
+                audioEncoder = default;
+            }
+        }
+
+        if (output is null || output->oformat->AudioCodec is MediaCodec.NONE)
+        {
+            locker.Release();
+            return;
+        }
+
+        MediaStream* inputStream = default;
 
         if (input is not null && inputAudioStreamIndex >= 0)
         {
-            inputAudioStream = input->streams[inputAudioStreamIndex];
-            if (inputAudioStream is null) throw new VideoStreamException("Не удалось найти выходной аудиопоток");
+            inputStream = input->streams[inputAudioStreamIndex];
+
+            if (inputStream is null)
+            {
+                locker.Release();
+                throw new VideoStreamException("Не удалось найти входной аудиопоток");
+            }
         }
 
-        var outputAudioStream = FFmpeg.Format.NewStream(output, default);
-        if (outputAudioStream is null) throw new VideoStreamException("Не удалось открыть поток записи аудио");
+        var outputStream = outputAudioStreamIndex < 0
+            ? FFmpeg.Format.NewStream(output, default)
+            : output->streams[inputAudioStreamIndex];
 
-        if (inputAudioStream is not null) outputAudioStream->time_base = inputAudioStream->time_base;
+        if (outputStream is null)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось открыть поток записи аудио");
+        }
 
         var codec = FFmpeg.Codec.FindEncoder(output->oformat->AudioCodec);
-        if (codec is null) throw new VideoStreamException("Не удалось найти декодер формата для выходного аудиопотока");
 
-        outputAudioCodecContext = FFmpeg.Codec.AllocContext3(codec);
-        if (outputAudioCodecContext is null) throw new VideoStreamException("Не удалось выделить контекст кодека выходного аудиопотока");
+        if (codec is null)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось найти декодер формата для выходного аудиопотока");
+        }
 
-        if (inputAudioStream is null || isDevice)
+        audioEncoder = FFmpeg.Codec.AllocContext3(codec);
+
+        if (audioEncoder is null)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось выделить контекст кодека выходного аудиопотока");
+        }
+
+        if (inputStream is null)
         {
             ChannelLayout cl = default;
             FFmpeg.Util.DefaultChannelLayout(&cl, audioChannels);
 
-            outputAudioCodecContext->sample_rate = audioSampleRate;
-            outputAudioCodecContext->ChannelLayout = cl;
-            outputAudioCodecContext->SampleFormat = output->oformat->AudioCodec.ToSampleFormat();
-            outputAudioCodecContext->time_base = new Ratio { num = 1, den = outputAudioCodecContext->sample_rate };
-            outputAudioCodecContext->framerate = new Ratio { num = outputAudioCodecContext->sample_rate, den = 1 };
-            outputAudioCodecContext->bit_rate = 256000;
-            outputAudioCodecContext->rc_max_rate = 2500000;
-            outputAudioCodecContext->trellis = 1;
-            outputAudioCodecContext->qmax = 51;
-            outputAudioCodecContext->gop_size = 12;
+            audioEncoder->sample_rate = audioEncoder->Kind is MediaCodec.OPUS ? 48000 : audioSampleRate;
+            audioEncoder->ChannelLayout = cl;
+            audioEncoder->SampleFormat = output->oformat->AudioCodec.ToSampleFormat();
+            audioEncoder->time_base = new Ratio { num = 1, den = audioEncoder->sample_rate };
+            audioEncoder->framerate = new Ratio { num = audioEncoder->sample_rate, den = 1 };
+            audioEncoder->bit_rate = 256000;
+            audioEncoder->rc_max_rate = 2500000;
+            audioEncoder->trellis = 1;
+            audioEncoder->qmax = 51;
+            audioEncoder->gop_size = 12;
         }
         else
         {
-            outputAudioCodecContext->sample_rate = inputAudioCodecContext->sample_rate;
-            outputAudioCodecContext->ChannelLayout = inputAudioCodecContext->ChannelLayout;
-            outputAudioCodecContext->SampleFormat = inputAudioCodecContext->SampleFormat;
-            outputAudioCodecContext->time_base = inputAudioCodecContext->time_base;
-            outputAudioCodecContext->bit_rate = inputAudioCodecContext->bit_rate;
-            outputAudioCodecContext->rc_max_rate = inputAudioCodecContext->rc_max_rate;
-            outputAudioCodecContext->trellis = inputAudioCodecContext->trellis;
-            outputAudioCodecContext->qmax = inputAudioCodecContext->qmax;
-            outputAudioCodecContext->gop_size = inputAudioCodecContext->gop_size;
+            audioEncoder->sample_rate = audioDecoder->sample_rate;
+            audioEncoder->ChannelLayout = audioDecoder->ChannelLayout;
+            audioEncoder->SampleFormat = audioDecoder->SampleFormat;
+            audioEncoder->time_base = audioDecoder->time_base;
+            audioEncoder->bit_rate = audioDecoder->bit_rate;
+            audioEncoder->rc_max_rate = audioDecoder->rc_max_rate;
+            audioEncoder->trellis = audioDecoder->trellis;
+            audioEncoder->qmax = audioDecoder->qmax;
+            audioEncoder->gop_size = audioDecoder->gop_size;
         }
 
-        FFmpeg.Codec.Open2(outputAudioCodecContext, codec, default)
-            .ThrowIfErrors("Не удалось открыть кодек выходного формата аудиопотока");
+        if (inputStream is not null) outputStream->time_base = inputStream->time_base;
 
-        if (inputAudioStream is not null && !isDevice && inputAudioCodecContext->Kind == outputAudioCodecContext->Kind)
-            FFmpeg.Codec.ParametersCopy(outputAudioStream->codecpar, inputAudioStream->codecpar)
-                .ThrowIfErrors("Не удалось скопировать параметры выходного аудиопотока");
-        else
-            FFmpeg.Codec.ParametersFromContext(outputAudioStream->codecpar, outputAudioCodecContext)
-                .ThrowIfErrors("Не удалось передать параметры в контекст выходного формата аудиопотока");
+        FFmpeg.Codec.Open2(audioEncoder, codec, default)
+                .ThrowIfErrors("Не удалось открыть кодек выходного формата аудиопотока", locker);
 
-        outputAudioStreamIndex = outputAudioStream->index;
+        if (FFmpeg.Codec.IsOpen(audioEncoder).ThrowIfErrors("Не удалось проверить открытие кодировщика", locker) is 0)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось открыть кодировщик");
+        }
+
+        if (FFmpeg.Codec.IsEncoder(audioEncoder->codec).ThrowIfErrors("Не удалось проверить кодировщик", locker) is 0)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось проверить кодировщик");
+        }
+
+        FFmpeg.Codec.ParametersFromContext(outputStream->codecpar, audioEncoder)
+            .ThrowIfErrors("Не удалось передать параметры в контекст выходного формата аудиопотока", locker);
+
+        outputAudioStreamIndex = outputStream->index;
+        locker.Release();
     }
 
-    private void SetUpOutput()
+    private void SetUpEncoder()
     {
-        isOutputReady = default;
+        locker.Wait();
+
+        outputVideoStreamIndex = -1;
+        outputAudioStreamIndex = -1;
+        videoPts = default;
+        audioPts = default;
+        readyFrames = default;
 
         if (processingTask is not null)
         {
             cts.Cancel();
-            processingTask.Wait();
-            CloseOutput();
+            processingTask = default;
         }
 
+        CloseEncoder();
+
+        isOutputReady = default;
         cts = new CancellationTokenSource();
         processingTask = Task.Run(() => Process(cts.Token));
+
+        locker.Release();
 
         if (string.IsNullOrEmpty(outputPath) || outputPath is DevNull) return;
 
@@ -659,11 +693,14 @@ public class VideoStream : Stream
             var outputFormat = FFmpeg.Format.GuessFormat(shortName, fileName, default);
             if (outputFormat is null) throw new VideoStreamException("Не удалось угадать формат вывода");
 
-            fixed (FormatContext** ctx = &output) FFmpeg.Format.AllocOutputContext2(ctx, outputFormat, default, outputPath)
+            fixed (FormatContext** ctx = &output)
+            {
+                FFmpeg.Format.AllocOutputContext2(ctx, outputFormat, default, outputPath)
                 .ThrowIfErrors("Не удалось выделить память для контекста выходного формата");
+            }
 
-            SetUpVideoOutput();
-            SetUpAudioOutput();
+            SetUpVideoEncoder();
+            SetUpAudioEncoder();
 
             FFmpeg.Format.IoOpen(&output->pb, outputPath, 2).ThrowIfErrors("Не удалось открыть поток записи");
 
@@ -676,19 +713,274 @@ public class VideoStream : Stream
         isOutputReady = true;
     }
 
-    private unsafe void CloseInput()
+    private unsafe void Encode(CodecContext* encoder, MediaStream* inputStream, MediaStream* outputStream, MediaFrame* frame, int samples, Ratio inputTimeBase, Ratio outputTimeBase)
     {
-        fixed (CodecContext** ctx = &inputVideoCodecContext) if (ctx is not null) FFmpeg.Codec.FreeContext(ctx);
-        fixed (CodecContext** ctx = &inputAudioCodecContext) if (ctx is not null) FFmpeg.Codec.FreeContext(ctx);
+        frame->pts = inputStream->index == inputVideoStreamIndex ? videoPts : audioPts;
+        frame->pict_type = (videoPts is 0) ? 1 : 2;
+        frame->flags = 0;
+        frame->duration = 1;
+        frame->time_base = outputTimeBase;
+
+        const string packetError = "Не удалось освободить пакет";
+
+        var packet = FFmpeg.Codec.PacketAlloc();
+        FFmpeg.Codec.SendFrame(encoder, frame).ThrowIfErrors("Не удалось отправить фрейм в энкодер", locker);
+        var result = FFmpeg.Codec.ReceivePacket(encoder, packet);
+
+        if (isDevice)
+        {
+            packet->dts = packet->pts = packet->stream_index == inputVideoStreamIndex ? videoPts : audioPts;
+
+            if (packet->stream_index == inputVideoStreamIndex)
+                ++videoPts;
+            else
+                audioPts += samples;
+        }
+        else
+        {
+            if (packet->stream_index == inputVideoStreamIndex)
+                videoPts += FFmpeg.Util.ReScaleQ(1, inputTimeBase, outputTimeBase);
+            else
+                audioPts += FFmpeg.Util.ReScaleQ(samples, inputTimeBase, outputTimeBase);
+        }
+
+        if (result is -11 or -541_478_725)
+        {
+            FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors(packetError);
+            FFmpeg.Codec.PacketFree(&packet);
+            Thread.Sleep(10);
+            return;
+        }
+
+        result.ThrowIfErrors("Не удалось получить пакет из энкодера", locker);
+
+        packet->stream_index = outputStream->index;
+
+        FFmpeg.Format.InterleavedWriteFrame(output, packet).ThrowIfErrors("Не удалось записать фрейм", locker);
+        if (packet->stream_index == inputVideoStreamIndex) ++readyFrames;
+
+        FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors(packetError, locker);
+        FFmpeg.Codec.PacketFree(&packet);
+
+        if (isDevice) Thread.Sleep(1000 / frameRate);
+    }
+
+    private unsafe MediaFrame* Decode(CodecContext* decoder, MediaPacket* packet, int encoderFormat, int encoderWidth, int encoderHeight, Ratio inputTimeBase, Ratio outputTimeBase)
+    {
+        var frame = FFmpeg.Util.FrameAlloc();
+
+        if (frame is null)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось выделить память для фрейма");
+        }
+
+        var result = FFmpeg.Codec.SendPacket(decoder, packet);
+
+        if (result is -11 or -541_478_725)
+        {
+            FFmpeg.Util.FrameFree(&frame);
+            Thread.Sleep(10);
+            return default;
+        }
+
+        result.ThrowIfErrors("Не удалось отправить пакет на декодер", locker);
+        result = FFmpeg.Codec.ReceiveFrame(decoder, frame);
+
+        if (result is -11 or -541_478_725)
+        {
+            FFmpeg.Util.FrameFree(&frame);
+            Thread.Sleep(10);
+            return default;
+        }
+
+        result.ThrowIfErrors("Не удалось получить фрейм из декодера", locker);
+
+        var pts = packet->stream_index == inputVideoStreamIndex ? videoPts : audioPts;
+
+        if (packet->stream_index == inputVideoStreamIndex && frame->Format != encoderFormat)
+        {
+            var convertedFrame = FFmpeg.Util.FrameAlloc();
+
+            if (convertedFrame == null)
+            {
+                locker.Release();
+                throw new VideoStreamException("Не удалось выделить память для преобразованного фрейма");
+            }
+
+            convertedFrame->Format = encoderFormat;
+            convertedFrame->width = frame->width;
+            convertedFrame->height = frame->height;
+
+            FFmpeg.Util.FrameGetBuffer(convertedFrame, 32).ThrowIfErrors("Ошибка выделения буфера для преобразованного фрейма", locker);
+            FFmpeg.Util.FrameMakeWritable(convertedFrame).ThrowIfErrors("Не удалось сделать фрейм записываемым", locker);
+
+            var swsContext = FFmpeg.SwScale.GetContext(
+                frame->width, frame->height, (PixelFormat)frame->Format,
+                encoderWidth, encoderHeight, (PixelFormat)encoderFormat,
+                2, default, default, default
+            );
+
+            if (swsContext is null)
+            {
+                locker.Release();
+                throw new VideoStreamException("Не удалось создать контекст масштабирования фрейма");
+            }
+
+            FFmpeg.SwScale.Scale(
+                swsContext,
+                frame->data.Source,
+                frame->linesize,
+                0,
+                frame->height,
+                convertedFrame->data.Source,
+                convertedFrame->linesize
+            ).ThrowIfErrors("Не удалось отмасштабировать фрейм", locker);
+
+            FFmpeg.SwScale.FreeContext(swsContext);
+
+            convertedFrame->pts = FFmpeg.Util.ReScaleQ(pts, inputTimeBase, outputTimeBase);
+            convertedFrame->pict_type = (videoPts is 0) ? 1 : 2;
+            convertedFrame->flags = 0;
+            convertedFrame->time_base = outputTimeBase;
+
+            FFmpeg.Util.FrameFree(&frame);
+            return convertedFrame;
+        }
+
+        return frame;
+    }
+
+    private unsafe bool ProcessInput()
+    {
+        if (!CanRead || !CanWrite) return default;
+
+        var packet = FFmpeg.Codec.PacketAlloc();
+
+        if (packet is null)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось выделить память для пакета");
+        }
+
+        const string packetError = "Не удалось освободить пакет";
+
+        if (FFmpeg.Format.ReadFrame(input, packet) < 0)
+        {
+            if (IsLooped || readyFrames < neededFrames) FFmpeg.Format.SeekFrame(input, -1, 0, 1).ThrowIfErrors("Ошибка перемещения указателя на начало", locker);
+
+            FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors(packetError, locker);
+            FFmpeg.Codec.PacketFree(&packet);
+
+            return IsLooped || readyFrames < neededFrames;
+        }
+
+        if (packet->stream_index == inputAudioStreamIndex && IsMuted)
+        {
+            FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors(packetError, locker);
+            FFmpeg.Codec.PacketFree(&packet);
+
+            return true;
+        }
+
+        var inputStreamIndex = packet->stream_index == inputAudioStreamIndex ? inputAudioStreamIndex : inputVideoStreamIndex;
+        var outputStreamIndex = packet->stream_index == inputAudioStreamIndex ? outputAudioStreamIndex : outputVideoStreamIndex;
+
+        var inputStream = input->streams[inputStreamIndex];
+        var outputStream = output->streams[outputStreamIndex];
+
+        var decoder = packet->stream_index == inputVideoStreamIndex ? videoDecoder : audioDecoder;
+        var encoder = packet->stream_index == inputVideoStreamIndex ? videoEncoder : audioEncoder;
+
+        var frame = Decode(decoder, packet, (int)encoder->PixelFormat, encoder->width, encoder->height, inputStream->time_base, outputStream->time_base);
+
+        if (frame is not null)
+        {
+            if (inputStream->nb_frames < 2 && inputStream->duration <= 1)
+            {
+                while (CanWrite && (IsLooped || readyFrames < neededFrames))
+                {
+                    Encode(encoder, inputStream, outputStream, frame, frame->nb_samples, inputStream->time_base, outputStream->time_base);
+                    if (output->oformat->IsImage && readyFrames > 0) break;
+                }
+
+                FFmpeg.Util.FrameFree(&frame);
+                return default;
+            }
+
+            Encode(encoder, inputStream, outputStream, frame, frame->nb_samples, inputStream->time_base, outputStream->time_base);
+            FFmpeg.Util.FrameFree(&frame);
+        }
+
+        FFmpeg.Codec.UnRefPacket(packet).ThrowIfErrors(packetError, locker);
+        FFmpeg.Codec.PacketFree(&packet);
+
+        return !output->oformat->IsImage || readyFrames <= 0;
+    }
+
+    private unsafe bool ProcessWhiteNoise()
+    {
+        if ((CanRead && !isDevice) || !CanWrite || (neededFrames > 0 && readyFrames >= neededFrames) || (readyFrames > 0 && output->oformat->IsImage)) return default;
+        if (videoEncoder is not null) WhiteNoiseGenerator.WriteVideoFrame(videoEncoder, output, outputVideoStreamIndex, ref videoPts, locker);
+        if (!output->oformat->IsImage && !IsMuted && audioEncoder is not null) WhiteNoiseGenerator.WriteAudioFrame(audioEncoder, output, outputAudioStreamIndex, ref audioPts, locker);
+
+        ++readyFrames;
+        if (neededFrames <= 0 || isDevice) Thread.Sleep(1000 / frameRate);
+
+        return neededFrames <= 0 || readyFrames <= neededFrames;
+    }
+
+    private unsafe void Process(CancellationToken cancellationToken)
+    {
+        Wait.Until(() => !CanWrite && !cancellationToken.IsCancellationRequested && !isDisposed);
+
+        while (CanWrite && !cancellationToken.IsCancellationRequested && !isDisposed)
+        {
+            locker.Wait(CancellationToken.None);
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                locker.Release();
+                break;
+            }
+
+            if (!CanRead)
+            {
+                if (!ProcessWhiteNoise())
+                {
+                    locker.Release();
+                    break;
+                }
+
+                locker.Release();
+                continue;
+            }
+
+            if (!ProcessInput())
+            {
+                locker.Release();
+                break;
+            }
+
+            locker.Release();
+        }
+
+        if (!cancellationToken.IsCancellationRequested) cts.Cancel();
+    }
+
+    private unsafe void CloseDecoder()
+    {
+        fixed (CodecContext** ctx = &videoDecoder) if (ctx is not null) FFmpeg.Codec.FreeContext(ctx);
+        fixed (CodecContext** ctx = &audioDecoder) if (ctx is not null) FFmpeg.Codec.FreeContext(ctx);
         fixed (FormatContext** ctx = &input) if (ctx is not null) FFmpeg.Format.CloseInput(ctx);
     }
 
-    private unsafe void CloseOutput()
+    private unsafe void CloseEncoder()
     {
         if (isOutputReady) FFmpeg.Format.WriteTrailer(output).ThrowIfErrors("Не удалось записать трейлер");
         if (output is not null && output->pb is not null) FFmpeg.Format.IoCloseP(&output->pb).ThrowIfErrors("Не удалось закрыть поток вывода");
-        fixed (CodecContext** ctx = &outputVideoCodecContext) if (ctx is not null) FFmpeg.Codec.FreeContext(ctx);
-        fixed (CodecContext** ctx = &outputAudioCodecContext) if (ctx is not null) FFmpeg.Codec.FreeContext(ctx);
+        fixed (CodecContext** ctx = &videoEncoder) if (ctx is not null) FFmpeg.Codec.FreeContext(ctx);
+        fixed (CodecContext** ctx = &audioEncoder) if (ctx is not null) FFmpeg.Codec.FreeContext(ctx);
         if (output is not null) FFmpeg.Format.FreeContext(output);
     }
 
@@ -700,15 +992,12 @@ public class VideoStream : Stream
         if (isDisposed) return;
         isDisposed = true;
 
-        if (processingTask is not null)
-        {
-            cts.Cancel();
-            processingTask.Wait();
-        }
+        if (processingTask is not null) cts.Cancel();
 
         Close();
         cts.Dispose();
         base.Dispose(disposing);
+        locker.Dispose();
     }
 
     /// <summary>
@@ -719,8 +1008,8 @@ public class VideoStream : Stream
         if (IsClosed) return;
         IsClosed = true;
 
-        CloseOutput();
-        CloseInput();
+        CloseEncoder();
+        CloseDecoder();
     }
 
     /// <inheritdoc/>
@@ -742,12 +1031,18 @@ public class VideoStream : Stream
     /// Ожидает завершение записи в выходной поток.
     /// </summary>
     /// <param name="timeout">Таймаут ожидания.</param>
-    public void WaitForEnding(TimeSpan timeout)
+    public unsafe void WaitForEnding(TimeSpan timeout)
     {
+        readyFrames = default;
         var timer = Stopwatch.StartNew();
         neededFrames = (long)(frameRate * timeout.TotalSeconds);
-        Wait.Until(() => !cts.IsCancellationRequested, TimeSpan.FromMilliseconds(50), timeout);
-        readyFrames = default;
+
+        Wait.Until(() => !cts.IsCancellationRequested, TimeSpan.FromMilliseconds(10), timeout);
+
+        Input = string.Empty;
+
+        if (output->oformat->IsImage) return;
+
         var time = (int)(timeout - timer.Elapsed).TotalMilliseconds;
         if (time > 0) Thread.Sleep(time);
     }
@@ -755,7 +1050,11 @@ public class VideoStream : Stream
     /// <summary>
     /// Ожидает завершение записи в выходной поток.
     /// </summary>
-    public void WaitForEnding() => Wait.Until(() => !cts.IsCancellationRequested);
+    public void WaitForEnding()
+    {
+        Wait.Until(() => !cts.IsCancellationRequested);
+        Input = string.Empty;
+    }
 
     /// <summary>
     /// Ожидает завершение записи в выходной поток.
@@ -764,10 +1063,19 @@ public class VideoStream : Stream
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     public async ValueTask WaitForEndingAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
+        readyFrames = default;
         var timer = Stopwatch.StartNew();
         neededFrames = (long)(frameRate * timeout.TotalSeconds);
-        await Wait.UntilAsync(() => !cts.IsCancellationRequested, TimeSpan.FromMilliseconds(50), timeout, cancellationToken).ConfigureAwait(false);
-        readyFrames = default;
+
+        await Wait.UntilAsync(() => !cts.IsCancellationRequested, TimeSpan.FromMilliseconds(10), timeout, cancellationToken).ConfigureAwait(false);
+
+        Input = string.Empty;
+
+        unsafe
+        {
+            if (output->oformat->IsImage) return;
+        }
+
         var time = (int)(timeout - timer.Elapsed).TotalMilliseconds;
         if (time > 0) await Task.Delay(time, cancellationToken).ConfigureAwait(false);
     }
@@ -782,7 +1090,11 @@ public class VideoStream : Stream
     /// Ожидает завершение записи в выходной поток.
     /// </summary>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    public ValueTask WaitForEndingAsync(CancellationToken cancellationToken) => Wait.UntilAsync(() => !cts.IsCancellationRequested, cancellationToken);
+    public async ValueTask WaitForEndingAsync(CancellationToken cancellationToken)
+    {
+        await Wait.UntilAsync(() => !cts.IsCancellationRequested, cancellationToken).ConfigureAwait(false);
+        Input = string.Empty;
+    }
 
     /// <summary>
     /// Ожидает завершение записи в выходной поток.

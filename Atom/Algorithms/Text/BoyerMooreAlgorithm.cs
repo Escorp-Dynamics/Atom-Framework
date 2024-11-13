@@ -20,11 +20,13 @@ public class BoyerMooreAlgorithm : TextAlgorithm
         badCharShift.Fill(-1);
 
         fixed (char* targetPtr = target)
+        {
             for (var i = 0; i < target.Length; ++i)
             {
                 badCharShift[Extensions.GetUpperChar(targetPtr[i], comparison)] = i;
                 badCharShift[Extensions.GetLowerChar(targetPtr[i], comparison)] = i;
             }
+        }
 
         return badCharShift;
     }

@@ -36,7 +36,9 @@ public class FieldMember : Member<FieldMember>, IFieldMember<FieldMember>
         sb.Append($"{spaces}{access}");
 
         if (IsConstant)
+        {
             sb.Append("const ");
+        }
         else
         {
             if (IsStatic) sb.Append("static ");

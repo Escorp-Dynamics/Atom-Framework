@@ -59,7 +59,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
 
     private void AppendEventHandlers(StringBuilder sb, string spaces)
     {
-        var tabs = spaces.Length / 4 + 1;
+        var tabs = (spaces.Length / 4) + 1;
 
         if (Adder is not null) Adder.ParentAccessModifier = AccessModifier;
         if (Remover is not null) Remover.ParentAccessModifier = AccessModifier;
@@ -79,7 +79,9 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
                 AppendEventHandlersBlock(sb, spaces, adder, remover, isAuto);
         }
         else
+        {
             sb.AppendLine(";");
+        }
     }
 
     /// <inheritdoc/>

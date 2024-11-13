@@ -106,7 +106,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
         AppendGenericsLimitations(sb);
 
         sb.AppendLine($"\n{spaces}{{");
-        var tabs = spaces.Length / 4 + 1;
+        var tabs = (spaces.Length / 4) + 1;
 
         foreach (var property in properties)
         {

@@ -3,7 +3,8 @@ namespace Atom.Media;
 /// <summary>
 /// Тип кодека.
 /// </summary>
-internal enum MediaCodec {
+internal enum MediaCodec
+{
     NONE,
 
     /* video codecs */
@@ -162,9 +163,9 @@ internal enum MediaCodec {
     BMV_VIDEO,
     VBLE,
     DXTORY,
-#if FF_API_V408_CODECID
+    //#if FF_API_V408_CODECID
     V410,
-#endif
+    //#endif
     XWD,
     CDXL,
     XBM,

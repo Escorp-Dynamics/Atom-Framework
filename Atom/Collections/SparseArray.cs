@@ -18,8 +18,6 @@ public class SparseArray<T> : IEnumerable<T>
     private readonly int[] indexes;
 
     private volatile int currentIndex = -1;
-    private bool isReleased;
-
     private static readonly ArrayPool<int> indexPool = ArrayPool<int>.Create();
 
     /// <summary>
@@ -57,7 +55,7 @@ public class SparseArray<T> : IEnumerable<T>
     /// <summary>
     /// Определяет, были ли ресурсы высвобождены.
     /// </summary>
-    public bool IsReleased => isReleased;
+    public bool IsReleased { get; private set; }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="SparseArray{T}"/>.
@@ -87,7 +85,7 @@ public class SparseArray<T> : IEnumerable<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ValidateIndex(int index)
     {
-        if (isReleased) throw new InvalidOperationException("Ресурсы были высвобождены");
+        if (IsReleased) throw new InvalidOperationException("Ресурсы были высвобождены");
         else if (index < 0 || index >= values.Length) throw new ArgumentOutOfRangeException(nameof(index));
     }
 
@@ -95,8 +93,9 @@ public class SparseArray<T> : IEnumerable<T>
     private int FindAvailableIndex(ReadOnlySpan<int> currentIndexes)
     {
         for (var i = 0; i < values.Length; ++i)
-            if (!IsIndexUsed(currentIndexes, i))
-                return i;
+        {
+            if (!IsIndexUsed(currentIndexes, i)) return i;
+        }
 
         return currentIndexes[^1] + 1;
     }
@@ -117,12 +116,16 @@ public class SparseArray<T> : IEnumerable<T>
             var currentIndexes = GetIndexes();
 
             fixed (int* ptr = currentIndexes)
+            {
                 for (var p = ptr; p < ptr + currentIndexes.Length; ++p)
+                {
                     if (*p == index)
                     {
                         needUpdateIndex = false;
                         break;
                     }
+                }
+            }
         }
 
         if (needUpdateIndex)
@@ -179,8 +182,8 @@ public class SparseArray<T> : IEnumerable<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Release(bool clearArray)
     {
-        if (isReleased) return;
-        isReleased = true;
+        if (IsReleased) return;
+        IsReleased = true;
 
         if (!isExternal) ArrayPool<T>.Shared.Return(values, clearArray);
         indexPool.Return(indexes, true);
@@ -209,9 +212,12 @@ public class SparseArray<T> : IEnumerable<T>
     private static unsafe bool IsIndexUsed(ReadOnlySpan<int> currentIndexes, int index)
     {
         fixed (int* ptr = currentIndexes)
+        {
             for (var p = ptr; p < ptr + currentIndexes.Length; ++p)
-                if (*p == index)
-                    return true;
+            {
+                if (*p == index) return true;
+            }
+        }
 
         return false;
     }

@@ -33,7 +33,7 @@ public class ReactivelyFieldSyntaxProvider : FieldSyntaxProvider
 
             var type = field.Symbol?.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) ?? node.Declaration.Type.ToString();
             if (!type.EndsWith('?') && field.Symbol?.Type.NullableAnnotation is NullableAnnotation.Annotated) type += "?";
-            
+
             var comment = string.Empty;
             field.Symbol?.TryParseXmlDocumentation(out comment);
 

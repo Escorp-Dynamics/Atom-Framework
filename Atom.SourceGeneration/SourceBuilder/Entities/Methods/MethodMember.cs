@@ -141,9 +141,13 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     private void AppendBody(StringBuilder sb, string spaces)
     {
         if (Code.StartsWith("return"))
+        {
             sb.AppendLine($" => {Code[6..].TrimStart()}");
+        }
         else if (Code.CountOf(';') is 1)
+        {
             sb.AppendLine($" => {Code}");
+        }
         else
         {
             sb.AppendLine($"\n{spaces}{{");
@@ -165,12 +169,16 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
           .AppendLine($"{spaces}/// </summary>");
 
         foreach (var arg in arguments)
+        {
             if (!string.IsNullOrEmpty(arg.Comment) && !string.IsNullOrEmpty(arg.Name))
                 sb.AppendLine($"{spaces}/// <param name=\"{arg.Name}\">{arg.Comment}</param>");
-        
+        }
+
         foreach (var generic in generics)
+        {
             if (!string.IsNullOrEmpty(generic.Comment) && !string.IsNullOrEmpty(generic.Name))
                 sb.AppendLine($"{spaces}/// <typeparam name=\"{generic.Name}\">{generic.Comment}</typeparam>");
+        }
     }
 
     /// <inheritdoc/>

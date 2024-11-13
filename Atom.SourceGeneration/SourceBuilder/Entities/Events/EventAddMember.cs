@@ -57,9 +57,13 @@ public class EventAddMember : Entity<EventAddMember>
             sb.Append(' ');
 
             if (Code.StartsWith("return"))
+            {
                 sb.AppendLine($"=> {Code[6..].TrimStart()}");
+            }
             else if (Code.CountOf(';') is 1)
+            {
                 sb.AppendLine($"=> {Code}");
+            }
             else
             {
                 sb.AppendLine($"\n{spaces}{{");
@@ -71,7 +75,9 @@ public class EventAddMember : Entity<EventAddMember>
             }
         }
         else
+        {
             sb.Append(';');
+        }
     }
 
     /// <summary>
@@ -126,7 +132,7 @@ public class EventAddMember : Entity<EventAddMember>
     public override void Release()
     {
         base.Release();
-        
+
         ObjectPool<EventAddMember>.Shared.Return(this, x =>
         {
             x.ParentAccessModifier = default;

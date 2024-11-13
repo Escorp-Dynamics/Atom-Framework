@@ -24,7 +24,6 @@ public ref struct SparseSpan<T>(Span<T> array)
     private readonly Span<int> indexes = StaticPools.SparseSpanIndexPool.Rent(array.Length);
 
     private volatile int currentIndex = -1;
-    private bool isReleased;
 
     /// <summary>
     /// Задаёт или возвращает значение массива по его индексу.
@@ -61,7 +60,7 @@ public ref struct SparseSpan<T>(Span<T> array)
     /// <summary>
     /// Определяет, были ли ресурсы высвобождены.
     /// </summary>
-    public readonly bool IsReleased => isReleased;
+    public bool IsReleased { get; private set; }
 
     /// <summary>
     /// Возвращает активные индексы.
@@ -70,11 +69,7 @@ public ref struct SparseSpan<T>(Span<T> array)
     public readonly ReadOnlySpan<int> Indexes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get
-        {
-            if (isReleased) throw new InvalidOperationException("Ресурсы были высвобождены");
-            return indexes[..(currentIndex + 1)];
-        }
+        get => IsReleased ? throw new InvalidOperationException("Ресурсы были высвобождены") : (ReadOnlySpan<int>)indexes[..(currentIndex + 1)];
     }
 
     /// <summary>
@@ -93,7 +88,7 @@ public ref struct SparseSpan<T>(Span<T> array)
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private readonly void ValidateIndex(int index)
     {
-        if (isReleased) throw new InvalidOperationException("Ресурсы были высвобождены");
+        if (IsReleased) throw new InvalidOperationException("Ресурсы были высвобождены");
         else if (index < 0 || index >= values.Length) throw new ArgumentOutOfRangeException(nameof(index));
     }
 
@@ -101,8 +96,10 @@ public ref struct SparseSpan<T>(Span<T> array)
     private readonly int FindAvailableIndex(ReadOnlySpan<int> currentIndexes)
     {
         for (var i = 0; i < values.Length; ++i)
+        {
             if (!IsIndexUsed(currentIndexes, i))
                 return i;
+        }
 
         return currentIndexes[^1] + 1;
     }
@@ -124,12 +121,16 @@ public ref struct SparseSpan<T>(Span<T> array)
             var currentIndexes = Indexes;
 
             fixed (int* ptr = currentIndexes)
+            {
                 for (var p = ptr; p < ptr + currentIndexes.Length; ++p)
+                {
                     if (*p == index)
                     {
                         needUpdateIndex = false;
                         break;
                     }
+                }
+            }
         }
 
         if (needUpdateIndex)
@@ -173,7 +174,7 @@ public ref struct SparseSpan<T>(Span<T> array)
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Reset()
     {
-        if (isReleased) throw new InvalidOperationException("Ресурсы были высвобождены");
+        if (IsReleased) throw new InvalidOperationException("Ресурсы были высвобождены");
         Interlocked.Exchange(ref currentIndex, -1);
     }
 
@@ -184,8 +185,8 @@ public ref struct SparseSpan<T>(Span<T> array)
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Release(bool clearArray)
     {
-        if (isReleased) return;
-        isReleased = true;
+        if (IsReleased) return;
+        IsReleased = true;
 
         if (!isExternal) SpanPool<T>.Shared.Return(values, clearArray);
         StaticPools.SparseSpanIndexPool.Return(indexes);
@@ -207,9 +208,12 @@ public ref struct SparseSpan<T>(Span<T> array)
     private static unsafe bool IsIndexUsed(ReadOnlySpan<int> currentIndexes, int index)
     {
         fixed (int* ptr = currentIndexes)
+        {
             for (var p = ptr; p < ptr + currentIndexes.Length; ++p)
-                if (*p == index)
-                    return true;
+            {
+                if (*p == index) return true;
+            }
+        }
 
         return false;
     }

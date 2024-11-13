@@ -32,7 +32,9 @@ public partial class NativeException : Exception
 
     [LibraryImport("libc", EntryPoint = "strerror", SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    private static partial nint Error(int errorNo);
+    private static partial nint ErrorUnix(int errorNo);
 
-    private static string? GetError() => Marshal.PtrToStringAnsi(Error(Marshal.GetLastWin32Error()));
+    private static unsafe string? GetError() => RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+        ? Marshal.GetLastPInvokeErrorMessage()
+        : Marshal.PtrToStringAnsi(ErrorUnix(Marshal.GetLastWin32Error()));
 }

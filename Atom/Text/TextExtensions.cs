@@ -113,9 +113,12 @@ public static class TextExtensions
         var count = 0;
 
         fixed (char* ptr = source)
+        {
             for (var p = ptr; *p is not char.MinValue; ++p)
-                if ((*p).Equals(target, comparison))
-                    ++count;
+            {
+                if ((*p).Equals(target, comparison)) ++count;
+            }
+        }
 
         return count;
     }

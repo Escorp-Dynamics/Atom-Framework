@@ -34,8 +34,10 @@ public static class OS
         var lines = File.ReadAllLines("/etc/os-release");
 
         foreach (var line in lines)
+        {
             if (line.StartsWith("ID=") && Enum.TryParse<Distributive>(line[3..].Trim('"'), true, out var kind))
                 return kind;
+        }
 
         return default;
     }

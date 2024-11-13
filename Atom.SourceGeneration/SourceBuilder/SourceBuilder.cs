@@ -79,7 +79,7 @@ public class SourceBuilder : ISourceBuilder
         }
 
         if (!string.IsNullOrEmpty(Namespace)) sb.AppendLine(CultureInfo.InvariantCulture, $"namespace {Namespace};").AppendLine();
-        
+
         foreach (var entity in entities)
         {
             var v = entity.Build();

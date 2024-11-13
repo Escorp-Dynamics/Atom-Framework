@@ -1,5 +1,6 @@
-﻿using System.Diagnostics.CodeAnalysis;
-using System.Runtime.Serialization;
+﻿#pragma warning disable IDE0046
+
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 using Atom.Architect.Reactive;
 

@@ -16,7 +16,7 @@ public interface ISyntaxProvider<TSymbol, TSyntaxNode> where TSymbol : ISymbol w
     /// <param name="node">Синтаксический узел.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     bool Predicate(SyntaxNode node, CancellationToken cancellationToken);
-    
+
     /// <summary>
     /// Преобразует синтаксический контекст в объект типа T.
     /// </summary>

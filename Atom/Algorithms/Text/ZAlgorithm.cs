@@ -89,8 +89,9 @@ public class ZAlgorithm : TextAlgorithm
         var count = 0;
 
         for (var i = target.Length + 1; i < combinedLength; ++i)
-            if (zArray[i] == target.Length)
-                ++count;
+        {
+            if (zArray[i] == target.Length) ++count;
+        }
 
         SpanPool<int>.Shared.Return(zArray);
         SpanPool<char>.Shared.Return(combined);
@@ -114,11 +115,13 @@ public class ZAlgorithm : TextAlgorithm
         var isFound = false;
 
         for (var i = target.Length + 1; i < combinedLength; ++i)
+        {
             if (zArray[i] == target.Length)
             {
                 isFound = true;
                 break;
             }
+        }
 
         SpanPool<int>.Shared.Return(zArray);
         SpanPool<char>.Shared.Return(combined);

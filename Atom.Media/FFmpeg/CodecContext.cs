@@ -29,7 +29,7 @@ internal unsafe struct CodecContext
     public int coded_width;
     public int coded_height;
     public Ratio sample_aspect_ratio;
-    public PixelFormat Format;
+    public PixelFormat PixelFormat;
     public int sw_pix_fmt;
     public int color_primaries;
     public int color_trc;

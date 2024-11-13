@@ -35,7 +35,7 @@ public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
         sb.AppendLine($"{spaces}{AccessModifier.AsString()} enum {Name}{type}")
           .AppendLine($"{spaces}{{");
 
-        var subTabs = spaces.Length / 4 + 1;
+        var subTabs = (spaces.Length / 4) + 1;
 
         foreach (var value in Values)
         {
