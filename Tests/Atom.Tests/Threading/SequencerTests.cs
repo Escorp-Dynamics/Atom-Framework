@@ -5,7 +5,7 @@ namespace Atom.Threading.Tests;
 
 public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logger)
 {
-    private readonly Sequencer sequencer = new(TimeSpan.FromSeconds(1), true);
+    private static readonly Sequencer sequencer = new(TimeSpan.FromSeconds(3), true);
 
     public override bool IsBenchmarkDisabled => true;
 
@@ -13,7 +13,7 @@ public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logg
 
     private async void TestCallback()
     {
-        await Task.Delay(TimeSpan.FromSeconds(2));
+        await Task.Delay(TimeSpan.FromSeconds(1));
         sequencer.Remove(TestCallback);
     }
 
@@ -23,15 +23,15 @@ public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logg
         sequencer.Add(TestCallback);
         await sequencer.StartAsync();
 
-        await sequencer.WaitAsync(TestCallback);
+        var result = await sequencer.WaitAsync(TestCallback);
+        Assert.That(result, Is.False);
 
-        sequencer.Interval = TimeSpan.FromSeconds(1);
+        await Task.Delay(TimeSpan.FromSeconds(15));
 
         sequencer.Add(TestCallback);
         await sequencer.StartAsync();
 
-        await sequencer.WaitAsync(TestCallback);
-
-        Assert.Pass();
+        result = await sequencer.WaitAsync(TestCallback);
+        Assert.That(result, Is.False);
     }
 }

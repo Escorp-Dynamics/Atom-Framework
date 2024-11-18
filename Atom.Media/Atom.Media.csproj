@@ -27,7 +27,7 @@
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.0.5</Version>
+		<Version>0.0.6</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -40,7 +40,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Escorp.Atom" Version="0.2.9" />
+		<PackageReference Include="Escorp.Atom" Version="0.2.10" />
 	</ItemGroup>
 
 	<ItemGroup>

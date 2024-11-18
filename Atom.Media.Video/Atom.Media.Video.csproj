@@ -27,7 +27,7 @@
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.0.7</Version>
+		<Version>0.0.8</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -52,11 +52,11 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Escorp.Atom.Media" Version="0.0.5" />
+		<PackageReference Include="Escorp.Atom.Media" Version="0.0.6" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="0.0.17" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="0.0.18" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
 	<PropertyGroup>

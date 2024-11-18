@@ -74,7 +74,12 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="state">Объект, передающий состояние таймера.</param>
     private void OnTimerElapsed(object? state)
     {
-        if (!tasks.TryDequeue(out var task) || task is null) return;
+        if (!IsRunning || !tasks.TryDequeue(out var task) || task is null)
+        {
+            timer.Change(Interval, Timeout.InfiniteTimeSpan);
+            return;
+        }
+
         if (IsLoop) tasks.Enqueue(task);
 
         task();
