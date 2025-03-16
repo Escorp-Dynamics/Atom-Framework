@@ -1,0 +1,318 @@
+#nullable enable
+#pragma warning disable CS0109
+
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
+using Atom;
+using System.IO;
+using System.IO.Pipelines;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
+using Atom.Text.Json;
+
+namespace Atom.Web.Proxies;
+
+public partial class ServiceProxy : IJsonContext<ServiceProxy>
+{
+    static readonly Lazy<JsonTypeInfo<ServiceProxy>> typeInfo = new(() =>
+                {
+                    var options = new JsonSerializerOptions
+                    {
+                        
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault,
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    PropertyNameCaseInsensitive = true
+
+                    };
+
+                    return new JsonContext<ServiceProxy>(options, default).TypeInfo;
+                }, true);
+
+    /// <inheritdoc/>
+    public new static JsonTypeInfo<ServiceProxy> TypeInfo => typeInfo.Value;
+
+    /// <inheritdoc/>
+    public static new event MutableEventHandler<FailedEventArgs>? SerializationFailed;
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new string? Serialize()
+    {
+        try
+        {
+            return JsonSerializer.Serialize(this, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new void Serialize(Stream utf8json)
+    {
+        try
+        {
+            JsonSerializer.Serialize(utf8json, this, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new void Serialize([NotNull] Utf8JsonWriter writer)
+    {
+        try
+        {
+            JsonSerializer.Serialize(writer, this, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new JsonDocument? SerializeToDocument()
+    {
+        try
+        {
+            return JsonSerializer.SerializeToDocument(this, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new JsonElement? SerializeToElement()
+    {
+        try
+        {
+            return JsonSerializer.SerializeToElement(this, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new JsonNode? SerializeToNode()
+    {
+        try
+        {
+            return JsonSerializer.SerializeToNode(this, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new ReadOnlySpan<byte> SerializeToUtf8Bytes()
+    {
+        try
+        {
+            return JsonSerializer.SerializeToUtf8Bytes(this, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new async ValueTask SerializeAsync([NotNull] Stream utf8json, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await JsonSerializer.SerializeAsync(utf8json, this, TypeInfo, cancellationToken).ConfigureAwait(false);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new async ValueTask SerializeAsync([NotNull] PipeWriter writer, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await JsonSerializer.SerializeAsync(writer, this, TypeInfo, cancellationToken).ConfigureAwait(false);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new static ServiceProxy? Deserialize([NotNull] JsonDocument json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(json, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new static ServiceProxy? Deserialize(JsonElement json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(json, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new static ServiceProxy? Deserialize([NotNull] Stream utf8json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(utf8json, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new static ServiceProxy? Deserialize([NotNull] string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(json, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new static ServiceProxy? Deserialize(JsonNode? node)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(node, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new static ServiceProxy? Deserialize(ref Utf8JsonReader reader)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(ref reader, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new static ServiceProxy? Deserialize(ReadOnlySpan<byte> json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(json, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new static ServiceProxy? Deserialize(ReadOnlySpan<char> json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(json, TypeInfo);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new static async ValueTask<ServiceProxy?> DeserializeAsync([NotNull] Stream utf8json, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await JsonSerializer.DeserializeAsync(utf8json, TypeInfo, cancellationToken).ConfigureAwait(false);
+        }
+        catch (JsonException ex)
+        {
+            SerializationFailed.On(args => args.Exception = ex);
+            return default;
+        }
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new static IAsyncEnumerable<ServiceProxy?> DeserializeAsyncEnumerable([NotNull] Stream utf8json, bool topLevelValues, CancellationToken cancellationToken = default) => JsonSerializer.DeserializeAsyncEnumerable(utf8json, TypeInfo, topLevelValues, cancellationToken);
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new static IAsyncEnumerable<ServiceProxy?> DeserializeAsyncEnumerable([NotNull] Stream utf8json, CancellationToken cancellationToken = default) => JsonSerializer.DeserializeAsyncEnumerable(utf8json, TypeInfo, cancellationToken);
+}

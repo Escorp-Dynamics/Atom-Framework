@@ -1,4 +1,4 @@
 /// <summary>
 /// Тестовая константа
 /// </summary>
-const System.Int32 TestConst = 5;
+const int TestConst = 5;

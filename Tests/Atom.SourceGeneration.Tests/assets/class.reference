@@ -4,12 +4,11 @@
 [Test]
 public partial class Test
 {
-    System.Object? field
+    object? field
 
-    System.Object? TestProperty1 { get; }
+    object? TestProperty1 { get; }
 
     event System.Action? TestEvent;
 
     void TestMethod() { }
-
 }

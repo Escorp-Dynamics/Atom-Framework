@@ -1,0 +1,89 @@
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Loggers;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Testing;
+using Microsoft.CodeAnalysis.Testing;
+
+namespace Atom.Architect.Components.Tests;
+
+public class ComponentOwnerTypeSyntaxProviderTests(ILogger logger) : BenchmarkTest<ComponentOwnerTypeSyntaxProviderTests>(logger)
+{
+    private static string? source;
+    private static string? reference;
+
+    public override bool IsBenchmarkDisabled => true;
+
+    public ComponentOwnerTypeSyntaxProviderTests() : this(ConsoleLogger.Unicode) { }
+
+    private static void Settings()
+    {
+        if (string.IsNullOrEmpty(source) && File.Exists("assets/component_owner.source"))
+            source = File.ReadAllText("assets/component_owner.source");
+
+        if (string.IsNullOrEmpty(reference) && File.Exists("assets/component_owner.reference"))
+            reference = File.ReadAllText("assets/component_owner.reference");
+    }
+
+    public override void GlobalSetUp()
+    {
+        Settings();
+        base.GlobalSetUp();
+    }
+
+    public override void OneTimeSetUp()
+    {
+        Settings();
+        base.OneTimeSetUp();
+    }
+
+    [TestCase(TestName = "Тест анализатора владельцев компонентов"), Benchmark]
+    public async Task AnalyzerTest()
+    {
+        var test = new CSharpAnalyzerTest<ComponentOwnerSourceAnalyzer, DefaultVerifier>
+        {
+            TestState =
+            {
+                ReferenceAssemblies = ReferenceAssemblies.Net.Net90,
+                Sources = { source! },
+                AdditionalReferences =
+                {
+                    MetadataReference.CreateFromFile(Path.Combine(Directory.GetCurrentDirectory(), "Escorp.Atom.dll")),
+                },
+            },
+        };
+
+        test.ExpectedDiagnostics.Add(new DiagnosticResult("A0001", DiagnosticSeverity.Hidden)
+            .WithSpan(119, 2, 119, 36)
+            .WithMessage("Обнаружен атрибут 'ComponentOwner'")
+        );
+
+        test.ExpectedDiagnostics.Add(new DiagnosticResult("A0001", DiagnosticSeverity.Hidden)
+            .WithSpan(120, 2, 120, 36)
+            .WithMessage("Обнаружен атрибут 'ComponentOwner'")
+        );
+
+        await test.RunAsync();
+        if (IsTest) Assert.Pass();
+    }
+
+    [TestCase(TestName = "Тест генератора владельцев компонентов"), Benchmark]
+    public async Task GeneratorTest()
+    {
+        var test = new CSharpSourceGeneratorTest<ComponentOwnerSourceGenerator, DefaultVerifier>
+        {
+            TestState =
+            {
+                ReferenceAssemblies = ReferenceAssemblies.Net.Net90,
+                Sources = { source! },
+                GeneratedSources = { (typeof(ComponentOwnerSourceGenerator), "TestFactory.ComponentOwner.g.cs", reference!) },
+                AdditionalReferences =
+                {
+                    MetadataReference.CreateFromFile(Path.Combine(Directory.GetCurrentDirectory(), "Escorp.Atom.dll")),
+                },
+            }
+        };
+
+        await test.RunAsync();
+        if (IsTest) Assert.Pass();
+    }
+}

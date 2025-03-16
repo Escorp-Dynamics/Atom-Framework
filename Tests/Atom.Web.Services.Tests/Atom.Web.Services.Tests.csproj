@@ -14,17 +14,17 @@
 
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
-    <PackageReference Include="coverlet.collector" Version="6.0.2">
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
-    <PackageReference Include="NUnit" Version="4.2.2" />
-    <PackageReference Include="NUnit.Analyzers" Version="4.4.0">
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+    <PackageReference Include="NUnit" Version="4.3.2" />
+    <PackageReference Include="NUnit.Analyzers" Version="4.6.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="5.0.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -32,12 +32,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Proxy\" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\Atom.Tests\Atom.Tests.csproj" />
-    <ProjectReference Include="..\..\Atom.Web.Services\Atom.Web.Services.csproj" />
+    <ProjectReference Include="../../Framework/Atom.Web.Services/Atom.Web.Services.csproj" />
+    <ProjectReference Include="../Atom.Tests/Atom.Tests.csproj" />
   </ItemGroup>
 
 </Project>

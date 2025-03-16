@@ -33,48 +33,48 @@ public class MethodBuilderTests(ILogger logger) : BenchmarkTest<MethodBuilderTes
     public void MethodTest()
     {
         var src = MethodMember.Create<int>("TestMethod", AccessModifier.Protected)
-            .AddArgument<bool>("arg1", "Булев аргумент")
-            .AddArgument<string>("arg2", "Строковый аргумент", "NotNull")
+            .WithArgument<bool>("arg1")
+            .WithArgument<string>("arg2", "NotNull")
             .WithComment("Тестовый метод")
             .AsAbstract()
             .Build(true);
 
         src += Environment.NewLine + MethodMember.Create("TestMethod", AccessModifier.ProtectedInternal)
-            .AddArgument<bool>("arg1", "Булев аргумент")
-            .AddArgument<string>("arg2", "Строковый аргумент", "NotNull", "Test")
+            .WithArgument<bool>("arg1")
+            .WithArgument<string>("arg2", "NotNull", "Test")
             .WithComment("Тестовый метод")
             .AsVirtual()
             .Build(true);
 
         src += Environment.NewLine + MethodMember.Create("TestMethod", AccessModifier.ProtectedInternal)
-            .AddArgument<bool>("arg1", "Булев аргумент")
-            .AddArgument<string>("arg2", "Строковый аргумент", "NotNull", "Test")
+            .WithArgument<bool>("arg1")
+            .WithArgument<string>("arg2", "NotNull", "Test")
             .WithComment("Тестовый метод")
             .AsVirtual()
             .Build(true);
 
         src += Environment.NewLine + MethodMember.Create<bool>("TestMethod")
-            .AddArgument<bool>("arg1", "Булев аргумент")
-            .AddArgument<string>("arg2", "Строковый аргумент")
+            .WithArgument<bool>("arg1")
+            .WithArgument<string>("arg2")
             .WithComment("Тестовый метод")
             .WithCode("arg1 && !string.IsNullOrEmpty(arg2)")
             .Build(true);
 
         src += Environment.NewLine + MethodMember.Create("TestMethod", true)
-            .AddArgument<bool>("arg1", "Булев аргумент")
-            .AddArgument<string>("arg2", "Строковый аргумент")
+            .WithArgument<bool>("arg1")
+            .WithArgument<string>("arg2")
             .WithComment("Тестовый метод")
             .WithCode(@"
                 var test = arg1 && !string.IsNullOrEmpty(arg2);
                 SomeMethod(test);
             ")
             .Build(true);
-        
+
         src += Environment.NewLine + MethodMember.Create("TestMethod", true)
-            .AddArgument<bool>("arg1", "Булев аргумент")
-            .AddArgument<string>("arg2", "Строковый аргумент")
+            .WithArgument<bool>("arg1")
+            .WithArgument<string>("arg2")
             .WithComment("Тестовый метод")
-            .AddGeneric("T", "Тестовый тип", "struct")
+            .WithGeneric("T", "struct")
             .WithCode(@"
                 var test = arg1 && !string.IsNullOrEmpty(arg2);
                 SomeMethod(test);

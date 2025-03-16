@@ -16,7 +16,7 @@ public class AccessorBuilderTests(ILogger logger) : BenchmarkTest<AccessorBuilde
     {
         if (string.IsNullOrEmpty(propertyAccessorReference) && File.Exists("assets/property_accessor.reference"))
             propertyAccessorReference = File.ReadAllText("assets/property_accessor.reference");
-        
+
         if (string.IsNullOrEmpty(eventAddReference) && File.Exists("assets/event_add.reference"))
             eventAddReference = File.ReadAllText("assets/event_add.reference");
     }
@@ -41,7 +41,7 @@ public class AccessorBuilderTests(ILogger logger) : BenchmarkTest<AccessorBuilde
             .AsReadOnly()
             .WithCode("test")
             .Build(true);
-        
+
         src += Environment.NewLine + PropertyAccessorMember.Create()
             .WithAttribute("Test")
             .AsReadOnly()
@@ -50,7 +50,7 @@ public class AccessorBuilderTests(ILogger logger) : BenchmarkTest<AccessorBuilde
                 return test;
             ")
             .Build(true);
-        
+
         src += Environment.NewLine + PropertyAccessorMember.Create()
             .WithAttribute("Test")
             .Build(true);
@@ -69,7 +69,7 @@ public class AccessorBuilderTests(ILogger logger) : BenchmarkTest<AccessorBuilde
             .WithAttribute("Test")
             .WithCode("Test += OnTest")
             .Build(true);
-        
+
         src += Environment.NewLine + EventAddMember.Create()
             .WithAttribute("Test")
             .WithCode(@"

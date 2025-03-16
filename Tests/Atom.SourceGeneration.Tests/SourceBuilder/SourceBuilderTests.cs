@@ -34,10 +34,10 @@ public class SourceBuilderTests(ILogger logger) : BenchmarkTest<SourceBuilderTes
     {
         var src = SourceBuilder.Create()
             .WithNamespace("Test")
-            .AddClass(ClassEntity.Create("TestClass", AccessModifier.Public)
+            .WithClass(ClassEntity.Create("TestClass", AccessModifier.Public)
                 .AsPartial()
-                .AddProperty<int>("TestProperty")
-                .AddMethod<ValueTask>("OnPropertyChanged")
+                .WithProperty<int>("TestProperty")
+                .WithMethod<ValueTask>("OnPropertyChanged")
             )
             .Build(true);
 

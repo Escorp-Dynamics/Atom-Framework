@@ -2,26 +2,26 @@
 /// Тестовое событие
 /// </summary>
 [Test]
-internal new virtual event System.Int32 TestEvent { add; }
+internal new virtual event int TestEvent { add; }
 
 /// <summary>
 /// Тестовое событие
 /// </summary>
-internal event System.Object? TestEvent { remove; }
+internal event object? TestEvent { remove; }
 
-event System.Int32 Test2 { add; }
+event int Test2 { add; }
 
-event System.Int32 Test2 { remove; }
-
-/// <summary>
-/// Тестовое событие
-/// </summary>
-public event System.Object? TestEvent => SomeEvent += value;
+event int Test2 { remove; }
 
 /// <summary>
 /// Тестовое событие
 /// </summary>
-protected internal event System.Object? TestEvent
+public event object? TestEvent => SomeEvent += value;
+
+/// <summary>
+/// Тестовое событие
+/// </summary>
+protected internal event object? TestEvent
 {
     add => SomeEvent += value;
     remove => SomeEvent -= value;
@@ -30,7 +30,7 @@ protected internal event System.Object? TestEvent
 /// <summary>
 /// Тестовое событие
 /// </summary>
-public event System.Object? TestEvent
+public event object? TestEvent
 {
     add 
     {
@@ -42,9 +42,10 @@ public event System.Object? TestEvent
 /// <summary>
 /// Тестовое событие
 /// </summary>
-protected internal event System.Object? TestEvent
+protected internal event object? TestEvent
 {
     add => SomeEvent += value;
+
     remove 
     {
         SomeMethod(value);

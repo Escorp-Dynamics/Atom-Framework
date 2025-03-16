@@ -1,11 +1,18 @@
 #nullable enable
 
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
+using Atom;
+
 namespace Test;
 
 public partial class TestClass
 {
-    System.Int32 TestProperty { get; }
+    int TestProperty { get; }
 
-    System.Threading.Tasks.ValueTask OnPropertyChanged() { }
-
+    ValueTask OnPropertyChanged() { }
 }

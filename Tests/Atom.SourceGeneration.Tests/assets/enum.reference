@@ -3,7 +3,7 @@
 /// </summary>
 [Test]
 [Flags]
-internal enum TestEnum : Int16
+internal enum TestEnum : short
 {
     /// <summary>
     /// Значение 1

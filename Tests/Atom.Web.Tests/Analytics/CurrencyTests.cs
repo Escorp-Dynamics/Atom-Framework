@@ -1,30 +1,19 @@
-﻿using System.Text.Json;
-using System.Text.Json.Serialization;
+﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Loggers;
 
 namespace Atom.Web.Analytics.Tests;
 
-public class Test1
+public class CurrencyTests(ILogger logger) : BenchmarkTest<CurrencyTests>(logger)
 {
-    [JsonConverter(typeof(CurrencyJsonConverter<ushort>))]
-    public Currency? Currency { get; set; }
-}
+    public override bool IsBenchmarkDisabled => true;
 
-[JsonSourceGenerationOptions(
-    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault,
-    GenerationMode = JsonSourceGenerationMode.Metadata,
-    WriteIndented = true
-)]
-[JsonSerializable(typeof(Test1))]
-public partial class JsonCurrencyTestContext : JsonSerializerContext;
+    public CurrencyTests() : this(ConsoleLogger.Unicode) { }
 
-[TestFixture]
-public class CurrencyTests
-{
-    [Test]
+    [TestCase(TestName = "Тест парсинга"), Benchmark]
     public void ParseTest()
     {
         var result = Currency.TryParse("RUB", out var currency);
+        if (!IsTest) return;
 
         Assert.Multiple(() =>
         {
@@ -35,22 +24,12 @@ public class CurrencyTests
         Assert.That(currency.IsoCode, Is.EqualTo("RUB"));
     }
 
-    [Test]
+    [TestCase(TestName = "Тест сериализации"), Benchmark]
     public void SerializeTest()
     {
         var currency = Currency.RUB;
+        var json = currency.Serialize();
 
-        var form = new Dictionary<string, object?>
-        {
-            {"currency", currency}
-        };
-
-        var element = JsonSerializer.Serialize(form!, JsonTestsContext.Default.Form);
-        Assert.That(element, Is.EqualTo("{\n  \"currency\": \"RUB\"\n}"));
-
-        var test1 = new Test1 { Currency = currency, };
-
-        element = JsonSerializer.Serialize(test1, JsonCurrencyTestContext.Default.Test1);
-        Assert.That(element, Is.EqualTo("{\n  \"currency\": \"RUB\"\n}"));
+        if (IsTest) Assert.That(json, Is.EqualTo(/*lang=json,strict*/ "\"RUB\""));
     }
 }

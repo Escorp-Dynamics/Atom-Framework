@@ -1,0 +1,9 @@
+using Atom.Architect.Components;
+
+namespace Atom.Tests;
+
+[Component]
+public partial class Component1;
+
+[Component]
+public partial class Component2;

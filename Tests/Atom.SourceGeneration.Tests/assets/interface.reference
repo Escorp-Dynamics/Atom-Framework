@@ -4,10 +4,9 @@
 [Test]
 public interface ITest
 {
-    System.Int32 TestProperty1 { get; }
+    int TestProperty1 { get; }
 
-    event Atom.Architect.Reactive.AsyncEventHandler<Atom.Architect.Reactive.FailedEventArgs?>? TestEvent;
+    event Atom.AsyncEventHandler<Atom.FailedEventArgs?>? TestEvent;
 
-    void TestMethod() { }
-
+    void TestMethod();
 }

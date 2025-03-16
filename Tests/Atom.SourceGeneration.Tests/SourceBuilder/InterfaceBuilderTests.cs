@@ -36,9 +36,9 @@ public class InterfaceBuilderTests(ILogger logger) : BenchmarkTest<InterfaceBuil
         var src = InterfaceEntity.Create("ITest", AccessModifier.Public)
             .WithComment("Тестовый интерфейс")
             .WithAttribute("Test")
-            .AddProperty<int>("TestProperty1")
-            .AddEvent<AsyncEventHandler<FailedEventArgs>>("TestEvent")
-            .AddMethod("TestMethod")
+            .WithProperty<int>("TestProperty1")
+            .WithEvent<AsyncEventHandler<FailedEventArgs>>("TestEvent")
+            .WithMethod("TestMethod")
             .Build(true);
 
         if (IsTest)

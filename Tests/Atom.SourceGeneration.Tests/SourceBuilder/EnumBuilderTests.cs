@@ -38,20 +38,20 @@ public class EnumBuilderTests(ILogger logger) : BenchmarkTest<EnumBuilderTests>(
             .WithAccessModifier(AccessModifier.Internal)
             .WithName("TestEnum")
             .WithType<short>()
-            .AddValue("Value1", 0x00, "Значение 1")
-            .AddValue("Value2", 0x01, "Значение 2")
-            .AddValue("Value3", 0x02, "Значение 3")
+            .WithValue("Value1", 0x00, "Значение 1")
+            .WithValue("Value2", 0x01, "Значение 2")
+            .WithValue("Value3", 0x02, "Значение 3")
             .AsFlags()
             .Build(true);
-        
+
         src += Environment.NewLine + EnumEntity.Create()
             .WithComment("Тестовое перечисление")
             .WithAttribute("Test")
             .WithAccessModifier(AccessModifier.Internal)
             .WithName("TestEnum")
-            .AddValue("Value1", "Значение 1")
-            .AddValue("Value2", "Значение 2")
-            .AddValue("Value3", "Значение 3")
+            .WithValue("Value1", "Значение 1")
+            .WithValue("Value2", "Значение 2")
+            .WithValue("Value3", "Значение 3")
             .Build(true);
 
         if (IsTest)

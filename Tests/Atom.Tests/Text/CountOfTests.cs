@@ -194,7 +194,7 @@ public class CountOfTests(ILogger logger) : BenchmarkTest<CountOfTests>(logger)
 
     [TestCase(TestName = "Тест подсчёта вхождений подстроки (Z-алгоритм, 10 000 символов)"), Benchmark(Description = "Z-алгоритм 10 000")]
     public void CountOfZLongTest() => LongTextTest(SubstringSearchAlgorithm.Z);
-    
+
     private static void SetUp()
     {
         if (string.IsNullOrEmpty(shortText) && File.Exists("assets/text/short.txt"))

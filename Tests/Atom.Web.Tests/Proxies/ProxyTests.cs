@@ -1,29 +1,75 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Loggers;
 
 namespace Atom.Web.Proxies.Tests;
 
-[JsonSourceGenerationOptions(
-    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault,
-    GenerationMode = JsonSourceGenerationMode.Metadata,
-    WriteIndented = true
-)]
-[JsonSerializable(typeof(Proxy))]
-public partial class JsonProxyTestContext : JsonSerializerContext;
-
-[TestFixture]
-public class ProxyTests
+public class ProxyTests(ILogger logger) : BenchmarkTest<ProxyTests>(logger)
 {
-    [Test]
+    public override bool IsBenchmarkDisabled => true;
+
+    public ProxyTests() : this(ConsoleLogger.Unicode) { }
+
+    [TestCase(TestName = "Тест сериализации"), Benchmark]
     public void SerializeTest()
     {
-        var proxy = new Proxy("localhost", 80, "login", "password")
+        var proxy = Proxy.Rent();
+
+        proxy.Host = "localhost";
+        proxy.Port = 80;
+
+        var json = proxy.Serialize();
+
+        if (IsTest)
         {
-            Anonymity = AnonymityLevel.High
-        };
-        
-        var json = JsonSerializer.Serialize(proxy, JsonProxyTestContext.Default.Proxy);
-        Assert.That(json, Is.EqualTo("{\n  \"host\": \"localhost\",\n  \"port\": 80,\n  \"userName\": \"login\",\n  \"password\": \"password\",\n  \"anonymity\": 3\n}"));
+            Assert.That(json, Is.Not.Null);
+            Assert.That(json, Is.EqualTo(/*lang=json,strict*/ "{\"host\":\"localhost\",\"port\":80}"));
+        }
+
+        if (string.IsNullOrEmpty(json)) return;
+        var proxy2 = Proxy.Deserialize(json);
+
+        if (IsTest)
+        {
+            Assert.That(proxy2, Is.Not.Null);
+
+            using (Assert.EnterMultipleScope())
+            {
+                Assert.That(proxy2.Host, Is.EqualTo(proxy.Host));
+                Assert.That(proxy2.Port, Is.EqualTo(proxy.Port));
+            }
+        }
+
+        if (proxy2 is not null) Proxy.Return(proxy2);
+
+        proxy.UserName = "login";
+        proxy.Password = "password";
+
+        json = proxy.Serialize();
+
+        if (IsTest)
+        {
+            Assert.That(json, Is.Not.Null);
+            Assert.That(json, Is.EqualTo(/*lang=json,strict*/ "{\"host\":\"localhost\",\"port\":80,\"userName\":\"login\",\"password\":\"password\"}"));
+        }
+
+        if (string.IsNullOrEmpty(json)) return;
+        proxy2 = Proxy.Deserialize(json);
+
+        if (IsTest)
+        {
+            Assert.That(proxy2, Is.Not.Null);
+
+            using (Assert.EnterMultipleScope())
+            {
+                Assert.That(proxy2.Host, Is.EqualTo(proxy.Host));
+                Assert.That(proxy2.Port, Is.EqualTo(proxy.Port));
+                Assert.That(proxy2.UserName, Is.EqualTo(proxy.UserName));
+                Assert.That(proxy2.Password, Is.EqualTo(proxy.Password));
+            }
+        }
+
+        if (proxy2 is not null) Proxy.Return(proxy2);
+
+        Proxy.Return(proxy);
     }
 }

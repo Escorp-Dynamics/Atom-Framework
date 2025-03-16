@@ -7,17 +7,17 @@ namespace Atom.Collections.Tests;
 public class SparseArrayTests(ILogger logger) : BenchmarkTest<SparseArrayTests>(logger)
 {
     public override bool IsBenchmarkDisabled => true;
-    
+
     public SparseArrayTests() : this(ConsoleLogger.Unicode) { }
 
     [TestCase(TestName = "Тест перебора через foreach"), Benchmark(Description = "foreach", Baseline = true)]
     public void ForEachTest()
     {
-        var array = new SparseArray<int>(ushort.MaxValue + 1);
-
-        array[0] = 1;
-        array[100] = 2;
-        array[0] = 3;
+        var array = new SparseArray<int>(ushort.MaxValue + 1)
+        {
+            [100] = 2,
+            [0] = 3
+        };
 
         array.AddOrUpdate(67, -22);
 
@@ -56,7 +56,7 @@ public class SparseArrayTests(ILogger logger) : BenchmarkTest<SparseArrayTests>(
 
             ++count;
         }
-        
+
         array.Release();
         ArrayPool<int>.Shared.Return(span);
 
@@ -66,11 +66,11 @@ public class SparseArrayTests(ILogger logger) : BenchmarkTest<SparseArrayTests>(
     [TestCase(TestName = "Тест перебора через for"), Benchmark(Description = "for")]
     public void ForTest()
     {
-        var array = new SparseArray<int>(ushort.MaxValue + 1);
-
-        array[0] = 1;
-        array[100] = 2;
-        array[0] = 3;
+        var array = new SparseArray<int>(ushort.MaxValue + 1)
+        {
+            [100] = 2,
+            [0] = 3
+        };
 
         array.AddOrUpdate(67, -22);
 

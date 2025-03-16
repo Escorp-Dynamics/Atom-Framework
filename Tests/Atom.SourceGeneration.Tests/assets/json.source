@@ -1,0 +1,240 @@
+using System;
+using System.Diagnostics.CodeAnalysis;
+using System.Net;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Atom.Buffers;
+using Atom.Text.Json;
+
+namespace Atom.Web.Proxies;
+
+/// <summary>
+/// Представляет расширенную реализацию <see cref="WebProxy"/>.
+/// </summary>
+[JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+[JsonConverter(typeof(ProxyJsonConverter))]
+[JsonContext(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault,
+    WriteIndented = true
+)]
+public partial class Proxy : WebProxy
+{
+    private string Scheme => Type switch
+    {
+        ProxyType.Https => "https",
+        ProxyType.Socks4 => "socks",
+        ProxyType.Socks5 => "socks5",
+        _ => "http",
+    };
+
+    /// <summary>
+    /// Тип прокси-сервера.
+    /// </summary>
+    public ProxyType Type { get; set; }
+
+    /// <summary>
+    /// Хост прокси-сервера, если адрес не пустой, иначе пустая строка.
+    /// </summary>
+    [JsonInclude]
+    public string Host
+    {
+        get => Address?.Host ?? string.Empty;
+
+        set
+        {
+            if (string.IsNullOrEmpty(value)) return;
+            Address = new Uri($"{Scheme}://{value}:{Port}");
+        }
+    }
+
+    /// <summary>
+    /// Порт прокси-сервера, если адрес не пустой, иначе 0.
+    /// </summary>
+    [JsonInclude]
+    public int Port
+    {
+        get => Address?.Port ?? 0;
+
+        set
+        {
+            if (value <= 0) return;
+            if (string.IsNullOrEmpty(Host)) Host = "localhost";
+
+            Address = new Uri($"{Scheme}://{Host}:{value}");
+        }
+    }
+
+    /// <summary>
+    /// Имя пользователя для аутентификации на прокси-сервере, если есть, иначе пустая строка.
+    /// </summary>
+    public string UserName
+    {
+        get => Credentials is NetworkCredential credentials ? credentials.UserName : string.Empty;
+
+        set
+        {
+            if (string.IsNullOrEmpty(value)) return;
+
+            var credentials = Credentials as NetworkCredential;
+            credentials ??= new NetworkCredential();
+            credentials.UserName = value;
+            Credentials = credentials;
+        }
+    }
+
+    /// <summary>
+    /// Пароль для аутентификации на прокси-сервере, если есть, иначе пустая строка.
+    /// </summary>
+    public string Password
+    {
+        get => Credentials is NetworkCredential credentials ? credentials.Password : string.Empty;
+
+        set
+        {
+            if (string.IsNullOrEmpty(value)) return;
+
+            var credentials = Credentials as NetworkCredential;
+            credentials ??= new NetworkCredential();
+            credentials.Password = value;
+            Credentials = credentials;
+        }
+    }
+
+    /// <summary>
+    /// Определяет, защищен ли прокси-сервер паролем и именем пользователя.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsProtected => !string.IsNullOrEmpty(UserName) && !string.IsNullOrEmpty(Password);
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="Proxy"/>.
+    /// </summary>
+    /// <param name="host">Хост прокси-сервера.</param>
+    /// <param name="port">Порт прокси-сервера.</param>
+    /// <param name="userName">Имя пользователя для аутентификации на прокси-сервере.</param>
+    /// <param name="password">Пароль для аутентификации на прокси-сервере.</param>
+    public Proxy(string host, int port, string userName, string password) => (Host, Port, UserName, Password) = (host, port, userName, password);
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="Proxy"/>.
+    /// </summary>
+    /// <param name="host">Хост прокси-сервера.</param>
+    /// <param name="port">Порт прокси-сервера.</param>
+    public Proxy(string host, int port) => (Host, Port) = (host, port);
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="Proxy"/>.
+    /// </summary>
+    public Proxy() { }
+}
+
+/// <summary>
+/// Представляет конвертер сериализатора JSON для <see cref="Proxy"/>.
+/// </summary>
+/// <typeparam name="T">Тип прокси.</typeparam>
+public class ProxyJsonConverter<T> : ExtendableJsonConverter<T> where T : Proxy, new()
+{
+    /// <inheritdoc/>
+    protected override T? OnReading(ref Utf8JsonReader reader, JsonElement root, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (!root.TryGetProperty("host", out var hostProperty)) return default;
+
+        var host = hostProperty.GetString();
+        if (string.IsNullOrEmpty(host)) return default;
+
+        if (!root.TryGetProperty("port", out var portProperty) || !portProperty.TryGetInt32(out var port)) return default;
+
+        var proxy = new T { Host = host, Port = port, };
+
+        if (root.TryGetProperty("userName", out var userNameProperty))
+            proxy.UserName = userNameProperty.GetString() ?? string.Empty;
+
+        if (root.TryGetProperty("password", out var passwordProperty))
+            proxy.Password = passwordProperty.GetString() ?? string.Empty;
+
+        if (root.TryGetProperty("type", out var typeProperty))
+        {
+            if (typeProperty.ValueKind is JsonValueKind.Number && typeProperty.TryGetInt32(out var number))
+                proxy.Type = (ProxyType)number;
+            else if (typeProperty.ValueKind is JsonValueKind.String && Enum.TryParse<ProxyType>(typeProperty.GetString(), true, out var type))
+                proxy.Type = type;
+        }
+
+        return proxy;
+    }
+
+    /// <inheritdoc/>
+    protected override void OnWriting([NotNull] Utf8JsonWriter writer, [NotNull] T value, JsonSerializerOptions options)
+    {
+        WriteProperty(writer, nameof(Proxy.Host), value.Host, options);
+        WriteProperty(writer, nameof(Proxy.Port), value.Port, options);
+
+        if (value.IsProtected)
+        {
+            WriteProperty(writer, nameof(Proxy.UserName), value.UserName, options);
+            WriteProperty(writer, nameof(Proxy.Password), value.Password, options);
+        }
+
+        if (value.Type != default) WriteProperty(writer, nameof(Proxy.Type), value.Type, options);
+    }
+}
+
+/// <summary>
+/// Представляет конвертер сериализатора JSON для <see cref="Proxy"/>.
+/// </summary>
+public class ProxyJsonConverter : ProxyJsonConverter<Proxy>;
+
+/// <summary>
+/// Тип прокси.
+/// </summary>
+public enum ProxyType
+{
+    /// <summary>
+    /// Неизвестный тип.
+    /// </summary>
+    Unknown,
+    /// <summary>
+    /// Обычные прокси, поддерживающие HTTP запросы. С ними можно просматривать сайты и скачивать файлы по HTTP-протоколу.
+    /// </summary>
+    Http,
+    /// <summary>
+    /// Также их называют прокси-серверами с поддержкой SSL. Позволяют просматривать HTTPS сайты.
+    /// С помощью специализированных программ их можно использовать для любого протокола, как SOCKS прокси-серверы.
+    /// </summary>
+    Https,
+    /// <summary>
+    /// Прокси поддерживающие socks протокол 4 версии. С их помощью можно соединяться по TCP/IP протоколу с любым адресом и портом.
+    /// </summary>
+    Socks4,
+    /// <summary>
+    /// Включает все возможности 4-й версии, а дополнительно можно использовать UDP протокол, делать DNS запросы через прокси, а также использовать метод BIND, чтобы открыть порт для входящих соединений.
+    /// </summary>
+    Socks5,
+}
+
+/// <summary>
+/// Представляет <see cref="Proxy"/> с расширенной информацией из сервисов.
+/// </summary>
+[JsonContext(
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault,
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    PropertyNameCaseInsensitive = true
+)]
+public partial class ServiceProxy : Proxy
+{
+    /// <summary>
+    /// ASN.
+    /// </summary>
+    public string? ASN { get; set; }
+
+    /// <summary>
+    /// Время последней активности прокси-сервера.
+    /// </summary>
+    public DateTime Alive { get; set; }
+
+    /// <summary>
+    /// Средняя длительность жизни прокси-сервера.
+    /// </summary>
+    public byte Uptime { get; set; }
+}

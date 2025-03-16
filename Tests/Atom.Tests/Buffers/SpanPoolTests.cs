@@ -27,7 +27,7 @@ public class SpanPoolTests(ILogger logger) : BenchmarkTest<SpanPoolTests>(logger
             Assert.That(span.Length, Is.EqualTo(BufferSize));
             foreach (var i in span[..5]) Assert.That(i, Is.EqualTo(5));
         }
-        
+
         SpanPool<int>.Shared.Return(span);
     }
 

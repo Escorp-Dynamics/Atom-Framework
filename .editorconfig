@@ -1,37 +1,53 @@
-[*.cs]
+[*.{cs,csx}]
+build_property.TreatWarningsAsErrors = true
+build_property.EnforceCodeStyleInBuild = true
 
-# IDE0022: Использовать тело блока для метода
-csharp_style_expression_bodied_methods = when_on_single_line
+dotnet_diagnostic.severity = error
 
-# IDE0160: Преобразовать в namespace с заданной областью видимости блока
-csharp_style_namespace_declarations = file_scoped
+dotnet_analyzer_diagnostic.category-Style.severity = error
+dotnet_analyzer_diagnostic.category-CodeQuality.severity = error
+dotnet_analyzer_diagnostic.category-Documentation.severity = error
+dotnet_analyzer_diagnostic.category-Naming.severity = error
+dotnet_analyzer_diagnostic.category-Design.severity = error
+dotnet_analyzer_diagnostic.category-Performance.severity = error
+dotnet_analyzer_diagnostic.category-Interoperability.severity = error
+dotnet_analyzer_diagnostic.category-Formatting.severity = error
 
-# IDE0130: Пространство имен (namespace) не соответствует структуре папок.
-dotnet_style_namespace_match_folder = false
+# Правила форматирования скобок и пробелов
+csharp_prefer_braces = all:error
+csharp_space_after_keywords_in_control_flow_statements = always:error
+csharp_space_between_parentheses = none:error
 
 # IDE0011: Добавить фигурные скобки
 csharp_prefer_braces = when_multiline
 
-# IDE0023: Использовать текст блока для оператора преобразования
+csharp_style_expression_bodied_methods = when_on_single_line
+csharp_style_prefer_conditional_expression_over_statement = when_on_single_line
+csharp_style_expression_bodied_lambdas = when_on_single_line
+csharp_style_expression_bodied_properties = when_on_single_line
+csharp_style_expression_bodied_constructors = when_on_single_line
 csharp_style_expression_bodied_operators = when_on_single_line
 
-# IDE0008: Использование явного типа
-csharp_style_var_for_built_in_types = true
-
-# IDE0008: Использование явного типа
-csharp_style_var_when_type_is_apparent = true
+# IDE0160: Преобразовать в namespace с заданной областью видимости блока
+csharp_style_namespace_declarations = file_scoped
 
 # IDE0008: Использование явного типа
 csharp_style_var_elsewhere = true
+csharp_style_var_for_built_in_types = true
+csharp_style_var_when_type_is_apparent = true
 
 # IDE0072: Добавить отсутствующие варианты
-dotnet_diagnostic.IDE0072.severity = none
+dotnet_diagnostic.IDE0072.severity = silent
+
+# IDE0046: Преобразовать в условное выражение
+dotnet_style_prefer_conditional_expression_over_return = false
+
+# IDE0130: Пространство имен (namespace) не соответствует структуре папок.
+dotnet_style_namespace_match_folder = false
 
 # IDE0058: Значение выражения никогда не используется
-dotnet_diagnostic.IDE0058.severity = none
-
-# IDE0021: Использовать тело блока для конструктора
-csharp_style_expression_bodied_constructors = when_on_single_line
+csharp_style_unused_value_expression_statement_preference = unused_local_variable
+dotnet_diagnostic.IDE0058.severity = silent
 
 # IDE0010: Добавить отсутствующие варианты
-dotnet_diagnostic.IDE0010.severity = none
+dotnet_diagnostic.IDE0010.severity = silent

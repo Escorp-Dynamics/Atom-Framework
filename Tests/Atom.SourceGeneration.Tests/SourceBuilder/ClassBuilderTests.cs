@@ -36,10 +36,10 @@ public class ClassBuilderTests(ILogger logger) : BenchmarkTest<ClassBuilderTests
             .WithComment("Тестовый класс")
             .WithAttribute("Test")
             .AsPartial()
-            .AddField<object>("field")
-            .AddProperty<object>("TestProperty1")
-            .AddEvent<Action>("TestEvent")
-            .AddMethod("TestMethod")
+            .WithField<object>("field")
+            .WithProperty<object>("TestProperty1")
+            .WithEvent<Action>("TestEvent")
+            .WithMethod("TestMethod")
             .Build(true);
 
         if (IsTest)

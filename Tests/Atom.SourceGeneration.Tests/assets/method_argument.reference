@@ -1,1 +1,1 @@
-System.Int32 arg1, in System.String? arg2, out System.Char arg3, ref System.Boolean arg4, params System.Byte[]? arg5
+int arg1, in string? arg2, out char arg3, ref bool arg4, params byte[]? arg5

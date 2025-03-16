@@ -1,0 +1,13 @@
+using Atom.Buffers;
+
+namespace Atom.Test;
+
+/// <summary>
+/// Тестовый класс.
+/// </summary>
+public partial class Test
+{
+    /// <inheritdoc/>
+    [Pooled]
+    public virtual void Reset() { }
+}

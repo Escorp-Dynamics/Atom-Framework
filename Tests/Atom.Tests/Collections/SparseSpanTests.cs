@@ -1,3 +1,5 @@
+#pragma warning disable IDE0059
+
 using Atom.Buffers;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Loggers;
@@ -7,7 +9,7 @@ namespace Atom.Collections.Tests;
 public class SparseSpanTests(ILogger logger) : BenchmarkTest<SparseSpanTests>(logger)
 {
     public override bool IsBenchmarkDisabled => true;
-    
+
     public SparseSpanTests() : this(ConsoleLogger.Unicode) { }
 
     [TestCase(TestName = "Тест перебора через foreach"), Benchmark(Description = "foreach", Baseline = true)]
@@ -15,7 +17,6 @@ public class SparseSpanTests(ILogger logger) : BenchmarkTest<SparseSpanTests>(lo
     {
         var array = new SparseSpan<int>(ushort.MaxValue + 1);
 
-        array[0] = 1;
         array[100] = 2;
         array[0] = 3;
 
@@ -42,7 +43,6 @@ public class SparseSpanTests(ILogger logger) : BenchmarkTest<SparseSpanTests>(lo
         var span = SpanPool<int>.Shared.Rent(ushort.MaxValue + 1);
         SparseSpan<int> array = span;
 
-        array[0] = 1;
         array[100] = 2;
         array[0] = 3;
 
@@ -69,7 +69,6 @@ public class SparseSpanTests(ILogger logger) : BenchmarkTest<SparseSpanTests>(lo
     {
         var array = new SparseSpan<int>(ushort.MaxValue + 1);
 
-        array[0] = 1;
         array[100] = 2;
         array[0] = 3;
 
@@ -97,7 +96,6 @@ public class SparseSpanTests(ILogger logger) : BenchmarkTest<SparseSpanTests>(lo
         var span = SpanPool<int>.Shared.Rent(ushort.MaxValue + 1);
         SparseSpan<int> array = span;
 
-        array[0] = 1;
         array[100] = 2;
         array[0] = 3;
 

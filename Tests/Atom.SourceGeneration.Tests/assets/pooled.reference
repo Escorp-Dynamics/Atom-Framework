@@ -1,0 +1,27 @@
+#nullable enable
+
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
+using Atom;
+using System.Diagnostics.CodeAnalysis;
+using Atom.Buffers;
+
+namespace Atom.Test;
+
+public partial class Test : IPooled
+{
+    /// <inheritdoc/>
+    public static T Rent<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>() where T : IPooled => ObjectPool<T>.Shared.Rent();
+
+    /// <summary>
+    /// Арендует экземпляр <see cref="Test"/> в пуле объектов.
+    /// </summary>
+    public static Test Rent() => Rent<Test>();
+
+    /// <inheritdoc/>
+    public static void Return<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>(T value) where T : IPooled => ObjectPool<T>.Shared.Return(value, x => x.Reset());
+}

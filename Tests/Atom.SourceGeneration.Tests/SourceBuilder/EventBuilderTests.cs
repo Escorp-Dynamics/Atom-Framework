@@ -93,7 +93,7 @@ public class EventBuilderTests(ILogger logger) : BenchmarkTest<EventBuilderTests
                 SomeEvent -= value;
             ")
             .Build(true);
-        
+
         src += Environment.NewLine + EventMember.Create<Type?>("SimpleEvent").Build(true);
 
         if (IsTest)

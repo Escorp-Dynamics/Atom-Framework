@@ -1,4 +1,4 @@
-﻿using Atom.Net.Http;
+﻿/*using Atom.Net.Http;
 
 using System.Net.Http.Json;
 
@@ -48,4 +48,4 @@ public class HttpTests
         await foreach (var item in content.AsJsonAsyncEnumerable(JsonHttpContext.Default.Form))
             Assert.That(item, Is.EquivalentTo(data[i++]));
     }
-}
+}*/

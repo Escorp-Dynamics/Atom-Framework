@@ -1,0 +1,105 @@
+#nullable enable
+
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
+using Atom;
+using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using Atom.Buffers;
+using Atom.Architect.Components;
+
+namespace Atom.Tests;
+
+public partial class TestFactory : IComponentOwner<TestFactory>
+{
+    readonly List<IComponent> components = [];
+
+    void OnComponentDetached(ComponentEventArgs args)
+    {
+        if (args.Component is not null) components.Remove(args.Component);
+    }
+
+    /// <inheritdoc/>
+    public bool Has<T>(T component) where T : IComponent => components.Contains(component);
+
+    /// <inheritdoc/>
+    public bool Has<T>() where T : IComponent => components.Any(x => x is T);
+
+    /// <inheritdoc/>
+    public bool TryGet<T>(out T? component) where T : IComponent
+    {
+        component = (T?)components.FirstOrDefault(x => x is T);
+        return components is null;
+    }
+
+    /// <inheritdoc/>
+    public T Get<T>() where T : IComponent => TryGet<T>(out var component) && component is not null ? component : throw new NotSupportedException("Не найдено ни одного подходящего компонента");
+
+    /// <inheritdoc/>
+    public bool TryGetAll<T>(out IEnumerable<T> components) where T : IComponent
+    {
+        components = this.components.OfType<T>();
+        return components.Any();
+    }
+
+    /// <inheritdoc/>
+    public IEnumerable<T> GetAll<T>() where T : IComponent => TryGetAll<T>(out var items) ? items : throw new NotSupportedException("Не найдено ни одного подходящего компонента");
+
+    /// <inheritdoc/>
+    public TestFactory Use<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] T>(T component) where T : IComponent
+    {
+        if (!IsSupported<T>()) throw new NotSupportedException($"Компоненты типа '{typeof(T).Name}' не поддерживаются");
+
+        if (component.IsAttached)
+        {
+            if (component.Owner == this) throw new InvalidOperationException("Компонент уже используется этим владельцем");
+            throw new InvalidOperationException("Компонент уже используется другим владельцем");
+        }
+
+        component.Detached += OnComponentDetached;
+        component.AttachTo(this);
+
+        return this;
+    }
+
+    /// <inheritdoc/>
+    public TestFactory Use<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] T>() where T : IComponent, new()
+    {
+        if (!IsSupported<T>()) throw new NotSupportedException($"Компоненты типа '{typeof(T).Name}' не поддерживаются");
+        var component = ObjectPool<T>.Shared.Rent(() => new T() { IsAttachedByOwner = true });
+        return Use(component);
+    }
+
+    /// <inheritdoc/>
+    public TestFactory UnUse<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] T>(T component) where T : IComponent
+    {
+        if (!component.IsAttached) throw new InvalidOperationException("Компонент уже был отсоединён");
+        if (component.Owner != this) throw new InvalidOperationException("Компонент присоединён к другому владельцу");
+
+        component.Detach();
+        component.Detached -= OnComponentDetached;
+
+        if (component.IsAttachedByOwner)
+        {
+            if (component is IPooled pooled) pooled.Reset();
+            ObjectPool<T>.Shared.Return(component);
+        }
+
+        return this;
+    }
+
+    /// <inheritdoc/>
+    public TestFactory UnUse<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] T>() where T : IComponent
+    {
+        if (!TryGetAll<T>(out var items)) throw new InvalidOperationException($"Компоненты типа '{typeof(T).Name}' не найдены");
+        foreach (var item in items) UnUse(item);
+        return this;
+    }
+
+    /// <inheritdoc/>
+    public bool IsSupported<T>() where T : IComponent => typeof(T).FullName is "Atom.Tests.Component1" or "Atom.Tests.Component2";
+}

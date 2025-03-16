@@ -16,7 +16,7 @@ public class MutatorBuilderTests(ILogger logger) : BenchmarkTest<MutatorBuilderT
     {
         if (string.IsNullOrEmpty(propertyMutatorReference) && File.Exists("assets/property_mutator.reference"))
             propertyMutatorReference = File.ReadAllText("assets/property_mutator.reference");
-        
+
         if (string.IsNullOrEmpty(eventRemoveReference) && File.Exists("assets/event_remove.reference"))
             eventRemoveReference = File.ReadAllText("assets/event_remove.reference");
     }
@@ -40,7 +40,7 @@ public class MutatorBuilderTests(ILogger logger) : BenchmarkTest<MutatorBuilderT
             .WithAttribute("Test")
             .WithCode("test = value")
             .Build(true);
-        
+
         src += Environment.NewLine + PropertyMutatorMember.Create()
             .WithAttribute("Test")
             .WithCode(@"
@@ -67,7 +67,7 @@ public class MutatorBuilderTests(ILogger logger) : BenchmarkTest<MutatorBuilderT
             .WithAttribute("Test")
             .WithCode("Test -= OnTest")
             .Build(true);
-        
+
         src += Environment.NewLine + EventRemoveMember.Create()
             .WithAttribute("Test")
             .WithCode(@"

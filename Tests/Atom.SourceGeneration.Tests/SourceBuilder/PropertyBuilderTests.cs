@@ -51,8 +51,8 @@ public class PropertyBuilderTests(ILogger logger) : BenchmarkTest<PropertyBuilde
             .WithSetter()
             .Build(true);
 
-        src += Environment.NewLine + PropertyMember.CreateWithGetterOnly<int>("Test2").WithInitialValue<string>("str").Build(true);
-        src += Environment.NewLine + PropertyMember.CreateWithGetterOnly<int>("Test2").WithInitialValue("anotherVar").Build(true);
+        src += Environment.NewLine + PropertyMember.CreateWithGetterOnly<string>("Test2").WithInitialValue<string>("str").Build(true);
+        src += Environment.NewLine + PropertyMember.CreateWithGetterOnly<bool>("Test2").WithInitialValue("anotherVar").Build(true);
         src += Environment.NewLine + PropertyMember.CreateWithSetterOnly<int>("Test2", true).Build(true);
 
         src += Environment.NewLine + PropertyMember.Create()

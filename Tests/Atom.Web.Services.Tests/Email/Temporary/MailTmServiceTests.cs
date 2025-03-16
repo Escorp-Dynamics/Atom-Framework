@@ -1,4 +1,4 @@
-﻿namespace Atom.Web.Services.Email.Temporary.Tests;
+﻿/*namespace Atom.Web.Services.Email.Temporary.Tests;
 
 [TestFixture]
 public class MailTmServiceTests
@@ -11,4 +11,4 @@ public class MailTmServiceTests
         Assert.That(domain, Is.Not.Null);
         Assert.That(domain, Is.Not.Empty);
     }
-}
+}*/

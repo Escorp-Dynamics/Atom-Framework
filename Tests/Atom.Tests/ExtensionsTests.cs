@@ -7,15 +7,15 @@ public class ExtensionsTests
     public void GetFriendlyNameTest()
     {
         var type = typeof(int).GetFriendlyName();
-        Assert.That(type, Is.EqualTo("System.Int32"));
+        Assert.That(type, Is.EqualTo("int"));
 
         type = typeof(int).GetFriendlyName(default);
-        Assert.That(type, Is.EqualTo("Int32"));
+        Assert.That(type, Is.EqualTo("int"));
 
         type = typeof(int?).GetFriendlyName(default);
-        Assert.That(type, Is.EqualTo("Int32?"));
+        Assert.That(type, Is.EqualTo("int?"));
 
         type = typeof(int?).GetFriendlyName();
-        Assert.That(type, Is.EqualTo("System.Int32?"));
+        Assert.That(type, Is.EqualTo("int?"));
     }
 }

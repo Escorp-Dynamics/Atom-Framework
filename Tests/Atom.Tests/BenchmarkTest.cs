@@ -7,8 +7,8 @@ using BenchmarkDotNet.Running;
 
 namespace Atom;
 
-[SimpleJob(RuntimeMoniker.Net80, baseline: true)]
-[SimpleJob(RuntimeMoniker.NativeAot80)]
+[SimpleJob(RuntimeMoniker.Net90, baseline: true)]
+//[SimpleJob(RuntimeMoniker.NativeAot90)]
 [TestFixture, MemoryDiagnoser]
 [Orderer(SummaryOrderPolicy.FastestToSlowest)]
 [RankColumn]
@@ -17,17 +17,15 @@ namespace Atom;
 #endif
 public abstract class BenchmarkTest<T>(ILogger logger)
 {
-    private readonly ILogger logger = logger;
-    
     public bool IsBenchmark { get; set; }
 
     public bool IsTest { get; set; } = true;
 
     public virtual bool IsBenchmarkDisabled { get; set; }
 
-    public ILogger Logger => logger;
+    public ILogger Logger { get; } = logger;
 
-    public BenchmarkTest() : this(ConsoleLogger.Unicode) { }
+    protected BenchmarkTest() : this(ConsoleLogger.Unicode) { }
 
     [OneTimeSetUp]
     public virtual void OneTimeSetUp() { }
@@ -39,12 +37,18 @@ public abstract class BenchmarkTest<T>(ILogger logger)
         IsTest = default;
     }
 
+    [OneTimeTearDown]
+    public virtual void OneTimeDispose() { }
+
+    [TearDown]
+    public virtual void GlobalDispose() { }
+
 #if BENCHMARKS
     [TestCase(TestName = "Замеры производительности")]
     public virtual void RunBenchmarks()
     {
         if (IsBenchmarkDisabled) return;
-        
+
         var summary = BenchmarkRunner.Run<T>();
         Assert.That(summary, Is.Not.Null);
     }

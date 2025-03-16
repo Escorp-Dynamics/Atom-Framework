@@ -1,0 +1,36 @@
+using System.Diagnostics;
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Loggers;
+
+namespace Atom.Threading.Tests;
+
+public class RateLimiterTests(ILogger logger) : BenchmarkTest<RateLimiterTests>(logger)
+{
+    public override bool IsBenchmarkDisabled => true;
+
+    public RateLimiterTests() : this(ConsoleLogger.Unicode) { }
+
+    private void Log(string? message)
+    {
+        message = $"{DateTime.UtcNow:HH:mm:ss.fff} {message}";
+        Logger.WriteLineInfo(message);
+        Trace.TraceInformation(message);
+    }
+
+    private async ValueTask TestCallbackAsync()
+    {
+        Log("TestCallbackAsync(): START");
+        await Task.Delay(TimeSpan.FromMilliseconds(1500));
+        Log("TestCallbackAsync(): END");
+    }
+
+    [TestCase(TestName = "Тест проверки пропускной способности"), Benchmark]
+    public async Task ManualTest()
+    {
+        using var limiter = new RateLimiter(1, 1000);
+
+        for (var i = 0; i < 10; ++i) await limiter.Call(TestCallbackAsync);
+
+        if (IsTest) Assert.Pass();
+    }
+}

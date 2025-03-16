@@ -1,15 +1,24 @@
 #nullable enable
 
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
+using Atom;
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using Atom.Architect.Reactive;
 
 namespace Atom.Media.Video;
 
-public partial class VirtualCamera
+public partial class VirtualCamera : IReactively
 {
     /// <summary>
     /// Разрешение камеры.
     /// </summary>
-    public virtual global::System.Drawing.Size Resolution
+    public System.Drawing.Size Resolution
     {
         get => resolution;
         set => SetProperty(ref resolution, value);
@@ -24,10 +33,27 @@ public partial class VirtualCamera
         set => SetProperty(ref frameRate, value);
     }
 
+    /// <inheritdoc/>
+    public bool Test
+    {
+        get => test;
+        set => SetProperty(ref test, value);
+    }
+
+    /// <summary>
+    /// Происходит перед изменением свойства.
+    /// </summary>
+    public event PropertyChangingEventHandler? PropertyChanging;
+
+    /// <summary>
+    /// Происходит после изменения свойства.
+    /// </summary>
+    public event PropertyChangedEventHandler? PropertyChanged;
+
     /// <summary>
     /// Происходит в момент изменения свойства <see cref="Resolution"/>.
     /// </summary>
-    public virtual event System.ComponentModel.PropertyChangingEventHandler? ResolutionChanging
+    public event PropertyChangingEventHandler? ResolutionChanging
     {
         add => PropertyChanging += value;
         remove => PropertyChanging -= value;
@@ -36,7 +62,7 @@ public partial class VirtualCamera
     /// <summary>
     /// Происходит после изменения свойства <see cref="Resolution"/>.
     /// </summary>
-    public virtual event System.ComponentModel.PropertyChangedEventHandler? ResolutionChanged
+    public event PropertyChangedEventHandler? ResolutionChanged
     {
         add => PropertyChanged += value;
         remove => PropertyChanged -= value;
@@ -45,7 +71,7 @@ public partial class VirtualCamera
     /// <summary>
     /// Происходит в момент изменения свойства <see cref="FrameRate"/>.
     /// </summary>
-    public event System.ComponentModel.PropertyChangingEventHandler? FrameRateChanging
+    public event PropertyChangingEventHandler? FrameRateChanging
     {
         add => PropertyChanging += value;
         remove => PropertyChanging -= value;
@@ -54,10 +80,59 @@ public partial class VirtualCamera
     /// <summary>
     /// Происходит после изменения свойства <see cref="FrameRate"/>.
     /// </summary>
-    public event System.ComponentModel.PropertyChangedEventHandler? FrameRateChanged
+    public event PropertyChangedEventHandler? FrameRateChanged
     {
         add => PropertyChanged += value;
         remove => PropertyChanged -= value;
     }
 
+    /// <summary>
+    /// Происходит в момент изменения свойства <see cref="Test"/>.
+    /// </summary>
+    public event PropertyChangingEventHandler? TestChanging
+    {
+        add => PropertyChanging += value;
+        remove => PropertyChanging -= value;
+    }
+
+    /// <summary>
+    /// Происходит после изменения свойства <see cref="Test"/>.
+    /// </summary>
+    public event PropertyChangedEventHandler? TestChanged
+    {
+        add => PropertyChanged += value;
+        remove => PropertyChanged -= value;
+    }
+
+    /// <summary>
+    /// Изменяет значение свойства.
+    /// </summary>
+    /// <param name="storage">Ссылка на поле, хранящее значение свойства.</param>
+    /// <param name="value">Значение свойства.</param>
+    /// <param name="propertyName">Имя свойства.</param>
+    /// <typeparam name="T">Тип свойства.</typeparam>
+    protected bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = default)
+    {
+        if (Equals(storage, value)) return false;
+
+        OnPropertyChanging(storage, value, propertyName);
+        storage = value;
+        OnPropertyChanged(propertyName);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Происходит перед изменением свойства.
+    /// </summary>
+    /// <param name="oldValue">Исходное значение свойства.</param>
+    /// <param name="newValue">Назначаемое значение свойства.</param>
+    /// <param name="propertyName">Имя свойства.</param>
+    protected virtual void OnPropertyChanging(object? oldValue, object? newValue, [CallerMemberName] string? propertyName = default) => PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(propertyName));
+
+    /// <summary>
+    /// Происходит после изменения свойства.
+    /// </summary>
+    /// <param name="propertyName">Имя свойства.</param>
+    protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = default) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

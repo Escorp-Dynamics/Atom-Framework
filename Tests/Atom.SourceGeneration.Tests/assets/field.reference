@@ -2,4 +2,4 @@
 /// Тестовое поле
 /// </summary>
 [Test]
-static readonly volatile ref System.Int32 testField = 5;
+static readonly volatile ref int testField = 5;

@@ -1,0 +1,67 @@
+#nullable enable
+
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
+using Atom;
+using Atom.Architect.Components;
+
+namespace Atom.Tests;
+
+public partial class Component1 : IComponent
+{
+    /// <inheritdoc/>
+    public IComponentOwner? Owner { get; protected set; }
+
+    /// <inheritdoc/>
+    public bool IsAttached => Owner is not null;
+
+    /// <inheritdoc/>
+    public bool IsAttachedByOwner { get; init; }
+
+    /// <inheritdoc/>
+    public event MutableEventHandler<ComponentEventArgs>? Attached;
+
+    /// <inheritdoc/>
+    public event MutableEventHandler<ComponentEventArgs>? Detached;
+
+    /// <summary>
+    /// Происходит в момент присоединения компонента к новому владельцу.
+    /// </summary>
+    /// <param name="owner">Новый владелец компонента.</param>
+    protected virtual void OnAttached(IComponentOwner owner)
+    {
+        if (Attached.On(args => { args.Owner = Owner; args.Component = this; })) Owner = owner;
+    }
+
+    /// <summary>
+    /// Происходит в момент отсоединения компонента от старого владельца.
+    /// </summary>
+    /// <param name="owner">Старый владелец компонента.</param>
+    protected virtual void OnDetached(IComponentOwner owner)
+    {
+        if (Detached.On(args => { args.Owner = Owner; args.Component = this; })) Owner = default;
+    }
+
+    /// <inheritdoc/>
+    public void AttachTo(IComponentOwner owner)
+    {
+        if (Owner is not null)
+        {
+            if (ReferenceEquals(owner, Owner)) throw new InvalidOperationException("Компонент уже присоединён к этому владельцу");
+            throw new InvalidOperationException("Компонент уже присоединён к другому владельцу");
+        }
+
+        OnAttached(owner);
+    }
+
+    /// <inheritdoc/>
+    public void Detach()
+    {
+        if (Owner is null) throw new InvalidOperationException("Компонент уже отсоединён от своего владельца");
+        OnDetached(Owner);
+    }
+}

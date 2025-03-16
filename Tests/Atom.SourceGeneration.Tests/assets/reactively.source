@@ -7,7 +7,7 @@ namespace Atom.Media.Video;
 /// <summary>
 /// Представляет устройство виртуальной камеры.
 /// </summary>
-public partial class VirtualCamera : Reactively
+public partial class VirtualCamera
 {
     /// <summary>
     /// Разрешение камеры.
@@ -20,6 +20,10 @@ public partial class VirtualCamera : Reactively
     /// </summary>
     [Reactively]
     private int frameRate;
+
+    /// <inheritdoc/>
+    [Reactively]
+    private bool test;
 
     /// <summary>
     /// .

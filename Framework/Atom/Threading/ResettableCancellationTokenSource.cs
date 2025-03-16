@@ -1,0 +1,143 @@
+using System.Runtime.CompilerServices;
+
+namespace Atom.Threading;
+
+/// <summary>
+/// Представляет источник токена отмены, который можно сбрасывать в исходное состояние.
+/// </summary>
+public sealed class ResettableCancellationTokenSource : CancellationTokenSource
+{
+    private CancellationTokenSource cts;
+    private bool isDisposed;
+
+    /// <summary>
+    /// Получает текущий токен отмены.
+    /// </summary>
+    public new CancellationToken Token => cts.Token;
+
+    /// <summary>
+    /// Определяет, был ли токен отменён.
+    /// </summary>
+    public new bool IsCancellationRequested => cts.IsCancellationRequested;
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="ResettableCancellationTokenSource"/>.
+    /// </summary>
+    public ResettableCancellationTokenSource() => cts = new CancellationTokenSource();
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="ResettableCancellationTokenSource"/>.
+    /// </summary>
+    /// <param name="delay">Задержка перед отменой.</param>
+    /// <param name="timeProvider">Провайдер таймера.</param>
+    public ResettableCancellationTokenSource(TimeSpan delay, TimeProvider timeProvider) => cts = new CancellationTokenSource(delay, timeProvider);
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="ResettableCancellationTokenSource"/>.
+    /// </summary>
+    /// <param name="delay">Задержка перед отменой.</param>
+    public ResettableCancellationTokenSource(TimeSpan delay) => cts = new CancellationTokenSource(delay);
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="ResettableCancellationTokenSource"/>.
+    /// </summary>
+    /// <param name="millisecondsDelay">Задержка перед отменой.</param>
+    public ResettableCancellationTokenSource(int millisecondsDelay) => cts = new CancellationTokenSource(millisecondsDelay);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void Reset(Func<CancellationTokenSource> factory)
+    {
+        do
+        {
+            if (Volatile.Read(ref isDisposed)) return;
+
+            var currentCts = Volatile.Read(ref cts);
+            var newCts = factory();
+            var previousCts = Interlocked.CompareExchange(ref cts, newCts, currentCts);
+
+            if (previousCts == currentCts)
+            {
+                previousCts.Dispose();
+                return;
+            }
+        }
+        while (true);
+    }
+
+    /// <summary>
+    /// Отменяет текущий токен.
+    /// </summary>
+    /// <param name="throwOnFirstException">Указывает, следует ли выбрасывать первое исключение.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new void Cancel(bool throwOnFirstException) => Volatile.Read(ref cts).Cancel(throwOnFirstException);
+
+    /// <summary>
+    /// Отменяет текущий токен.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new void Cancel() => Volatile.Read(ref cts).Cancel();
+
+    /// <summary>
+    /// Асинхронно отменяет текущий токен.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new async ValueTask CancelAsync() => await Volatile.Read(ref cts).CancelAsync().ConfigureAwait(false);
+
+    /// <summary>
+    /// Отменяет текущий токен после задержки.
+    /// </summary>
+    /// <param name="delay">Задержка перед отменой.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new void CancelAfter(TimeSpan delay) => Volatile.Read(ref cts).CancelAfter(delay);
+
+    /// <summary>
+    /// Отменяет текущий токен после задержки.
+    /// </summary>
+    /// <param name="millisecondsDelay">Задержка перед отменой.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new void CancelAfter(int millisecondsDelay) => Volatile.Read(ref cts).CancelAfter(millisecondsDelay);
+
+    /// <summary>
+    /// Пытается сбросить состояние токена отмены, если он ещё не был отменён.
+    /// </summary>
+    /// <returns></returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public new bool TryReset() => Volatile.Read(ref cts).TryReset();
+
+    /// <summary>
+    /// Сбрасывает источник токена.
+    /// </summary>
+    /// <param name="delay">Задержка перед отменой.</param>
+    /// <param name="timeProvider">Провайдер таймера.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Reset(TimeSpan delay, TimeProvider timeProvider) => Reset(() => new CancellationTokenSource(delay, timeProvider));
+
+    /// <summary>
+    /// Сбрасывает источник токена.
+    /// </summary>
+    /// <param name="delay">Задержка перед отменой.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Reset(TimeSpan delay) => Reset(() => new CancellationTokenSource(delay));
+
+    /// <summary>
+    /// Сбрасывает источник токена.
+    /// </summary>
+    /// <param name="millisecondsDelay">Задержка перед отменой.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Reset(int millisecondsDelay) => Reset(() => new CancellationTokenSource(millisecondsDelay));
+
+    /// <summary>
+    /// Сбрасывает источник токена.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Reset() => Reset(() => new CancellationTokenSource());
+
+    /// <inheritdoc/>
+    protected override void Dispose(bool disposing)
+    {
+        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
+
+        base.Dispose(disposing);
+        cts.Dispose();
+    }
+}
