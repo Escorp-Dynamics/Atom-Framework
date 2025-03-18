@@ -1,4 +1,6 @@
-﻿using System.Diagnostics;
+﻿#pragma warning disable CA1052
+
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
@@ -7,155 +9,18 @@ namespace Atom.Threading;
 /// <summary>
 /// Представляет механизмы ожиданий.
 /// </summary>
-public sealed class Wait : IDisposable
+public class Wait
 {
     private const int MaxSpinIterations = 8;
     private const int MaxYieldIterations = 8;
     private const int MaxSleepThreshold = 16;
 
-    private readonly ManualResetEventSlim mre = new();
-    private bool isDisposed;
-
     private static readonly int SpinWaitCount = Environment.ProcessorCount * 4;
 
     /// <summary>
-    /// Ожидает выполнения условия.
+    /// Инициализирует новый экземпляр <see cref="Wait"/>.
     /// </summary>
-    /// <param name="condition">Условие.</param>
-    /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
-    /// <param name="cancellationToken">Токен отмены задачи.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public async ValueTask LockAsync([NotNull] Func<bool> condition, int timeout, CancellationToken cancellationToken)
-    {
-        while (!Volatile.Read(ref isDisposed) && condition())
-        {
-            mre.Wait(timeout, cancellationToken);
-            mre.Reset();
-            await Task.Yield();
-        }
-    }
-
-    /// <summary>
-    /// Ожидает выполнения условия.
-    /// </summary>
-    /// <param name="condition">Условие.</param>
-    /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<bool> condition, int timeout) => LockAsync(condition, timeout, CancellationToken.None);
-
-    /// <summary>
-    /// Ожидает выполнения условия.
-    /// </summary>
-    /// <param name="condition">Условие.</param>
-    /// <param name="timeout">Таймаут ожидания.</param>
-    /// <param name="cancellationToken">Токен отмены задачи.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<bool> condition, TimeSpan timeout, CancellationToken cancellationToken)
-        => LockAsync(condition, (int)timeout.TotalMilliseconds, cancellationToken);
-
-    /// <summary>
-    /// Ожидает выполнения условия.
-    /// </summary>
-    /// <param name="condition">Условие.</param>
-    /// <param name="timeout">Таймаут ожидания.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<bool> condition, TimeSpan timeout)
-        => LockAsync(condition, timeout, CancellationToken.None);
-
-    /// <summary>
-    /// Ожидает выполнения условия.
-    /// </summary>
-    /// <param name="condition">Условие.</param>
-    /// <param name="cancellationToken">Токен отмены задачи.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<bool> condition, CancellationToken cancellationToken)
-        => LockAsync(condition, Timeout.Infinite, cancellationToken);
-
-    /// <summary>
-    /// Ожидает выполнения условия.
-    /// </summary>
-    /// <param name="condition">Условие.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<bool> condition) => LockAsync(condition, CancellationToken.None);
-
-    /// <summary>
-    /// Ожидает выполнения условия.
-    /// </summary>
-    /// <param name="condition">Условие.</param>
-    /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
-    /// <param name="cancellationToken">Токен отмены задачи.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public async ValueTask LockAsync([NotNull] Func<ValueTask<bool>> condition, int timeout, CancellationToken cancellationToken)
-    {
-        while (!Volatile.Read(ref isDisposed) && await condition().ConfigureAwait(false))
-        {
-            mre.Wait(timeout, cancellationToken);
-            mre.Reset();
-            await Task.Yield();
-        }
-    }
-
-    /// <summary>
-    /// Ожидает выполнения условия.
-    /// </summary>
-    /// <param name="condition">Условие.</param>
-    /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<ValueTask<bool>> condition, int timeout) => LockAsync(condition, timeout, CancellationToken.None);
-
-    /// <summary>
-    /// Ожидает выполнения условия.
-    /// </summary>
-    /// <param name="condition">Условие.</param>
-    /// <param name="timeout">Таймаут ожидания.</param>
-    /// <param name="cancellationToken">Токен отмены задачи.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<ValueTask<bool>> condition, TimeSpan timeout, CancellationToken cancellationToken)
-        => LockAsync(condition, (int)timeout.TotalMilliseconds, cancellationToken);
-
-    /// <summary>
-    /// Ожидает выполнения условия.
-    /// </summary>
-    /// <param name="condition">Условие.</param>
-    /// <param name="timeout">Таймаут ожидания.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<ValueTask<bool>> condition, TimeSpan timeout)
-        => LockAsync(condition, timeout, CancellationToken.None);
-
-    /// <summary>
-    /// Ожидает выполнения условия.
-    /// </summary>
-    /// <param name="condition">Условие.</param>
-    /// <param name="cancellationToken">Токен отмены задачи.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<ValueTask<bool>> condition, CancellationToken cancellationToken)
-        => LockAsync(condition, Timeout.Infinite, cancellationToken);
-
-    /// <summary>
-    /// Ожидает выполнения условия.
-    /// </summary>
-    /// <param name="condition">Условие.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<ValueTask<bool>> condition) => LockAsync(condition, CancellationToken.None);
-
-    /// <summary>
-    /// Освобождает ожидание.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Release() => mre.Set();
-
-    /// <summary>
-    /// Высвобождает ресурсы.
-    /// </summary>
-    public void Dispose()
-    {
-        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
-
-        mre.Set();
-        mre.Dispose();
-
-        GC.SuppressFinalize(this);
-    }
+    protected Wait() { }
 
     /// <summary>
     /// Ожидает до тех пор, пока выполняется условие <paramref name="condition"/>.
@@ -347,4 +212,174 @@ public sealed class Wait : IDisposable
     /// <param name="condition">Условие ожидания.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ValueTask UntilAsync(Func<ValueTask<bool>> condition) => UntilAsync(condition, CancellationToken.None);
+}
+
+/// <summary>
+/// Представляет условное ожидание через сигналы.
+/// </summary>
+/// <typeparam name="T">Тип состояния.</typeparam>
+public sealed class Wait<T> : Wait, IDisposable
+{
+    private readonly ManualResetEventSlim mre = new();
+    private readonly Signal<T> signal;
+    private readonly T? state;
+    private bool isDisposed;
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="Wait"/>
+    /// </summary>
+    /// <param name="signal">Связанный сигнал.</param>
+    /// <param name="state">Связанное состояние.</param>
+    public Wait(Signal<T> signal, T? state)
+    {
+        this.signal = signal;
+        this.state = state;
+        this.signal.Sended += OnSignaled;
+    }
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="Wait"/>
+    /// </summary>
+    /// <param name="signal">Связанный сигнал.</param>
+    public Wait(Signal<T> signal) : this(signal, default) { }
+
+    private void OnSignaled(SignalEventArgs<T> args)
+    {
+        if (ReferenceEquals(args.State, state) || state?.Equals(args.State) is true || state is null || args.State is null) mre.Set();
+    }
+
+    /// <summary>
+    /// Ожидает выполнения условия.
+    /// </summary>
+    /// <param name="condition">Условие.</param>
+    /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public async ValueTask LockAsync([NotNull] Func<bool> condition, int timeout, CancellationToken cancellationToken)
+    {
+        while (!Volatile.Read(ref isDisposed) && condition())
+        {
+            mre.Wait(timeout, cancellationToken);
+            mre.Reset();
+            await Task.Yield();
+        }
+    }
+
+    /// <summary>
+    /// Ожидает выполнения условия.
+    /// </summary>
+    /// <param name="condition">Условие.</param>
+    /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ValueTask LockAsync(Func<bool> condition, int timeout) => LockAsync(condition, timeout, CancellationToken.None);
+
+    /// <summary>
+    /// Ожидает выполнения условия.
+    /// </summary>
+    /// <param name="condition">Условие.</param>
+    /// <param name="timeout">Таймаут ожидания.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ValueTask LockAsync(Func<bool> condition, TimeSpan timeout, CancellationToken cancellationToken)
+        => LockAsync(condition, (int)timeout.TotalMilliseconds, cancellationToken);
+
+    /// <summary>
+    /// Ожидает выполнения условия.
+    /// </summary>
+    /// <param name="condition">Условие.</param>
+    /// <param name="timeout">Таймаут ожидания.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ValueTask LockAsync(Func<bool> condition, TimeSpan timeout)
+        => LockAsync(condition, timeout, CancellationToken.None);
+
+    /// <summary>
+    /// Ожидает выполнения условия.
+    /// </summary>
+    /// <param name="condition">Условие.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ValueTask LockAsync(Func<bool> condition, CancellationToken cancellationToken)
+        => LockAsync(condition, Timeout.Infinite, cancellationToken);
+
+    /// <summary>
+    /// Ожидает выполнения условия.
+    /// </summary>
+    /// <param name="condition">Условие.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ValueTask LockAsync(Func<bool> condition) => LockAsync(condition, CancellationToken.None);
+
+    /// <summary>
+    /// Ожидает выполнения условия.
+    /// </summary>
+    /// <param name="condition">Условие.</param>
+    /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public async ValueTask LockAsync([NotNull] Func<ValueTask<bool>> condition, int timeout, CancellationToken cancellationToken)
+    {
+        while (!Volatile.Read(ref isDisposed) && await condition().ConfigureAwait(false))
+        {
+            mre.Wait(timeout, cancellationToken);
+            mre.Reset();
+            await Task.Yield();
+        }
+    }
+
+    /// <summary>
+    /// Ожидает выполнения условия.
+    /// </summary>
+    /// <param name="condition">Условие.</param>
+    /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ValueTask LockAsync(Func<ValueTask<bool>> condition, int timeout) => LockAsync(condition, timeout, CancellationToken.None);
+
+    /// <summary>
+    /// Ожидает выполнения условия.
+    /// </summary>
+    /// <param name="condition">Условие.</param>
+    /// <param name="timeout">Таймаут ожидания.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ValueTask LockAsync(Func<ValueTask<bool>> condition, TimeSpan timeout, CancellationToken cancellationToken)
+        => LockAsync(condition, (int)timeout.TotalMilliseconds, cancellationToken);
+
+    /// <summary>
+    /// Ожидает выполнения условия.
+    /// </summary>
+    /// <param name="condition">Условие.</param>
+    /// <param name="timeout">Таймаут ожидания.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ValueTask LockAsync(Func<ValueTask<bool>> condition, TimeSpan timeout)
+        => LockAsync(condition, timeout, CancellationToken.None);
+
+    /// <summary>
+    /// Ожидает выполнения условия.
+    /// </summary>
+    /// <param name="condition">Условие.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ValueTask LockAsync(Func<ValueTask<bool>> condition, CancellationToken cancellationToken)
+        => LockAsync(condition, Timeout.Infinite, cancellationToken);
+
+    /// <summary>
+    /// Ожидает выполнения условия.
+    /// </summary>
+    /// <param name="condition">Условие.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ValueTask LockAsync(Func<ValueTask<bool>> condition) => LockAsync(condition, CancellationToken.None);
+
+    /// <summary>
+    /// Высвобождает ресурсы.
+    /// </summary>
+    public void Dispose()
+    {
+        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
+
+        signal.Sended -= OnSignaled;
+
+        mre.Set();
+        mre.Dispose();
+
+        GC.SuppressFinalize(this);
+    }
 }

@@ -6,6 +6,60 @@ namespace Atom.Threading.Tests;
 
 public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logger)
 {
+    private sealed class Worker(int id, TimeSpan duration)
+    {
+        private readonly TimeSpan duration = duration;
+        private readonly Stopwatch timer = new();
+
+        private static readonly Sequencer sequencer = new(SequenceMode.Loop) { Interval = TimeSpan.FromSeconds(1) };
+
+        public int Id { get; set; } = id;
+
+        public bool IsReady { get; private set; }
+
+        public static SequencerTests Context { get; set; }
+
+        static Worker()
+        {
+            sequencer.Started += args => Log("Секвенция запущена");
+            sequencer.Stopped += args => Log("Секвенция остановлена");
+            sequencer.Added += args => Log($"{((Worker)args.Task!.Target!).Id} Задача добавлена");
+            sequencer.Updated += args => Log($"{((Worker)args.Task!.Target!).Id} Задача обновлена");
+            sequencer.Removed += args => Log($"{((Worker)args.Task!.Target!).Id} Задача удалена");
+            sequencer.Sequence += args => Log($"{((Worker)args.Task!.Target!).Id} Выполнение");
+            sequencer.Failed += args => Log($"{((Worker)args.Task!.Target!).Id} {args.Exception?.Message ?? "Ошибка"}");
+            sequencer.Paused += args => Log($"{((Worker)args.Task!.Target!).Id} Задача приостановлена");
+            sequencer.Resumed += args => Log($"{((Worker)args.Task!.Target!).Id} Задача возобновлена");
+        }
+
+        private static void Log(string? message)
+        {
+            message = $"{DateTime.UtcNow:HH:mm:ss.fff} {message}";
+            Context.Logger.WriteLineInfo(message);
+            Trace.TraceInformation(message);
+        }
+
+        private ValueTask CallbackAsync()
+        {
+            Log($"{Id} Callback");
+            if (timer.Elapsed >= duration) sequencer.Remove(CallbackAsync);
+            return ValueTask.CompletedTask;
+        }
+
+        public void Start()
+        {
+            sequencer.AddAndStart(CallbackAsync);
+
+            Task.Run(async () =>
+            {
+                await sequencer.WaitAsync(CallbackAsync).ConfigureAwait(false);
+                IsReady = true;
+            });
+
+            timer.Start();
+        }
+    }
+
     private readonly Sequencer manualSequencer = new(TimeSpan.FromSeconds(1), SequenceMode.Manual);
     private readonly Sequencer loopSequencer = new(TimeSpan.FromSeconds(1), SequenceMode.Loop);
     private readonly Sequencer loopWithWaitingSequencer = new(TimeSpan.FromSeconds(1), SequenceMode.LoopWithWaiting);
@@ -204,5 +258,22 @@ public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logg
 
         var result = await loopWithWaitingSequencer.WaitAsync(TestCallback);
         Assert.That(result, Is.True);
+    }
+
+    [TestCase(TestName = "Тест удаления коллбэка"), Benchmark]
+    public async Task LoopRemovingTest()
+    {
+        Worker.Context = this;
+
+        var workers = new Worker[10];
+
+        for (var i = 0; i < 10; ++i)
+        {
+            workers[i] = new Worker(i + 1, TimeSpan.FromSeconds(i + 1));
+            workers[i].Start();
+        }
+
+        await Wait.UntilAsync(() => !workers.All(x => x.IsReady));
+        Assert.Pass();
     }
 }
