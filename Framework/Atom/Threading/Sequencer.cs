@@ -512,6 +512,24 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// Пытается вернуть режим работы задачи.
+    /// </summary>
+    /// <param name="task">Задача.</param>
+    /// <param name="mode">Режим работы.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetMode(Func<ValueTask> task, out SequenceMode mode)
+    {
+        if (tasks.TryGetValue(task, out var state))
+        {
+            mode = state.Mode;
+            return true;
+        }
+
+        mode = default;
+        return default;
+    }
+
+    /// <summary>
     /// Запускает выполнение задач в секвенции.
     /// </summary>
     /// <param name="waitIntervalBeforeStarting">Указывает, требуется ли ожидать интервал перед запуском секвенции.</param>
