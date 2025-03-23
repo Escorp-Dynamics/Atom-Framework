@@ -224,6 +224,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
         UpdateTimer();
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void UpdateLoopMode(Func<ValueTask> task, TaskState state)
     {
         var mode = Interlocked.Increment(ref state.Counter) >= LoopRepetitionsWithoutWaiting ? SequenceMode.LoopWithWaiting : SequenceMode.Loop;
