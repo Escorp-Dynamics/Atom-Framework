@@ -114,6 +114,11 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     public event MutableEventHandler<SequenceEventArgs>? Resumed;
 
     /// <summary>
+    /// Происходит в момент изменения параметров задачи.
+    /// </summary>
+    public event MutableEventHandler<SequenceEventArgs>? Changed;
+
+    /// <summary>
     /// Происходит в момент исключения при выполнении задачи.
     /// </summary>
     public event MutableEventHandler<SequenceFailedEventArgs>? Failed;
@@ -167,8 +172,10 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     public Sequencer() : this(SequenceMode.Manual) { }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ProcessTask(Func<ValueTask> task, TaskState state)
+    private void ProcessTask(Func<ValueTask> task)
     {
+        if (!tasks.TryGetValue(task, out var state)) return;
+
         var minInterval = Volatile.Read(ref state.MinInterval);
         var lastExecutionTime = Volatile.Read(ref state.LastExecutionTime);
 
@@ -176,7 +183,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
         {
             if (Sequence.On(args => { args.Task = task; Mode = state.Mode; }))
             {
-                _ = ExecuteAsync(task, state).ConfigureAwait(false);
+                _ = ExecuteAsync(task).ConfigureAwait(false);
                 if (Volatile.Read(ref state.IsCustomCondition)) signal.Send(task);
             }
         }
@@ -207,9 +214,9 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 
         while (!sequence.IsEmpty)
         {
-            if (sequence.TryDequeue(out var task) && tasks.TryGetValue(task, out var entry))
+            if (sequence.TryDequeue(out var task) && tasks.TryGetValue(task, out _))
             {
-                ProcessTask(task, entry);
+                ProcessTask(task);
                 break;
             }
         }
@@ -217,16 +224,21 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
         UpdateTimer();
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private async Task ExecuteAsync(Func<ValueTask> task, TaskState state)
+    private void UpdateLoopMode(Func<ValueTask> task, TaskState state)
     {
-        if (state.Mode is SequenceMode.Loop)
-        {
-            var mode = Interlocked.Increment(ref state.Counter) >= LoopRepetitionsWithoutWaiting ? SequenceMode.LoopWithWaiting : SequenceMode.Loop;
+        var mode = Interlocked.Increment(ref state.Counter) >= LoopRepetitionsWithoutWaiting ? SequenceMode.LoopWithWaiting : SequenceMode.Loop;
 
-            tasks.TryUpdate(task, state with { Mode = mode, Counter = default, LastExecutionTime = DateTime.UtcNow.Ticks }, state);
-            ScheduleTask(task, mode);
-        }
+        if (tasks.TryUpdate(task, state with { Mode = mode, Counter = default, LastExecutionTime = DateTime.UtcNow.Ticks }, state) && mode != state.Mode)
+            Changed.On(args => { args.Task = task; args.Mode = mode; });
+
+        ScheduleTask(task, mode);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private async Task ExecuteAsync(Func<ValueTask> task)
+    {
+        if (!tasks.TryGetValue(task, out var state)) return;
+        if (state.Mode is SequenceMode.Loop) UpdateLoopMode(task, state);
 
         try
         {
@@ -237,14 +249,14 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
             Failed.On(args => { args.Exception = ex; args.Task = task; args.Mode = state.Mode; });
         }
 
-        if (state.Mode is SequenceMode.LoopWithWaiting)
-        {
-            if (tasks.TryUpdate(task, state with { LastExecutionTime = DateTime.UtcNow.Ticks }, state)) ScheduleTask(task, state.Mode);
-        }
-        else if (state.Mode is SequenceMode.Manual)
-        {
+        if (!tasks.TryGetValue(task, out state)) return;
+
+        if (state.Mode is SequenceMode.Manual)
             Remove(task);
-        }
+        else if (state.Mode is SequenceMode.Loop)
+            UpdateLoopMode(task, state);
+        else if (tasks.TryUpdate(task, state with { LastExecutionTime = DateTime.UtcNow.Ticks }, state))
+            ScheduleTask(task, state.Mode);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -477,6 +489,25 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
                 timer.Change(Interval, Timeout.InfiniteTimeSpan);
             }
         }
+    }
+
+    /// <summary>
+    /// Определяет, находится ли задача на паузе.
+    /// </summary>
+    /// <param name="task">Задача.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool IsPaused(Func<ValueTask> task) => tasks.TryGetValue(task, out var state) && Volatile.Read(ref state.IsPaused);
+
+    /// <summary>
+    /// Устанавливает режим работы задаче.
+    /// </summary>
+    /// <param name="task">Задача.</param>
+    /// <param name="mode">Режим работы.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void SetMode(Func<ValueTask> task, SequenceMode mode)
+    {
+        if (tasks.TryGetValue(task, out var state) && tasks.TryUpdate(task, state with { Mode = mode }, state) && mode != state.Mode)
+            Changed.On(args => { args.Task = task; args.Mode = mode; });
     }
 
     /// <summary>

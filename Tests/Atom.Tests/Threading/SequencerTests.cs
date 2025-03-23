@@ -30,6 +30,8 @@ public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logg
             sequencer.Failed += args => Log($"{((Worker)args.Task!.Target!).Id} {args.Exception?.Message ?? "Ошибка"}");
             sequencer.Paused += args => Log($"{((Worker)args.Task!.Target!).Id} Задача приостановлена");
             sequencer.Resumed += args => Log($"{((Worker)args.Task!.Target!).Id} Задача возобновлена");
+
+            Context = new();
         }
 
         private static void Log(string? message)
