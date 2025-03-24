@@ -11,7 +11,7 @@ public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logg
         private readonly TimeSpan duration = duration;
         private readonly Stopwatch timer = new();
 
-        private static readonly Sequencer sequencer = new(SequenceMode.Loop) { Interval = TimeSpan.FromSeconds(1) };
+        private int timeIncrement;
 
         public int Id { get; set; } = id;
 
@@ -19,17 +19,20 @@ public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logg
 
         public static SequencerTests Context { get; set; }
 
+        public static Sequencer Sequencer { get; } = new(SequenceMode.Loop) { Interval = TimeSpan.FromSeconds(1) };
+
         static Worker()
         {
-            sequencer.Started += args => Log("Секвенция запущена");
-            sequencer.Stopped += args => Log("Секвенция остановлена");
-            sequencer.Added += args => Log($"{((Worker)args.Task!.Target!).Id} Задача добавлена");
-            sequencer.Updated += args => Log($"{((Worker)args.Task!.Target!).Id} Задача обновлена");
-            sequencer.Removed += args => Log($"{((Worker)args.Task!.Target!).Id} Задача удалена");
-            sequencer.Sequence += args => Log($"{((Worker)args.Task!.Target!).Id} Выполнение");
-            sequencer.Failed += args => Log($"{((Worker)args.Task!.Target!).Id} {args.Exception?.Message ?? "Ошибка"}");
-            sequencer.Paused += args => Log($"{((Worker)args.Task!.Target!).Id} Задача приостановлена");
-            sequencer.Resumed += args => Log($"{((Worker)args.Task!.Target!).Id} Задача возобновлена");
+            Sequencer.Started += args => Log("Секвенция запущена");
+            Sequencer.Stopped += args => Log("Секвенция остановлена");
+            Sequencer.Added += args => Log($"{((Worker)args.Task!.Target!).Id} Задача добавлена, {args.Mode}");
+            Sequencer.Updated += args => Log($"{((Worker)args.Task!.Target!).Id} Задача обновлена, {args.Mode}");
+            Sequencer.Removed += args => Log($"{((Worker)args.Task!.Target!).Id} Задача удалена, {args.Mode}");
+            Sequencer.Sequence += args => Log($"{((Worker)args.Task!.Target!).Id} Выполнение, {args.Mode}");
+            Sequencer.Failed += args => Log($"{((Worker)args.Task!.Target!).Id} {args.Exception?.Message ?? "Ошибка"}, {args.Mode}");
+            Sequencer.Paused += args => Log($"{((Worker)args.Task!.Target!).Id} Задача приостановлена, {args.Mode}");
+            Sequencer.Resumed += args => Log($"{((Worker)args.Task!.Target!).Id} Задача возобновлена, {args.Mode}");
+            Sequencer.Changed += args => Log($"{((Worker)args.Task!.Target!).Id} Задача изменена, {args.Mode}");
 
             Context = new();
         }
@@ -41,20 +44,20 @@ public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logg
             Trace.TraceInformation(message);
         }
 
-        private ValueTask CallbackAsync()
+        public async ValueTask CallbackAsync()
         {
-            Log($"{Id} Callback");
-            if (timer.Elapsed >= duration) sequencer.Remove(CallbackAsync);
-            return ValueTask.CompletedTask;
+            Log($"{Id} Callback: {timeIncrement + 1}");
+            if (timer.Elapsed >= duration && Context.IsRemoveTest) Sequencer.Remove(CallbackAsync);
+            if (!Context.IsRemoveTest) await Task.Delay(TimeSpan.FromSeconds(Interlocked.Increment(ref timeIncrement)));
         }
 
         public void Start()
         {
-            sequencer.AddAndStart(CallbackAsync);
+            Sequencer.AddAndStart(CallbackAsync);
 
             Task.Run(async () =>
             {
-                await sequencer.WaitAsync(CallbackAsync).ConfigureAwait(false);
+                await Sequencer.WaitAsync(CallbackAsync).ConfigureAwait(false);
                 IsReady = true;
             });
 
@@ -65,6 +68,8 @@ public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logg
     private readonly Sequencer manualSequencer = new(TimeSpan.FromSeconds(1), SequenceMode.Manual);
     private readonly Sequencer loopSequencer = new(TimeSpan.FromSeconds(1), SequenceMode.Loop);
     private readonly Sequencer loopWithWaitingSequencer = new(TimeSpan.FromSeconds(1), SequenceMode.LoopWithWaiting);
+
+    private bool IsRemoveTest { get; set; }
 
     public override bool IsBenchmarkDisabled => true;
 
@@ -265,6 +270,7 @@ public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logg
     [TestCase(TestName = "Тест удаления коллбэка"), Benchmark]
     public async Task LoopRemovingTest()
     {
+        IsRemoveTest = true;
         Worker.Context = this;
 
         var workers = new Worker[10];
@@ -276,6 +282,31 @@ public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logg
         }
 
         await Wait.UntilAsync(() => !workers.All(x => x.IsReady));
+        Assert.Pass();
+    }
+
+    [TestCase(TestName = "Тест паузы и смены режимов"), Benchmark]
+    public async Task LoopPauseAndChangeModeTest()
+    {
+        Worker.Context = this;
+
+        var worker = new Worker(1, TimeSpan.FromSeconds(1));
+        worker.Start();
+
+        await Task.Delay(TimeSpan.FromSeconds(3));
+
+        Worker.Sequencer.Pause(worker.CallbackAsync);
+        Worker.Sequencer.SetMode(worker.CallbackAsync, SequenceMode.LoopWithWaiting);
+
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        Worker.Sequencer.Resume(worker.CallbackAsync);
+
+        await Task.Delay(TimeSpan.FromSeconds(30));
+
+        Worker.Sequencer.SetMode(worker.CallbackAsync, SequenceMode.Loop);
+
+        await Task.Delay(TimeSpan.FromSeconds(10));
+
         Assert.Pass();
     }
 }

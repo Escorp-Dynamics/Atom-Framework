@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Atom.Buffers;
+using Atom.Collections;
 
 namespace Atom.Threading;
 
@@ -14,6 +15,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 {
     private struct TaskState
     {
+        public SequenceMode OriginalMode;
         public SequenceMode Mode;
         public ulong Counter;
         public bool IsPaused;
@@ -172,16 +174,14 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     public Sequencer() : this(SequenceMode.Manual) { }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ProcessTask(Func<ValueTask> task)
+    private void ProcessTask(Func<ValueTask> task, TaskState state)
     {
-        if (!tasks.TryGetValue(task, out var state)) return;
-
         var minInterval = Volatile.Read(ref state.MinInterval);
         var lastExecutionTime = Volatile.Read(ref state.LastExecutionTime);
 
         if (!Volatile.Read(ref state.IsPaused) && (minInterval is 0 || DateTime.UtcNow.Ticks - lastExecutionTime >= minInterval))
         {
-            if (Sequence.On(args => { args.Task = task; Mode = state.Mode; }))
+            if (Sequence.On(args => { args.Task = task; args.Mode = state.Mode; }))
             {
                 _ = ExecuteAsync(task).ConfigureAwait(false);
                 if (Volatile.Read(ref state.IsCustomCondition)) signal.Send(task);
@@ -189,7 +189,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
         }
         else
         {
-            sequence.Enqueue(task);
+            sequence.EnqueueOnce(task);
         }
     }
 
@@ -214,9 +214,9 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 
         while (!sequence.IsEmpty)
         {
-            if (sequence.TryDequeue(out var task) && tasks.TryGetValue(task, out _))
+            if (sequence.TryDequeue(out var task) && tasks.TryGetValue(task, out var taskState))
             {
-                ProcessTask(task);
+                ProcessTask(task, taskState);
                 break;
             }
         }
@@ -227,7 +227,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void UpdateLoopMode(Func<ValueTask> task, TaskState state)
     {
-        var mode = Interlocked.Increment(ref state.Counter) >= LoopRepetitionsWithoutWaiting ? SequenceMode.LoopWithWaiting : SequenceMode.Loop;
+        var mode = state.OriginalMode is SequenceMode.Loop && LoopRepetitionsWithoutWaiting > 0 && Interlocked.Increment(ref state.Counter) >= LoopRepetitionsWithoutWaiting ? SequenceMode.LoopWithWaiting : SequenceMode.Loop;
 
         if (tasks.TryUpdate(task, state with { Mode = mode, Counter = default, LastExecutionTime = DateTime.UtcNow.Ticks }, state) && mode != state.Mode)
             Changed.On(args => { args.Task = task; args.Mode = mode; });
@@ -265,7 +265,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     {
         if (!tasks.TryGetValue(task, out _)) return;
 
-        sequence.Enqueue(task);
+        sequence.EnqueueOnce(task);
         if (update) Updated.On(args => { args.Task = task; args.Mode = mode; });
     }
 
@@ -282,7 +282,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 
         var isEmpty = tasks.IsEmpty;
 
-        if (!tasks.TryAdd(task, new TaskState { Mode = mode, MinInterval = minInterval.Ticks, LastExecutionTime = DateTime.UtcNow.Ticks - minInterval.Ticks }))
+        if (!tasks.TryAdd(task, new TaskState { OriginalMode = mode, Mode = mode, MinInterval = minInterval.Ticks, LastExecutionTime = DateTime.UtcNow.Ticks - minInterval.Ticks }))
         {
             Failed.On(args =>
             {
@@ -507,7 +507,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void SetMode(Func<ValueTask> task, SequenceMode mode)
     {
-        if (tasks.TryGetValue(task, out var state) && tasks.TryUpdate(task, state with { Mode = mode }, state) && mode != state.Mode)
+        if (tasks.TryGetValue(task, out var state) && tasks.TryUpdate(task, state with { OriginalMode = Mode, Mode = mode }, state) && mode != state.Mode)
             Changed.On(args => { args.Task = task; args.Mode = mode; });
     }
 
