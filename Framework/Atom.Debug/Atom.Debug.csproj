@@ -29,7 +29,7 @@
 
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.2.1</Version>
+		<Version>0.2.2</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -55,11 +55,11 @@
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(Configuration)' == 'Release'">
-		<PackageReference Include="Escorp.Atom" Version="0.8.4" />
+		<PackageReference Include="Escorp.Atom" Version="0.8.5" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.3" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.4" />
 	</ItemGroup>
 
 	<ItemGroup>

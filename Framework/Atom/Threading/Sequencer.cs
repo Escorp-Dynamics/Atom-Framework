@@ -182,6 +182,8 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 
         if (!Volatile.Read(ref state.IsPaused) && (minInterval is 0 || DateTime.UtcNow.Ticks - lastExecutionTime >= minInterval))
         {
+            if (state.Context is not null) ExecutionContext.Restore(state.Context);
+
             if (Sequence.On(args => { args.Task = task; args.Mode = state.Mode; }))
             {
                 _ = ExecuteAsync(task).ConfigureAwait(false);
@@ -244,7 +246,6 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     private async Task ExecuteAsync(Func<ValueTask> task)
     {
         if (!tasks.TryGetValue(task, out var state)) return;
-        if (state.Context is not null) ExecutionContext.Restore(state.Context);
         if (state.Mode is SequenceMode.Loop) UpdateLoopMode(task, state);
 
         try
