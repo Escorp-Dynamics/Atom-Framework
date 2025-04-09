@@ -1,19 +1,14 @@
-﻿using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
+﻿namespace Atom.Web.Analytics.Tests;
 
-namespace Atom.Web.Analytics.Tests;
-
-public class CurrencyTests(ILogger logger) : BenchmarkTest<CurrencyTests>(logger)
+public class CurrencyTests(ILogger logger) : BenchmarkTests<CurrencyTests>(logger)
 {
-    public override bool IsBenchmarkDisabled => true;
-
     public CurrencyTests() : this(ConsoleLogger.Unicode) { }
 
     [TestCase(TestName = "Тест парсинга"), Benchmark]
     public void ParseTest()
     {
         var result = Currency.TryParse("RUB", out var currency);
-        if (!IsTest) return;
+        if (IsBenchmarkEnabled) return;
 
         Assert.Multiple(() =>
         {
@@ -21,7 +16,7 @@ public class CurrencyTests(ILogger logger) : BenchmarkTest<CurrencyTests>(logger
             Assert.That(currency, Is.Not.Null);
         });
 
-        Assert.That(currency.IsoCode, Is.EqualTo("RUB"));
+        Assert.That(currency?.IsoCode, Is.EqualTo("RUB"));
     }
 
     [TestCase(TestName = "Тест сериализации"), Benchmark]
@@ -30,6 +25,6 @@ public class CurrencyTests(ILogger logger) : BenchmarkTest<CurrencyTests>(logger
         var currency = Currency.RUB;
         var json = currency.Serialize();
 
-        if (IsTest) Assert.That(json, Is.EqualTo(/*lang=json,strict*/ "\"RUB\""));
+        if (!IsBenchmarkEnabled) Assert.That(json, Is.EqualTo(/*lang=json,strict*/ "\"RUB\""));
     }
 }

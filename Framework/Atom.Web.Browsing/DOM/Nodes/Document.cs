@@ -178,27 +178,27 @@ public class Document : Node, IDocument
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Prepend(params INode[] nodes) => ParentNode.Prepend(nodes);
+    public void Prepend(params IEnumerable<INode> nodes) => ParentNode.Prepend(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Prepend(params string[] nodes) => ParentNode.Prepend(nodes);
+    public void Prepend(params IEnumerable<string> nodes) => ParentNode.Prepend(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Append(params INode[] nodes) => ParentNode.Append(nodes);
+    public void Append(params IEnumerable<INode> nodes) => ParentNode.Append(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Append(params string[] nodes) => ParentNode.Append(nodes);
+    public void Append(params IEnumerable<string> nodes) => ParentNode.Append(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void ReplaceChildren(params INode[] nodes) => ParentNode.ReplaceChildren(nodes);
+    public void ReplaceChildren(params IEnumerable<INode> nodes) => ParentNode.ReplaceChildren(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void ReplaceChildren(params string[] nodes) => ParentNode.ReplaceChildren(nodes);
+    public void ReplaceChildren(params IEnumerable<string> nodes) => ParentNode.ReplaceChildren(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]

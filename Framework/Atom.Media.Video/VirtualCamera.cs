@@ -226,7 +226,7 @@ public partial class VirtualCamera : IAsyncDisposable
     /// <param name="path">Путь к файлу видеозахвата.</param>
     /// <param name="isLooped">Указывает, является ли захват зацикленным.</param>
     /// <param name="filters">Коллекция фильтров.</param>
-    public ValueTask StartCaptureAsync(string path, bool isLooped, params IFilter[] filters) => StartCaptureAsync(path, isLooped, filters, CancellationToken.None);
+    public ValueTask StartCaptureAsync(string path, bool isLooped, params IEnumerable<IFilter> filters) => StartCaptureAsync(path, isLooped, filters, CancellationToken.None);
 
     /// <summary>
     /// Начинает захват видеопотока с камеры.
@@ -256,7 +256,7 @@ public partial class VirtualCamera : IAsyncDisposable
     /// </summary>
     /// <param name="path">Путь к файлу видеозахвата.</param>
     /// <param name="filters">Коллекция фильтров.</param>
-    public ValueTask StartCaptureAsync(string path, params IFilter[] filters) => StartCaptureAsync(path, default, filters, CancellationToken.None);
+    public ValueTask StartCaptureAsync(string path, params IEnumerable<IFilter> filters) => StartCaptureAsync(path, default, filters, CancellationToken.None);
 
     /// <summary>
     /// Начинает захват видеопотока с камеры.
@@ -317,7 +317,7 @@ public partial class VirtualCamera : IAsyncDisposable
     /// <param name="url">Ссылка к файлу видеозахвата.</param>
     /// <param name="isLooped">Указывает, является ли захват зацикленным.</param>
     /// <param name="filters">Коллекция фильтров.</param>
-    public ValueTask StartCaptureAsync(Uri url, bool isLooped, params IFilter[] filters) => StartCaptureAsync(url, isLooped, filters, CancellationToken.None);
+    public ValueTask StartCaptureAsync(Uri url, bool isLooped, params IEnumerable<IFilter> filters) => StartCaptureAsync(url, isLooped, filters, CancellationToken.None);
 
     /// <summary>
     /// Начинает захват видеопотока с камеры.
@@ -347,7 +347,7 @@ public partial class VirtualCamera : IAsyncDisposable
     /// </summary>
     /// <param name="url">Ссылка к файлу видеозахвата.</param>
     /// <param name="filters">Коллекция фильтров.</param>
-    public ValueTask StartCaptureAsync(Uri url, params IFilter[] filters) => StartCaptureAsync(url, default, filters, CancellationToken.None);
+    public ValueTask StartCaptureAsync(Uri url, params IEnumerable<IFilter> filters) => StartCaptureAsync(url, default, filters, CancellationToken.None);
 
     /// <summary>
     /// Начинает захват видеопотока с камеры.

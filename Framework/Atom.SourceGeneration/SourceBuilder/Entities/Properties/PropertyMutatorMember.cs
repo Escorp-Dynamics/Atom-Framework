@@ -42,7 +42,7 @@ public class PropertyMutatorMember : Entity<PropertyMutatorMember>
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params string[] usings)
+    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params IEnumerable<string> usings)
     {
         var access = AccessModifier.AsString(ParentAccessModifier);
         if (!string.IsNullOrEmpty(access)) access += ' ';
@@ -94,7 +94,7 @@ public class PropertyMutatorMember : Entity<PropertyMutatorMember>
     public override PropertyMutatorMember WithName(string name) => this;
 
     /// <inheritdoc/>
-    public override PropertyMutatorMember WithAttribute(params string[] attributes)
+    public override PropertyMutatorMember WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
         return this;

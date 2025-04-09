@@ -1,14 +1,8 @@
-using Atom.Architect.Reactive;
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.SourceGeneration.Tests;
 
-public class InterfaceBuilderTests(ILogger logger) : BenchmarkTest<InterfaceBuilderTests>(logger)
+public class InterfaceBuilderTests(ILogger logger) : BenchmarkTests<InterfaceBuilderTests>(logger)
 {
     private static string? interfaceReference;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public InterfaceBuilderTests() : this(ConsoleLogger.Unicode) { }
 
@@ -41,7 +35,7 @@ public class InterfaceBuilderTests(ILogger logger) : BenchmarkTest<InterfaceBuil
             .WithMethod("TestMethod")
             .Build(true);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(src, Is.Not.Null);
             Assert.That(src, Is.EqualTo(interfaceReference));

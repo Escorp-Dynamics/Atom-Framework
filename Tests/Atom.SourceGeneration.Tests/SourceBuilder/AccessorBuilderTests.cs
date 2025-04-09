@@ -1,14 +1,9 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.SourceGeneration.Tests;
 
-public class AccessorBuilderTests(ILogger logger) : BenchmarkTest<AccessorBuilderTests>(logger)
+public class AccessorBuilderTests(ILogger logger) : BenchmarkTests<AccessorBuilderTests>(logger)
 {
     private static string? propertyAccessorReference;
     private static string? eventAddReference;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public AccessorBuilderTests() : this(ConsoleLogger.Unicode) { }
 
@@ -55,7 +50,7 @@ public class AccessorBuilderTests(ILogger logger) : BenchmarkTest<AccessorBuilde
             .WithAttribute("Test")
             .Build(true);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(src, Is.Not.Null);
             Assert.That(src, Is.EqualTo(propertyAccessorReference));
@@ -82,7 +77,7 @@ public class AccessorBuilderTests(ILogger logger) : BenchmarkTest<AccessorBuilde
             .WithAttribute("Test")
             .Build(true);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(src, Is.Not.Null);
             Assert.That(src, Is.EqualTo(eventAddReference));

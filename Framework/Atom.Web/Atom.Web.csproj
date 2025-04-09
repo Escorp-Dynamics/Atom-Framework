@@ -8,11 +8,11 @@
 		<OptimizationPreference>speed</OptimizationPreference>
 		<AssemblyName>Escorp.Atom.Web</AssemblyName>
 
-		<EnforceCodeStyleInBuild>True</EnforceCodeStyleInBuild>
+		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 		<AnalysisLevel>latest-all</AnalysisLevel>
-		<CheckForOverflowUnderflow>True</CheckForOverflowUnderflow>
-		<TreatWarningsAsErrors>True</TreatWarningsAsErrors>
-		<CodeAnalysisTreatWarningsAsErrors>True</CodeAnalysisTreatWarningsAsErrors>
+		<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+		<CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
 		<WarningLevel>9999</WarningLevel>
 		<AnalysisMode>AllEnabledByDefault</AnalysisMode>
 
@@ -22,23 +22,31 @@
 		<JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
 
 		<IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
-		<IlcOptimizationPreference>Size</IlcOptimizationPreference>
+		<IlcOptimizationPreference>speed</IlcOptimizationPreference>
 
 		<NoWarn>CA1003;CA1708</NoWarn>
 
-		<GenerateDocumentationFile>True</GenerateDocumentationFile>
-		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.3.4</Version>
+		<Version>0.3.6</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
 		<RepositoryUrl>https://gitflic.ru/project/escorp-lab/atom</RepositoryUrl>
-		<IncludeSymbols>True</IncludeSymbols>
+		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<PackageIcon>icon.png</PackageIcon>
 		<PackageTags>atom;framework;escorp;exomode;system;threading;log;debug;extension;web</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 	</PropertyGroup>
 
 	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
@@ -46,12 +54,11 @@
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(Configuration)' == 'Release'">
-		<PackageReference Include="Escorp.Atom" Version="0.7.15" GeneratePathProperty="true"
-			PrivateAssets="all" />
+		<PackageReference Include="Escorp.Atom" Version="0.8.1" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="0.4.4" PrivateAssets="all"
+		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="0.4.6" PrivateAssets="all"
 			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
@@ -60,8 +67,24 @@
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
 
-	<PropertyGroup>
-		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
-	</PropertyGroup>
+	<Target Name="PublishPackages" AfterTargets="Pack">
+		<PropertyGroup>
+			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
+		</PropertyGroup>
+
+		<ItemGroup>
+			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" />
+			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg"
+				Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
+		</ItemGroup>
+
+		<Exec
+			Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;"
+			Condition="'%(PackageFiles.Identity)' != ''"
+			IgnoreExitCode="true">
+			<Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
+		</Exec>
+
+	</Target>
 
 </Project>

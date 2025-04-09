@@ -1,10 +1,8 @@
 using System.Diagnostics;
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
 
 namespace Atom.Threading.Tests;
 
-public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logger)
+public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(logger), IDisposable
 {
     private sealed class Worker(int id, TimeSpan duration)
     {
@@ -70,8 +68,6 @@ public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logg
     private readonly Sequencer loopWithWaitingSequencer = new(TimeSpan.FromSeconds(1), SequenceMode.LoopWithWaiting);
 
     private bool IsRemoveTest { get; set; }
-
-    public override bool IsBenchmarkDisabled => true;
 
     public SequencerTests() : this(ConsoleLogger.Unicode)
     {
@@ -308,5 +304,14 @@ public class SequencerTests(ILogger logger) : BenchmarkTest<SequencerTests>(logg
         await Task.Delay(TimeSpan.FromSeconds(10));
 
         Assert.Pass();
+    }
+
+    public void Dispose()
+    {
+        manualSequencer.Dispose();
+        loopSequencer.Dispose();
+        loopWithWaitingSequencer.Dispose();
+
+        GC.SuppressFinalize(this);
     }
 }

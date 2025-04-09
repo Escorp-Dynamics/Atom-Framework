@@ -42,7 +42,7 @@ public class PropertyAccessorMember : Entity<PropertyAccessorMember>
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params string[] usings)
+    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params IEnumerable<string> usings)
     {
         var access = AccessModifier.AsString(ParentAccessModifier);
         if (!string.IsNullOrEmpty(access)) access += ' ';
@@ -118,7 +118,7 @@ public class PropertyAccessorMember : Entity<PropertyAccessorMember>
     public PropertyAccessorMember AsReadOnly() => AsReadOnly(true);
 
     /// <inheritdoc/>
-    public override PropertyAccessorMember WithAttribute(params string[] attributes)
+    public override PropertyAccessorMember WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
         return this;

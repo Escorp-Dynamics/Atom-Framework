@@ -57,14 +57,7 @@ public interface IConsoleCommand
     /// </summary>
     /// <param name="args">Аргументы команды.</param>
     /// <returns>True, если процедура была успешна, иначе false.</returns>
-    ValueTask<bool> ExecuteAsync(IEnumerable<string> args) => ExecuteAsync(args, CancellationToken.None);
-
-    /// <summary>
-    /// Выполняет команду с заданными аргументами.
-    /// </summary>
-    /// <param name="args">Аргументы команды.</param>
-    /// <returns>True, если процедура была успешна, иначе false.</returns>
-    ValueTask<bool> ExecuteAsync(params string[] args) => ExecuteAsync(args, CancellationToken.None);
+    ValueTask<bool> ExecuteAsync(params IEnumerable<string> args) => ExecuteAsync(args, CancellationToken.None);
 
     /// <summary>
     /// Выполняет команду.
@@ -92,14 +85,7 @@ public interface IConsoleCommand
     /// </summary>
     /// <param name="args">Аргументы команды.</param>
     /// <returns>True, если процедура была успешна, иначе false.</returns>
-    ValueTask<bool> CancelAsync(IEnumerable<string> args) => CancelAsync(args, CancellationToken.None);
-
-    /// <summary>
-    /// Отменяет команду с заданными аргументами.
-    /// </summary>
-    /// <param name="args">Аргументы команды.</param>
-    /// <returns>True, если процедура была успешна, иначе false.</returns>
-    ValueTask<bool> CancelAsync(params string[] args) => CancelAsync(args, CancellationToken.None);
+    ValueTask<bool> CancelAsync(params IEnumerable<string> args) => CancelAsync(args, CancellationToken.None);
 
     /// <summary>
     /// Отменяет команду.

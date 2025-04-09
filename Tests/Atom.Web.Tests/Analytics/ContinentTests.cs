@@ -1,19 +1,14 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.Web.Analytics.Tests;
 
-public class ContinentTests(ILogger logger) : BenchmarkTest<ContinentTests>(logger)
+public class ContinentTests(ILogger logger) : BenchmarkTests<ContinentTests>(logger)
 {
-    public override bool IsBenchmarkDisabled => true;
-
     public ContinentTests() : this(ConsoleLogger.Unicode) { }
 
     [TestCase(TestName = "Тест парсинга"), Benchmark]
     public void ParseTest()
     {
         var result = Continent.TryParse("an", out var continent);
-        if (!IsTest) return;
+        if (IsBenchmarkEnabled) return;
 
         Assert.Multiple(() =>
         {
@@ -21,7 +16,7 @@ public class ContinentTests(ILogger logger) : BenchmarkTest<ContinentTests>(logg
             Assert.That(continent, Is.Not.Null);
         });
 
-        Assert.That(continent.Code, Is.EqualTo("AN"));
+        Assert.That(continent?.Code, Is.EqualTo("AN"));
     }
 
     [TestCase(TestName = "Тест сериализации"), Benchmark]
@@ -30,6 +25,6 @@ public class ContinentTests(ILogger logger) : BenchmarkTest<ContinentTests>(logg
         var continent = Continent.AN;
         var json = continent.Serialize();
 
-        if (IsTest) Assert.That(json, Is.EqualTo(/*lang=json,strict*/ "\"AN\""));
+        if (!IsBenchmarkEnabled) Assert.That(json, Is.EqualTo(/*lang=json,strict*/ "\"AN\""));
     }
 }

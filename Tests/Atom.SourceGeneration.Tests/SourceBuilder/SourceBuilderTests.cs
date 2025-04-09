@@ -1,13 +1,8 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.SourceGeneration.Tests;
 
-public class SourceBuilderTests(ILogger logger) : BenchmarkTest<SourceBuilderTests>(logger)
+public class SourceBuilderTests(ILogger logger) : BenchmarkTests<SourceBuilderTests>(logger)
 {
     private static string? sourceReference;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public SourceBuilderTests() : this(ConsoleLogger.Unicode) { }
 
@@ -41,7 +36,7 @@ public class SourceBuilderTests(ILogger logger) : BenchmarkTest<SourceBuilderTes
             )
             .Build(true);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(src, Is.Not.Null);
             Assert.That(src, Is.EqualTo(sourceReference));

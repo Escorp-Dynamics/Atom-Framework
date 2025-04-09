@@ -1,17 +1,13 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Testing;
 using Microsoft.CodeAnalysis.Testing;
 
 namespace Atom.Architect.Components.Tests;
 
-public class ComponentOwnerTypeSyntaxProviderTests(ILogger logger) : BenchmarkTest<ComponentOwnerTypeSyntaxProviderTests>(logger)
+public class ComponentOwnerTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<ComponentOwnerTypeSyntaxProviderTests>(logger)
 {
     private static string? source;
     private static string? reference;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public ComponentOwnerTypeSyntaxProviderTests() : this(ConsoleLogger.Unicode) { }
 
@@ -63,7 +59,7 @@ public class ComponentOwnerTypeSyntaxProviderTests(ILogger logger) : BenchmarkTe
         );
 
         await test.RunAsync();
-        if (IsTest) Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 
     [TestCase(TestName = "Тест генератора владельцев компонентов"), Benchmark]
@@ -84,6 +80,6 @@ public class ComponentOwnerTypeSyntaxProviderTests(ILogger logger) : BenchmarkTe
         };
 
         await test.RunAsync();
-        if (IsTest) Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 }

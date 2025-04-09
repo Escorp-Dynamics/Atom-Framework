@@ -1,5 +1,3 @@
-using Atom.Architect.Reactive;
-
 namespace Atom.Web.Browsing.BOM;
 
 /// <summary>
@@ -10,7 +8,7 @@ namespace Atom.Web.Browsing.BOM;
 /// </remarks>
 /// <param name="type">Тип сообщения.</param>
 /// <param name="data">Связанные данные.</param>
-public class ConsoleMessageEventArgs(ConsoleMessageType type, params object?[] data) : AsyncEventArgs
+public class ConsoleMessageEventArgs(ConsoleMessageType type, params IEnumerable<object?> data) : AsyncEventArgs
 {
     /// <summary>
     /// Тип сообщения.

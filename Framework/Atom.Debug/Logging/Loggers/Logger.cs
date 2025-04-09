@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Atom.Buffers;
+using Atom.Threading;
 using Microsoft.Extensions.Logging;
 
 namespace Atom.Debug.Logging;
@@ -13,6 +14,8 @@ public abstract class Logger : ILogger, IDisposable
 {
     private const string DefaultDateFormat = "dd.MM.yyyy";
     private const string DefaultTimeFormat = "HH:mm:ss.fff";
+
+    private readonly Locker locker = new();
 
     private readonly Dictionary<LogLevel, bool> logLevels = new()
     {
@@ -62,6 +65,11 @@ public abstract class Logger : ILogger, IDisposable
     /// Определяет, будет ли поддерживаться форматирование цветов и стилей.
     /// </summary>
     public virtual bool IsStylingEnabled { get; set; }
+
+    /// <summary>
+    /// Определяет, будут ли выводиться отформатированные теги цветов и стилей.
+    /// </summary>
+    public virtual bool IsStylingOutputEnabled { get; set; }
 
     /// <summary>
     /// Формат вывода даты.
@@ -117,6 +125,7 @@ public abstract class Logger : ILogger, IDisposable
             }
 
             log();
+
             trigger.Set();
         }
     }
@@ -152,14 +161,15 @@ public abstract class Logger : ILogger, IDisposable
     {
         if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
 
-        if (disposing)
-        {
-            cts.Cancel();
-            trigger.Set();
+        if (!disposing) return;
 
-            cts.Dispose();
-            trigger.Dispose();
-        }
+        cts.Cancel();
+        trigger.Set();
+
+        cts.Dispose();
+        trigger.Dispose();
+
+        locker.Dispose();
     }
 
     /// <summary>
@@ -167,7 +177,7 @@ public abstract class Logger : ILogger, IDisposable
     /// </summary>
     /// <param name="logLevels">Уровни логирования.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Logger WithLogLevels([NotNull] params LogLevel[] logLevels)
+    public virtual Logger WithLogLevels([NotNull] params IEnumerable<LogLevel> logLevels)
     {
         foreach (var logLevel in logLevels) this.logLevels[logLevel] = true;
         return this;
@@ -178,7 +188,7 @@ public abstract class Logger : ILogger, IDisposable
     /// </summary>
     /// <param name="logLevels">Уровни логирования.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Logger WithoutLogLevels([NotNull] params LogLevel[] logLevels)
+    public virtual Logger WithoutLogLevels([NotNull] params IEnumerable<LogLevel> logLevels)
     {
         foreach (var logLevel in logLevels) this.logLevels[logLevel] = default;
         return this;
@@ -189,7 +199,7 @@ public abstract class Logger : ILogger, IDisposable
     /// </summary>
     /// <param name="display">Выводить ли название категории в журнал.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Logger WithCategoryName(bool display)
+    public virtual Logger WithCategoryName(bool display)
     {
         IsCategoryNameEnabled = display;
         return this;
@@ -213,7 +223,7 @@ public abstract class Logger : ILogger, IDisposable
     /// <param name="display">Выводить ли дату события в журнал.</param>
     /// <param name="format">Формат вывода даты.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Logger WithDate(bool display, string format)
+    public virtual Logger WithDate(bool display, string format)
     {
         IsDateEnabled = display;
         DateFormat = format;
@@ -252,7 +262,7 @@ public abstract class Logger : ILogger, IDisposable
     /// <param name="display">Выводить ли время события в журнал.</param>
     /// <param name="format">Формат вывода времени.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Logger WithTime(bool display, string format)
+    public virtual Logger WithTime(bool display, string format)
     {
         IsTimeEnabled = display;
         TimeFormat = format;
@@ -290,7 +300,7 @@ public abstract class Logger : ILogger, IDisposable
     /// </summary>
     /// <param name="display">Выводить ли идентификатор события в журнал.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Logger WithEventId(bool display)
+    public virtual Logger WithEventId(bool display)
     {
         IsEventIdEnabled = display;
         return this;
@@ -313,7 +323,7 @@ public abstract class Logger : ILogger, IDisposable
     /// </summary>
     /// <param name="isEnabled">Выводить ли идентификатор события в журнал.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Logger WithStyling(bool isEnabled)
+    public virtual Logger WithStyling(bool isEnabled)
     {
         IsStylingEnabled = isEnabled;
         return this;
@@ -384,12 +394,15 @@ public abstract class Logger : ILogger, IDisposable
 
         queue.Enqueue(() =>
         {
+            locker.Wait();
+
             try
             {
                 OnLogged(e);
             }
             finally
             {
+                locker.Release();
                 MutableEventArgs.Return(e);
             }
         });

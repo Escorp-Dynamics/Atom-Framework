@@ -1,13 +1,8 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.SourceGeneration.Tests;
 
-public class EventBuilderTests(ILogger logger) : BenchmarkTest<EventBuilderTests>(logger)
+public class EventBuilderTests(ILogger logger) : BenchmarkTests<EventBuilderTests>(logger)
 {
     private static string? eventReference;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public EventBuilderTests() : this(ConsoleLogger.Unicode) { }
 
@@ -96,7 +91,7 @@ public class EventBuilderTests(ILogger logger) : BenchmarkTest<EventBuilderTests
 
         src += Environment.NewLine + EventMember.Create<Type?>("SimpleEvent").Build(true);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(src, Is.Not.Null);
             Assert.That(src, Is.EqualTo(eventReference));

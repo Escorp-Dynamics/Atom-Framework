@@ -21,7 +21,7 @@ public class TrustedTypePolicy : ITrustedTypePolicy
 
     /// <inheritdoc/>
     [ScriptMember]
-    public ITrustedHTML CreateHTML(string input, params object?[] arguments)
+    public ITrustedHTML CreateHTML(string input, params IEnumerable<object?> arguments)
     {
         if (options.CreateHTML is not null)
         {
@@ -34,7 +34,7 @@ public class TrustedTypePolicy : ITrustedTypePolicy
 
     /// <inheritdoc/>
     [ScriptMember]
-    public ITrustedScript CreateScript(string input, params object?[] arguments)
+    public ITrustedScript CreateScript(string input, params IEnumerable<object?> arguments)
     {
         if (options.CreateScript is not null)
         {
@@ -47,7 +47,7 @@ public class TrustedTypePolicy : ITrustedTypePolicy
 
     /// <inheritdoc/>
     [ScriptMember]
-    public ITrustedScriptURL CreateScriptURL(string input, params object?[] arguments)
+    public ITrustedScriptURL CreateScriptURL(string input, params IEnumerable<object?> arguments)
     {
         if (options.CreateScriptURL is not null)
         {

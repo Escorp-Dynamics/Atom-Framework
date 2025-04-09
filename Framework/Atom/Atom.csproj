@@ -23,14 +23,13 @@
 		<JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
 
 		<IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
-		<IlcOptimizationPreference>Size</IlcOptimizationPreference>
+		<IlcOptimizationPreference>speed</IlcOptimizationPreference>
 
 		<NoWarn>CA1003;CA1031;CA1040;CA1711;CA1716</NoWarn>
 
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
-		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.7.25</Version>
+		<Version>0.8.4</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -42,9 +41,37 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
+	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<None Update="icon.png" PackagePath="\" Pack="true" />
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
+
+	<Target Name="PublishPackages" AfterTargets="Pack">
+		<PropertyGroup>
+			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
+		</PropertyGroup>
+
+		<ItemGroup>
+			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" />
+			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg"
+				Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
+		</ItemGroup>
+
+		<Exec
+			Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;"
+			Condition="'%(PackageFiles.Identity)' != ''"
+			IgnoreExitCode="true">
+			<Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
+		</Exec>
+
+	</Target>
 
 </Project>

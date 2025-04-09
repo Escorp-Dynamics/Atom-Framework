@@ -1,17 +1,13 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Testing;
 using Microsoft.CodeAnalysis.Testing;
 
 namespace Atom.Buffers.Tests;
 
-public class PooledTypeSyntaxProviderTests(ILogger logger) : BenchmarkTest<PooledTypeSyntaxProviderTests>(logger)
+public class PooledTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<PooledTypeSyntaxProviderTests>(logger)
 {
     private static string? source;
     private static string? reference;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public PooledTypeSyntaxProviderTests() : this(ConsoleLogger.Unicode) { }
 
@@ -58,7 +54,7 @@ public class PooledTypeSyntaxProviderTests(ILogger logger) : BenchmarkTest<Poole
         );
 
         await test.RunAsync();
-        if (IsTest) Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 
     [TestCase(TestName = "Тест генератора буферизации"), Benchmark]
@@ -79,6 +75,6 @@ public class PooledTypeSyntaxProviderTests(ILogger logger) : BenchmarkTest<Poole
         };
 
         await test.RunAsync();
-        if (IsTest) Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 }

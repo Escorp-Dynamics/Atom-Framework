@@ -29,5 +29,5 @@ public class FileLoggerProvider(string dir) : LoggerProvider<FileLogger>
     /// </summary>
     /// <param name="categoryName">Название категории.</param>
     /// <param name="path">Путь к файлу журнала.</param>
-    public ILogger CreateLogger(string categoryName, string path) => Loggers.GetOrAdd(categoryName, cn => new FileLogger(cn) { Path = path });
+    public ILogger CreateLogger(string categoryName, string path) => Loggers.GetOrAdd(categoryName, cn => new FileLogger(cn, path));
 }

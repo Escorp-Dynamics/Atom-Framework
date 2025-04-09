@@ -115,7 +115,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, [NotNull] params string[] usings)
+    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, [NotNull] params IEnumerable<string> usings)
     {
         AppendAccessModifiers(sb, spaces);
         sb.Append($"event {Type.GetTypeName(usings)} {Name}");
@@ -190,7 +190,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     }
 
     /// <inheritdoc/>
-    public EventMember WithAdder(string body, bool isReadOnly, params string[] attributes) => WithAdder(EventAddMember.Create()
+    public EventMember WithAdder(string body, bool isReadOnly, params IEnumerable<string> attributes) => WithAdder(EventAddMember.Create()
         .WithAttribute(attributes)
         .WithCode(body)
         .AsReadOnly(isReadOnly)
@@ -198,13 +198,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     );
 
     /// <inheritdoc/>
-    public EventMember WithAdder(string body, params string[] attributes) => WithAdder(body, default, attributes);
-
-    /// <inheritdoc/>
-    public EventMember WithAdder(string body) => WithAdder(body, false);
-
-    /// <inheritdoc/>
-    public EventMember WithAdder(params string[] attributes) => WithAdder(string.Empty, attributes);
+    public EventMember WithAdder(string body, params IEnumerable<string> attributes) => WithAdder(body, default, attributes);
 
     /// <inheritdoc/>
     public EventMember WithAdder() => WithAdder(string.Empty);
@@ -217,18 +211,12 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     }
 
     /// <inheritdoc/>
-    public EventMember WithRemover(string body, string comment, params string[] attributes) => WithRemover(EventRemoveMember.Create()
+    public EventMember WithRemover(string body, string comment, params IEnumerable<string> attributes) => WithRemover(EventRemoveMember.Create()
         .WithAttribute(attributes)
         .WithCode(body)
         .WithComment(comment)
         .WithAccessModifier(AccessModifier)
     );
-
-    /// <inheritdoc/>
-    public EventMember WithRemover(string body, params string[] attributes) => WithRemover(body, string.Empty, attributes);
-
-    /// <inheritdoc/>
-    public EventMember WithRemover(string body, string comment) => WithRemover(body, comment, []);
 
     /// <inheritdoc/>
     public EventMember WithRemover(string body) => WithRemover(body, string.Empty);
@@ -258,7 +246,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     }
 
     /// <inheritdoc/>
-    public override EventMember WithAttribute(params string[] attributes)
+    public override EventMember WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
         return this;

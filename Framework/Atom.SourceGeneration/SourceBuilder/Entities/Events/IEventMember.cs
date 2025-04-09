@@ -58,7 +58,7 @@ public interface IEventMember<out T> : IMember<T> where T : IEntity
     /// <param name="body">Тело подписчика.</param>
     /// <param name="isReadOnly">Указывает, являет ли подписчик только для чтения.</param>
     /// <param name="attributes">Атрибуты подписчика.</param>
-    T WithAdder(string body, bool isReadOnly, params string[] attributes) => WithAdder(EventAddMember.Create()
+    T WithAdder(string body, bool isReadOnly, params IEnumerable<string> attributes) => WithAdder(EventAddMember.Create()
         .WithAttribute(attributes)
         .WithCode(body)
         .AsReadOnly(isReadOnly)
@@ -69,19 +69,7 @@ public interface IEventMember<out T> : IMember<T> where T : IEntity
     /// </summary>
     /// <param name="body">Тело подписчика.</param>
     /// <param name="attributes">Атрибуты подписчика.</param>
-    T WithAdder(string body, params string[] attributes) => WithAdder(body, default, attributes);
-
-    /// <summary>
-    /// Добавляет подписчик.
-    /// </summary>
-    /// <param name="body">Тело подписчика.</param>
-    T WithAdder(string body) => WithAdder(body, false);
-
-    /// <summary>
-    /// Добавляет подписчик.
-    /// </summary>
-    /// <param name="attributes">Атрибуты подписчика.</param>
-    T WithAdder(params string[] attributes) => WithAdder(string.Empty, attributes);
+    T WithAdder(string body, params IEnumerable<string> attributes) => WithAdder(body, default, attributes);
 
     /// <summary>
     /// Добавляет подписчик.
@@ -105,20 +93,6 @@ public interface IEventMember<out T> : IMember<T> where T : IEntity
         .WithCode(body)
         .WithComment(comment)
     );
-
-    /// <summary>
-    /// Добавляет отписчик.
-    /// </summary>
-    /// <param name="body">Тело отписчика.</param>
-    /// <param name="attributes">Атрибуты отписчика.</param>
-    T WithRemover(string body, params string[] attributes) => WithRemover(body, string.Empty, attributes);
-
-    /// <summary>
-    /// Добавляет отписчик.
-    /// </summary>
-    /// <param name="body">Тело отписчика.</param>
-    /// <param name="comment">Комментарий.</param>
-    T WithRemover(string body, string comment) => WithRemover(body, comment, []);
 
     /// <summary>
     /// Добавляет отписчик.

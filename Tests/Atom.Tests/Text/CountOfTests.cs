@@ -1,15 +1,10 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.Text.Tests;
 
-public class CountOfTests(ILogger logger) : BenchmarkTest<CountOfTests>(logger)
+public class CountOfTests(ILogger logger) : BenchmarkTests<CountOfTests>(logger)
 {
     private const string SearchPattern = "Поиск";
     private static string? shortText;
     private static string? longText;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public CountOfTests() : this(ConsoleLogger.Unicode) { }
 
@@ -27,23 +22,23 @@ public class CountOfTests(ILogger logger) : BenchmarkTest<CountOfTests>(logger)
 
     private void ShortTextTest(SubstringSearchAlgorithm algorithm)
     {
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
             Assert.That(shortText, Is.Not.Null);
         else
             ArgumentException.ThrowIfNullOrEmpty(shortText);
 
         var count = shortText!.CountOf(SearchPattern, algorithm);
-        if (IsTest) Assert.That(count, Is.EqualTo(1));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(1));
 
         count = shortText!.CountOf(SearchPattern, StringComparison.InvariantCultureIgnoreCase, algorithm);
-        if (IsTest) Assert.That(count, Is.EqualTo(7));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(7));
     }
 
     private void ShortTextTest() => ShortTextTest(default);
 
     private void ShortTextDotnetTest()
     {
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
             Assert.That(shortText, Is.Not.Null);
         else
             ArgumentException.ThrowIfNullOrEmpty(shortText);
@@ -57,7 +52,7 @@ public class CountOfTests(ILogger logger) : BenchmarkTest<CountOfTests>(logger)
             startIndex += SearchPattern.Length;
         }
 
-        if (IsTest) Assert.That(count, Is.EqualTo(1));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(1));
 
         count = 0;
         startIndex = 0;
@@ -68,12 +63,12 @@ public class CountOfTests(ILogger logger) : BenchmarkTest<CountOfTests>(logger)
             startIndex += SearchPattern.Length;
         }
 
-        if (IsTest) Assert.That(count, Is.EqualTo(7));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(7));
     }
 
     private void ShortTextDotnetLinqTest()
     {
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
             Assert.That(shortText, Is.Not.Null);
         else
             ArgumentException.ThrowIfNullOrEmpty(shortText);
@@ -81,33 +76,33 @@ public class CountOfTests(ILogger logger) : BenchmarkTest<CountOfTests>(logger)
         var count = shortText!.Select((c, i) => shortText![i..])
             .Count(sub => sub.StartsWith(SearchPattern));
 
-        if (IsTest) Assert.That(count, Is.EqualTo(1));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(1));
 
         count = shortText!.Select((c, i) => shortText![i..])
             .Count(sub => sub.StartsWith(SearchPattern, StringComparison.InvariantCultureIgnoreCase));
 
-        if (IsTest) Assert.That(count, Is.EqualTo(7));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(7));
     }
 
     private void LongTextTest(SubstringSearchAlgorithm algorithm)
     {
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
             Assert.That(longText, Is.Not.Null);
         else
             ArgumentException.ThrowIfNullOrEmpty(longText);
 
         var count = longText!.CountOf(SearchPattern, algorithm);
-        if (IsTest) Assert.That(count, Is.EqualTo(10));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(10));
 
         count = longText!.CountOf(SearchPattern, StringComparison.InvariantCultureIgnoreCase, algorithm);
-        if (IsTest) Assert.That(count, Is.EqualTo(120));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(120));
     }
 
     private void LongTextTest() => LongTextTest(default);
 
     private void LongTextDotnetTest()
     {
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
             Assert.That(longText, Is.Not.Null);
         else
             ArgumentException.ThrowIfNullOrEmpty(longText);
@@ -121,7 +116,7 @@ public class CountOfTests(ILogger logger) : BenchmarkTest<CountOfTests>(logger)
             startIndex += SearchPattern.Length;
         }
 
-        if (IsTest) Assert.That(count, Is.EqualTo(10));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(10));
 
         count = 0;
         startIndex = 0;
@@ -132,12 +127,12 @@ public class CountOfTests(ILogger logger) : BenchmarkTest<CountOfTests>(logger)
             startIndex += SearchPattern.Length;
         }
 
-        if (IsTest) Assert.That(count, Is.EqualTo(120));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(120));
     }
 
     private void LongTextDotnetLinqTest()
     {
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
             Assert.That(longText, Is.Not.Null);
         else
             ArgumentException.ThrowIfNullOrEmpty(longText);
@@ -145,12 +140,12 @@ public class CountOfTests(ILogger logger) : BenchmarkTest<CountOfTests>(logger)
         var count = longText!.Select((c, i) => longText![i..])
             .Count(sub => sub.StartsWith(SearchPattern));
 
-        if (IsTest) Assert.That(count, Is.EqualTo(10));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(10));
 
         count = longText!.Select((c, i) => longText![i..])
             .Count(sub => sub.StartsWith(SearchPattern, StringComparison.InvariantCultureIgnoreCase));
 
-        if (IsTest) Assert.That(count, Is.EqualTo(120));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(120));
     }
 
     [TestCase(TestName = "Тест подсчёта вхождений подстроки (.NET, 300 символов)"), Benchmark(Description = ".NET 300", Baseline = true)]

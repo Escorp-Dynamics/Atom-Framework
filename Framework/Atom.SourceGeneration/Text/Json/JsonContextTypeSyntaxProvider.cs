@@ -231,7 +231,7 @@ public class JsonContextTypeSyntaxProvider : TypeSyntaxProvider
         if (!string.IsNullOrEmpty(src)) context.AddSource($"{entityName}.Json.g.cs", SourceText.From(src, Encoding.UTF8));
     }
 
-    private static MethodMember CreateMethodWithReturn(string name, string body, params MethodArgumentMember[] args)
+    private static MethodMember CreateMethodWithReturn(string name, string body, params IEnumerable<MethodArgumentMember> args)
     {
         return MethodMember.Create(name, AccessModifier.Public)
             .WithComment(InheritdocComment)
@@ -249,7 +249,7 @@ public class JsonContextTypeSyntaxProvider : TypeSyntaxProvider
                 }}");
     }
 
-    private static MethodMember CreateMethod(string name, string body, params MethodArgumentMember[] args)
+    private static MethodMember CreateMethod(string name, string body, params IEnumerable<MethodArgumentMember> args)
     {
         return MethodMember.Create(name, AccessModifier.Public)
             .WithComment(InheritdocComment)

@@ -1,20 +1,16 @@
 using System.IO.Pipelines;
 using System.Text.Json.Serialization;
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Testing;
 using Microsoft.CodeAnalysis.Testing;
 
 namespace Atom.Text.Json.Tests;
 
-public class JsonContextTypeSyntaxProviderTests(ILogger logger) : BenchmarkTest<JsonContextTypeSyntaxProviderTests>(logger)
+public class JsonContextTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<JsonContextTypeSyntaxProviderTests>(logger)
 {
     private static string? source;
     private static string? reference;
     private static string? derivedReference;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public JsonContextTypeSyntaxProviderTests() : this(ConsoleLogger.Unicode) { }
 
@@ -69,7 +65,7 @@ public class JsonContextTypeSyntaxProviderTests(ILogger logger) : BenchmarkTest<
         );
 
         await test.RunAsync();
-        if (IsTest) Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 
     [TestCase(TestName = "Тест генератора контекстов сериализации"), Benchmark]
@@ -95,6 +91,6 @@ public class JsonContextTypeSyntaxProviderTests(ILogger logger) : BenchmarkTest<
         };
 
         await test.RunAsync();
-        if (IsTest) Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 }

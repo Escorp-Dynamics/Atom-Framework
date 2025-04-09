@@ -18,7 +18,7 @@ public class EnumMember : Entity<EnumMember>
     public override bool IsValid => !string.IsNullOrEmpty(Name);
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params string[] usings)
+    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params IEnumerable<string> usings)
     {
         if (Value < 0)
             sb.AppendLine($"{spaces}{Name},");
@@ -34,7 +34,7 @@ public class EnumMember : Entity<EnumMember>
     }
 
     /// <inheritdoc/>
-    public override EnumMember WithAttribute(params string[] attributes)
+    public override EnumMember WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
         return this;

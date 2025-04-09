@@ -1,5 +1,6 @@
 ﻿using Atom.Architect;
 using Atom.Architect.Components;
+using Atom.Architect.Factories;
 
 namespace Atom.Web.Services;
 
@@ -8,7 +9,7 @@ namespace Atom.Web.Services;
 /// </summary>
 /// <typeparam name="TService">Тип базового интерфейса связанного сервиса.</typeparam>
 /// <typeparam name="TFactory">Тип реализуемой фабрики.</typeparam>
-public interface IWebServiceFactory<TService, out TFactory> : IModular<TService, TFactory>, IFactory, IDisposable
+public interface IWebServiceFactory<TService, out TFactory> : IComponentOwner<TService, TFactory>, IFactory, IDisposable
     where TService : IWebService
     where TFactory : IFactory
 {

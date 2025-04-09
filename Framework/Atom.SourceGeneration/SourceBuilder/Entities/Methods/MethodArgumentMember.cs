@@ -61,7 +61,7 @@ public class MethodArgumentMember : Entity<MethodArgumentMember>
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, [NotNull] params string[] usings)
+    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, [NotNull] params IEnumerable<string> usings)
     {
         if (IsIn)
             sb.Append("in ");
@@ -190,7 +190,7 @@ public class MethodArgumentMember : Entity<MethodArgumentMember>
     public MethodArgumentMember WithInitialValue<TValue>(TValue value) => WithInitialValue(value is string ? $"\"{value}\"" : value?.ToString());
 
     /// <inheritdoc/>
-    public override MethodArgumentMember WithAttribute(params string[] attributes)
+    public override MethodArgumentMember WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
         return this;

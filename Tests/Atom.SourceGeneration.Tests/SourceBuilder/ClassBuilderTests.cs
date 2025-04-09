@@ -1,13 +1,8 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.SourceGeneration.Tests;
 
-public class ClassBuilderTests(ILogger logger) : BenchmarkTest<ClassBuilderTests>(logger)
+public class ClassBuilderTests(ILogger logger) : BenchmarkTests<ClassBuilderTests>(logger)
 {
     private static string? classReference;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public ClassBuilderTests() : this(ConsoleLogger.Unicode) { }
 
@@ -42,7 +37,7 @@ public class ClassBuilderTests(ILogger logger) : BenchmarkTest<ClassBuilderTests
             .WithMethod("TestMethod")
             .Build(true);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(src, Is.Not.Null);
             Assert.That(src, Is.EqualTo(classReference));

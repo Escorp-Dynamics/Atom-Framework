@@ -38,7 +38,7 @@ public class DOMTokenList : IDOMTokenList
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Add([NotNull] params string[] tokens)
+    public void Add([NotNull] params IEnumerable<string> tokens)
     {
         foreach (var token in tokens)
         {
@@ -49,7 +49,7 @@ public class DOMTokenList : IDOMTokenList
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Remove([NotNull] params string[] tokens)
+    public void Remove([NotNull] params IEnumerable<string> tokens)
     {
         foreach (var token in tokens) this.tokens.Remove(token);
     }

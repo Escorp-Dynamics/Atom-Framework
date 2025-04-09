@@ -1,13 +1,9 @@
 using Atom.Media.Filters.Video;
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
 
 namespace Atom.Media.Video.Tests;
 
-public class VirtualCameraTests(ILogger logger) : BenchmarkTest<VirtualCameraTests>(logger)
+public class VirtualCameraTests(ILogger logger) : BenchmarkTests<VirtualCameraTests>(logger)
 {
-    public override bool IsBenchmarkDisabled => true;
-
     public VirtualCameraTests() : this(ConsoleLogger.Unicode) { }
 
     public override void OneTimeSetUp()
@@ -35,7 +31,7 @@ public class VirtualCameraTests(ILogger logger) : BenchmarkTest<VirtualCameraTes
         await camera.WaitForCaptureAsync(Path.GetFullPath("assets/test2.webm"));
         await camera.WaitForCaptureAsync(Path.GetFullPath("assets/test.mov"));
 
-        Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 
     [TestCase(TestName = "Тест зацикленного захвата виртуальной камеры (локальный)"), Benchmark]
@@ -54,14 +50,14 @@ public class VirtualCameraTests(ILogger logger) : BenchmarkTest<VirtualCameraTes
 
         await camera.StartCaptureAsync(Path.GetFullPath($"/home/exomode/1.mp4"), true);
         await Task.Delay(TimeSpan.FromSeconds(3));
-        
+
         camera.Filters = [
             new ZoomPanFilter(1f, 1.65f, TimeSpan.FromSeconds(1)),
             //new CropFilter(),
         ];
 
         await Task.Delay(TimeSpan.FromSeconds(3));
-        
+
         /*camera.Filters = [
             new ZoomPanFilter(1.65f, 2.45f, TimeSpan.FromSeconds(1)),
             //new CropFilter(),
@@ -70,7 +66,7 @@ public class VirtualCameraTests(ILogger logger) : BenchmarkTest<VirtualCameraTes
         await Task.Delay(TimeSpan.FromSeconds(5));
         await camera.StopCaptureAsync();
 
-        Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 
     [TestCase(TestName = "Тест захвата виртуальной камеры (удалённый)"), Benchmark]
@@ -92,7 +88,7 @@ public class VirtualCameraTests(ILogger logger) : BenchmarkTest<VirtualCameraTes
 
         await camera.StopCaptureAsync();
 
-        Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 
     [TestCase(TestName = "Тест захвата c нескольких виртуальных камер"), Benchmark]
@@ -105,12 +101,12 @@ public class VirtualCameraTests(ILogger logger) : BenchmarkTest<VirtualCameraTes
         await camera2.StartCaptureAsync(Path.GetFullPath($"/home/exomode/1.mp4"), true);
 
         await Task.Delay(TimeSpan.FromMinutes(1));
-        Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 
     private static void SetUp()
     {
-        //Distribution.OS.Terminal.RootPassword = "";
+        Distribution.OS.Terminal.RootPassword = Environment.GetEnvironmentVariable("ROOT_PASSWORD");
         string[] packages = ["ffmpeg", "v4l2loopback-dkms", "v4l-utils", "v4l2loopback-utils"];
 
         foreach (var package in packages)

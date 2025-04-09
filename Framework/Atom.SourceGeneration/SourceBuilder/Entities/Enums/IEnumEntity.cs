@@ -55,7 +55,7 @@ public interface IEnumEntity<out T> : IEntity<T> where T : IEntity
     /// Добавляет значения перечисления.
     /// </summary>
     /// <param name="values">Значения.</param>
-    T WithValue(params EnumMember[] values);
+    T WithValue(params IEnumerable<EnumMember> values);
 
     /// <summary>
     /// Добавляет значение перечисления.
@@ -64,7 +64,7 @@ public interface IEnumEntity<out T> : IEntity<T> where T : IEntity
     /// <param name="value">Значение.</param>
     /// <param name="comment">Комментарий.</param>
     /// <param name="attributes">Атрибуты значения.</param>
-    T WithValue(string name, long value, string comment, params string[] attributes) => WithValue(EnumMember.Create()
+    T WithValue(string name, long value, string comment, params IEnumerable<string> attributes) => WithValue(EnumMember.Create()
         .WithName(name)
         .WithValue(value)
         .WithComment(comment)
@@ -90,5 +90,5 @@ public interface IEnumEntity<out T> : IEntity<T> where T : IEntity
     /// <param name="name">Имя значения.</param>
     /// <param name="comment">Комментарий.</param>
     /// <param name="attributes">Атрибуты значения.</param>
-    T WithValue(string name, string comment, params string[] attributes) => WithValue(name, -1, comment, attributes);
+    T WithValue(string name, string comment, params IEnumerable<string> attributes) => WithValue(name, -1, comment, attributes);
 }

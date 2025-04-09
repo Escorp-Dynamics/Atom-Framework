@@ -1,14 +1,9 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.SourceGeneration.Tests;
 
-public class FieldBuilderTests(ILogger logger) : BenchmarkTest<FieldBuilderTests>(logger)
+public class FieldBuilderTests(ILogger logger) : BenchmarkTests<FieldBuilderTests>(logger)
 {
     private static string? fieldReference;
     private static string? constReference;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public FieldBuilderTests() : this(ConsoleLogger.Unicode) { }
 
@@ -49,7 +44,7 @@ public class FieldBuilderTests(ILogger logger) : BenchmarkTest<FieldBuilderTests
             .WithValue(5)
             .Build(true);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(src, Is.Not.Null);
             Assert.That(src, Is.EqualTo(fieldReference));
@@ -68,7 +63,7 @@ public class FieldBuilderTests(ILogger logger) : BenchmarkTest<FieldBuilderTests
             .WithValue(5)
             .Build(true);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(src, Is.Not.Null);
             Assert.That(src, Is.EqualTo(constReference));

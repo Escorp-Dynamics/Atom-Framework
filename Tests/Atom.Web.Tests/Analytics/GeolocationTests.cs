@@ -1,12 +1,7 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.Web.Analytics.Tests;
 
-public class GeolocationTests(ILogger logger) : BenchmarkTest<GeolocationTests>(logger)
+public class GeolocationTests(ILogger logger) : BenchmarkTests<GeolocationTests>(logger)
 {
-    public override bool IsBenchmarkDisabled => true;
-
     public GeolocationTests() : this(ConsoleLogger.Unicode) { }
 
     [TestCase(TestName = "Тест сериализации"), Benchmark]
@@ -19,7 +14,7 @@ public class GeolocationTests(ILogger logger) : BenchmarkTest<GeolocationTests>(
 
         var json = geolocation.Serialize();
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(json, Is.Not.Null);
             Assert.That(json, Is.EqualTo(/*lang=json,strict*/ "{\"latitude\":65.86785675,\"longitude\":146.76576576}"));
@@ -28,14 +23,14 @@ public class GeolocationTests(ILogger logger) : BenchmarkTest<GeolocationTests>(
         if (string.IsNullOrEmpty(json)) return;
         var geolocation2 = Geolocation.Deserialize(json);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(geolocation2, Is.Not.Null);
 
             using (Assert.EnterMultipleScope())
             {
-                Assert.That(geolocation2.Latitude, Is.EqualTo(geolocation.Latitude));
-                Assert.That(geolocation2.Longitude, Is.EqualTo(geolocation.Longitude));
+                Assert.That(geolocation2?.Latitude, Is.EqualTo(geolocation.Latitude));
+                Assert.That(geolocation2?.Longitude, Is.EqualTo(geolocation.Longitude));
             }
         }
 
@@ -46,7 +41,7 @@ public class GeolocationTests(ILogger logger) : BenchmarkTest<GeolocationTests>(
 
         json = geolocation.Serialize();
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(json, Is.Not.Null);
             Assert.That(json, Is.EqualTo(/*lang=json,strict*/ "{\"continent\":\"AF\",\"country\":\"NGA\",\"latitude\":65.86785675,\"longitude\":146.76576576}"));
@@ -55,16 +50,16 @@ public class GeolocationTests(ILogger logger) : BenchmarkTest<GeolocationTests>(
         if (string.IsNullOrEmpty(json)) return;
         geolocation2 = Geolocation.Deserialize(json);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(geolocation2, Is.Not.Null);
 
             using (Assert.EnterMultipleScope())
             {
-                Assert.That(geolocation2.Continent, Is.EqualTo(geolocation.Continent));
-                Assert.That(geolocation2.Country, Is.EqualTo(geolocation.Country));
-                Assert.That(geolocation2.Latitude, Is.EqualTo(geolocation.Latitude));
-                Assert.That(geolocation2.Longitude, Is.EqualTo(geolocation.Longitude));
+                Assert.That(geolocation2?.Continent, Is.EqualTo(geolocation.Continent));
+                Assert.That(geolocation2?.Country, Is.EqualTo(geolocation.Country));
+                Assert.That(geolocation2?.Latitude, Is.EqualTo(geolocation.Latitude));
+                Assert.That(geolocation2?.Longitude, Is.EqualTo(geolocation.Longitude));
             }
         }
 

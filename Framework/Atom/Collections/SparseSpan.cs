@@ -147,7 +147,7 @@ public ref struct SparseSpan<T>(Span<T> array)
     /// </summary>
     /// <param name="values">Добавляемые значения.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public unsafe void AddRange([NotNull] params T[] values)
+    public unsafe void AddRange([NotNull] params IEnumerable<T> values)
     {
         var currentIndexes = Indexes;
 

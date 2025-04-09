@@ -38,13 +38,13 @@ public readonly ref struct DOMParser(Uri url, ReadOnlySpan<char> html)
     /// </summary>
     /// <param name="url">Ссылка страницы.</param>
     /// <param name="html">Исходный HTML.</param>
-    public DOMParser(Uri url, string html) : this(url, html.ToArray()) { }
+    public DOMParser(Uri url, string html) : this(url, html.AsSpan()) { }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="DOMParser"/>.
     /// </summary>
     /// <param name="html">Исходный HTML.</param>
-    public DOMParser(string html) : this(html.ToArray()) { }
+    public DOMParser(string html) : this(html.AsSpan()) { }
 
     /// <summary>
     /// Парсит HTML в DOM.
@@ -141,11 +141,11 @@ public readonly ref struct DOMParser(Uri url, ReadOnlySpan<char> html)
     /// </summary>
     /// <param name="url">Ссылка страницы.</param>
     /// <param name="html">Исходный HTML.</param>
-    public static IDocument Parse(Uri url, string html) => Parse(url, html.ToArray());
+    public static IDocument Parse(Uri url, string html) => Parse(url, html.AsSpan());
 
     /// <summary>
     /// Парсит HTML в DOM.
     /// </summary>
     /// <param name="html">Исходный HTML.</param>
-    public static IDocument Parse(string html) => Parse(html.ToArray());
+    public static IDocument Parse(string html) => Parse(html.AsSpan());
 }

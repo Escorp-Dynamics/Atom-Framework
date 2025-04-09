@@ -1,6 +1,3 @@
-#pragma warning disable CA1848
-
-using BenchmarkDotNet.Attributes;
 using Microsoft.Extensions.Logging;
 using NLog.Extensions.Logging;
 using Serilog;
@@ -9,7 +6,7 @@ using ILogger = Microsoft.Extensions.Logging.ILogger;
 
 namespace Atom.Debug.Logging.Tests;
 
-public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest<LoggerTests>(logger)
+public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTests<LoggerTests>(logger)
 {
     private static StringWriter? consoleOutput;
     private static TextWriter? originalConsoleOutput;
@@ -27,8 +24,6 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
     private static ILoggerFactory? serilogFactory;
     private static ILogger? serilogConsoleLogger;
 
-    public override bool IsBenchmarkDisabled => true;
-
     public LoggerTests() : this(BenchmarkDotNet.Loggers.ConsoleLogger.Unicode) { }
 
     public override void OneTimeSetUp()
@@ -43,16 +38,16 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
         base.GlobalSetUp();
     }
 
-    public override void OneTimeDispose()
+    public override void OneTimeTearDown()
     {
         Dispose();
-        base.OneTimeDispose();
+        base.OneTimeTearDown();
     }
 
-    public override void GlobalDispose()
+    public override void GlobalTearDown()
     {
         Dispose();
-        base.GlobalDispose();
+        base.GlobalTearDown();
     }
 
     [TestCase(TestName = "Консольный тест логирования"), Benchmark]
@@ -60,7 +55,7 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
     {
         await Test(consoleLogger);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             var sb = consoleOutput!.GetStringBuilder();
             Assert.That(sb.Length, Is.GreaterThan(0));
@@ -71,7 +66,7 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
     public async Task FileTest()
     {
         await Test(fileLogger);
-        if (IsTest) Assert.That(File.Exists(((FileLogger)fileLogger!).Path), Is.True);
+        if (!IsBenchmarkEnabled) Assert.That(File.Exists(((FileLogger)fileLogger!).Path), Is.True);
     }
 
     [TestCase(TestName = "Полный тест логирования")]
@@ -79,7 +74,7 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
     {
         await Test(combinedLogger);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.Multiple(() =>
             {
@@ -97,7 +92,7 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
     {
         await Test(microsoftConsoleLogger);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             var sb = consoleOutput!.GetStringBuilder();
             Assert.That(sb.Length, Is.GreaterThan(0));
@@ -109,7 +104,7 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
     {
         await Test(nLogConsoleLogger);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             var sb = consoleOutput!.GetStringBuilder();
             Assert.That(sb.Length, Is.GreaterThan(0));
@@ -121,89 +116,79 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
     {
         await Test(serilogConsoleLogger);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             var sb = consoleOutput!.GetStringBuilder();
             Assert.That(sb.Length, Is.GreaterThan(0));
         }
     }
 
-    private static async Task Test(ILogger? log)
+    private static async Task Test(ILogger? logger)
     {
-        if (log is null) return;
+        if (logger is null) return;
 
-        log.LogInformation("Test Information");
+        logger.TestInformation();
 
-        using var glob = log.BeginScope("[GLOBAL]");
-        log.LogInformation("Test Information 2");
+        using var glob = logger.BeginScope("[GLOBAL]");
+        logger.TestInformation2();
 
         await Task.Run(async () =>
         {
-            using var local = log.BeginScope("[LOCAL]");
+            using var local = logger.BeginScope("[LOCAL]");
 
-            using (var scope = log.BeginScope("ID 1"))
+            using (var scope = logger.BeginScope("ID 1")) logger.TestInformationWithScope();
+
+            using (var scope = logger.BeginScope("ID 2"))
             {
-                log.LogInformation("Test Information with scope");
-            }
+                logger.StartingTransactionProcessing();
 
-            using (var scope = log.BeginScope("ID 2"))
-            {
-                log.LogDebug("Starting transaction processing");
+                await Task.Run(() => logger.SubtaskTransactionStep1());
 
-                await Task.Run(() => log.LogInformation("Processing transaction step 1 (subtask)"));
-
-                var thread = new Thread(() => log.LogInformation("Processing transaction step 2 (subthread)"));
+                var thread = new Thread(() => logger.SubtaskTransactionStep2());
                 thread.Start();
                 thread.Join();
 
-                await Task.Run(() => log.LogInformation("Processing transaction step 3 (subtask)"));
+                await Task.Run(() => logger.SubtaskTransactionStep3());
 
-                log.LogInformation("Transaction processing completed");
+                logger.TransactionProcessingCompleted();
             }
 
             var tasks = new Task[2];
 
             tasks[0] = Task.Run(() =>
             {
-                using var scope = log.BeginScope("ID 3");
+                using var scope = logger.BeginScope("ID 3");
 
                 for (var i = 0; i < 10; ++i)
                 {
-                    using var subScope = log.BeginScope("SubScope {I}", i);
-                    log.LogCritical("Async Test {I}", i);
+                    using var subScope = logger.BeginScope("SubScope " + i);
+                    logger.AsyncTest1(i);
                 }
             });
 
             tasks[1] = Task.Run(() =>
             {
-                using var scope = log.BeginScope("ID 4");
+                using var scope = logger.BeginScope("ID 4");
 
-                for (var i = 0; i < 20; ++i)
-                {
-                    log.LogInformation("Async Test {I}", i);
-                }
+                for (var i = 0; i < 20; ++i) logger.AsyncTest2(i);
             });
 
             var thread2 = new Thread(() =>
             {
-                using var scope = log.BeginScope("ID 5");
-
-                for (var i = 0; i < 15; ++i)
-                {
-                    log.LogError("Thread Test {I}", i);
-                }
+                using var scope = logger.BeginScope("ID 5");
+                for (var i = 0; i < 15; ++i) logger.ThreadTest1(i);
             });
 
             thread2.Start();
 
             var thread3 = new Thread(() =>
             {
-                using var scope = log.BeginScope("ID 6");
+                using var scope = logger.BeginScope("ID 6");
 
                 for (var i = 0; i < 15; ++i)
                 {
-                    using var subScope = log.BeginScope("SubScope {I}", i);
-                    log.LogWarning("Thread Test {I}", i);
+                    using var subScope = logger.BeginScope("SubScope" + i);
+                    logger.ThreadTest2(i);
                 }
             });
 
@@ -213,20 +198,17 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
             thread2.Join();
             thread3.Join();
 
-            using (var scope = log.BeginScope("ID 7"))
+            using (var scope = logger.BeginScope("ID 7"))
             {
-                await foreach (var i in TestEnumerableAsync())
-                {
-                    log.LogInformation("IAsyncEnumerable Test {I}", i);
-                }
+                await foreach (var i in TestEnumerableAsync()) logger.IAsyncEnumerableTest1(i);
             }
 
-            using (var scope = log.BeginScope("ID 8"))
+            using (var scope = logger.BeginScope("ID 8"))
             {
                 await foreach (var i in TestEnumerableAsync())
                 {
-                    using var subScope = log.BeginScope("SubScope {I}", i);
-                    log.LogTrace("IAsyncEnumerable Test {I}", i);
+                    using var subScope = logger.BeginScope("SubScope " + i);
+                    logger.IAsyncEnumerableTest1(i);
                 }
             }
         });

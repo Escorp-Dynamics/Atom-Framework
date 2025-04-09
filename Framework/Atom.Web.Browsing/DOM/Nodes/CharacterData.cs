@@ -76,27 +76,27 @@ public abstract class CharacterData : Node, ICharacterData
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Before(params INode[] nodes) => ChildNode.Before(nodes);
+    public void Before(params IEnumerable<INode> nodes) => ChildNode.Before(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Before(params string[] nodes) => ChildNode.Before(nodes);
+    public void Before(params IEnumerable<string> nodes) => ChildNode.Before(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void After(params INode[] nodes) => ChildNode.After(nodes);
+    public void After(params IEnumerable<INode> nodes) => ChildNode.After(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void After(params string[] nodes) => ChildNode.After(nodes);
+    public void After(params IEnumerable<string> nodes) => ChildNode.After(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void ReplaceWith(params INode[] nodes) => ChildNode.ReplaceWith(nodes);
+    public void ReplaceWith(params IEnumerable<INode> nodes) => ChildNode.ReplaceWith(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void ReplaceWith(params string[] nodes) => ChildNode.ReplaceWith(nodes);
+    public void ReplaceWith(params IEnumerable<string> nodes) => ChildNode.ReplaceWith(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]

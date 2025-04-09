@@ -163,7 +163,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, [NotNull] params string[] usings)
+    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, [NotNull] params IEnumerable<string> usings)
     {
         AppendModifiers(sb, spaces);
         sb.Append($"{Type.GetTypeName(usings)} {Name}");
@@ -268,7 +268,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    public PropertyMember WithGetter(string body, bool isReadOnly, params string[] attributes) => WithGetter(PropertyAccessorMember.Create()
+    public PropertyMember WithGetter(string body, bool isReadOnly, params IEnumerable<string> attributes) => WithGetter(PropertyAccessorMember.Create()
         .WithAttribute(attributes)
         .WithCode(body)
         .AsReadOnly(isReadOnly)
@@ -276,13 +276,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     );
 
     /// <inheritdoc/>
-    public PropertyMember WithGetter(string body, params string[] attributes) => WithGetter(body, default, attributes);
-
-    /// <inheritdoc/>
-    public PropertyMember WithGetter(string body) => WithGetter(body, false);
-
-    /// <inheritdoc/>
-    public PropertyMember WithGetter(params string[] attributes) => WithGetter(string.Empty, attributes);
+    public PropertyMember WithGetter(string body, params IEnumerable<string> attributes) => WithGetter(body, default, attributes);
 
     /// <inheritdoc/>
     public PropertyMember WithGetter() => WithGetter(string.Empty);
@@ -295,7 +289,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    public PropertyMember WithSetter(string body, bool isInit, string comment, params string[] attributes) => WithSetter(PropertyMutatorMember.Create()
+    public PropertyMember WithSetter(string body, bool isInit, string comment, params IEnumerable<string> attributes) => WithSetter(PropertyMutatorMember.Create()
         .WithAttribute(attributes)
         .WithCode(body)
         .AsInit(isInit)
@@ -304,28 +298,13 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     );
 
     /// <inheritdoc/>
-    public PropertyMember WithSetter(string body, bool isInit, params string[] attributes) => WithSetter(body, isInit, string.Empty, attributes);
-
-    /// <inheritdoc/>
-    public PropertyMember WithSetter(string body, bool isInit, string comment) => WithSetter(body, isInit, comment, []);
-
-    /// <inheritdoc/>
     public PropertyMember WithSetter(string body, bool isInit) => WithSetter(body, isInit, string.Empty);
 
     /// <inheritdoc/>
     public PropertyMember WithSetter(bool isInit) => WithSetter(string.Empty, isInit);
 
     /// <inheritdoc/>
-    public PropertyMember WithSetter(string body, string comment, params string[] attributes) => WithSetter(body, default, comment, attributes);
-
-    /// <inheritdoc/>
-    public PropertyMember WithSetter(string body, params string[] attributes) => WithSetter(body, string.Empty, attributes);
-
-    /// <inheritdoc/>
-    public PropertyMember WithSetter(params string[] attributes) => WithSetter(string.Empty, attributes);
-
-    /// <inheritdoc/>
-    public PropertyMember WithSetter(string body, string comment) => WithSetter(body, false, comment);
+    public PropertyMember WithSetter(string body, string comment, params IEnumerable<string> attributes) => WithSetter(body, default, comment, attributes);
 
     /// <inheritdoc/>
     public PropertyMember WithSetter(string body) => WithSetter(body, string.Empty);
@@ -365,7 +344,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    public override PropertyMember WithAttribute(params string[] attributes)
+    public override PropertyMember WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
         return this;

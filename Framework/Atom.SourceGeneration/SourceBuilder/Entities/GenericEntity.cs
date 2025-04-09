@@ -44,7 +44,7 @@ public class GenericEntity : Entity<GenericEntity>
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params string[] usings) => sb.Append(Name);
+    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params IEnumerable<string> usings) => sb.Append(Name);
 
     /// <summary>
     /// Указывает, является ли инвариантным.
@@ -80,7 +80,7 @@ public class GenericEntity : Entity<GenericEntity>
     /// Добавляет ограничители.
     /// </summary>
     /// <param name="limitations">Ограничители.</param>
-    public virtual GenericEntity WithLimitation([NotNull] params string[] limitations)
+    public virtual GenericEntity WithLimitation([NotNull] params IEnumerable<string> limitations)
     {
         this.limitations.AddRange(limitations);
         return this;
@@ -145,7 +145,7 @@ public class GenericEntity : Entity<GenericEntity>
     }
 
     /// <inheritdoc/>
-    public override GenericEntity WithAttribute(params string[] attributes)
+    public override GenericEntity WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
         return this;
@@ -174,5 +174,5 @@ public class GenericEntity : Entity<GenericEntity>
     /// </summary>
     /// <param name="name">Имя типа.</param>
     /// <param name="limitations">Ограничения типа.</param>
-    public static GenericEntity Create(string name, params string[] limitations) => Create().WithName(name).WithLimitation(limitations);
+    public static GenericEntity Create(string name, params IEnumerable<string> limitations) => Create().WithName(name).WithLimitation(limitations);
 }

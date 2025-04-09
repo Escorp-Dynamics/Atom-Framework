@@ -1,17 +1,13 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Testing;
 using Microsoft.CodeAnalysis.Testing;
 
 namespace Atom.Architect.Reactive.Tests;
 
-public class ReactiveFieldSyntaxProviderTests(ILogger logger) : BenchmarkTest<ReactiveFieldSyntaxProviderTests>(logger)
+public class ReactiveFieldSyntaxProviderTests(ILogger logger) : BenchmarkTests<ReactiveFieldSyntaxProviderTests>(logger)
 {
     private static string? source;
     private static string? reference;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public ReactiveFieldSyntaxProviderTests() : this(ConsoleLogger.Unicode) { }
 
@@ -68,7 +64,7 @@ public class ReactiveFieldSyntaxProviderTests(ILogger logger) : BenchmarkTest<Re
         );
 
         await test.RunAsync();
-        if (IsTest) Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 
     [TestCase(TestName = "Тест генератора реактивных свойств"), Benchmark]
@@ -89,6 +85,6 @@ public class ReactiveFieldSyntaxProviderTests(ILogger logger) : BenchmarkTest<Re
         };
 
         await test.RunAsync();
-        if (IsTest) Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 }

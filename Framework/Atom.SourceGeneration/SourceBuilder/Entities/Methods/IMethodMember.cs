@@ -191,14 +191,14 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// Добавляет аргументы к методу.
     /// </summary>
     /// <param name="arguments">Массив аргументов метода.</param>
-    T WithArgument(params MethodArgumentMember[] arguments);
+    T WithArgument(params IEnumerable<MethodArgumentMember> arguments);
 
     /// <summary>
     /// Добавляет аргумент к методу.
     /// </summary>
     /// <param name="name">Имя аргумента.</param>
     /// <param name="attributes">Атрибуты аргумента.</param>
-    T WithArgument<TArg>(string name, params string[] attributes)
+    T WithArgument<TArg>(string name, params IEnumerable<string> attributes)
         => WithArgument(MethodArgumentMember.Create<TArg>(name).WithAttribute(attributes));
 
     /// <summary>
@@ -206,7 +206,7 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// </summary>
     /// <param name="name">Имя аргумента.</param>
     /// <param name="attributes">Атрибуты аргумента.</param>
-    T WithInArgument<TArg>(string name, params string[] attributes)
+    T WithInArgument<TArg>(string name, params IEnumerable<string> attributes)
         => WithArgument(MethodArgumentMember.CreateIn<TArg>(name).WithAttribute(attributes));
 
     /// <summary>
@@ -214,7 +214,7 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// </summary>
     /// <param name="name">Имя аргумента.</param>
     /// <param name="attributes">Атрибуты аргумента.</param>
-    T WithOutArgument<TArg>(string name, params string[] attributes)
+    T WithOutArgument<TArg>(string name, params IEnumerable<string> attributes)
         => WithArgument(MethodArgumentMember.CreateOut<TArg>(name).WithAttribute(attributes));
 
     /// <summary>
@@ -222,7 +222,7 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// </summary>
     /// <param name="name">Имя аргумента.</param>
     /// <param name="attributes">Атрибуты аргумента.</param>
-    T WithRefArgument<TArg>(string name, params string[] attributes)
+    T WithRefArgument<TArg>(string name, params IEnumerable<string> attributes)
         => WithArgument(MethodArgumentMember.CreateRef<TArg>(name).WithAttribute(attributes));
 
     /// <summary>
@@ -230,19 +230,19 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// </summary>
     /// <param name="name">Имя аргумента.</param>
     /// <param name="attributes">Атрибуты аргумента.</param>
-    T WithParamsArgument<TArg>(string name, params string[] attributes)
+    T WithParamsArgument<TArg>(string name, params IEnumerable<string> attributes)
         => WithArgument(MethodArgumentMember.CreateParams<TArg>(name).WithAttribute(attributes));
 
     /// <summary>
     /// Добавляет шаблонные типы.
     /// </summary>
     /// <param name="generics">Шаблонные типы.</param>
-    T WithGeneric(params GenericEntity[] generics);
+    T WithGeneric(params IEnumerable<GenericEntity> generics);
 
     /// <summary>
     /// Добавляет шаблонный тип.
     /// </summary>
     /// <param name="name">Имя типа.</param>
     /// <param name="limitations">Ограничения типа.</param>
-    T WithGeneric(string name, params string[] limitations) => WithGeneric(GenericEntity.Create(name, limitations));
+    T WithGeneric(string name, params IEnumerable<string> limitations) => WithGeneric(GenericEntity.Create(name, limitations));
 }

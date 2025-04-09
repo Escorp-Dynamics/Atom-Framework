@@ -29,13 +29,13 @@ public interface ISourceBuilder
     /// Добавляет используемые директивы.
     /// </summary>
     /// <param name="directives">Используемые директивы.</param>
-    ISourceBuilder WithDirective(params string[] directives);
+    ISourceBuilder WithDirective(params IEnumerable<string> directives);
 
     /// <summary>
     /// Добавляет используемые пространства имён.
     /// </summary>
     /// <param name="ns">Используемые пространства имён.</param>
-    ISourceBuilder WithUsing(params string[] ns);
+    ISourceBuilder WithUsing(params IEnumerable<string> ns);
 
     /// <summary>
     /// Добавляет <c>namespace</c>.
@@ -47,25 +47,25 @@ public interface ISourceBuilder
     /// Добавляет сущности в исходный код.
     /// </summary>
     /// <param name="entities">Сущности.</param>
-    ISourceBuilder WithEntity(params IEntity[] entities);
+    ISourceBuilder WithEntity(params IEnumerable<IEntity> entities);
 
     /// <summary>
     /// Добавляет перечисления в исходный код.
     /// </summary>
     /// <param name="enums">Перечисления.</param>
-    ISourceBuilder WithEnum(params EnumEntity[] enums) => WithEntity(enums);
+    ISourceBuilder WithEnum(params IEnumerable<EnumEntity> enums) => WithEntity(enums);
 
     /// <summary>
     /// Добавляет интерфейс в исходный код.
     /// </summary>
     /// <param name="interfaces">Интерфейсы.</param>
-    ISourceBuilder WithInterface(params InterfaceEntity[] interfaces) => WithEntity(interfaces);
+    ISourceBuilder WithInterface(params IEnumerable<InterfaceEntity> interfaces) => WithEntity(interfaces);
 
     /// <summary>
     /// Добавляет класс в исходный код.
     /// </summary>
     /// <param name="classes">Классы.</param>
-    ISourceBuilder WithClass(params ClassEntity[] classes) => WithEntity(classes);
+    ISourceBuilder WithClass(params IEnumerable<ClassEntity> classes) => WithEntity(classes);
 
     /// <summary>
     /// Собирает исходный код.

@@ -12,7 +12,17 @@ namespace Atom.Debug.Logging;
 /// </summary>
 public class ConsoleLogger : Logger
 {
-    private TextWriter? writer;
+    /// <summary>
+    /// Поток записи.
+    /// </summary>
+    public virtual TextWriter Writer
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Volatile.Read(ref field);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        set => Volatile.Write(ref field, value);
+    }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="ConsoleLogger"/>.
@@ -20,9 +30,8 @@ public class ConsoleLogger : Logger
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ConsoleLogger() : base()
     {
-        IsTimeEnabled = true;
-        IsEventIdEnabled = true;
-        IsStylingEnabled = true;
+        IsTimeEnabled = IsStylingEnabled = IsStylingOutputEnabled = true;
+        Writer = Console.Out;
     }
 
     /// <summary>
@@ -32,16 +41,9 @@ public class ConsoleLogger : Logger
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ConsoleLogger(string categoryName) : base(categoryName)
     {
-        IsTimeEnabled = true;
-        IsEventIdEnabled = true;
-        IsStylingEnabled = true;
+        IsTimeEnabled = IsStylingEnabled = IsStylingOutputEnabled = true;
+        Writer = Console.Out;
     }
-
-    /// <summary>
-    /// Открывает поток на запись.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected virtual TextWriter CreateWriter() => Console.Out;
 
     /// <summary>
     /// Форматирует время и дату события.
@@ -49,17 +51,15 @@ public class ConsoleLogger : Logger
     /// <param name="sb">Ссылка на <see cref="StringBuilder"/>.</param>
     /// <param name="dt">Время и дата события.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected virtual void FormatDateTime([NotNull] ref StringBuilder sb, DateTime dt)
+    protected virtual void FormatDateTime([NotNull] StringBuilder sb, DateTime dt)
     {
-        if (IsDateEnabled || IsTimeEnabled)
-        {
-            if (IsDateEnabled) sb.Append(dt.ToString(DateFormat));
+        if (!IsDateEnabled && !IsTimeEnabled) return;
+        if (IsDateEnabled) sb.Append(dt.ToString(DateFormat));
 
-            if (IsTimeEnabled)
-            {
-                if (IsDateEnabled) sb.Append(' ');
-                sb.Append(dt.ToString(TimeFormat));
-            }
+        if (IsTimeEnabled)
+        {
+            if (IsDateEnabled) sb.Append(' ');
+            sb.Append(dt.ToString(TimeFormat));
         }
     }
 
@@ -75,7 +75,7 @@ public class ConsoleLogger : Logger
         var color = GetColorByLevel(args.Level);
 
         if (IsStylingEnabled) sb.Append('[').Append(color).Append(']');
-        FormatDateTime(ref sb, args.DateTime);
+        FormatDateTime(sb, args.DateTime);
         if (Console.IsOutputRedirected) sb.Append(' ').Append(GetPrefixByLevel(args.Level));
 
         if (IsCategoryNameEnabled && !string.IsNullOrEmpty(CategoryName)) sb.Append(' ').Append(CategoryName);
@@ -91,7 +91,8 @@ public class ConsoleLogger : Logger
         message = sb.ToString();
         ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
 
-        if (IsStylingEnabled) message = message.ToUnixStyleFormat(Console.IsOutputRedirected);
+        if (IsStylingEnabled) message = message.ToUnixStyleFormat(!IsStylingOutputEnabled || Console.IsOutputRedirected);
+
         return message;
     }
 
@@ -105,8 +106,7 @@ public class ConsoleLogger : Logger
         var result = CreateMessage(args);
         if (string.IsNullOrEmpty(result)) return;
 
-        writer ??= CreateWriter();
-        writer.WriteLine(result);
+        Writer.WriteLine(result);
     }
 
     /// <inheritdoc/>
@@ -114,7 +114,7 @@ public class ConsoleLogger : Logger
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
-        writer?.Dispose();
+        Writer.Dispose();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

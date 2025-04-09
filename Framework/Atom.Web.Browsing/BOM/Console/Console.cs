@@ -1,4 +1,3 @@
-using Atom.Architect.Reactive;
 using Microsoft.ClearScript;
 
 namespace Atom.Web.Browsing.BOM;
@@ -21,11 +20,11 @@ public class Console : IConsole
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Assert(bool condition, params object?[] data) => throw new NotImplementedException();
+    public void Assert(bool condition, params IEnumerable<object?> data) => throw new NotImplementedException();
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Assert(params object?[] data) => Assert(default, data);
+    public void Assert(params IEnumerable<object?> data) => Assert(default, data);
 
     /// <inheritdoc/>
     [ScriptMember]
@@ -33,31 +32,31 @@ public class Console : IConsole
 
     /// <inheritdoc/>
     [ScriptMember]
-    public async void Debug(params object?[] data) => await OnMessage(new ConsoleMessageEventArgs(ConsoleMessageType.Debug, data)).ConfigureAwait(false);
+    public async void Debug(params IEnumerable<object?> data) => await OnMessage(new ConsoleMessageEventArgs(ConsoleMessageType.Debug, data)).ConfigureAwait(false);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public async void Error(params object?[] data) => await OnMessage(new ConsoleMessageEventArgs(ConsoleMessageType.Error, data)).ConfigureAwait(false);
+    public async void Error(params IEnumerable<object?> data) => await OnMessage(new ConsoleMessageEventArgs(ConsoleMessageType.Error, data)).ConfigureAwait(false);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public async void Info(params object?[] data) => await OnMessage(new ConsoleMessageEventArgs(ConsoleMessageType.Info, data)).ConfigureAwait(false);
+    public async void Info(params IEnumerable<object?> data) => await OnMessage(new ConsoleMessageEventArgs(ConsoleMessageType.Info, data)).ConfigureAwait(false);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public async void Log(params object?[] data) => await OnMessage(new ConsoleMessageEventArgs(ConsoleMessageType.Log, data)).ConfigureAwait(false);
+    public async void Log(params IEnumerable<object?> data) => await OnMessage(new ConsoleMessageEventArgs(ConsoleMessageType.Log, data)).ConfigureAwait(false);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public async void Trace(params object?[] data) => await OnMessage(new ConsoleMessageEventArgs(ConsoleMessageType.Trace, data)).ConfigureAwait(false);
+    public async void Trace(params IEnumerable<object?> data) => await OnMessage(new ConsoleMessageEventArgs(ConsoleMessageType.Trace, data)).ConfigureAwait(false);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public async void Warn(params object?[] data) => await OnMessage(new ConsoleMessageEventArgs(ConsoleMessageType.Warn, data)).ConfigureAwait(false);
+    public async void Warn(params IEnumerable<object?> data) => await OnMessage(new ConsoleMessageEventArgs(ConsoleMessageType.Warn, data)).ConfigureAwait(false);
 
     /// <inheritdoc/>
     [ScriptMember("dirxml")]
-    public void DirXML(params object?[] data) => throw new NotImplementedException();
+    public void DirXML(params IEnumerable<object?> data) => throw new NotImplementedException();
 
     /// <inheritdoc/>
     [ScriptMember]
@@ -109,11 +108,11 @@ public class Console : IConsole
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Group(params object?[] data) => throw new NotImplementedException();
+    public void Group(params IEnumerable<object?> data) => throw new NotImplementedException();
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void GroupCollapsed(params object?[] data) => throw new NotImplementedException();
+    public void GroupCollapsed(params IEnumerable<object?> data) => throw new NotImplementedException();
 
     /// <inheritdoc/>
     [ScriptMember]
@@ -129,7 +128,7 @@ public class Console : IConsole
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void TimeLog(string label, params object?[] data) => throw new NotImplementedException();
+    public void TimeLog(string label, params IEnumerable<object?> data) => throw new NotImplementedException();
 
     /// <inheritdoc/>
     [ScriptMember]
@@ -137,7 +136,7 @@ public class Console : IConsole
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void TimeLog(params object?[] data) => TimeLog("default", data);
+    public void TimeLog(params IEnumerable<object?> data) => TimeLog("default", data);
 
     /// <inheritdoc/>
     [ScriptMember]

@@ -1,13 +1,9 @@
 using System.Diagnostics;
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
 
 namespace Atom.Threading.Tests;
 
-public class RateLimiterTests(ILogger logger) : BenchmarkTest<RateLimiterTests>(logger)
+public class RateLimiterTests(ILogger logger) : BenchmarkTests<RateLimiterTests>(logger)
 {
-    public override bool IsBenchmarkDisabled => true;
-
     public RateLimiterTests() : this(ConsoleLogger.Unicode) { }
 
     private void Log(string? message)
@@ -31,6 +27,6 @@ public class RateLimiterTests(ILogger logger) : BenchmarkTest<RateLimiterTests>(
 
         for (var i = 0; i < 10; ++i) await limiter.Call(TestCallbackAsync);
 
-        if (IsTest) Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 }

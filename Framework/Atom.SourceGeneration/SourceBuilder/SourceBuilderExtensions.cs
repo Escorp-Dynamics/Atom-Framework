@@ -9,7 +9,7 @@ namespace Atom.SourceGeneration;
 /// </summary>
 public static class SourceBuilderExtensions
 {
-    internal static string GetTypeName(this string name, [NotNull] params string[] usings)
+    internal static string GetTypeName(this string name, [NotNull] params IEnumerable<string> usings)
     {
         if (string.IsNullOrEmpty(name)) return "void";
         var type = name.Replace("global::", null);

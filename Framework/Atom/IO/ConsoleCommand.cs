@@ -131,10 +131,7 @@ public abstract class ConsoleCommand(IEnumerable<string> aliases) : IConsoleComm
     }
 
     /// <inheritdoc/>
-    public ValueTask<bool> ExecuteAsync(IEnumerable<string> args) => ExecuteAsync(args, CancellationToken.None);
-
-    /// <inheritdoc/>
-    public ValueTask<bool> ExecuteAsync(params string[] args) => ExecuteAsync(args, CancellationToken.None);
+    public ValueTask<bool> ExecuteAsync(params IEnumerable<string> args) => ExecuteAsync(args, CancellationToken.None);
 
     /// <inheritdoc/>
     public ValueTask<bool> ExecuteAsync(CancellationToken cancellationToken) => ExecuteAsync([], cancellationToken);
@@ -150,10 +147,7 @@ public abstract class ConsoleCommand(IEnumerable<string> aliases) : IConsoleComm
     }
 
     /// <inheritdoc/>
-    public ValueTask<bool> CancelAsync(IEnumerable<string> args) => CancelAsync(args, CancellationToken.None);
-
-    /// <inheritdoc/>
-    public ValueTask<bool> CancelAsync(params string[] args) => CancelAsync(args, CancellationToken.None);
+    public ValueTask<bool> CancelAsync(params IEnumerable<string> args) => CancelAsync(args, CancellationToken.None);
 
     /// <inheritdoc/>
     public ValueTask<bool> CancelAsync(CancellationToken cancellationToken) => CancelAsync([], cancellationToken);

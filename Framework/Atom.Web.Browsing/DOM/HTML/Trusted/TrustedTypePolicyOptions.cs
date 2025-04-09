@@ -7,21 +7,21 @@ namespace Atom.Web.Browsing.DOM;
 /// </summary>
 /// <param name="input">Входные данные.</param>
 /// <param name="arguments">Аргументы.</param>
-public delegate string? CreateHTMLCallback(string input, params object?[] arguments);
+public delegate string? CreateHTMLCallback(string input, params IEnumerable<object?> arguments);
 
 /// <summary>
 /// Делегат создания доверенного скрипта.
 /// </summary>
 /// <param name="input">Входные данные.</param>
 /// <param name="arguments">Аргументы.</param>
-public delegate string? CreateScriptCallback(string input, params object?[] arguments);
+public delegate string? CreateScriptCallback(string input, params IEnumerable<object?> arguments);
 
 /// <summary>
 /// Делегат создания доверенного скрипта в формате ссылки.
 /// </summary>
 /// <param name="input">Входные данные.</param>
 /// <param name="arguments">Аргументы.</param>
-public delegate Uri? CreateScriptURLCallback(string input, params object?[] arguments);
+public delegate Uri? CreateScriptURLCallback(string input, params IEnumerable<object?> arguments);
 
 /// <summary>
 /// Представляет настройки политики доверия.

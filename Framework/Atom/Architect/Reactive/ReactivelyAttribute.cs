@@ -28,6 +28,11 @@ public sealed class ReactivelyAttribute(string propertyName, AccessModifier acce
     public bool IsVirtual { get; } = isVirtual;
 
     /// <summary>
+    /// Атрибуты свойства.
+    /// </summary>
+    public Type[] Attributes { get; set; } = [];
+
+    /// <summary>
     /// Инициализирует новый экземпляр <see cref="ReactivelyAttribute"/>
     /// </summary>
     /// <param name="propertyName">Имя свойства, для которого будет генерироваться код событий изменения.</param>

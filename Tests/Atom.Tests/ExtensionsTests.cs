@@ -1,9 +1,9 @@
 namespace Atom.Tests;
 
 [TestFixture]
-public class ExtensionsTests
+public class ExtensionsTests(ILogger logger) : BenchmarkTests<ExtensionsTests>(logger)
 {
-    [Test]
+    [TestCase(TestName = "Тест получения дружественных имён типов"), Benchmark(Baseline = true)]
     public void GetFriendlyNameTest()
     {
         var type = typeof(int).GetFriendlyName();

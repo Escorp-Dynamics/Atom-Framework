@@ -9,7 +9,7 @@ namespace Atom.Web.Browsing;
 /// <summary>
 /// Представляет настройки браузера.
 /// </summary>
-public partial class WebBrowserSettings : Reactively, IWebBrowserSettings
+public partial class WebBrowserSettings : IWebBrowserSettings
 {
     private static readonly Lazy<WebBrowserSettings> defaultSettings = new(() => new WebBrowserSettings
     {

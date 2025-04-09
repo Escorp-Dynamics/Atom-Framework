@@ -12,42 +12,42 @@ public interface IChildNode
     /// </summary>
     /// <param name="nodes">Добавляемые узлы.</param>
     [ScriptMember]
-    void Before(params INode[] nodes);
+    void Before(params IEnumerable<INode> nodes);
 
     /// <summary>
     /// Добавляет узлы перед текущим узлом.
     /// </summary>
     /// <param name="nodes">Добавляемые узлы.</param>
     [ScriptMember]
-    void Before(params string[] nodes);
+    void Before(params IEnumerable<string> nodes);
 
     /// <summary>
     /// Добавляет узлы после текущего узла.
     /// </summary>
     /// <param name="nodes">Добавляемые узлы.</param>
     [ScriptMember]
-    void After(params INode[] nodes);
+    void After(params IEnumerable<INode> nodes);
 
     /// <summary>
     /// Добавляет узлы после текущего узла.
     /// </summary>
     /// <param name="nodes">Добавляемые узлы.</param>
     [ScriptMember]
-    void After(params string[] nodes);
+    void After(params IEnumerable<string> nodes);
 
     /// <summary>
     /// Заменяет текущий узел новыми узлами.
     /// </summary>
     /// <param name="nodes">Заменяемые узлы.</param>
     [ScriptMember]
-    void ReplaceWith(params INode[] nodes);
+    void ReplaceWith(params IEnumerable<INode> nodes);
 
     /// <summary>
     /// Заменяет текущий узел новыми узлами.
     /// </summary>
     /// <param name="nodes">Заменяемые узлы.</param>
     [ScriptMember]
-    void ReplaceWith(params string[] nodes);
+    void ReplaceWith(params IEnumerable<string> nodes);
 
     /// <summary>
     /// Удаляет текущий узел.

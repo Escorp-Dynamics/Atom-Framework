@@ -74,7 +74,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
         sb.Append('>');
     }
 
-    private void AppendParents(StringBuilder sb, params string[] usings)
+    private void AppendParents(StringBuilder sb, params IEnumerable<string> usings)
     {
         if (parents.IsEmpty) return;
 
@@ -101,7 +101,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
         }
     }
 
-    private void AppendEntities(StringBuilder sb, string spaces, params string[] usings)
+    private void AppendEntities(StringBuilder sb, string spaces, params IEnumerable<string> usings)
     {
         if (fields.IsEmpty && properties.IsEmpty && events.IsEmpty && methods.IsEmpty && others.IsEmpty)
         {
@@ -147,7 +147,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, params string[] usings)
+    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, params IEnumerable<string> usings)
     {
         var access = AccessModifier.AsString();
         if (!string.IsNullOrEmpty(access)) access += ' ';
@@ -164,7 +164,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
-    public virtual ClassEntity WithEvent([NotNull] params EventMember[] events)
+    public virtual ClassEntity WithEvent([NotNull] params IEnumerable<EventMember> events)
     {
         this.events.AddRange(events);
         return this;
@@ -177,17 +177,17 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     public ClassEntity WithEvent<TType>(string name) => WithEvent<TType>(name, default);
 
     /// <inheritdoc/>
-    public virtual ClassEntity WithGeneric([NotNull] params GenericEntity[] generics)
+    public virtual ClassEntity WithGeneric([NotNull] params IEnumerable<GenericEntity> generics)
     {
         this.generics.AddRange(generics);
         return this;
     }
 
     /// <inheritdoc/>
-    public ClassEntity WithGeneric(string name, params string[] limitations) => WithGeneric(GenericEntity.Create(name, limitations));
+    public ClassEntity WithGeneric(string name, params IEnumerable<string> limitations) => WithGeneric(GenericEntity.Create(name, limitations));
 
     /// <inheritdoc/>
-    public virtual ClassEntity WithMethod([NotNull] params MethodMember[] methods)
+    public virtual ClassEntity WithMethod([NotNull] params IEnumerable<MethodMember> methods)
     {
         this.methods.AddRange(methods);
         return this;
@@ -200,14 +200,14 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     public ClassEntity WithMethod<TType>(string name) => WithMethod(MethodMember.Create<TType>(name));
 
     /// <inheritdoc/>
-    public virtual ClassEntity WithOther([NotNull] params IEntity[] entities)
+    public virtual ClassEntity WithOther([NotNull] params IEnumerable<IEntity> entities)
     {
         others.AddRange(entities);
         return this;
     }
 
     /// <inheritdoc/>
-    public virtual ClassEntity WithParent([NotNull] params string[] parents)
+    public virtual ClassEntity WithParent([NotNull] params IEnumerable<string> parents)
     {
         this.parents.AddRange(parents);
         return this;
@@ -217,7 +217,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     public ClassEntity WithParent<TType>(bool withNamespaces = true, bool withNullable = true, bool withGenericNullable = true) => WithParent(typeof(TType).GetFriendlyName(withNamespaces, withNullable, withGenericNullable));
 
     /// <inheritdoc/>
-    public virtual ClassEntity WithProperty([NotNull] params PropertyMember[] properties)
+    public virtual ClassEntity WithProperty([NotNull] params IEnumerable<PropertyMember> properties)
     {
         this.properties.AddRange(properties);
         return this;
@@ -227,7 +227,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     public ClassEntity WithProperty<TType>(string name) => WithProperty(PropertyMember.CreateWithGetterOnly<TType>(name));
 
     /// <inheritdoc/>
-    public virtual ClassEntity WithField([NotNull] params FieldMember[] fields)
+    public virtual ClassEntity WithField([NotNull] params IEnumerable<FieldMember> fields)
     {
         this.fields.AddRange(fields);
         return this;
@@ -290,7 +290,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
-    public override ClassEntity WithAttribute(params string[] attributes)
+    public override ClassEntity WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
         return this;

@@ -13,8 +13,9 @@ namespace Atom.Threading;
 /// </summary>
 public sealed class Sequencer : IDisposable, IAsyncDisposable
 {
-    private struct TaskState
+    private sealed class TaskState
     {
+        public ExecutionContext? Context;
         public SequenceMode OriginalMode;
         public SequenceMode Mode;
         public ulong Counter;
@@ -227,10 +228,14 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void UpdateLoopMode(Func<ValueTask> task, TaskState state)
     {
+        var oldMode = state.Mode;
         var mode = state.OriginalMode is SequenceMode.Loop && LoopRepetitionsWithoutWaiting > 0 && Interlocked.Increment(ref state.Counter) >= LoopRepetitionsWithoutWaiting ? SequenceMode.LoopWithWaiting : SequenceMode.Loop;
 
-        if (tasks.TryUpdate(task, state with { Mode = mode, Counter = default, LastExecutionTime = DateTime.UtcNow.Ticks }, state) && mode != state.Mode)
-            Changed.On(args => { args.Task = task; args.Mode = mode; });
+        Interlocked.Exchange(ref state.Mode, mode);
+        Interlocked.Exchange(ref state.Counter, default);
+        Interlocked.Exchange(ref state.LastExecutionTime, DateTime.UtcNow.Ticks);
+
+        if (oldMode != mode) Changed.On(args => { args.Task = task; args.Mode = mode; });
 
         ScheduleTask(task, mode);
     }
@@ -239,6 +244,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     private async Task ExecuteAsync(Func<ValueTask> task)
     {
         if (!tasks.TryGetValue(task, out var state)) return;
+        if (state.Context is not null) ExecutionContext.Restore(state.Context);
         if (state.Mode is SequenceMode.Loop) UpdateLoopMode(task, state);
 
         try
@@ -253,11 +259,18 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
         if (!tasks.TryGetValue(task, out state)) return;
 
         if (state.Mode is SequenceMode.Manual)
+        {
             Remove(task);
+        }
         else if (state.Mode is SequenceMode.Loop)
+        {
             UpdateLoopMode(task, state);
-        else if (tasks.TryUpdate(task, state with { LastExecutionTime = DateTime.UtcNow.Ticks }, state))
+        }
+        else
+        {
+            Interlocked.Exchange(ref state.LastExecutionTime, DateTime.UtcNow.Ticks);
             ScheduleTask(task, state.Mode);
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -282,7 +295,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 
         var isEmpty = tasks.IsEmpty;
 
-        if (!tasks.TryAdd(task, new TaskState { OriginalMode = mode, Mode = mode, MinInterval = minInterval.Ticks, LastExecutionTime = DateTime.UtcNow.Ticks - minInterval.Ticks }))
+        if (!tasks.TryAdd(task, new TaskState { Context = ExecutionContext.Capture(), OriginalMode = mode, Mode = mode, MinInterval = minInterval.Ticks, LastExecutionTime = DateTime.UtcNow.Ticks - minInterval.Ticks }))
         {
             Failed.On(args =>
             {
@@ -321,7 +334,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// </summary>
     /// <param name="tasks">Массив делегатов, представляющих задачи для добавления в очередь.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Add([NotNull] params Func<ValueTask>[] tasks)
+    public void Add([NotNull] params IEnumerable<Func<ValueTask>> tasks)
     {
         foreach (var task in tasks) Add(task, Mode);
     }
@@ -404,7 +417,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="waitIntervalBeforeStarting">Указывает, требуется ли ожидать интервал перед запуском секвенции.</param>
     /// <param name="tasks">Массив делегатов, представляющих задачи для добавления в очередь.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void AddAndStart(bool waitIntervalBeforeStarting, [NotNull] params Func<ValueTask>[] tasks)
+    public void AddAndStart(bool waitIntervalBeforeStarting, [NotNull] params IEnumerable<Func<ValueTask>> tasks)
     {
         Add(tasks);
         Start(waitIntervalBeforeStarting);
@@ -415,14 +428,14 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// </summary>
     /// <param name="tasks">Массив делегатов, представляющих задачи для добавления в очередь.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void AddAndStart([NotNull] params Func<ValueTask>[] tasks) => AddAndStart(default, tasks);
+    public void AddAndStart([NotNull] params IEnumerable<Func<ValueTask>> tasks) => AddAndStart(default, tasks);
 
     /// <summary>
     /// Удаляет массив задач из очереди задач для последовательного выполнения.
     /// </summary>
     /// <param name="tasks">Массив делегатов, представляющих задачи для удаления из очереди.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Remove([NotNull] params Func<ValueTask>[] tasks)
+    public void Remove([NotNull] params IEnumerable<Func<ValueTask>> tasks)
     {
         foreach (var task in tasks)
         {
@@ -454,17 +467,15 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// </summary>
     /// <param name="tasks">Массив делегатов, представляющих задачи для установки паузы.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Pause([NotNull] params Func<ValueTask>[] tasks)
+    public void Pause([NotNull] params IEnumerable<Func<ValueTask>> tasks)
     {
         foreach (var task in tasks)
         {
-            if (this.tasks.TryGetValue(task, out var state) && !Volatile.Read(ref state.IsPaused))
-            {
-                this.tasks.TryUpdate(task, state with { IsPaused = true }, state);
-                signal.Send(task);
+            if (!this.tasks.TryGetValue(task, out var state) || Interlocked.CompareExchange(ref state.IsPaused, true, default)) continue;
 
-                if (Paused.On(args => { args.Task = task; args.Mode = state.Mode; }) && !this.tasks.Values.Any(x => !Volatile.Read(ref x.IsPaused))) timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-            }
+            signal.Send(task);
+
+            if (Paused.On(args => { args.Task = task; args.Mode = state.Mode; }) && !this.tasks.Values.Any(x => !Volatile.Read(ref x.IsPaused))) timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         }
     }
 
@@ -473,15 +484,14 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// </summary>
     /// <param name="tasks">Массив делегатов, представляющих задачи для снятия с паузы.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Resume([NotNull] params Func<ValueTask>[] tasks)
+    public void Resume([NotNull] params IEnumerable<Func<ValueTask>> tasks)
     {
         var isPaused = !this.tasks.Values.Any(x => !Volatile.Read(ref x.IsPaused));
 
         foreach (var task in tasks)
         {
-            if (!this.tasks.TryGetValue(task, out var state) || !Volatile.Read(ref state.IsPaused)) continue;
+            if (!this.tasks.TryGetValue(task, out var state) || !Interlocked.CompareExchange(ref state.IsPaused, default, true)) continue;
 
-            this.tasks.TryUpdate(task, state with { IsPaused = default }, state);
             signal.Send(task);
 
             if (Resumed.On(args => { args.Task = task; args.Mode = state.Mode; }) && isPaused)
@@ -507,8 +517,12 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void SetMode(Func<ValueTask> task, SequenceMode mode)
     {
-        if (tasks.TryGetValue(task, out var state) && tasks.TryUpdate(task, state with { OriginalMode = Mode, Mode = mode }, state) && mode != state.Mode)
-            Changed.On(args => { args.Task = task; args.Mode = mode; });
+        if (!tasks.TryGetValue(task, out var state) || state.Mode == mode) return;
+
+        Interlocked.Exchange(ref state.OriginalMode, mode);
+        Interlocked.Exchange(ref state.Mode, mode);
+
+        Changed.On(args => { args.Task = task; args.Mode = mode; });
     }
 
     /// <summary>

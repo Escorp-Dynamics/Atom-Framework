@@ -1,27 +1,26 @@
 using System.Net;
-using Atom.Web.Browsing.Drivers;
 using Atom.Web.Browsing.Drivers.Firefox;
-using BenchmarkDotNet.Loggers;
 
 namespace Atom.Web.Browsing.Tests;
 
-public class WebBrowserTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest<WebBrowserTests>(logger)
+public class WebBrowserTests(ILogger logger) : BenchmarkTests<WebBrowserTests>(logger)
 {
-    public override bool IsBenchmarkDisabled => true;
-
     public WebBrowserTests() : this(ConsoleLogger.Unicode) { }
 
-    //[Test]
+    [Test]
     public async Task BaseTest()
     {
         await using var browser = new WebBrowser();
         var statusCode = await browser.GoToAsync(new Uri("link"));
 
-        Assert.Multiple(() =>
+        if (!IsBenchmarkEnabled)
         {
-            Assert.That(statusCode, Is.EqualTo(HttpStatusCode.OK));
-            Assert.That(browser.Source, Is.Not.Empty);
-        });
+            Assert.Multiple(() =>
+            {
+                Assert.That(statusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(browser.Source, Is.Not.Empty);
+            });
+        }
     }
 
     [Test]
@@ -33,11 +32,14 @@ public class WebBrowserTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchmark
         await using var browser = new FirefoxDriver(settings);
         var statusCode = await browser.GoToAsync(new Uri("https://www.google.com/"));
 
-        Assert.Multiple(() =>
+        if (!IsBenchmarkEnabled)
         {
-            Assert.That(statusCode, Is.EqualTo(HttpStatusCode.OK));
-            Assert.That(browser.Source, Is.Not.Empty);
-        });
+            Assert.Multiple(() =>
+            {
+                Assert.That(statusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(browser.Source, Is.Not.Empty);
+            });
+        }
     }
 
     [Test]
@@ -51,10 +53,13 @@ public class WebBrowserTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchmark
 
         var statusCode = await context.GoToAsync(new Uri("https://www.google.com/"));
 
-        Assert.Multiple(() =>
+        if (!IsBenchmarkEnabled)
         {
-            Assert.That(statusCode, Is.EqualTo(HttpStatusCode.OK));
-            Assert.That(browser.Source, Is.Not.Empty);
-        });
+            Assert.Multiple(() =>
+            {
+                Assert.That(statusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(browser.Source, Is.Not.Empty);
+            });
+        }
     }
 }

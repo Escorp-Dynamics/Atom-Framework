@@ -65,7 +65,7 @@ public sealed class ScopeContext : IDisposable
 
                 if (!string.IsNullOrEmpty(state))
                 {
-                    sb.Insert(0, state.Trim());
+                    sb.Insert(0, state);
                     if (current.Parent is not null) sb.Insert(0, ' ');
                 }
             }

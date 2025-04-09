@@ -20,14 +20,14 @@ public interface IConsole
     /// <param name="condition">TODO.</param>
     /// <param name="data">TODO.</param>
     [ScriptMember]
-    void Assert(bool condition, params object?[] data);
+    void Assert(bool condition, params IEnumerable<object?> data);
 
     /// <summary>
     /// TODO.
     /// </summary>
     /// <param name="data">TODO.</param>
     [ScriptMember]
-    void Assert(params object?[] data) => Assert(default, data);
+    void Assert(params IEnumerable<object?> data) => Assert(default, data);
 
     /// <summary>
     /// Очищает журнал консоли.
@@ -40,49 +40,49 @@ public interface IConsole
     /// </summary>
     /// <param name="data">Аргументы сообщения.</param>
     [ScriptMember]
-    void Debug(params object?[] data);
+    void Debug(params IEnumerable<object?> data);
 
     /// <summary>
     /// Записывает сообщение об ошибке в журнал.
     /// </summary>
     /// <param name="data">Аргументы сообщения.</param>
     [ScriptMember]
-    void Error(params object?[] data);
+    void Error(params IEnumerable<object?> data);
 
     /// <summary>
     /// Записывает сообщение в журнал.
     /// </summary>
     /// <param name="data">Аргументы сообщения.</param>
     [ScriptMember]
-    void Info(params object?[] data);
+    void Info(params IEnumerable<object?> data);
 
     /// <summary>
     /// Записывает сообщение в журнал.
     /// </summary>
     /// <param name="data">Аргументы сообщения.</param>
     [ScriptMember]
-    void Log(params object?[] data);
+    void Log(params IEnumerable<object?> data);
 
     /// <summary>
     /// Записывает сообщение в журнал.
     /// </summary>
     /// <param name="data">Аргументы сообщения.</param>
     [ScriptMember]
-    void Trace(params object?[] data);
+    void Trace(params IEnumerable<object?> data);
 
     /// <summary>
     /// Записывает сообщение о предупреждении в журнал.
     /// </summary>
     /// <param name="data">Аргументы сообщения.</param>
     [ScriptMember]
-    void Warn(params object?[] data);
+    void Warn(params IEnumerable<object?> data);
 
     /// <summary>
     /// TODO.
     /// </summary>
     /// <param name="data">TODO.</param>
     [ScriptMember("dirxml")]
-    void DirXML(params object?[] data);
+    void DirXML(params IEnumerable<object?> data);
 
     /// <summary>
     /// TODO.
@@ -171,14 +171,14 @@ public interface IConsole
     /// </summary>
     /// <param name="data">TODO.</param>
     [ScriptMember]
-    void Group(params object?[] data);
+    void Group(params IEnumerable<object?> data);
 
     /// <summary>
     /// TODO.
     /// </summary>
     /// <param name="data">TODO.</param>
     [ScriptMember]
-    void GroupCollapsed(params object?[] data);
+    void GroupCollapsed(params IEnumerable<object?> data);
 
     /// <summary>
     /// TODO.
@@ -205,7 +205,7 @@ public interface IConsole
     /// <param name="label">TODO.</param>
     /// <param name="data">TODO.</param>
     [ScriptMember]
-    void TimeLog(string label, params object?[] data);
+    void TimeLog(string label, params IEnumerable<object?> data);
 
     /// <summary>
     /// TODO.
@@ -219,7 +219,7 @@ public interface IConsole
     /// </summary>
     /// <param name="data">TODO.</param>
     [ScriptMember]
-    void TimeLog(params object?[] data) => TimeLog("default", data);
+    void TimeLog(params IEnumerable<object?> data) => TimeLog("default", data);
 
     /// <summary>
     /// TODO.

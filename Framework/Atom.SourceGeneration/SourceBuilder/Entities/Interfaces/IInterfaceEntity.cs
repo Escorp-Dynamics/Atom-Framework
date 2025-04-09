@@ -63,7 +63,7 @@ public interface IInterfaceEntity<out T> : IEntity<T> where T : IEntity
     /// Добавляет родителей для наследования.
     /// </summary>
     /// <param name="parents">Родители.</param>
-    T WithParent(params string[] parents);
+    T WithParent(params IEnumerable<string> parents);
 
     /// <summary>
     /// Добавляет родителя для наследования.
@@ -78,20 +78,20 @@ public interface IInterfaceEntity<out T> : IEntity<T> where T : IEntity
     /// Добавляет шаблоны типов.
     /// </summary>
     /// <param name="generics">Шаблоны типов.</param>
-    T WithGeneric(params GenericEntity[] generics);
+    T WithGeneric(params IEnumerable<GenericEntity> generics);
 
     /// <summary>
     /// Добавляет шаблон типа.
     /// </summary>
     /// <param name="name">Имя шаблона.</param>
     /// <param name="limitations">Ограничения шаблона.</param>
-    T WithGeneric(string name, params string[] limitations) => WithGeneric(GenericEntity.Create(name, limitations));
+    T WithGeneric(string name, params IEnumerable<string> limitations) => WithGeneric(GenericEntity.Create(name, limitations));
 
     /// <summary>
     /// Добавляет свойства.
     /// </summary>
     /// <param name="properties">Свойства.</param>
-    T WithProperty(params PropertyMember[] properties);
+    T WithProperty(params IEnumerable<PropertyMember> properties);
 
     /// <summary>
     /// Добавляет свойство.
@@ -104,7 +104,7 @@ public interface IInterfaceEntity<out T> : IEntity<T> where T : IEntity
     /// Добавляет события.
     /// </summary>
     /// <param name="events">События.</param>
-    T WithEvent(params EventMember[] events);
+    T WithEvent(params IEnumerable<EventMember> events);
 
     /// <summary>
     /// Добавляет событие.
@@ -126,7 +126,7 @@ public interface IInterfaceEntity<out T> : IEntity<T> where T : IEntity
     /// Добавляет методы.
     /// </summary>
     /// <param name="methods">Методы.</param>
-    T WithMethod(params MethodMember[] methods);
+    T WithMethod(params IEnumerable<MethodMember> methods);
 
     /// <summary>
     /// Добавляет метод.
@@ -145,7 +145,7 @@ public interface IInterfaceEntity<out T> : IEntity<T> where T : IEntity
     /// Добавляет прочие вложенные сущности.
     /// </summary>
     /// <param name="entities">Сущности.</param>
-    T WithOther(params IEntity[] entities);
+    T WithOther(params IEnumerable<IEntity> entities);
 
     /// <summary>
     /// Указывает, является ли частичным.

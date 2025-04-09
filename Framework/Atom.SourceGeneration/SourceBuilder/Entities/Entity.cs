@@ -28,7 +28,7 @@ public abstract class Entity : IEntity
     /// Добавляет атрибуты.
     /// </summary>
     /// <param name="attributes">Коллекция атрибутов.</param>
-    protected virtual void AddAttribute([NotNull] params string[] attributes) => this.attributes.AddRange(attributes);
+    protected virtual void AddAttribute([NotNull] params IEnumerable<string> attributes) => this.attributes.AddRange(attributes);
 
     /// <summary>
     /// Очищает установленные атрибуты.
@@ -71,10 +71,10 @@ public abstract class Entity : IEntity
     /// <param name="sb">Сборщик строки.</param>
     /// <param name="spaces">Отступ.</param>
     /// <param name="usings">Используемые пространства имён.</param>
-    protected abstract void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params string[] usings);
+    protected abstract void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params IEnumerable<string> usings);
 
     /// <inheritdoc/>
-    public virtual string? Build(int tabs, bool release, params string[] usings)
+    public virtual string? Build(int tabs, bool release, params IEnumerable<string> usings)
     {
         if (!IsValid)
         {
@@ -97,13 +97,13 @@ public abstract class Entity : IEntity
     }
 
     /// <inheritdoc/>
-    public string? Build(int tabs, params string[] usings) => Build(tabs, default, usings);
+    public string? Build(int tabs, params IEnumerable<string> usings) => Build(tabs, default, usings);
 
     /// <inheritdoc/>
-    public string? Build(bool release, params string[] usings) => Build(default, release, usings);
+    public string? Build(bool release, params IEnumerable<string> usings) => Build(default, release, usings);
 
     /// <inheritdoc/>
-    public string? Build(params string[] usings) => Build(default, default, usings);
+    public string? Build(params IEnumerable<string> usings) => Build(default, default, usings);
 
     /// <inheritdoc/>
     public virtual void Release()
@@ -134,5 +134,5 @@ public abstract class Entity<T> : Entity, IEntity<T> where T : IEntity
     public abstract T WithComment(string? comment);
 
     /// <inheritdoc/>
-    public abstract T WithAttribute(params string[] attributes);
+    public abstract T WithAttribute(params IEnumerable<string> attributes);
 }

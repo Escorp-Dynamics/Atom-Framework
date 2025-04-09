@@ -103,7 +103,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
         sb.Append('>');
     }
 
-    private void AppendArguments(StringBuilder sb, params string[] usings)
+    private void AppendArguments(StringBuilder sb, params IEnumerable<string> usings)
     {
         if (arguments.IsEmpty) return;
 
@@ -129,7 +129,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
         }
     }
 
-    private void AppendSignature(StringBuilder sb, params string[] usings)
+    private void AppendSignature(StringBuilder sb, params IEnumerable<string> usings)
     {
         sb.Append($"{Type.GetTypeName(usings)} {Name}");
         AppendGenerics(sb);
@@ -197,7 +197,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params string[] usings)
+    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params IEnumerable<string> usings)
     {
         AppendModifiers(sb, spaces);
         AppendSignature(sb, usings);
@@ -330,41 +330,41 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     public MethodMember AsAsync() => AsAsync(true);
 
     /// <inheritdoc/>
-    public virtual MethodMember WithArgument([NotNull] params MethodArgumentMember[] arguments)
+    public virtual MethodMember WithArgument([NotNull] params IEnumerable<MethodArgumentMember> arguments)
     {
         this.arguments.AddRange(arguments);
         return this;
     }
 
     /// <inheritdoc/>
-    public MethodMember WithArgument<TArg>(string name, params string[] attributes)
+    public MethodMember WithArgument<TArg>(string name, params IEnumerable<string> attributes)
         => WithArgument(MethodArgumentMember.Create<TArg>(name).WithAttribute(attributes));
 
     /// <inheritdoc/>
-    public MethodMember WithInArgument<TArg>(string name, params string[] attributes)
+    public MethodMember WithInArgument<TArg>(string name, params IEnumerable<string> attributes)
         => WithArgument(MethodArgumentMember.CreateIn<TArg>(name).WithAttribute(attributes));
 
     /// <inheritdoc/>
-    public MethodMember WithOutArgument<TArg>(string name, params string[] attributes)
+    public MethodMember WithOutArgument<TArg>(string name, params IEnumerable<string> attributes)
         => WithArgument(MethodArgumentMember.CreateOut<TArg>(name).WithAttribute(attributes));
 
     /// <inheritdoc/>
-    public MethodMember WithRefArgument<TArg>(string name, params string[] attributes)
+    public MethodMember WithRefArgument<TArg>(string name, params IEnumerable<string> attributes)
         => WithArgument(MethodArgumentMember.CreateRef<TArg>(name).WithAttribute(attributes));
 
     /// <inheritdoc/>
-    public MethodMember WithParamsArgument<TArg>(string name, params string[] attributes)
+    public MethodMember WithParamsArgument<TArg>(string name, params IEnumerable<string> attributes)
         => WithArgument(MethodArgumentMember.CreateParams<TArg>(name).WithAttribute(attributes));
 
     /// <inheritdoc/>
-    public virtual MethodMember WithGeneric([NotNull] params GenericEntity[] generics)
+    public virtual MethodMember WithGeneric([NotNull] params IEnumerable<GenericEntity> generics)
     {
         this.generics.AddRange(generics);
         return this;
     }
 
     /// <inheritdoc/>
-    public MethodMember WithGeneric(string name, params string[] limitations) => WithGeneric(GenericEntity.Create(name, limitations));
+    public MethodMember WithGeneric(string name, params IEnumerable<string> limitations) => WithGeneric(GenericEntity.Create(name, limitations));
 
     /// <inheritdoc/>
     public override MethodMember AsStatic(bool value)
@@ -381,7 +381,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    public override MethodMember WithAttribute(params string[] attributes)
+    public override MethodMember WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
         return this;

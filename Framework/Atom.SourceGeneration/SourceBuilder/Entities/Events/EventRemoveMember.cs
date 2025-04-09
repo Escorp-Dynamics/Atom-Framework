@@ -37,7 +37,7 @@ public class EventRemoveMember : Entity<EventRemoveMember>
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params string[] usings)
+    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params IEnumerable<string> usings)
     {
         var access = AccessModifier.AsString(ParentAccessModifier);
         if (!string.IsNullOrEmpty(access)) access += ' ';
@@ -89,7 +89,7 @@ public class EventRemoveMember : Entity<EventRemoveMember>
     public override EventRemoveMember WithName(string name) => this;
 
     /// <inheritdoc/>
-    public override EventRemoveMember WithAttribute(params string[] attributes)
+    public override EventRemoveMember WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
         return this;

@@ -37,14 +37,14 @@ public interface IDOMTokenList : IEnumerable<string>
     /// </summary>
     /// <param name="tokens">Добавляемые токены.</param>
     [ScriptMember]
-    void Add(params string[] tokens);
+    void Add(params IEnumerable<string> tokens);
 
     /// <summary>
     /// Удаляет токены из списка.
     /// </summary>
     /// <param name="tokens">Удаляемые токены.</param>
     [ScriptMember]
-    void Remove(params string[] tokens);
+    void Remove(params IEnumerable<string> tokens);
 
     /// <summary>
     /// Добавляет токен в список, если его нет или удаляет из списка, если он есть.

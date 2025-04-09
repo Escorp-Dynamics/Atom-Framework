@@ -1,13 +1,8 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.SourceGeneration.Tests;
 
-public class EnumBuilderTests(ILogger logger) : BenchmarkTest<EnumBuilderTests>(logger)
+public class EnumBuilderTests(ILogger logger) : BenchmarkTests<EnumBuilderTests>(logger)
 {
     private static string? enumReference;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public EnumBuilderTests() : this(ConsoleLogger.Unicode) { }
 
@@ -54,7 +49,7 @@ public class EnumBuilderTests(ILogger logger) : BenchmarkTest<EnumBuilderTests>(
             .WithValue("Value3", "Значение 3")
             .Build(true);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(src, Is.Not.Null);
             Assert.That(src, Is.EqualTo(enumReference));

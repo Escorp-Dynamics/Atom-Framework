@@ -1,5 +1,4 @@
 using Atom.Media.Filters.Video;
-using BenchmarkDotNet.Attributes;
 
 namespace Atom.Media.Tests;
 
@@ -28,7 +27,7 @@ public partial class VideoStreamTests
             stream.WaitForEnding(TimeSpan.FromSeconds(5));
         }
 
-        Assert.That(File.Exists(outputPath), Is.True);
+        if (!IsBenchmarkEnabled) Assert.That(File.Exists(outputPath), Is.True);
     }
 
     [TestCase(TestName = "Тест фильтра Crop"), Benchmark]
@@ -46,7 +45,7 @@ public partial class VideoStreamTests
             stream.WaitForEnding(TimeSpan.FromSeconds(5));
         }
 
-        Assert.That(File.Exists(outputPath), Is.True);
+        if (!IsBenchmarkEnabled) Assert.That(File.Exists(outputPath), Is.True);
     }
 
     [TestCase(TestName = "Тест фильтра Crop + ZoomPan"), Benchmark]
@@ -67,6 +66,6 @@ public partial class VideoStreamTests
             stream.WaitForEnding(TimeSpan.FromSeconds(5));
         }
 
-        Assert.That(File.Exists(outputPath), Is.True);
+        if (!IsBenchmarkEnabled) Assert.That(File.Exists(outputPath), Is.True);
     }
 }

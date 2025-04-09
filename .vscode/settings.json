@@ -27,6 +27,7 @@
     "аудиоэффектом",
     "бакете",
     "бенд",
+    "бенчмарка",
     "Бойер",
     "Бойера",
     "валидатор",
@@ -48,6 +49,7 @@
     "Двухсимвольный",
     "декодировщик",
     "декодировщика",
+    "десериализацией",
     "десериализованные",
     "Десериализованный",
     "десериализованных",
@@ -184,9 +186,11 @@
     "fileuri",
     "focusmanager",
     "FRAMESIZES",
+    "GITFLIC",
     "hangmonitor",
     "healthreport",
     "Horspool",
+    "HPACK",
     "ICDATA",
     "IDOM",
     "IHTML",
@@ -223,6 +227,7 @@
     "RAWVIDEO",
     "referer",
     "retargeting",
+    "rmmod",
     "RSSI",
     "safebrowsing",
     "sbtv",
@@ -255,6 +260,7 @@
     "YUVJ",
     "YUYV",
     "Zombification",
-    "zoompan"
+    "zoompan",
+    "Zstd"
   ]
 }

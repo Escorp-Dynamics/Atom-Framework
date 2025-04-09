@@ -36,42 +36,42 @@ public interface IParentNode
     /// </summary>
     /// <param name="nodes">Добавляемые узлы.</param>
     [ScriptMember]
-    void Prepend(params INode[] nodes);
+    void Prepend(params IEnumerable<INode> nodes);
 
     /// <summary>
     /// Добавляет узлы в начало коллекции дочерних элементов.
     /// </summary>
     /// <param name="nodes">Добавляемые узлы.</param>
     [ScriptMember]
-    void Prepend(params string[] nodes);
+    void Prepend(params IEnumerable<string> nodes);
 
     /// <summary>
     /// Добавляет узлы в конец коллекции дочерних элементов.
     /// </summary>
     /// <param name="nodes">Добавляемые узлы.</param>
     [ScriptMember]
-    void Append(params INode[] nodes);
+    void Append(params IEnumerable<INode> nodes);
 
     /// <summary>
     /// Добавляет узлы в конец коллекции дочерних элементов.
     /// </summary>
     /// <param name="nodes">Добавляемые узлы.</param>
     [ScriptMember]
-    void Append(params string[] nodes);
+    void Append(params IEnumerable<string> nodes);
 
     /// <summary>
     /// Заменяет коллекцию дочерних элементов указанными узлами.
     /// </summary>
     /// <param name="nodes">Новые узлы.</param>
     [ScriptMember]
-    void ReplaceChildren(params INode[] nodes);
+    void ReplaceChildren(params IEnumerable<INode> nodes);
 
     /// <summary>
     /// Заменяет коллекцию дочерних элементов указанными узлами.
     /// </summary>
     /// <param name="nodes">Новые узлы.</param>
     [ScriptMember]
-    void ReplaceChildren(params string[] nodes);
+    void ReplaceChildren(params IEnumerable<string> nodes);
 
     /// <summary>
     /// Выбирает первый элемент, соответствующий селектору поиска.

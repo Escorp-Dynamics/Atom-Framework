@@ -64,7 +64,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
         sb.Append('>');
     }
 
-    private void AppendParents(StringBuilder sb, params string[] usings)
+    private void AppendParents(StringBuilder sb, params IEnumerable<string> usings)
     {
         if (parents.IsEmpty) return;
 
@@ -92,7 +92,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, params string[] usings)
+    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, params IEnumerable<string> usings)
     {
         var access = AccessModifier.AsString();
         if (!string.IsNullOrEmpty(access)) access += ' ';
@@ -150,7 +150,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
     }
 
     /// <inheritdoc/>
-    public virtual InterfaceEntity WithEvent([NotNull] params EventMember[] events)
+    public virtual InterfaceEntity WithEvent([NotNull] params IEnumerable<EventMember> events)
     {
         this.events.AddRange(events);
         return this;
@@ -163,17 +163,17 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
     public InterfaceEntity WithEvent<TType>(string name) => WithEvent<TType>(name, default);
 
     /// <inheritdoc/>
-    public virtual InterfaceEntity WithGeneric([NotNull] params GenericEntity[] generics)
+    public virtual InterfaceEntity WithGeneric([NotNull] params IEnumerable<GenericEntity> generics)
     {
         this.generics.AddRange(generics);
         return this;
     }
 
     /// <inheritdoc/>
-    public InterfaceEntity WithGeneric(string name, params string[] limitations) => WithGeneric(GenericEntity.Create(name, limitations));
+    public InterfaceEntity WithGeneric(string name, params IEnumerable<string> limitations) => WithGeneric(GenericEntity.Create(name, limitations));
 
     /// <inheritdoc/>
-    public virtual InterfaceEntity WithMethod([NotNull] params MethodMember[] methods)
+    public virtual InterfaceEntity WithMethod([NotNull] params IEnumerable<MethodMember> methods)
     {
         foreach (var method in methods)
         {
@@ -191,14 +191,14 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
     public InterfaceEntity WithMethod<TType>(string name) => WithMethod(MethodMember.Create<TType>(name));
 
     /// <inheritdoc/>
-    public virtual InterfaceEntity WithOther([NotNull] params IEntity[] entities)
+    public virtual InterfaceEntity WithOther([NotNull] params IEnumerable<IEntity> entities)
     {
         others.AddRange(entities);
         return this;
     }
 
     /// <inheritdoc/>
-    public virtual InterfaceEntity WithParent([NotNull] params string[] parents)
+    public virtual InterfaceEntity WithParent([NotNull] params IEnumerable<string> parents)
     {
         this.parents.AddRange(parents);
         return this;
@@ -208,7 +208,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
     public InterfaceEntity WithParent<TType>(bool withNamespaces = true, bool withNullable = true, bool withGenericNullable = true) => WithParent(typeof(TType).GetFriendlyName(withNamespaces, withNullable, withGenericNullable));
 
     /// <inheritdoc/>
-    public virtual InterfaceEntity WithProperty([NotNull] params PropertyMember[] properties)
+    public virtual InterfaceEntity WithProperty([NotNull] params IEnumerable<PropertyMember> properties)
     {
         this.properties.AddRange(properties);
         return this;
@@ -232,7 +232,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
     }
 
     /// <inheritdoc/>
-    public override InterfaceEntity WithAttribute(params string[] attributes)
+    public override InterfaceEntity WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
         return this;

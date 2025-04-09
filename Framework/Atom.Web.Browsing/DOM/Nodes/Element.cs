@@ -182,27 +182,27 @@ public class Element : Node, IElement
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Prepend(params INode[] nodes) => ParentNode.Prepend(nodes);
+    public void Prepend(params IEnumerable<INode> nodes) => ParentNode.Prepend(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Prepend(params string[] nodes) => ParentNode.Prepend(nodes);
+    public void Prepend(params IEnumerable<string> nodes) => ParentNode.Prepend(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Append(params INode[] nodes) => ParentNode.Append(nodes);
+    public void Append(params IEnumerable<INode> nodes) => ParentNode.Append(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Append(params string[] nodes) => ParentNode.Append(nodes);
+    public void Append(params IEnumerable<string> nodes) => ParentNode.Append(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void ReplaceChildren(params INode[] nodes) => ParentNode.ReplaceChildren(nodes);
+    public void ReplaceChildren(params IEnumerable<INode> nodes) => ParentNode.ReplaceChildren(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void ReplaceChildren(params string[] nodes) => ParentNode.ReplaceChildren(nodes);
+    public void ReplaceChildren(params IEnumerable<string> nodes) => ParentNode.ReplaceChildren(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
@@ -214,27 +214,27 @@ public class Element : Node, IElement
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Before(params INode[] nodes) => ChildNode.Before(nodes);
+    public void Before(params IEnumerable<INode> nodes) => ChildNode.Before(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void Before(params string[] nodes) => ChildNode.Before(nodes);
+    public void Before(params IEnumerable<string> nodes) => ChildNode.Before(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void After(params INode[] nodes) => ChildNode.After(nodes);
+    public void After(params IEnumerable<INode> nodes) => ChildNode.After(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void After(params string[] nodes) => ChildNode.After(nodes);
+    public void After(params IEnumerable<string> nodes) => ChildNode.After(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void ReplaceWith(params INode[] nodes) => ChildNode.ReplaceWith(nodes);
+    public void ReplaceWith(params IEnumerable<INode> nodes) => ChildNode.ReplaceWith(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]
-    public void ReplaceWith(params string[] nodes) => ChildNode.ReplaceWith(nodes);
+    public void ReplaceWith(params IEnumerable<string> nodes) => ChildNode.ReplaceWith(nodes);
 
     /// <inheritdoc/>
     [ScriptMember]

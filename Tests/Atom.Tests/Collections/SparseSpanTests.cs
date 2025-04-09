@@ -1,15 +1,9 @@
-#pragma warning disable IDE0059
-
 using Atom.Buffers;
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
 
 namespace Atom.Collections.Tests;
 
-public class SparseSpanTests(ILogger logger) : BenchmarkTest<SparseSpanTests>(logger)
+public class SparseSpanTests(ILogger logger) : BenchmarkTests<SparseSpanTests>(logger)
 {
-    public override bool IsBenchmarkDisabled => true;
-
     public SparseSpanTests() : this(ConsoleLogger.Unicode) { }
 
     [TestCase(TestName = "Тест перебора через foreach"), Benchmark(Description = "foreach", Baseline = true)]
@@ -34,7 +28,7 @@ public class SparseSpanTests(ILogger logger) : BenchmarkTest<SparseSpanTests>(lo
 
         array.Release();
 
-        if (IsTest) Assert.That(count, Is.EqualTo(3));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(3));
     }
 
     [TestCase(TestName = "Тест перебора через foreach (SpanPool)"), Benchmark(Description = "foreach (SpanPool)")]
@@ -61,7 +55,7 @@ public class SparseSpanTests(ILogger logger) : BenchmarkTest<SparseSpanTests>(lo
         array.Release();
         SpanPool<int>.Shared.Return(span);
 
-        if (IsTest) Assert.That(count, Is.EqualTo(3));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(3));
     }
 
     [TestCase(TestName = "Тест перебора через for"), Benchmark(Description = "for")]
@@ -87,7 +81,7 @@ public class SparseSpanTests(ILogger logger) : BenchmarkTest<SparseSpanTests>(lo
 
         array.Release();
 
-        if (IsTest) Assert.That(count, Is.EqualTo(3));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(3));
     }
 
     [TestCase(TestName = "Тест перебора через for (SpanPool)"), Benchmark(Description = "for (SpanPool)")]
@@ -115,6 +109,6 @@ public class SparseSpanTests(ILogger logger) : BenchmarkTest<SparseSpanTests>(lo
         array.Release();
         SpanPool<int>.Shared.Return(span);
 
-        if (IsTest) Assert.That(count, Is.EqualTo(3));
+        if (!IsBenchmarkEnabled) Assert.That(count, Is.EqualTo(3));
     }
 }

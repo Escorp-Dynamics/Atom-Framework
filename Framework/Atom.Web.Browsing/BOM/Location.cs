@@ -7,124 +7,43 @@ namespace Atom.Web.Browsing.BOM;
 /// <summary>
 /// Представляет локацию страницы.
 /// </summary>
-public class Location : Reactively, ILocation
+public partial class Location : ILocation
 {
+    /// <inheritdoc/>
+    [Reactively(Attributes = [typeof(ScriptMemberAttribute)])]
     private Uri href;
+
+    /// <inheritdoc/>
+    [Reactively(Attributes = [typeof(ScriptMemberAttribute)])]
     private string protocol;
+
+    /// <inheritdoc/>
+    [Reactively(Attributes = [typeof(ScriptMemberAttribute)])]
     private string host;
+
+    /// <inheritdoc/>
+    [Reactively(Attributes = [typeof(ScriptMemberAttribute)])]
     private string hostName;
+
+    /// <inheritdoc/>
+    [Reactively(Attributes = [typeof(ScriptMemberAttribute)])]
     private string port;
+
+    /// <inheritdoc/>
+    [Reactively(Attributes = [typeof(ScriptMemberAttribute)])]
     private string path;
+
+    /// <inheritdoc/>
+    [Reactively(Attributes = [typeof(ScriptMemberAttribute)])]
     private string search;
+
+    /// <inheritdoc/>
+    [Reactively(Attributes = [typeof(ScriptMemberAttribute)])]
     private string hash;
 
     /// <inheritdoc/>
     [ScriptMember]
-    public Uri Href
-    {
-        get => href;
-
-        set
-        {
-            SetProperty(ref href, value);
-            if (value is not null) ParseHref(value);
-        }
-    }
-
-    /// <inheritdoc/>
-    [ScriptMember]
     public Uri Origin => new($"{protocol}://{hostName}");
-
-    /// <inheritdoc/>
-    [ScriptMember]
-    public string Protocol
-    {
-        get => protocol;
-
-        set
-        {
-            SetProperty(ref protocol, value);
-            UpdateHref();
-        }
-    }
-
-    /// <inheritdoc/>
-    [ScriptMember]
-    public string Host
-    {
-        get => host;
-
-        set
-        {
-            SetProperty(ref host, value);
-            UpdateHref();
-        }
-    }
-
-    /// <inheritdoc/>
-    [ScriptMember]
-    public string HostName
-    {
-        get => hostName;
-
-        set
-        {
-            SetProperty(ref hostName, value);
-            UpdateHref();
-        }
-    }
-
-    /// <inheritdoc/>
-    [ScriptMember]
-    public string Port
-    {
-        get => port;
-
-        set
-        {
-            SetProperty(ref port, value);
-            UpdateHref();
-        }
-    }
-
-    /// <inheritdoc/>
-    [ScriptMember]
-    public string Path
-    {
-        get => path;
-
-        set
-        {
-            SetProperty(ref path, value);
-            UpdateHref();
-        }
-    }
-
-    /// <inheritdoc/>
-    [ScriptMember]
-    public string Search
-    {
-        get => search;
-
-        set
-        {
-            SetProperty(ref search, value);
-            UpdateHref();
-        }
-    }
-
-    /// <inheritdoc/>
-    [ScriptMember]
-    public string Hash
-    {
-        get => hash;
-
-        set
-        {
-            SetProperty(ref hash, value);
-            UpdateHref();
-        }
-    }
 
     /// <inheritdoc/>
     [ScriptMember]
@@ -142,7 +61,7 @@ public class Location : Reactively, ILocation
         hash = url.Fragment;
     }
 
-    [ScriptMember(ScriptAccess.None)]
+    /*[ScriptMember(ScriptAccess.None)]
     private void ParseHref(Uri url)
     {
         protocol = url.Scheme;
@@ -152,10 +71,10 @@ public class Location : Reactively, ILocation
         path = url.AbsolutePath;
         search = url.Query;
         hash = url.Fragment;
-    }
+    }*/
 
-    [ScriptMember(ScriptAccess.None)]
-    private void UpdateHref() => href = new Uri($"{protocol}//{host}{path}{search}{hash}");
+    /*[ScriptMember(ScriptAccess.None)]
+    private void UpdateHref() => href = new Uri($"{protocol}//{host}{path}{search}{hash}");*/
 
     /// <inheritdoc/>
     [ScriptMember]

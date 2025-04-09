@@ -23,16 +23,25 @@ public class GeolocationJsonConverter<T> : ExtendableJsonConverter<T> where T : 
                 rootElement = doc.RootElement;
             }
 
-            var coords = rootElement.EnumerateArray().Where(x => x.TryGetDouble(out _)).Select(x => x.GetDouble()).ToArray();
+            T? geo = default;
+            byte i = default;
 
-            if (coords.Length < 2) return default;
+            foreach (var item in rootElement.EnumerateArray())
+            {
+                if (!item.TryGetDouble(out var coords)) continue;
+                geo ??= Geolocation.Rent<T>();
 
-            var geo = Geolocation.Rent<T>();
+                if (i is 0)
+                    geo.Latitude = coords;
+                else if (i is 1)
+                    geo.Longitude = coords;
+                else if (i is 2)
+                    geo.Altitude = coords;
+                else
+                    break;
 
-            geo.Latitude = coords[0];
-            geo.Longitude = coords[1];
-
-            if (coords.Length > 2) geo.Altitude = coords[2];
+                ++i;
+            }
 
             return geo;
         }

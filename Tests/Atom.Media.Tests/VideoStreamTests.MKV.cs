@@ -1,5 +1,3 @@
-using BenchmarkDotNet.Attributes;
-
 namespace Atom.Media.Tests;
 
 public partial class VideoStreamTests

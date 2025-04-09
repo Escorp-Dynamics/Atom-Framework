@@ -78,7 +78,7 @@ public interface IPropertyMember<out T> : IMember<T> where T : IEntity
     /// <param name="body">Тело асессора.</param>
     /// <param name="isReadOnly">Указывает, являет ли асессор только для чтения.</param>
     /// <param name="attributes">Атрибуты асессора.</param>
-    T WithGetter(string body, bool isReadOnly, params string[] attributes) => WithGetter(PropertyAccessorMember.Create()
+    T WithGetter(string body, bool isReadOnly, params IEnumerable<string> attributes) => WithGetter(PropertyAccessorMember.Create()
         .WithAttribute(attributes)
         .WithCode(body)
         .AsReadOnly(isReadOnly)
@@ -89,13 +89,7 @@ public interface IPropertyMember<out T> : IMember<T> where T : IEntity
     /// </summary>
     /// <param name="body">Тело асессора.</param>
     /// <param name="attributes">Атрибуты асессора.</param>
-    T WithGetter(string body, params string[] attributes) => WithGetter(body, default, attributes);
-
-    /// <summary>
-    /// Добавляет асессор.
-    /// </summary>
-    /// <param name="attributes">Атрибуты асессора.</param>
-    T WithGetter(params string[] attributes) => WithGetter(string.Empty, attributes);
+    T WithGetter(string body, params IEnumerable<string> attributes) => WithGetter(body, default, attributes);
 
     /// <summary>
     /// Добавляет асессор.
@@ -115,28 +109,12 @@ public interface IPropertyMember<out T> : IMember<T> where T : IEntity
     /// <param name="isInit">Указывает, что мутатор будет инициализируемым.</param>
     /// <param name="comment">Комментарий.</param>
     /// <param name="attributes">Атрибуты мутатора.</param>
-    T WithSetter(string body, bool isInit, string comment, params string[] attributes) => WithSetter(PropertyMutatorMember.Create()
+    T WithSetter(string body, bool isInit, string comment, params IEnumerable<string> attributes) => WithSetter(PropertyMutatorMember.Create()
         .WithAttribute(attributes)
         .WithCode(body)
         .AsInit(isInit)
         .WithComment(comment)
     );
-
-    /// <summary>
-    /// Добавляет мутатор.
-    /// </summary>
-    /// <param name="body">Тело мутатора.</param>
-    /// <param name="isInit">Указывает, что мутатор будет инициализируемым.</param>
-    /// <param name="attributes">Атрибуты мутатора.</param>
-    T WithSetter(string body, bool isInit, params string[] attributes) => WithSetter(body, isInit, string.Empty, attributes);
-
-    /// <summary>
-    /// Добавляет мутатор.
-    /// </summary>
-    /// <param name="body">Тело мутатора.</param>
-    /// <param name="isInit">Указывает, что мутатор будет инициализируемым.</param>
-    /// <param name="comment">Комментарий.</param>
-    T WithSetter(string body, bool isInit, string comment) => WithSetter(body, isInit, comment, []);
 
     /// <summary>
     /// Добавляет мутатор.
@@ -157,27 +135,7 @@ public interface IPropertyMember<out T> : IMember<T> where T : IEntity
     /// <param name="body">Тело мутатора.</param>
     /// <param name="comment">Комментарий.</param>
     /// <param name="attributes">Атрибуты мутатора.</param>
-    T WithSetter(string body, string comment, params string[] attributes) => WithSetter(body, default, comment, attributes);
-
-    /// <summary>
-    /// Добавляет мутатор.
-    /// </summary>
-    /// <param name="body">Тело мутатора.</param>
-    /// <param name="attributes">Атрибуты мутатора.</param>
-    T WithSetter(string body, params string[] attributes) => WithSetter(body, string.Empty, attributes);
-
-    /// <summary>
-    /// Добавляет мутатор.
-    /// </summary>
-    /// <param name="attributes">Атрибуты мутатора.</param>
-    T WithSetter(params string[] attributes) => WithSetter(string.Empty, attributes);
-
-    /// <summary>
-    /// Добавляет мутатор.
-    /// </summary>
-    /// <param name="body">Тело мутатора.</param>
-    /// <param name="comment">Комментарий.</param>
-    T WithSetter(string body, string comment) => WithSetter(body, false, comment);
+    T WithSetter(string body, string comment, params IEnumerable<string> attributes) => WithSetter(body, default, comment, attributes);
 
     /// <summary>
     /// Добавляет мутатор.

@@ -17,23 +17,12 @@ public static class CollectionsExtensions
     /// <param name="dictionary">Исходный словарь.</param>
     /// <param name="items">Добавляемые элементы.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static IDictionary<TKey, TValue>? AddRange<TKey, TValue>(this IDictionary<TKey, TValue>? dictionary, IEnumerable<KeyValuePair<TKey, TValue>>? items)
+    public static IDictionary<TKey, TValue>? AddRange<TKey, TValue>(this IDictionary<TKey, TValue>? dictionary, params IEnumerable<KeyValuePair<TKey, TValue>>? items)
     {
         if (dictionary is null || items is null) return dictionary;
         foreach (var item in items) dictionary.Add(item.Key, item.Value);
         return dictionary;
     }
-
-    /// <summary>
-    /// Добавляет несколько элементов в словарь.
-    /// </summary>
-    /// <typeparam name="TKey">Тип ключа.</typeparam>
-    /// <typeparam name="TValue">Тип значения.</typeparam>
-    /// <param name="dictionary">Исходный словарь.</param>
-    /// <param name="items">Добавляемые элементы.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static IDictionary<TKey, TValue>? AddRange<TKey, TValue>(this IDictionary<TKey, TValue>? dictionary, params KeyValuePair<TKey, TValue>[]? items)
-        => dictionary.AddRange(items as IEnumerable<KeyValuePair<TKey, TValue>>);
 
     /// <summary>
     /// Преобразует диапазон в разреженный массив.

@@ -1,15 +1,10 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.Text.Tests;
 
-public class ContainsTests(ILogger logger) : BenchmarkTest<ContainsTests>(logger)
+public class ContainsTests(ILogger logger) : BenchmarkTests<ContainsTests>(logger)
 {
     private const string SearchPattern = "Поиск";
     private static string? shortText;
     private static string? longText;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public ContainsTests() : this(ConsoleLogger.Unicode) { }
 
@@ -27,62 +22,62 @@ public class ContainsTests(ILogger logger) : BenchmarkTest<ContainsTests>(logger
 
     private void ShortTextTest(SubstringSearchAlgorithm algorithm)
     {
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
             Assert.That(shortText, Is.Not.Null);
         else
             ArgumentException.ThrowIfNullOrEmpty(shortText);
 
         var isFound = shortText!.Contains(SearchPattern, algorithm);
-        if (IsTest) Assert.That(isFound, Is.True);
+        if (!IsBenchmarkEnabled) Assert.That(isFound, Is.True);
 
         isFound = shortText!.Contains(SearchPattern, StringComparison.InvariantCultureIgnoreCase, algorithm);
-        if (IsTest) Assert.That(isFound, Is.True);
+        if (!IsBenchmarkEnabled) Assert.That(isFound, Is.True);
     }
 
     private void ShortTextTest() => ShortTextTest(default);
 
     private void ShortTextDotnetTest()
     {
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
             Assert.That(shortText, Is.Not.Null);
         else
             ArgumentException.ThrowIfNullOrEmpty(shortText);
 
         var isFound = shortText!.Contains(SearchPattern);
-        if (IsTest) Assert.That(isFound, Is.True);
+        if (!IsBenchmarkEnabled) Assert.That(isFound, Is.True);
 
         isFound = shortText!.Contains(SearchPattern, StringComparison.InvariantCultureIgnoreCase);
-        if (IsTest) Assert.That(isFound, Is.True);
+        if (!IsBenchmarkEnabled) Assert.That(isFound, Is.True);
     }
 
     private void LongTextTest(SubstringSearchAlgorithm algorithm)
     {
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
             Assert.That(longText, Is.Not.Null);
         else
             ArgumentException.ThrowIfNullOrEmpty(longText);
 
         var isFound = longText!.Contains(SearchPattern, algorithm);
-        if (IsTest) Assert.That(isFound, Is.True);
+        if (!IsBenchmarkEnabled) Assert.That(isFound, Is.True);
 
         isFound = longText!.Contains(SearchPattern, StringComparison.InvariantCultureIgnoreCase, algorithm);
-        if (IsTest) Assert.That(isFound, Is.True);
+        if (!IsBenchmarkEnabled) Assert.That(isFound, Is.True);
     }
 
     private void LongTextTest() => LongTextTest(default);
 
     private void LongTextDotnetTest()
     {
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
             Assert.That(longText, Is.Not.Null);
         else
             ArgumentException.ThrowIfNullOrEmpty(longText);
 
         var isFound = shortText!.Contains(SearchPattern);
-        if (IsTest) Assert.That(isFound, Is.True);
+        if (!IsBenchmarkEnabled) Assert.That(isFound, Is.True);
 
         isFound = shortText!.Contains(SearchPattern, StringComparison.InvariantCultureIgnoreCase);
-        if (IsTest) Assert.That(isFound, Is.True);
+        if (!IsBenchmarkEnabled) Assert.That(isFound, Is.True);
     }
 
 

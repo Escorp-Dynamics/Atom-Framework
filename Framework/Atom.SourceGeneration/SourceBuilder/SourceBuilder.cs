@@ -27,14 +27,14 @@ public class SourceBuilder : ISourceBuilder
     public IEnumerable<IEntity> Entities => entities;
 
     /// <inheritdoc/>
-    public ISourceBuilder WithDirective(params string[] directives)
+    public ISourceBuilder WithDirective(params IEnumerable<string> directives)
     {
         this.directives.AddRange(directives);
         return this;
     }
 
     /// <inheritdoc/>
-    public virtual ISourceBuilder WithUsing(params string[] ns)
+    public virtual ISourceBuilder WithUsing(params IEnumerable<string> ns)
     {
         usings.AddRange(ns);
         return this;
@@ -48,20 +48,20 @@ public class SourceBuilder : ISourceBuilder
     }
 
     /// <inheritdoc/>
-    public virtual ISourceBuilder WithEntity(params IEntity[] entities)
+    public virtual ISourceBuilder WithEntity(params IEnumerable<IEntity> entities)
     {
         this.entities.AddRange(entities);
         return this;
     }
 
     /// <inheritdoc/>
-    public ISourceBuilder WithEnum(EnumEntity entity) => WithEntity(entity);
+    public ISourceBuilder WithEnum(params IEnumerable<EnumEntity> enums) => WithEntity(enums);
 
     /// <inheritdoc/>
-    public ISourceBuilder WithInterface(InterfaceEntity entity) => WithEntity(entity);
+    public ISourceBuilder WithInterface(params IEnumerable<InterfaceEntity> interfaces) => WithEntity(interfaces);
 
     /// <inheritdoc/>
-    public ISourceBuilder WithClass(ClassEntity entity) => WithEntity(entity);
+    public ISourceBuilder WithClass(params IEnumerable<ClassEntity> classes) => WithEntity(classes);
 
     /// <inheritdoc/>
     public string? Build(bool release)

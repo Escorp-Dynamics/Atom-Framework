@@ -28,7 +28,7 @@ public class FieldMember : Member<FieldMember>, IFieldMember<FieldMember>
     public override bool IsValid => !string.IsNullOrEmpty(Name) && !string.IsNullOrEmpty(Type);
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, [NotNull] params string[] usings)
+    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, [NotNull] params IEnumerable<string> usings)
     {
         var access = AccessModifier.AsString();
         if (!string.IsNullOrEmpty(access)) access += ' ';
@@ -117,7 +117,7 @@ public class FieldMember : Member<FieldMember>, IFieldMember<FieldMember>
     }
 
     /// <inheritdoc/>
-    public override FieldMember WithAttribute(params string[] attributes)
+    public override FieldMember WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
         return this;

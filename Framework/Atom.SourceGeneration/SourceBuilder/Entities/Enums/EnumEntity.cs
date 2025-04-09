@@ -28,7 +28,7 @@ public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
     public override bool IsValid => !string.IsNullOrEmpty(Name) && values.CurrentIndex >= 0;
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, params string[] usings)
+    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, params IEnumerable<string> usings)
     {
         var type = string.IsNullOrEmpty(Type) || Type is "int" or "Int32" ? string.Empty : $" : {Type}";
 
@@ -56,7 +56,7 @@ public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
     }
 
     /// <inheritdoc/>
-    public override EnumEntity WithAttribute([NotNull] params string[] attributes)
+    public override EnumEntity WithAttribute([NotNull] params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
         return this;
@@ -94,14 +94,14 @@ public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
     }
 
     /// <inheritdoc/>
-    public virtual EnumEntity WithValue([NotNull] params EnumMember[] values)
+    public virtual EnumEntity WithValue([NotNull] params IEnumerable<EnumMember> values)
     {
         this.values.AddRange(values);
         return this;
     }
 
     /// <inheritdoc/>
-    public EnumEntity WithValue(string name, long value, string comment, params string[] attributes) => WithValue(EnumMember.Create()
+    public EnumEntity WithValue(string name, long value, string comment, params IEnumerable<string> attributes) => WithValue(EnumMember.Create()
         .WithName(name)
         .WithValue(value)
         .WithComment(comment)
@@ -115,7 +115,7 @@ public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
     public EnumEntity WithValue(string name) => WithValue(name, -1);
 
     /// <inheritdoc/>
-    public EnumEntity WithValue(string name, string comment, params string[] attributes) => WithValue(name, -1, comment, attributes);
+    public EnumEntity WithValue(string name, string comment, params IEnumerable<string> attributes) => WithValue(name, -1, comment, attributes);
 
     /// <inheritdoc/>
     public override void Release()

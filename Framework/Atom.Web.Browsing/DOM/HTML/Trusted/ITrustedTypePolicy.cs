@@ -19,7 +19,7 @@ public interface ITrustedTypePolicy
     /// <param name="input">Входные данные.</param>
     /// <param name="arguments">Аргументы.</param>
     [ScriptMember]
-    ITrustedHTML CreateHTML(string input, params object?[] arguments);
+    ITrustedHTML CreateHTML(string input, params IEnumerable<object?> arguments);
 
     /// <summary>
     /// Создаёт доверительный скрипт.
@@ -27,7 +27,7 @@ public interface ITrustedTypePolicy
     /// <param name="input">Входные данные.</param>
     /// <param name="arguments">Аргументы.</param>
     [ScriptMember]
-    ITrustedScript CreateScript(string input, params object?[] arguments);
+    ITrustedScript CreateScript(string input, params IEnumerable<object?> arguments);
 
     /// <summary>
     /// Создаёт доверительный скрипт в формате ссылки.
@@ -35,5 +35,5 @@ public interface ITrustedTypePolicy
     /// <param name="input">Входные данные.</param>
     /// <param name="arguments">Аргументы.</param>
     [ScriptMember]
-    ITrustedScriptURL CreateScriptURL(string input, params object?[] arguments);
+    ITrustedScriptURL CreateScriptURL(string input, params IEnumerable<object?> arguments);
 }

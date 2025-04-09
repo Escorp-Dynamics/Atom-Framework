@@ -14,46 +14,66 @@ public class FileLogger : ConsoleLogger
     /// <summary>
     /// Путь к файлу журнала.
     /// </summary>
-    public string Path { get; init; } = string.Empty;
+    public string Path { get; init; } = "logs/";
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="FileLogger"/>.
     /// </summary>
+    /// <param name="path">Путь для хранения файла журнала событий.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public FileLogger() : base() => IsDateEnabled = true;
+    public FileLogger(string path) : base()
+    {
+        Path = path;
+        IsDateEnabled = true;
+        IsStylingOutputEnabled = default;
+        Writer = CreateWriter();
+    }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="FileLogger"/>.
     /// </summary>
     /// <param name="categoryName">Название категории.</param>
+    /// <param name="path">Путь для хранения файла журнала событий.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public FileLogger(string categoryName) : base(categoryName) => IsDateEnabled = true;
+    public FileLogger(string categoryName, string path) : base(categoryName)
+    {
+        Path = path;
+        IsDateEnabled = true;
+        IsStylingOutputEnabled = default;
+        Writer = CreateWriter();
+    }
 
-    /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected override TextWriter CreateWriter()
+    private StreamWriter CreateWriter()
     {
         var directory = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(Path));
         if (!Directory.Exists(directory)) Directory.CreateDirectory(directory!);
 
-        var sw = File.AppendText(Path);
-        sw.AutoFlush = true;
+        var sw = new StreamWriter(Path, new FileStreamOptions
+        {
+            Access = FileAccess.Write,
+            Mode = FileMode.Append,
+            Options = FileOptions.Asynchronous,
+            Share = FileShare.Read,
+        })
+        {
+            AutoFlush = true,
+        };
+
         return sw;
     }
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected override void FormatDateTime([NotNull] ref StringBuilder sb, DateTime dt)
+    protected override void FormatDateTime([NotNull] StringBuilder sb, DateTime dt)
     {
-        if (IsDateEnabled || IsTimeEnabled)
-        {
-            if (IsDateEnabled) sb.Append(dt.ToString(DateFormat));
+        if (!IsDateEnabled && !IsTimeEnabled) return;
+        if (IsDateEnabled) sb.Append(dt.ToString(DateFormat));
 
-            if (IsTimeEnabled)
-            {
-                if (IsDateEnabled) sb.Append(' ');
-                sb.Append(dt.ToString(TimeFormat));
-            }
+        if (IsTimeEnabled)
+        {
+            if (IsDateEnabled) sb.Append(' ');
+            sb.Append(dt.ToString(TimeFormat));
         }
     }
 

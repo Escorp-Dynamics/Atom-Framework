@@ -1,13 +1,9 @@
 using Atom.Web.Analytics;
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
 
 namespace Atom.Web.Proxies.Services.Tests;
 
-public class ServiceProxyTests(ILogger logger) : BenchmarkTest<ServiceProxyTests>(logger)
+public class ServiceProxyTests(ILogger logger) : BenchmarkTests<ServiceProxyTests>(logger)
 {
-    public override bool IsBenchmarkDisabled => true;
-
     public ServiceProxyTests() : this(ConsoleLogger.Unicode) { }
 
     [TestCase(TestName = "Тест сериализации"), Benchmark]
@@ -20,7 +16,7 @@ public class ServiceProxyTests(ILogger logger) : BenchmarkTest<ServiceProxyTests
 
         var json = proxy.Serialize();
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(json, Is.Not.Null);
             Assert.That(json, Is.EqualTo(/*lang=json,strict*/ "{\"host\":\"localhost\",\"port\":80}"));
@@ -29,7 +25,7 @@ public class ServiceProxyTests(ILogger logger) : BenchmarkTest<ServiceProxyTests
         if (string.IsNullOrEmpty(json)) return;
         var proxy2 = ServiceProxy.Deserialize(json);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(proxy2, Is.Not.Null);
 
@@ -54,7 +50,7 @@ public class ServiceProxyTests(ILogger logger) : BenchmarkTest<ServiceProxyTests
 
         json = proxy.Serialize();
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(json, Is.Not.Null);
             Assert.That(json, Is.EqualTo(/*lang=json,strict*/ "{\"host\":\"localhost\",\"port\":80,\"anonymity\":3,\"geolocation\":{\"continent\":\"SA\",\"country\":\"BRA\",\"latitude\":45.65656,\"longitude\":135.6334544},\"asn\":\"Test ASN\",\"alive\":\"01.02.2025 21:04:35\",\"uptime\":40}"));
@@ -63,7 +59,7 @@ public class ServiceProxyTests(ILogger logger) : BenchmarkTest<ServiceProxyTests
         if (string.IsNullOrEmpty(json)) return;
         proxy2 = ServiceProxy.Deserialize(json);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(proxy2, Is.Not.Null);
 

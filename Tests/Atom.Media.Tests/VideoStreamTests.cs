@@ -1,14 +1,10 @@
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.Media.Tests;
 
-public partial class VideoStreamTests(ILogger logger) : BenchmarkTest<VideoStreamTests>(logger)
+public partial class VideoStreamTests(ILogger logger) : BenchmarkTests<VideoStreamTests>(logger)
 {
-    public override bool IsBenchmarkDisabled => true;
-
     public VideoStreamTests() : this(ConsoleLogger.Unicode) { }
 
-    private static void BaseTest(string inputFormat, string outputFormat)
+    private void BaseTest(string inputFormat, string outputFormat)
     {
         var isNoise = string.IsNullOrEmpty(inputFormat);
         var inputPath = isNoise ? string.Empty : Path.GetFullPath($"assets/test.{inputFormat}");
@@ -25,10 +21,10 @@ public partial class VideoStreamTests(ILogger logger) : BenchmarkTest<VideoStrea
                 stream.WaitForEnding();
         }
 
-        Assert.That(File.Exists(outputPath), Is.True);
+        if (!IsBenchmarkEnabled) Assert.That(File.Exists(outputPath), Is.True);
     }
 
-    private static void V4L2Test(string inputFormat, string outputDevice)
+    private void V4L2Test(string inputFormat, string outputDevice)
     {
         var isImage = inputFormat is "png" or "jpg" or "webp";
 
@@ -49,6 +45,6 @@ public partial class VideoStreamTests(ILogger logger) : BenchmarkTest<VideoStrea
         else
             stream.WaitForEnding();
 
-        Assert.Pass();
+        if (!IsBenchmarkEnabled) Assert.Pass();
     }
 }

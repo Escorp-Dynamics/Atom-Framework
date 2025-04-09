@@ -25,7 +25,7 @@ public interface IClassEntity<out T> : IInterfaceEntity<T> where T : IEntity
     /// Добавляет поля.
     /// </summary>
     /// <param name="fields">Поля.</param>
-    T WithField(params FieldMember[] fields);
+    T WithField(params IEnumerable<FieldMember> fields);
 
     /// <summary>
     /// Добавляет поле.

@@ -1,14 +1,9 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.SourceGeneration.Tests;
 
-public class MutatorBuilderTests(ILogger logger) : BenchmarkTest<MutatorBuilderTests>(logger)
+public class MutatorBuilderTests(ILogger logger) : BenchmarkTests<MutatorBuilderTests>(logger)
 {
     private static string? propertyMutatorReference;
     private static string? eventRemoveReference;
-
-    public override bool IsBenchmarkDisabled => true;
 
     public MutatorBuilderTests() : this(ConsoleLogger.Unicode) { }
 
@@ -53,7 +48,7 @@ public class MutatorBuilderTests(ILogger logger) : BenchmarkTest<MutatorBuilderT
             .WithAttribute("Test")
             .Build(true);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(src, Is.Not.Null);
             Assert.That(src, Is.EqualTo(propertyMutatorReference));
@@ -80,7 +75,7 @@ public class MutatorBuilderTests(ILogger logger) : BenchmarkTest<MutatorBuilderT
             .WithAttribute("Test")
             .Build(true);
 
-        if (IsTest)
+        if (!IsBenchmarkEnabled)
         {
             Assert.That(src, Is.Not.Null);
             Assert.That(src, Is.EqualTo(eventRemoveReference));

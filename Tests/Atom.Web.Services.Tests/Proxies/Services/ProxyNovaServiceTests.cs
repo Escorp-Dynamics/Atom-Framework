@@ -1,12 +1,7 @@
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Loggers;
-
 namespace Atom.Web.Proxies.Services.Tests;
 
-public class ProxyNovaServiceTests(ILogger logger) : BenchmarkTest<ProxyNovaServiceTests>(logger)
+public class ProxyNovaServiceTests(ILogger logger) : BenchmarkTests<ProxyNovaServiceTests>(logger)
 {
-    public override bool IsBenchmarkDisabled => true;
-
     public ProxyNovaServiceTests() : this(ConsoleLogger.Unicode) { }
 
     [TestCase(TestName = "Базовый тест"), Benchmark]
