@@ -377,7 +377,7 @@ public static class Extensions
     /// <typeparam name="T">Тип аргументов события.</typeparam>
     /// <returns>True, если событие было успешно выполнено и не отменено, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool On<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>(this MutableEventHandler<T>? handler, Action<T>? argsModifier) where T : MutableEventArgs
+    public static bool On<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>(this MutableEventHandler<T>? handler, Action<T>? argsModifier) where T : MutableEventArgs
     {
         if (handler is null) return true;
 
@@ -400,5 +400,5 @@ public static class Extensions
     /// <typeparam name="T">Тип аргументов события.</typeparam>
     /// <returns>True, если событие было успешно выполнено и не отменено, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool On<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>(this MutableEventHandler<T>? handler) where T : MutableEventArgs => handler.On(default);
+    public static bool On<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>(this MutableEventHandler<T>? handler) where T : MutableEventArgs => handler.On(default);
 }

@@ -40,7 +40,7 @@ public class SpanPoolTests(ILogger logger) : BenchmarkTests<SpanPoolTests>(logge
         if (!IsBenchmarkEnabled)
         {
             Assert.That(span.Length, Is.EqualTo(BufferSize));
-            foreach (var i in span[..5]) Assert.That(i, Is.EqualTo(0));
+            foreach (var i in span[..5]) Assert.That(i, Is.Zero);
         }
 
         SpanPool<int>.Shared.Return(span, true);

@@ -33,7 +33,7 @@ public class PooledMethodSyntaxProvider : MethodSyntaxProvider
                 .WithComment(InheritdocComment)
                 .AsStatic()
                 .WithType("T")
-                .WithGeneric(GenericEntity.Create("T", "IPooled").WithAttribute("DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)"))
+                .WithGeneric(GenericEntity.Create("T", "IPooled").WithAttribute("DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)"))
                 .WithCode("ObjectPool<T>.Shared.Rent()"))
             .WithMethod(MethodMember.Create("Rent", AccessModifier.Public)
                 .WithComment($"Арендует экземпляр <see cref=\"{entityName}\"/> в пуле объектов.")
@@ -43,7 +43,7 @@ public class PooledMethodSyntaxProvider : MethodSyntaxProvider
             .WithMethod(MethodMember.Create("Return", AccessModifier.Public)
                 .WithComment(InheritdocComment)
                 .AsStatic()
-                .WithGeneric(GenericEntity.Create("T", "IPooled").WithAttribute("DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)"))
+                .WithGeneric(GenericEntity.Create("T", "IPooled").WithAttribute("DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)"))
                 .WithArgument(MethodArgumentMember.Create("value").WithType("T"))
                 .WithCode("ObjectPool<T>.Shared.Return(value, x => x.Reset())"));
 

@@ -40,7 +40,7 @@ public static class ConsoleProcessor
 
     private static async ValueTask OnCommandInternal()
     {
-        await Wait.UntilAsync(() => !Console.KeyAvailable).ConfigureAwait(false);
+        await Wait.UntilAsync(() => Console.KeyAvailable).ConfigureAwait(false);
 
         var sb = ObjectPool<StringBuilder>.Shared.Rent();
         ConsoleKeyInfo keyInfo;

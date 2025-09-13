@@ -30,8 +30,8 @@ public abstract class Logger : ILogger, IDisposable
 
     internal readonly AsyncLocal<ScopeContext?> scope = new();
 
-    private readonly ManualResetEventSlim trigger = new(false);
-    private readonly ConcurrentQueue<Action> queue = [];
+    private readonly Locker trigger = new(0);
+    private readonly ConcurrentQueue<Func<ValueTask>> queue = [];
     private readonly CancellationTokenSource cts = new();
 
     private bool isDisposed;
@@ -95,7 +95,7 @@ public abstract class Logger : ILogger, IDisposable
     /// Инициализирует новый экземпляр <see cref="Logger"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected Logger() => Task.Run(ProcessLogs, cts.Token);
+    protected Logger() => Task.Factory.StartNew(ProcessLogs, cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Current);
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="Logger"/>.
@@ -105,28 +105,23 @@ public abstract class Logger : ILogger, IDisposable
     protected Logger(string categoryName) : this()
     {
         CategoryName = categoryName;
-        Task.Run(ProcessLogs, cts.Token);
+        Task.Factory.StartNew(ProcessLogs, cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Current);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static Logger() => Factory.AddProvider(new ConsoleLoggerProvider());
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ProcessLogs()
+    private async Task ProcessLogs()
     {
         while (!cts.Token.IsCancellationRequested)
         {
-            trigger.Wait(cts.Token);
+            await trigger.WaitAsync(cts.Token).ConfigureAwait(false);
 
-            if (!queue.TryDequeue(out var log))
-            {
-                trigger.Reset();
-                continue;
-            }
+            if (!queue.TryDequeue(out var log)) continue;
 
-            log();
-
-            trigger.Set();
+            await log().ConfigureAwait(false);
+            trigger.Release();
         }
     }
 
@@ -164,7 +159,7 @@ public abstract class Logger : ILogger, IDisposable
         if (!disposing) return;
 
         cts.Cancel();
-        trigger.Set();
+        trigger.Release();
 
         cts.Dispose();
         trigger.Dispose();
@@ -376,6 +371,7 @@ public abstract class Logger : ILogger, IDisposable
     /// <param name="exception">Связанное исключение.</param>
     /// <param name="formatter">Функция форматирования.</param>
     /// <typeparam name="TState">Тип данных состояния контекста.</typeparam>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, [NotNull] Func<TState, Exception?, string> formatter)
     {
         if (!IsEnabled(logLevel) || IsEnabled(LogLevel.None)) return;
@@ -392,9 +388,9 @@ public abstract class Logger : ILogger, IDisposable
 
         e.Reset();
 
-        queue.Enqueue(() =>
+        queue.Enqueue(async () =>
         {
-            locker.Wait();
+            await locker.WaitAsync().ConfigureAwait(false);
 
             try
             {
@@ -407,7 +403,7 @@ public abstract class Logger : ILogger, IDisposable
             }
         });
 
-        trigger.Set();
+        trigger.Release();
     }
 
     /// <summary>

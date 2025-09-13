@@ -5,6 +5,7 @@
 		<LangVersion>preview</LangVersion>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<OptimizationPreference>speed</OptimizationPreference>
 		<AssemblyName>Escorp.Atom.Net</AssemblyName>
 
@@ -24,7 +25,7 @@
 		<IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
 		<IlcOptimizationPreference>speed</IlcOptimizationPreference>
 
-		<NoWarn>CA1003;CA1031</NoWarn>
+		<NoWarn>CA1003;CA1028;CA1031;CA1711</NoWarn>
 
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<PackageId>$(AssemblyName)</PackageId>
@@ -49,17 +50,22 @@
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 	</PropertyGroup>
 
+	<ItemGroup>
+		<InternalsVisibleTo Include="Atom.Net.Tests" />
+	</ItemGroup>
+
 	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
 		<ProjectReference Include="../Atom/Atom.csproj" />
+		<ProjectReference Include="../Atom.Debug/Atom.Debug.csproj" />
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(Configuration)' == 'Release'">
-		<PackageReference Include="Escorp.Atom" Version="0.8.1" />
+		<PackageReference Include="Escorp.Atom" Version="0.8.6" />
+		<PackageReference Include="Escorp.Atom.Debug" Version="0.2.3" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="0.4.6" PrivateAssets="all"
-			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="0.5.0" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
 	<ItemGroup>

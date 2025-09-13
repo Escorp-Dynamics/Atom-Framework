@@ -15,7 +15,7 @@ public interface IBuilder
 /// Представляет базовый интерфейс для реализации строителя.
 /// </summary>
 /// <typeparam name="TResult">Тип результата построения.</typeparam>
-public interface IBuilder<out TResult> : IBuilder
+public interface IBuilder<out TResult> : IBuilder where TResult : allows ref struct
 {
     /// <summary>
     /// Строит результирующее значение.
@@ -33,7 +33,7 @@ public interface IBuilder<out TResult> : IBuilder
 /// </summary>
 /// <typeparam name="TResult">Тип результата построения.</typeparam>
 /// <typeparam name="TBuilder">Тип строителя.</typeparam>
-public interface IBuilder<out TResult, out TBuilder> : IBuilder<TResult>
+public interface IBuilder<out TResult, out TBuilder> : IBuilder<TResult> where TResult : allows ref struct
 {
     /// <summary>
     /// Создаёт новый экземпляр строителя.

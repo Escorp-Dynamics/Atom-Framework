@@ -1,1 +1,1 @@
-int arg1, in string? arg2, out char arg3, ref bool arg4, params IEnumerable<byte[]>? arg5
+int arg1, in string? arg2, out char arg3, ref bool arg4, params byte[]? arg5

@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Runtime.CompilerServices;
-using Atom.Net.Http;
+using Atom.Net.Https;
 
 namespace Atom.Net.Proxies;
 
@@ -15,10 +15,10 @@ namespace Atom.Net.Proxies;
 /// <param name="speed">Максимально допустимый предел скорости ответа от сервера, при котором прокси будет считаться невалидным.</param>
 /// <param name="statusCode">Код статуса ответа сервера, при котором прокси будет считаться валидным.</param>
 [method: MethodImpl(MethodImplOptions.AggressiveInlining)]
-public abstract class ProxyValidator(HttpRequestBuilder request, TimeSpan speed, HttpStatusCode statusCode) : IProxyValidator
+public abstract class ProxyValidator(HttpsRequestBuilder request, TimeSpan speed, HttpStatusCode statusCode) : IProxyValidator
 {
     /// <inheritdoc/>
-    public virtual HttpRequestBuilder Request { get; set; } = request;
+    public virtual HttpsRequestBuilder Request { get; set; } = request;
 
     /// <inheritdoc/>
     public virtual TimeSpan Speed { get; set; } = speed;
@@ -28,12 +28,12 @@ public abstract class ProxyValidator(HttpRequestBuilder request, TimeSpan speed,
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public virtual async ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, [NotNull] HttpRequestBuilder request, TimeSpan speed, HttpStatusCode statusCode, CancellationToken cancellationToken)
+    public virtual async ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, [NotNull] HttpsRequestBuilder request, TimeSpan speed, HttpStatusCode statusCode, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        using var handler = new HttpClientHandler { Proxy = proxy, UseProxy = true };
-        using var client = new SafetyHttpClient(handler, true);
+        using var handler = new HttpsClientHandler { Proxy = proxy, UseProxy = true, CheckCertificateRevocationList = true };
+        using var client = new HttpsClient(handler, true);
         using var speedCts = new CancellationTokenSource(speed);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, speedCts.Token);
 
@@ -46,7 +46,7 @@ public abstract class ProxyValidator(HttpRequestBuilder request, TimeSpan speed,
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpRequestBuilder request, TimeSpan speed, HttpStatusCode statusCode) => ValidateAsync(proxy, request, speed, statusCode, CancellationToken.None);
+    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpsRequestBuilder request, TimeSpan speed, HttpStatusCode statusCode) => ValidateAsync(proxy, request, speed, statusCode, CancellationToken.None);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -58,27 +58,27 @@ public abstract class ProxyValidator(HttpRequestBuilder request, TimeSpan speed,
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpRequestBuilder request, TimeSpan speed, CancellationToken cancellationToken) => ValidateAsync(proxy, request, speed, StatusCode, cancellationToken);
+    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpsRequestBuilder request, TimeSpan speed, CancellationToken cancellationToken) => ValidateAsync(proxy, request, speed, StatusCode, cancellationToken);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpRequestBuilder request, TimeSpan speed) => ValidateAsync(proxy, request, speed, CancellationToken.None);
+    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpsRequestBuilder request, TimeSpan speed) => ValidateAsync(proxy, request, speed, CancellationToken.None);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpRequestBuilder request, HttpStatusCode statusCode, CancellationToken cancellationToken) => ValidateAsync(proxy, request, Speed, statusCode, cancellationToken);
+    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpsRequestBuilder request, HttpStatusCode statusCode, CancellationToken cancellationToken) => ValidateAsync(proxy, request, Speed, statusCode, cancellationToken);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpRequestBuilder request, HttpStatusCode statusCode) => ValidateAsync(proxy, request, statusCode, CancellationToken.None);
+    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpsRequestBuilder request, HttpStatusCode statusCode) => ValidateAsync(proxy, request, statusCode, CancellationToken.None);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpRequestBuilder request, CancellationToken cancellationToken) => ValidateAsync(proxy, request, Speed, StatusCode, cancellationToken);
+    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpsRequestBuilder request, CancellationToken cancellationToken) => ValidateAsync(proxy, request, Speed, StatusCode, cancellationToken);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpRequestBuilder request) => ValidateAsync(proxy, request, CancellationToken.None);
+    public ValueTask<ProxyResponseMessage> ValidateAsync(Proxy proxy, HttpsRequestBuilder request) => ValidateAsync(proxy, request, CancellationToken.None);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

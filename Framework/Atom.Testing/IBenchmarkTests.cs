@@ -1,6 +1,4 @@
-using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Loggers;
-using NUnit.Framework;
 
 namespace Atom.Testing;
 
@@ -22,24 +20,20 @@ public interface IBenchmarkTests
     /// <summary>
     /// Устанавливает настройки для всех тестов.
     /// </summary>
-    [GlobalSetup]
     void GlobalSetUp();
 
     /// <summary>
     /// Устанавливает настройки для каждого теста.
     /// </summary>
-    [OneTimeSetUp]
     void OneTimeSetUp();
 
     /// <summary>
     /// Вызывается при завершении всех тестов.
     /// </summary>
-    [TearDown]
     void GlobalTearDown();
 
     /// <summary>
     /// Вызывается при завершении каждого теста.
     /// </summary>
-    [OneTimeTearDown]
     void OneTimeTearDown();
 }

@@ -1,18 +1,18 @@
 using System.Net;
 using System.Runtime.CompilerServices;
-using Atom.Net.Http;
+using Atom.Net.Https;
 
 namespace Atom.Net.Proxies;
 
 /// <summary>
-/// Представляет расширенную версию <see cref="SafetyHttpResponseMessage"/> для валидации прокси.
+/// Представляет расширенную версию <see cref="HttpsResponseMessage"/> для валидации прокси.
 /// </summary>
 /// <remarks>
 /// Инициализирует новый экземпляр <see cref="ProxyResponseMessage"/>.
 /// </remarks>
 /// <param name="statusCode">Код статуса ответа.</param>
 [method: MethodImpl(MethodImplOptions.AggressiveInlining)]
-public class ProxyResponseMessage(HttpStatusCode statusCode) : SafetyHttpResponseMessage(statusCode)
+public class ProxyResponseMessage(HttpStatusCode statusCode) : HttpsResponseMessage(statusCode)
 {
     /// <summary>
     /// Определяет, валидны ли прокси по скорости.
@@ -25,7 +25,7 @@ public class ProxyResponseMessage(HttpStatusCode statusCode) : SafetyHttpRespons
     public bool IsStatusCodeValid { get; set; }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal ProxyResponseMessage(SafetyHttpResponseMessage message, bool isSpeedValid, bool statusCodeValid) : this()
+    internal ProxyResponseMessage(HttpsResponseMessage message, bool isSpeedValid, bool statusCodeValid) : this()
     {
         StatusCode = message.StatusCode;
         ReasonPhrase = message.ReasonPhrase;

@@ -19,7 +19,7 @@ namespace Atom.Testing;
 /// <param name="logger">Журнал событий для бенчмарка.</param>
 [SimpleJob(RuntimeMoniker.Net90, baseline: true)]
 [SimpleJob(RuntimeMoniker.NativeAot90)]
-[TestFixture, MemoryDiagnoser]
+[TestFixture, MemoryDiagnoser, ThreadingDiagnoser, ExceptionDiagnoser/*, DisassemblyDiagnoser*/]
 [Orderer(SummaryOrderPolicy.FastestToSlowest)]
 [RankColumn]
 #if DEBUG
@@ -40,15 +40,19 @@ public abstract class BenchmarkTests<T>(ILogger logger) : IBenchmarkTests where 
     protected BenchmarkTests() : this(ConsoleLogger.Unicode) { }
 
     /// <inheritdoc/>
+    [GlobalSetup]
     public virtual void GlobalSetUp() => IsBenchmarkEnabled = true;
 
     /// <inheritdoc/>
+    [OneTimeSetUp]
     public virtual void OneTimeSetUp() { }
 
     /// <inheritdoc/>
+    [TearDown]
     public virtual void GlobalTearDown() { }
 
     /// <inheritdoc/>
+    [OneTimeTearDown]
     public virtual void OneTimeTearDown() { }
 
     /// <summary>

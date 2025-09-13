@@ -1,6 +1,7 @@
 ﻿#pragma warning disable CS0649
 
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Atom.Buffers;
@@ -18,7 +19,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
         public ExecutionContext? Context;
         public SequenceMode OriginalMode;
         public SequenceMode Mode;
-        public ulong Counter;
+        public long Counter;
         public bool IsPaused;
         public bool IsCustomCondition;
         public long MinInterval;
@@ -30,10 +31,15 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     private readonly Timer timer;
     private readonly Signal<Func<ValueTask>> signal = new();
 
-    private ulong mergedCounter;
+    private int activeTasks; // атомарно: сколько НЕ на паузе
+    private int inFlight;
+
+    private long mergedCounter;
 
     private bool isRunning;
     private bool isDisposed;
+
+    private static readonly double TickToStopwatch = (double)TimeSpan.TicksPerSecond / Stopwatch.Frequency;
 
     /// <summary>
     /// Получает или задает интервал времени между выполнениями задач.
@@ -46,12 +52,12 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <summary>
     /// Количество повторений задачи без ожидания выполнения (только для режима <see cref="SequenceMode.Loop"/>).
     /// </summary>
-    public ulong LoopRepetitionsWithoutWaiting { get; set; }
+    public long LoopRepetitionsWithoutWaiting { get; set; }
 
     /// <summary>
     /// Количество задач с игнорированием ожидания.
     /// </summary>
-    public ulong MergedRepetitions { get; set; }
+    public long MergedRepetitions { get; set; }
 
     /// <summary>
     /// Минимальный интервал повторений между одной задачей.
@@ -172,28 +178,29 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// Инициализирует новый экземпляр <see cref="Sequencer"/> с интервалом в одну секунду и базовым режимом.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Sequencer() : this(SequenceMode.Manual) { }
+    public Sequencer() : this(SequenceMode.Once) { }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ProcessTask(Func<ValueTask> task, TaskState state)
+    private bool ProcessTask(Func<ValueTask> task, TaskState state)
     {
         var minInterval = Volatile.Read(ref state.MinInterval);
         var lastExecutionTime = Volatile.Read(ref state.LastExecutionTime);
 
-        if (!Volatile.Read(ref state.IsPaused) && (minInterval is 0 || DateTime.UtcNow.Ticks - lastExecutionTime >= minInterval))
-        {
-            if (state.Context is not null) ExecutionContext.Restore(state.Context);
+        if (Volatile.Read(ref state.IsPaused)) return default;
 
-            if (Sequence.On(args => { args.Task = task; args.Mode = state.Mode; }))
-            {
-                _ = ExecuteAsync(task).ConfigureAwait(false);
-                if (Volatile.Read(ref state.IsCustomCondition)) signal.Send(task);
-            }
-        }
-        else
+        // используйте StopwatchTicks (см. ниже в рекомендациях)
+        if (minInterval is not 0 && (NowTicks() - lastExecutionTime) < minInterval) return default;
+
+        if (state.Context is not null) ExecutionContext.Restore(state.Context);
+
+        if (Sequence.On(args => { args.Task = task; args.Mode = state.Mode; }))
         {
-            sequence.EnqueueOnce(task);
+            _ = ExecuteAsync(task).ConfigureAwait(false);
+            if (Volatile.Read(ref state.IsCustomCondition)) signal.Send(task);
+            return true;
         }
+
+        return default;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -215,13 +222,19 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     {
         if (Volatile.Read(ref isDisposed) || !Volatile.Read(ref isRunning)) return;
 
-        while (!sequence.IsEmpty)
+        // Снимок «сколько максимум попыток сделать за тик»
+        var maxProbe = Math.Max(1, tasks.Count); // ConcurrentDictionary.Count O(1)
+
+        for (var i = 0; i < maxProbe; i++)
         {
-            if (sequence.TryDequeue(out var task) && tasks.TryGetValue(task, out var taskState))
-            {
-                ProcessTask(task, taskState);
-                break;
-            }
+            if (!sequence.TryDequeue(out var task)) break;
+            if (!tasks.TryGetValue(task, out var taskState)) continue;
+
+            // возвращаем true, только если реально запустили
+            if (ProcessTask(task, taskState))
+                break; // исполнили ровно одну задачу на тик
+            else
+                sequence.EnqueueOnce(task); // не исполнилась — к хвосту и пробуем следующую
         }
 
         UpdateTimer();
@@ -235,7 +248,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 
         Interlocked.Exchange(ref state.Mode, mode);
         Interlocked.Exchange(ref state.Counter, default);
-        Interlocked.Exchange(ref state.LastExecutionTime, DateTime.UtcNow.Ticks);
+        Interlocked.Exchange(ref state.LastExecutionTime, NowTicks());
 
         if (oldMode != mode) Changed.On(args => { args.Task = task; args.Mode = mode; });
 
@@ -248,6 +261,8 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
         if (!tasks.TryGetValue(task, out var state)) return;
         if (state.Mode is SequenceMode.Loop) UpdateLoopMode(task, state);
 
+        Interlocked.Increment(ref inFlight);
+
         try
         {
             await task().ConfigureAwait(false);
@@ -256,10 +271,14 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
         {
             Failed.On(args => { args.Exception = ex; args.Task = task; args.Mode = state.Mode; });
         }
+        finally
+        {
+            Interlocked.Decrement(ref inFlight);
+        }
 
         if (!tasks.TryGetValue(task, out state)) return;
 
-        if (state.Mode is SequenceMode.Manual)
+        if (state.Mode is SequenceMode.Once)
         {
             Remove(task);
         }
@@ -269,7 +288,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
         }
         else
         {
-            Interlocked.Exchange(ref state.LastExecutionTime, DateTime.UtcNow.Ticks);
+            Interlocked.Exchange(ref state.LastExecutionTime, NowTicks());
             ScheduleTask(task, state.Mode);
         }
     }
@@ -296,7 +315,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 
         var isEmpty = tasks.IsEmpty;
 
-        if (!tasks.TryAdd(task, new TaskState { Context = ExecutionContext.Capture(), OriginalMode = mode, Mode = mode, MinInterval = minInterval.Ticks, LastExecutionTime = DateTime.UtcNow.Ticks - minInterval.Ticks }))
+        if (!tasks.TryAdd(task, new TaskState { Context = ExecutionContext.Capture(), OriginalMode = mode, Mode = mode, MinInterval = minInterval.Ticks, LastExecutionTime = NowTicks() - minInterval.Ticks }))
         {
             Failed.On(args =>
             {
@@ -308,6 +327,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
             return;
         }
 
+        Interlocked.Increment(ref activeTasks);  // новая задача активна
         ScheduleTask(task, mode, default);
 
         signal.Send(task);
@@ -444,6 +464,9 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 
             if (this.tasks.TryRemove(task, out var state))
             {
+                if (!Volatile.Read(ref state.IsPaused)) Interlocked.Decrement(ref activeTasks);
+
+                state.IsCustomCondition = default;
                 signal.Send(task);
 
                 if (Removed.On(args => { args.Task = task; args.Mode = state.Mode; }) && this.tasks.IsEmpty)
@@ -472,12 +495,17 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     {
         foreach (var task in tasks)
         {
-            if (!this.tasks.TryGetValue(task, out var state) || Interlocked.CompareExchange(ref state.IsPaused, true, default)) continue;
+            if (!this.tasks.TryGetValue(task, out var state)) continue;
+            if (Interlocked.CompareExchange(ref state.IsPaused, true, false)) continue;
 
             signal.Send(task);
+            Interlocked.Decrement(ref activeTasks);
 
-            if (Paused.On(args => { args.Task = task; args.Mode = state.Mode; }) && !this.tasks.Values.Any(x => !Volatile.Read(ref x.IsPaused))) timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            Paused.On(args => { args.Task = task; args.Mode = state.Mode; });
         }
+
+        // Если активных не осталось — выключаем таймер
+        if (Volatile.Read(ref activeTasks) is 0) timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
     }
 
     /// <summary>
@@ -487,20 +515,22 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Resume([NotNull] params IEnumerable<Func<ValueTask>> tasks)
     {
-        var isPaused = !this.tasks.Values.Any(x => !Volatile.Read(ref x.IsPaused));
+        var needStart = false;
 
         foreach (var task in tasks)
         {
-            if (!this.tasks.TryGetValue(task, out var state) || !Interlocked.CompareExchange(ref state.IsPaused, default, true)) continue;
+            if (!this.tasks.TryGetValue(task, out var state)) continue;
+            if (!Interlocked.CompareExchange(ref state.IsPaused, false, true)) continue;
 
             signal.Send(task);
 
-            if (Resumed.On(args => { args.Task = task; args.Mode = state.Mode; }) && isPaused)
-            {
-                isPaused = default;
-                timer.Change(Interval, Timeout.InfiniteTimeSpan);
-            }
+            // если до инкремента было 0, то это первый активный
+            if (Interlocked.Increment(ref activeTasks) is 1) needStart = true;
+
+            Resumed.On(args => { args.Task = task; args.Mode = state.Mode; });
         }
+
+        if (needStart) UpdateTimer(); // уважает MergedRepetitions
     }
 
     /// <summary>
@@ -553,9 +583,8 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed), this);
 
-        if (Interlocked.CompareExchange(ref isRunning, true, Volatile.Read(ref isRunning))) return;
-        if (!tasks.IsEmpty && !timer.Change(Interval, Timeout.InfiniteTimeSpan)) Interlocked.Exchange(ref isRunning, default);
-        if (!Volatile.Read(ref isRunning)) return;
+        if (Interlocked.CompareExchange(ref isRunning, true, default)) return;
+        if (!tasks.IsEmpty) UpdateTimer();
 
         Started.On();
         if (!waitIntervalBeforeStarting) _ = Task.Run(() => OnTimerElapsed(default)).ConfigureAwait(false);
@@ -607,7 +636,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public async ValueTask<bool> WaitAsync(Func<ValueTask> task, TimeSpan timeout, CancellationToken cancellationToken)
     {
-        using (var awaiter = new Wait<Func<ValueTask>>(signal, task)) await awaiter.LockAsync(() => Volatile.Read(ref isRunning) && !Volatile.Read(ref isDisposed) && tasks.ContainsKey(task), timeout, cancellationToken).ConfigureAwait(false);
+        using (var awaiter = new Wait<Func<ValueTask>>(signal, task)) await awaiter.LockUntilAsync(() => !Volatile.Read(ref isRunning) || Volatile.Read(ref isDisposed) || !tasks.ContainsKey(task), timeout, cancellationToken).ConfigureAwait(false);
 
         return !Volatile.Read(ref isRunning);
     }
@@ -666,7 +695,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="cancellationToken">Токен отмены для отслеживания запросов на отмену.</param>
     /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public async ValueTask<bool> WaitAsync(Func<ValueTask> task, [NotNull] Func<bool> condition, TimeSpan timeout, CancellationToken cancellationToken)
+    public async ValueTask<bool> WaitUntilAsync(Func<ValueTask> task, [NotNull] Func<bool> condition, TimeSpan timeout, CancellationToken cancellationToken)
     {
         if (!tasks.TryGetValue(task, out var state)) return !Volatile.Read(ref isRunning);
         state.IsCustomCondition = true;
@@ -674,11 +703,11 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 
         using (var awaiter = new Wait<Func<ValueTask>>(signal, task))
         {
-            await awaiter.LockAsync(() =>
+            await awaiter.LockUntilAsync(() =>
             {
-                isCondition = condition();
+                isCondition = !condition();
                 if (isCondition) Remove(task);
-                return Volatile.Read(ref isRunning) && tasks.ContainsKey(task) && !Volatile.Read(ref isDisposed) && !isCondition;
+                return !Volatile.Read(ref isRunning) || !tasks.ContainsKey(task) || Volatile.Read(ref isDisposed) || isCondition;
             }, timeout, cancellationToken).ConfigureAwait(false);
         }
 
@@ -693,7 +722,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="timeout">Таймаут ожидания.</param>
     /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<bool> WaitAsync(Func<ValueTask> task, Func<bool> condition, TimeSpan timeout) => WaitAsync(task, condition, timeout, CancellationToken.None);
+    public ValueTask<bool> WaitUntilAsync(Func<ValueTask> task, Func<bool> condition, TimeSpan timeout) => WaitUntilAsync(task, condition, timeout, CancellationToken.None);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен.
@@ -704,7 +733,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="cancellationToken">Токен отмены для отслеживания запросов на отмену.</param>
     /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<bool> WaitAsync(Func<ValueTask> task, Func<bool> condition, int timeout, CancellationToken cancellationToken) => WaitAsync(task, condition, TimeSpan.FromMilliseconds(timeout), cancellationToken);
+    public ValueTask<bool> WaitUntilAsync(Func<ValueTask> task, Func<bool> condition, int timeout, CancellationToken cancellationToken) => WaitUntilAsync(task, condition, TimeSpan.FromMilliseconds(timeout), cancellationToken);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен.
@@ -714,7 +743,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
     /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<bool> WaitAsync(Func<ValueTask> task, Func<bool> condition, int timeout) => WaitAsync(task, condition, timeout, CancellationToken.None);
+    public ValueTask<bool> WaitUntilAsync(Func<ValueTask> task, Func<bool> condition, int timeout) => WaitUntilAsync(task, condition, timeout, CancellationToken.None);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен.
@@ -724,7 +753,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="cancellationToken">Токен отмены для отслеживания запросов на отмену.</param>
     /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<bool> WaitAsync(Func<ValueTask> task, Func<bool> condition, CancellationToken cancellationToken) => WaitAsync(task, condition, Timeout.Infinite, cancellationToken);
+    public ValueTask<bool> WaitUntilAsync(Func<ValueTask> task, Func<bool> condition, CancellationToken cancellationToken) => WaitUntilAsync(task, condition, Timeout.Infinite, cancellationToken);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен.
@@ -733,7 +762,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="condition">Дополнительное условие проверки делегата.</param>
     /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<bool> WaitAsync(Func<ValueTask> task, Func<bool> condition) => WaitAsync(task, condition, CancellationToken.None);
+    public ValueTask<bool> WaitUntilAsync(Func<ValueTask> task, Func<bool> condition) => WaitUntilAsync(task, condition, CancellationToken.None);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен.
@@ -744,7 +773,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="cancellationToken">Токен отмены для отслеживания запросов на отмену.</param>
     /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public async ValueTask<bool> WaitAsync(Func<ValueTask> task, [NotNull] Func<ValueTask<bool>> condition, TimeSpan timeout, CancellationToken cancellationToken)
+    public async ValueTask<bool> WaitUntilAsync(Func<ValueTask> task, [NotNull] Func<ValueTask<bool>> condition, TimeSpan timeout, CancellationToken cancellationToken)
     {
         if (!tasks.TryGetValue(task, out var state)) return !isRunning;
         state.IsCustomCondition = true;
@@ -752,11 +781,11 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 
         using (var awaiter = new Wait<Func<ValueTask>>(signal, task))
         {
-            await awaiter.LockAsync(async () =>
+            await awaiter.LockUntilAsync(async () =>
             {
-                isCondition = await condition().ConfigureAwait(false);
+                isCondition = !await condition().ConfigureAwait(false);
                 if (isCondition) Remove(task);
-                return Volatile.Read(ref isRunning) && tasks.ContainsKey(task) && !Volatile.Read(ref isDisposed) && !isCondition;
+                return !Volatile.Read(ref isRunning) || !tasks.ContainsKey(task) || Volatile.Read(ref isDisposed) || isCondition;
             }, timeout, cancellationToken).ConfigureAwait(false);
         }
 
@@ -771,7 +800,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="timeout">Таймаут ожидания.</param>
     /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<bool> WaitAsync(Func<ValueTask> task, Func<ValueTask<bool>> condition, TimeSpan timeout) => WaitAsync(task, condition, timeout, CancellationToken.None);
+    public ValueTask<bool> WaitUntilAsync(Func<ValueTask> task, Func<ValueTask<bool>> condition, TimeSpan timeout) => WaitUntilAsync(task, condition, timeout, CancellationToken.None);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен.
@@ -782,7 +811,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="cancellationToken">Токен отмены для отслеживания запросов на отмену.</param>
     /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<bool> WaitAsync(Func<ValueTask> task, Func<ValueTask<bool>> condition, int timeout, CancellationToken cancellationToken) => WaitAsync(task, condition, TimeSpan.FromMilliseconds(timeout), cancellationToken);
+    public ValueTask<bool> WaitUntilAsync(Func<ValueTask> task, Func<ValueTask<bool>> condition, int timeout, CancellationToken cancellationToken) => WaitUntilAsync(task, condition, TimeSpan.FromMilliseconds(timeout), cancellationToken);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен.
@@ -792,7 +821,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
     /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<bool> WaitAsync(Func<ValueTask> task, Func<ValueTask<bool>> condition, int timeout) => WaitAsync(task, condition, timeout, CancellationToken.None);
+    public ValueTask<bool> WaitUntilAsync(Func<ValueTask> task, Func<ValueTask<bool>> condition, int timeout) => WaitUntilAsync(task, condition, timeout, CancellationToken.None);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен.
@@ -802,7 +831,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="cancellationToken">Токен отмены для отслеживания запросов на отмену.</param>
     /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<bool> WaitAsync(Func<ValueTask> task, Func<ValueTask<bool>> condition, CancellationToken cancellationToken) => WaitAsync(task, condition, Timeout.Infinite, cancellationToken);
+    public ValueTask<bool> WaitUntilAsync(Func<ValueTask> task, Func<ValueTask<bool>> condition, CancellationToken cancellationToken) => WaitUntilAsync(task, condition, Timeout.Infinite, cancellationToken);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен.
@@ -811,7 +840,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     /// <param name="condition">Дополнительное условие проверки делегата.</param>
     /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<bool> WaitAsync(Func<ValueTask> task, Func<ValueTask<bool>> condition) => WaitAsync(task, condition, CancellationToken.None);
+    public ValueTask<bool> WaitUntilAsync(Func<ValueTask> task, Func<ValueTask<bool>> condition) => WaitUntilAsync(task, condition, CancellationToken.None);
 
     /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен.
@@ -822,7 +851,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     public async ValueTask WaitAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
         using var awaiter = new Wait<Func<ValueTask>>(signal);
-        await awaiter.LockAsync(() => Volatile.Read(ref isRunning) && !Volatile.Read(ref isDisposed), timeout, cancellationToken).ConfigureAwait(false);
+        await awaiter.LockUntilAsync(() => !Volatile.Read(ref isRunning) || Volatile.Read(ref isDisposed), timeout, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -868,6 +897,8 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
         if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
 
         Stop();
+        Wait.Until(() => Volatile.Read(ref inFlight) is 0);
+
         timer.Dispose();
 
         ObjectPool<ConcurrentDictionary<Func<ValueTask>, TaskState>>.Shared.Return(tasks, x => x.Clear());
@@ -884,6 +915,8 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
         if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
 
         Stop();
+        await Wait.UntilAsync(() => Volatile.Read(ref inFlight) is 0).ConfigureAwait(false);
+
         await timer.DisposeAsync().ConfigureAwait(false);
 
         ObjectPool<ConcurrentDictionary<Func<ValueTask>, TaskState>>.Shared.Return(tasks, x => x.Clear());
@@ -891,4 +924,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 
         GC.SuppressFinalize(this);
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long NowTicks() => (long)(Stopwatch.GetTimestamp() * TickToStopwatch);
 }

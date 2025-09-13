@@ -215,6 +215,7 @@ public sealed class Locker : IDisposable
     /// <summary>
     /// Высвобождает ресурсы.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Dispose()
     {
         locker.Dispose();

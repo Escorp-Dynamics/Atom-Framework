@@ -8,7 +8,7 @@ namespace Atom.Net.Proxies;
 /// Представляет конвертер сериализатора JSON для <see cref="Proxy"/>.
 /// </summary>
 /// <typeparam name="T">Тип прокси.</typeparam>
-public class ProxyJsonConverter<T> : ExtendableJsonConverter<T> where T : Proxy, new()
+public class ProxyJsonConverter<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T> : ExtendableJsonConverter<T> where T : Proxy, new()
 {
     /// <inheritdoc/>
     protected override T? OnReading(ref Utf8JsonReader reader, JsonElement root, Type typeToConvert, JsonSerializerOptions options)

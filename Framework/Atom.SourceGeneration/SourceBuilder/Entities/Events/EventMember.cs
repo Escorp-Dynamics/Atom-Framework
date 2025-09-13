@@ -61,8 +61,8 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     {
         var tabs = (spaces.Length / 4) + 1;
 
-        if (Adder is not null) Adder.ParentAccessModifier = AccessModifier;
-        if (Remover is not null) Remover.ParentAccessModifier = AccessModifier;
+        Adder?.ParentAccessModifier = AccessModifier;
+        Remover?.ParentAccessModifier = AccessModifier;
 
         var adder = Adder?.Build(tabs);
         var remover = Remover?.Build(tabs);

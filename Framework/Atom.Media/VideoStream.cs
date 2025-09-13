@@ -427,7 +427,7 @@ public class VideoStream : Stream
         CloseDecoder();
 
         cts = new CancellationTokenSource();
-        processingTask = Task.Run(() => Process(cts.Token));
+        processingTask = Task.Run(async () => await ProcessAsync(cts.Token).ConfigureAwait(false));
 
         if (string.IsNullOrEmpty(inputPath) || inputPath is DevNull)
         {
@@ -714,7 +714,7 @@ public class VideoStream : Stream
 
         isOutputReady = default;
         cts = new CancellationTokenSource();
-        processingTask = Task.Run(() => Process(cts.Token));
+        processingTask = Task.Run(async () => await ProcessAsync(cts.Token).ConfigureAwait(false));
 
         if (string.IsNullOrEmpty(outputPath) || outputPath is DevNull)
         {
@@ -1346,13 +1346,13 @@ public class VideoStream : Stream
         return neededFrames <= 0 || readyFrames <= neededFrames;
     }
 
-    private unsafe void Process(CancellationToken cancellationToken)
+    private async ValueTask ProcessAsync(CancellationToken cancellationToken)
     {
-        Wait.Until(() => !CanWrite && !cancellationToken.IsCancellationRequested && !isDisposed);
+        await Wait.UntilAsync(() => CanWrite || cancellationToken.IsCancellationRequested || isDisposed, cancellationToken).ConfigureAwait(false);
 
         while (CanWrite && !cancellationToken.IsCancellationRequested && !Volatile.Read(ref isDisposed))
         {
-            locker.Wait(CancellationToken.None);
+            await locker.WaitAsync(CancellationToken.None).ConfigureAwait(false);
 
             if (cancellationToken.IsCancellationRequested)
             {
@@ -1381,7 +1381,7 @@ public class VideoStream : Stream
             locker.Release();
         }
 
-        if (!cancellationToken.IsCancellationRequested) cts.Cancel();
+        if (!cancellationToken.IsCancellationRequested) await cts.CancelAsync().ConfigureAwait(false);
     }
 
     private unsafe void CloseDecoder()
@@ -1473,7 +1473,7 @@ public class VideoStream : Stream
 
         var timer = Stopwatch.StartNew();
 
-        Wait.Until(() => !cts.IsCancellationRequested && (IsLooped || readyFrames < neededFrames), timeout);
+        Wait.Until(() => cts.IsCancellationRequested || (!IsLooped && readyFrames >= neededFrames), timeout);
 
         if (output->oformat->IsImage || !isDevice)
         {
@@ -1493,7 +1493,7 @@ public class VideoStream : Stream
     public void WaitForEnding()
     {
         IsActive = true;
-        Wait.Until(() => !cts.IsCancellationRequested && (IsLooped || readyFrames < neededFrames));
+        Wait.Until(() => cts.IsCancellationRequested || (!IsLooped && readyFrames >= neededFrames));
         IsActive = default;
     }
 
@@ -1510,7 +1510,7 @@ public class VideoStream : Stream
 
         var timer = Stopwatch.StartNew();
 
-        await Wait.UntilAsync(() => !cts.IsCancellationRequested && (IsLooped || readyFrames < neededFrames), timeout, cancellationToken).ConfigureAwait(false);
+        await Wait.UntilAsync(() => cts.IsCancellationRequested || (!IsLooped && readyFrames >= neededFrames), timeout, cancellationToken).ConfigureAwait(false);
 
         unsafe
         {
@@ -1540,7 +1540,7 @@ public class VideoStream : Stream
     public async ValueTask WaitForEndingAsync(CancellationToken cancellationToken)
     {
         IsActive = true;
-        await Wait.UntilAsync(() => !cts.IsCancellationRequested && (IsLooped || readyFrames < neededFrames), cancellationToken).ConfigureAwait(false);
+        await Wait.UntilAsync(() => cts.IsCancellationRequested || (!IsLooped && readyFrames >= neededFrames), cancellationToken).ConfigureAwait(false);
         IsActive = default;
     }
 

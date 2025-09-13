@@ -79,8 +79,8 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     {
         var tabs = (spaces.Length / 4) + 1;
 
-        if (Getter is not null) Getter.ParentAccessModifier = AccessModifier;
-        if (Setter is not null) Setter.ParentAccessModifier = AccessModifier;
+        Getter?.ParentAccessModifier = AccessModifier;
+        Setter?.ParentAccessModifier = AccessModifier;
 
         var getter = Getter?.Build(tabs);
         var setter = Setter?.Build(tabs);

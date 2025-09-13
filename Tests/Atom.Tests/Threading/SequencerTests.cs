@@ -63,7 +63,7 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
         }
     }
 
-    private readonly Sequencer manualSequencer = new(TimeSpan.FromSeconds(1), SequenceMode.Manual);
+    private readonly Sequencer manualSequencer = new(TimeSpan.FromSeconds(1), SequenceMode.Once);
     private readonly Sequencer loopSequencer = new(TimeSpan.FromSeconds(1), SequenceMode.Loop);
     private readonly Sequencer loopWithWaitingSequencer = new(TimeSpan.FromSeconds(1), SequenceMode.LoopWithWaiting);
 
@@ -277,7 +277,7 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
             workers[i].Start();
         }
 
-        await Wait.UntilAsync(() => !workers.All(x => x.IsReady));
+        await Wait.UntilAsync(() => workers.All(x => x.IsReady));
         Assert.Pass();
     }
 

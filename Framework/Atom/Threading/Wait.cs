@@ -35,7 +35,7 @@ public class Wait
         var counter = 0;
         var useHardwareSpin = true;
 
-        while (condition())
+        while (!condition())
         {
             if (timeout != Timeout.Infinite && timer.ElapsedMilliseconds >= timeout) return;
 
@@ -85,7 +85,7 @@ public class Wait
         var timer = Stopwatch.StartNew();
         var delay = 1;
 
-        while (condition())
+        while (!condition())
         {
             if (timeout != Timeout.Infinite && timer.ElapsedMilliseconds >= timeout) return;
 
@@ -155,7 +155,7 @@ public class Wait
         var timer = Stopwatch.StartNew();
         var delay = 1;
 
-        while (await condition().ConfigureAwait(false))
+        while (!await condition().ConfigureAwait(false))
         {
             if (timeout != Timeout.Infinite && timer.ElapsedMilliseconds >= timeout) return;
 
@@ -220,7 +220,7 @@ public class Wait
 /// <typeparam name="T">Тип состояния.</typeparam>
 public sealed class Wait<T> : Wait, IDisposable
 {
-    private readonly ManualResetEventSlim mre = new();
+    private readonly Locker locker = new(1);
     private readonly Signal<T> signal;
     private readonly T? state;
     private bool isDisposed;
@@ -245,7 +245,7 @@ public sealed class Wait<T> : Wait, IDisposable
 
     private void OnSignaled(SignalEventArgs<T> args)
     {
-        if (ReferenceEquals(args.State, state) || state?.Equals(args.State) is true || state is null || args.State is null) mre.Set();
+        if (ReferenceEquals(args.State, state) || state?.Equals(args.State) is true || state is null || args.State is null) locker.Release();
     }
 
     /// <summary>
@@ -255,12 +255,11 @@ public sealed class Wait<T> : Wait, IDisposable
     /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public async ValueTask LockAsync([NotNull] Func<bool> condition, int timeout, CancellationToken cancellationToken)
+    public async ValueTask LockUntilAsync([NotNull] Func<bool> condition, int timeout, CancellationToken cancellationToken)
     {
-        while (!Volatile.Read(ref isDisposed) && condition())
+        while (!Volatile.Read(ref isDisposed) && !condition())
         {
-            mre.Wait(timeout, cancellationToken);
-            mre.Reset();
+            await locker.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
             await Task.Yield();
         }
     }
@@ -271,7 +270,7 @@ public sealed class Wait<T> : Wait, IDisposable
     /// <param name="condition">Условие.</param>
     /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<bool> condition, int timeout) => LockAsync(condition, timeout, CancellationToken.None);
+    public ValueTask LockUntilAsync(Func<bool> condition, int timeout) => LockUntilAsync(condition, timeout, CancellationToken.None);
 
     /// <summary>
     /// Ожидает выполнения условия.
@@ -280,8 +279,8 @@ public sealed class Wait<T> : Wait, IDisposable
     /// <param name="timeout">Таймаут ожидания.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<bool> condition, TimeSpan timeout, CancellationToken cancellationToken)
-        => LockAsync(condition, (int)timeout.TotalMilliseconds, cancellationToken);
+    public ValueTask LockUntilAsync(Func<bool> condition, TimeSpan timeout, CancellationToken cancellationToken)
+        => LockUntilAsync(condition, (int)timeout.TotalMilliseconds, cancellationToken);
 
     /// <summary>
     /// Ожидает выполнения условия.
@@ -289,8 +288,8 @@ public sealed class Wait<T> : Wait, IDisposable
     /// <param name="condition">Условие.</param>
     /// <param name="timeout">Таймаут ожидания.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<bool> condition, TimeSpan timeout)
-        => LockAsync(condition, timeout, CancellationToken.None);
+    public ValueTask LockUntilAsync(Func<bool> condition, TimeSpan timeout)
+        => LockUntilAsync(condition, timeout, CancellationToken.None);
 
     /// <summary>
     /// Ожидает выполнения условия.
@@ -298,15 +297,15 @@ public sealed class Wait<T> : Wait, IDisposable
     /// <param name="condition">Условие.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<bool> condition, CancellationToken cancellationToken)
-        => LockAsync(condition, Timeout.Infinite, cancellationToken);
+    public ValueTask LockUntilAsync(Func<bool> condition, CancellationToken cancellationToken)
+        => LockUntilAsync(condition, Timeout.Infinite, cancellationToken);
 
     /// <summary>
     /// Ожидает выполнения условия.
     /// </summary>
     /// <param name="condition">Условие.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<bool> condition) => LockAsync(condition, CancellationToken.None);
+    public ValueTask LockUntilAsync(Func<bool> condition) => LockUntilAsync(condition, CancellationToken.None);
 
     /// <summary>
     /// Ожидает выполнения условия.
@@ -315,12 +314,11 @@ public sealed class Wait<T> : Wait, IDisposable
     /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public async ValueTask LockAsync([NotNull] Func<ValueTask<bool>> condition, int timeout, CancellationToken cancellationToken)
+    public async ValueTask LockUntilAsync([NotNull] Func<ValueTask<bool>> condition, int timeout, CancellationToken cancellationToken)
     {
-        while (!Volatile.Read(ref isDisposed) && await condition().ConfigureAwait(false))
+        while (!Volatile.Read(ref isDisposed) && !await condition().ConfigureAwait(false))
         {
-            mre.Wait(timeout, cancellationToken);
-            mre.Reset();
+            await locker.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
             await Task.Yield();
         }
     }
@@ -331,7 +329,7 @@ public sealed class Wait<T> : Wait, IDisposable
     /// <param name="condition">Условие.</param>
     /// <param name="timeout">Таймаут ожидания (в миллисекундах).</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<ValueTask<bool>> condition, int timeout) => LockAsync(condition, timeout, CancellationToken.None);
+    public ValueTask LockUntilAsync(Func<ValueTask<bool>> condition, int timeout) => LockUntilAsync(condition, timeout, CancellationToken.None);
 
     /// <summary>
     /// Ожидает выполнения условия.
@@ -340,8 +338,8 @@ public sealed class Wait<T> : Wait, IDisposable
     /// <param name="timeout">Таймаут ожидания.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<ValueTask<bool>> condition, TimeSpan timeout, CancellationToken cancellationToken)
-        => LockAsync(condition, (int)timeout.TotalMilliseconds, cancellationToken);
+    public ValueTask LockUntilAsync(Func<ValueTask<bool>> condition, TimeSpan timeout, CancellationToken cancellationToken)
+        => LockUntilAsync(condition, (int)timeout.TotalMilliseconds, cancellationToken);
 
     /// <summary>
     /// Ожидает выполнения условия.
@@ -349,8 +347,8 @@ public sealed class Wait<T> : Wait, IDisposable
     /// <param name="condition">Условие.</param>
     /// <param name="timeout">Таймаут ожидания.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<ValueTask<bool>> condition, TimeSpan timeout)
-        => LockAsync(condition, timeout, CancellationToken.None);
+    public ValueTask LockUntilAsync(Func<ValueTask<bool>> condition, TimeSpan timeout)
+        => LockUntilAsync(condition, timeout, CancellationToken.None);
 
     /// <summary>
     /// Ожидает выполнения условия.
@@ -358,15 +356,15 @@ public sealed class Wait<T> : Wait, IDisposable
     /// <param name="condition">Условие.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<ValueTask<bool>> condition, CancellationToken cancellationToken)
-        => LockAsync(condition, Timeout.Infinite, cancellationToken);
+    public ValueTask LockUntilAsync(Func<ValueTask<bool>> condition, CancellationToken cancellationToken)
+        => LockUntilAsync(condition, Timeout.Infinite, cancellationToken);
 
     /// <summary>
     /// Ожидает выполнения условия.
     /// </summary>
     /// <param name="condition">Условие.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask LockAsync(Func<ValueTask<bool>> condition) => LockAsync(condition, CancellationToken.None);
+    public ValueTask LockUntilAsync(Func<ValueTask<bool>> condition) => LockUntilAsync(condition, CancellationToken.None);
 
     /// <summary>
     /// Высвобождает ресурсы.
@@ -377,8 +375,8 @@ public sealed class Wait<T> : Wait, IDisposable
 
         signal.Sended -= OnSignaled;
 
-        mre.Set();
-        mre.Dispose();
+        locker.Release();
+        locker.Dispose();
 
         GC.SuppressFinalize(this);
     }

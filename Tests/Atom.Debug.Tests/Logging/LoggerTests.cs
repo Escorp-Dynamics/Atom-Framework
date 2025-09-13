@@ -135,7 +135,6 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
         await Task.Run(async () =>
         {
             using var local = logger.BeginScope("[LOCAL]");
-
             using (var scope = logger.BeginScope("ID 1")) logger.TestInformationWithScope();
 
             using (var scope = logger.BeginScope("ID 2"))
