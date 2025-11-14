@@ -141,11 +141,11 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
 
     private void AppendBody(StringBuilder sb, string spaces)
     {
-        if (Code.StartsWith("return"))
+        if (Code.StartsWith("return", StringComparison.Ordinal))
         {
             sb.AppendLine($" => {Code[6..].TrimStart()}");
         }
-        else if (Code.CountOf(';') is 1 && !Code.Contains("if") && !Code.Contains("for") && !Code.Contains("while") && !Code.Contains("do"))
+        else if (Code.CountOf(';', StringComparison.Ordinal) is 1 && !Code.Contains("if", StringComparison.Ordinal) && !Code.Contains("for", StringComparison.Ordinal) && !Code.Contains("while", StringComparison.Ordinal) && !Code.Contains("do", StringComparison.Ordinal))
         {
             sb.AppendLine($" => {Code}");
         }
@@ -237,7 +237,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    public MethodMember AsReadOnly() => AsReadOnly(true);
+    public MethodMember AsReadOnly() => AsReadOnly(value: true);
 
     /// <inheritdoc/>
     public virtual MethodMember AsPartial(bool value)
@@ -247,7 +247,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    public MethodMember AsPartial() => AsPartial(true);
+    public MethodMember AsPartial() => AsPartial(value: true);
 
     /// <inheritdoc/>
     public virtual MethodMember AsRef(bool value)
@@ -257,7 +257,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    public MethodMember AsRef() => AsRef(true);
+    public MethodMember AsRef() => AsRef(value: true);
 
     /// <inheritdoc/>
     public virtual MethodMember AsReadOnlyRef(bool value)
@@ -267,7 +267,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    public MethodMember AsReadOnlyRef() => AsReadOnlyRef(true);
+    public MethodMember AsReadOnlyRef() => AsReadOnlyRef(value: true);
 
     /// <inheritdoc/>
     public virtual MethodMember AsUnsafe(bool value)
@@ -277,7 +277,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    public MethodMember AsUnsafe() => AsUnsafe(true);
+    public MethodMember AsUnsafe() => AsUnsafe(value: true);
 
     /// <inheritdoc/>
     public virtual MethodMember AsAbstract(bool value)
@@ -287,7 +287,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    public MethodMember AsAbstract() => AsAbstract(true);
+    public MethodMember AsAbstract() => AsAbstract(value: true);
 
     /// <inheritdoc/>
     public virtual MethodMember AsVirtual(bool value)
@@ -297,7 +297,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    public MethodMember AsVirtual() => AsVirtual(true);
+    public MethodMember AsVirtual() => AsVirtual(value: true);
 
     /// <inheritdoc/>
     public virtual MethodMember AsOverride(bool value)
@@ -307,7 +307,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    public MethodMember AsOverride() => AsOverride(true);
+    public MethodMember AsOverride() => AsOverride(value: true);
 
     /// <inheritdoc/>
     public virtual MethodMember AsNew(bool value)
@@ -317,7 +317,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    public MethodMember AsNew() => AsNew(true);
+    public MethodMember AsNew() => AsNew(value: true);
 
     /// <inheritdoc/>
     public virtual MethodMember AsAsync(bool value)
@@ -327,7 +327,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    public MethodMember AsAsync() => AsAsync(true);
+    public MethodMember AsAsync() => AsAsync(value: true);
 
     /// <inheritdoc/>
     public virtual MethodMember WithArgument([NotNull] params IEnumerable<MethodArgumentMember> arguments)
@@ -471,7 +471,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     /// Создаёт новый экземпляр строителя метода.
     /// </summary>
     /// <param name="name">Имя метода.</param>
-    public static MethodMember Create(string name) => Create(name, false);
+    public static MethodMember Create(string name) => Create(name, isStatic: false);
 
     /// <summary>
     /// Создаёт новый экземпляр строителя метода.
@@ -503,5 +503,5 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     /// </summary>
     /// <param name="name">Имя метода.</param>
     /// <typeparam name="T">Тип возврата из метода.</typeparam>
-    public static MethodMember Create<T>(string name) => Create<T>(name, false);
+    public static MethodMember Create<T>(string name) => Create<T>(name, isStatic: false);
 }

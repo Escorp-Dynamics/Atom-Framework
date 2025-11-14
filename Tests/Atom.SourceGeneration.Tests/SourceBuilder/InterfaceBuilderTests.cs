@@ -1,5 +1,6 @@
 namespace Atom.SourceGeneration.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class InterfaceBuilderTests(ILogger logger) : BenchmarkTests<InterfaceBuilderTests>(logger)
 {
     private static string? interfaceReference;
@@ -31,9 +32,9 @@ public class InterfaceBuilderTests(ILogger logger) : BenchmarkTests<InterfaceBui
             .WithComment("Тестовый интерфейс")
             .WithAttribute("Test")
             .WithProperty<int>("TestProperty1")
-            .WithEvent<AsyncEventHandler<FailedEventArgs>>("TestEvent")
+            .WithEvent<AsyncEventHandler<object, FailedEventArgs>>("TestEvent")
             .WithMethod("TestMethod")
-            .Build(true);
+            .Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {

@@ -1,5 +1,6 @@
 namespace Atom.SourceGeneration.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class ClassBuilderTests(ILogger logger) : BenchmarkTests<ClassBuilderTests>(logger)
 {
     private static string? classReference;
@@ -35,7 +36,7 @@ public class ClassBuilderTests(ILogger logger) : BenchmarkTests<ClassBuilderTest
             .WithProperty<object>("TestProperty1")
             .WithEvent<Action>("TestEvent")
             .WithMethod("TestMethod")
-            .Build(true);
+            .Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {

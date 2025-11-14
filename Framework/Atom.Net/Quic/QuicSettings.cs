@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Atom.Net.Udp;
 
 namespace Atom.Net.Quic;
@@ -10,6 +11,7 @@ namespace Atom.Net.Quic;
 /// Инициализирует новый экземпляр <see cref="QuicSettings"/>.
 /// </remarks>
 [method: MethodImpl(MethodImplOptions.AggressiveInlining)]
+[StructLayout(LayoutKind.Auto)]
 public readonly struct QuicSettings() : IEquatable<QuicSettings>
 {
     /// <summary>

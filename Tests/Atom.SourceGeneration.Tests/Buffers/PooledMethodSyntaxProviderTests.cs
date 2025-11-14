@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.Testing;
 
 namespace Atom.Buffers.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class PooledTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<PooledTypeSyntaxProviderTests>(logger)
 {
     private static string? source;
@@ -33,7 +34,7 @@ public class PooledTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<Pool
     }
 
     [TestCase(TestName = "Тест анализатора буферизации"), Benchmark]
-    public async Task AnalyzerTest()
+    public async Task AnalyzerTestAsync()
     {
         var test = new CSharpAnalyzerTest<PooledSourceAnalyzer, DefaultVerifier>
         {
@@ -58,7 +59,7 @@ public class PooledTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<Pool
     }
 
     [TestCase(TestName = "Тест генератора буферизации"), Benchmark]
-    public async Task GeneratorTest()
+    public async Task GeneratorTestAsync()
     {
         var test = new CSharpSourceGeneratorTest<PooledSourceGenerator, DefaultVerifier>
         {

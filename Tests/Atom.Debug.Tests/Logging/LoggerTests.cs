@@ -51,9 +51,9 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
     }
 
     [TestCase(TestName = "Консольный тест логирования"), Benchmark]
-    public async Task ConsoleTest()
+    public async Task ConsoleTestAsync()
     {
-        await Test(consoleLogger);
+        await TestAsync(consoleLogger);
 
         if (!IsBenchmarkEnabled)
         {
@@ -63,16 +63,16 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
     }
 
     [TestCase(TestName = "Файловый тест логирования")]
-    public async Task FileTest()
+    public async Task FileTestAsync()
     {
-        await Test(fileLogger);
+        await TestAsync(fileLogger);
         if (!IsBenchmarkEnabled) Assert.That(File.Exists(((FileLogger)fileLogger!).Path), Is.True);
     }
 
     [TestCase(TestName = "Полный тест логирования")]
-    public async Task CombinedTest()
+    public async Task CombinedTestAsync()
     {
-        await Test(combinedLogger);
+        await TestAsync(combinedLogger);
 
         if (!IsBenchmarkEnabled)
         {
@@ -88,9 +88,9 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
     }
 
     [TestCase(TestName = "Консольный тест логирования (.NET)"), Benchmark]
-    public async Task ConsoleTestDotnet()
+    public async Task ConsoleTestDotnetAsync()
     {
-        await Test(microsoftConsoleLogger);
+        await TestAsync(microsoftConsoleLogger);
 
         if (!IsBenchmarkEnabled)
         {
@@ -100,9 +100,9 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
     }
 
     [TestCase(TestName = "Консольный тест логирования (NLog)"), Benchmark]
-    public async Task ConsoleTestNLog()
+    public async Task ConsoleTestNLogAsync()
     {
-        await Test(nLogConsoleLogger);
+        await TestAsync(nLogConsoleLogger);
 
         if (!IsBenchmarkEnabled)
         {
@@ -112,9 +112,9 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
     }
 
     [TestCase(TestName = "Консольный тест логирования (Serilog)"), Benchmark]
-    public async Task ConsoleTestSerilog()
+    public async Task ConsoleTestSerilogAsync()
     {
-        await Test(serilogConsoleLogger);
+        await TestAsync(serilogConsoleLogger);
 
         if (!IsBenchmarkEnabled)
         {
@@ -123,7 +123,7 @@ public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTest
         }
     }
 
-    private static async Task Test(ILogger? logger)
+    private static async Task TestAsync(ILogger? logger)
     {
         if (logger is null) return;
 

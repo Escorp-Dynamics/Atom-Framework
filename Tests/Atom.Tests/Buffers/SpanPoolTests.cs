@@ -33,7 +33,7 @@ public class SpanPoolTests(ILogger logger) : BenchmarkTests<SpanPoolTests>(logge
         if (!IsBenchmarkEnabled) Assert.That(span.Length, Is.EqualTo(BufferSize));
 
         span[..5].Fill(5);
-        SpanPool<int>.Shared.Return(span, true);
+        SpanPool<int>.Shared.Return(span, clearArray: true);
 
         span = SpanPool<int>.Shared.Rent(BufferSize);
 
@@ -43,6 +43,6 @@ public class SpanPoolTests(ILogger logger) : BenchmarkTests<SpanPoolTests>(logge
             foreach (var i in span[..5]) Assert.That(i, Is.Zero);
         }
 
-        SpanPool<int>.Shared.Return(span, true);
+        SpanPool<int>.Shared.Return(span, clearArray: true);
     }
 }

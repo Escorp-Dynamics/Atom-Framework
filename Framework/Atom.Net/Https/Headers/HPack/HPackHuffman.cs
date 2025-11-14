@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Atom.Net.Https.Headers.HPack;
 
@@ -81,6 +82,7 @@ internal static class HPackHuffman
     // ---- Декодирующее дерево (узлы) ----
     // Узел хранит: индекс левого/правого ребёнка (0 => нет), либо терминальный символ (>=0).
     // Мы строим дерево один раз при первом обращении (без аллокаций после инициализации).
+    [StructLayout(LayoutKind.Auto)]
     private struct Node
     {
         public int Left;    // 0 если отсутствует; иначе индекс узла (1.._nodes.Length-1)
@@ -162,76 +164,64 @@ internal static class HPackHuffman
     {
         EnsureInitialized();
 
-        // «Битовый поток»: в переменной acc храним nBits значимых старших бит (MSB-first).
         uint acc = 0;
         var nBits = 0;
-
-        // Scratch-буфер результата
-        var outBuf = EnsureScratch(Math.Max(64, data.Length * 2)); // декомпрессия обычно даёт больше байтов, чем вход
+        var outBuf = EnsureScratch(Math.Max(64, data.Length * 2));
         var outPos = 0;
-
-        var nodes = HPackHuffman.nodes;
-        var node = 1; // корень (индекс 1)
-
+        var node = 1;
         for (var i = 0; i < data.Length; i++)
         {
             acc = (acc << 8) | data[i];
             nBits += 8;
+            (node, nBits, outPos, outBuf) = DecodeBits(acc, nBits, node, outPos, outBuf);
+        }
+        ValidateDecodeFinalState(node, nBits, acc);
+        return new ReadOnlySpan<byte>(outBuf, 0, outPos);
+    }
 
-            // Пытаемся снимать символы, пока хватает бит
-            while (nBits > 0)
+    /// <summary>
+    /// Обрабатывает побитовый обход дерева Хаффмана и эмит символы в буфер.
+    /// </summary>
+    private static (int node, int nBits, int outPos, byte[] outBuf) DecodeBits(uint acc, int nBits, int node, int outPos, byte[] outBuf)
+    {
+        var step = Math.Min(nBits, MaxCodeBits);
+        var consumed = 0;
+        while (nBits > 0 && consumed < step)
+        {
+            var bitIndex = nBits - 1;
+            var bit = (int)((acc >> bitIndex) & 1);
+            nBits--;
+            consumed++;
+            node = (bit == 0) ? nodes[node].Left : nodes[node].Right;
+            if (node is 0)
+                throw new InvalidOperationException("HPACK Huffman: недопустимая последовательность бит (пустая ветка).");
+            var sym = nodes[node].Symbol;
+            if (sym >= 0)
             {
-                // Идём по дереву, расходуя по 1 биту (MSB → LSB)
-                var step = Math.Min(nBits, MaxCodeBits);
-
-                // Обрабатываем побитово (30 шагов — безопасно и быстро)
-                var consumed = 0;
-
-                while (consumed < step)
-                {
-                    var bitIndex = nBits - 1;               // старший бит
-                    var bit = (int)((acc >> bitIndex) & 1); // 0/1
-
-                    nBits--;
-                    consumed++;
-
-                    node = (bit is 0) ? nodes[node].Left : nodes[node].Right;
-                    if (node is 0) throw new InvalidOperationException("HPACK Huffman: недопустимая последовательность бит (пустая ветка).");
-
-                    var sym = nodes[node].Symbol;
-                    if (sym >= 0)
-                    {
-                        // Терминал — эмитим символ и возвращаемся в корень
-                        if (sym is 256) // EOS в середине — запрещено
-                            throw new InvalidOperationException("HPACK Huffman: недопустимый EOS в середине потока.");
-
-                        if (outPos == outBuf.Length) outBuf = EnsureScratch(outBuf.Length << 1);
-
-                        outBuf[outPos++] = (byte)sym;
-                        node = 1; // корень
-                        break;    // выходим к while(nBits>0), пробуем декодировать дальше
-                    }
-                }
-
-                // Если мы не дошли до терминала — нужен следующий байт
-                if (nodes[node].Symbol < 0) break;
+                if (sym is 256)
+                    throw new InvalidOperationException("HPACK Huffman: недопустимый EOS в середине потока.");
+                if (outPos == outBuf.Length)
+                    outBuf = EnsureScratch(outBuf.Length << 1);
+                outBuf[outPos++] = (byte)sym;
+                node = 1;
+                break;
             }
         }
+        return (node, nBits, outPos, outBuf);
+    }
 
-        // Завершение: оставшиеся биты должны быть паддингом из единиц,
-        // а состояние автомата — корень (иначе мы в середине кода символа).
+    /// <summary>
+    /// Проверяет финальное состояние декодирования Huffman-блока.
+    /// </summary>
+    private static void ValidateDecodeFinalState(int node, int nBits, uint acc)
+    {
         if (node is not 1) throw new InvalidOperationException("HPACK Huffman: незавершённый код символа в конце потока.");
-
         if (nBits > 0)
         {
             var mask = (uint)((1 << nBits) - 1);
             var tail = acc & mask;
-
-            // Паддинг в HPACK — это префикс кода EOS (все 1). Значит оставшиеся биты должны быть все 1.
             if (tail != mask) throw new InvalidOperationException("HPACK Huffman: некорректный паддинг (ожидались единицы).");
         }
-
-        return new ReadOnlySpan<byte>(outBuf, 0, outPos);
     }
 
     /// <summary>
@@ -263,103 +253,111 @@ internal static class HPackHuffman
     /// </summary>
     private static void BuildDecoder()
     {
-        // Оценим верхнюю границу узлов: грубая — сумма длин (но это многовато).
-        // Для простоты возьмём фиксированный буфер, который с запасом покрывает HPACK-таблицу.
-        // Практически хватает &lt; 6000 узлов.
-        var nodes = new Node[8192];
-        var next = 2; // 1 — корень занят
+        var localNodes = AllocateDecoderNodes();
+        BuildDecoderTree(localNodes);
+        nodes = localNodes;
+    }
 
-        nodes[1].Left = 0; nodes[1].Right = 0; nodes[1].Symbol = -1;
+    /// <summary>
+    /// Выделяет массив узлов для декодирующего дерева.
+    /// </summary>
+    private static Node[] AllocateDecoderNodes()
+    {
+        var arr = new Node[8192];
+        arr[1].Left = 0; arr[1].Right = 0; arr[1].Symbol = -1;
+        return arr;
+    }
 
+    /// <summary>
+    /// Строит бинарное дерево декодирования Huffman по таблицам кодов и длин.
+    /// </summary>
+    private static void BuildDecoderTree(Node[] localNodes)
+    {
+        var next = 2;
         for (var sym = 0; sym <= 256; sym++)
         {
             var code = Codes[sym];
             int len = Lengths[sym];
-
-            var node = 1; // от корня
-
+            var node = 1;
             for (var k = len - 1; k >= 0; k--)
             {
                 var bit = (int)((code >> k) & 1);
-                ref var n = ref nodes[node];
-
                 if (k is 0)
                 {
-                    // Последний шаг — устанавливаем терминал
-                    if (bit is 0)
-                    {
-                        if (n.Left is 0)
-                        {
-                            n.Left = next;
-                            nodes[next] = new Node { Symbol = sym };
-                            next++;
-                        }
-                        else
-                        {
-                            if (nodes[n.Left].Symbol is not -1) throw new InvalidOperationException("HPACK Huffman: конфликт кодов (терминал слева).");
-                            // если ветка была промежуточной, превращать в терминал нельзя
-                            throw new InvalidOperationException("HPACK Huffman: код пересекается с существующим префиксом.");
-                        }
-                    }
-                    else
-                    {
-                        if (n.Right is 0)
-                        {
-                            n.Right = next;
-                            nodes[next] = new Node { Symbol = sym };
-                            next++;
-                        }
-                        else
-                        {
-                            if (nodes[n.Right].Symbol is not -1) throw new InvalidOperationException("HPACK Huffman: конфликт кодов (терминал справа).");
-                            throw new InvalidOperationException("HPACK Huffman: код пересекается с существующим префиксом.");
-                        }
-                    }
+                    next = HandleTerminalStep(localNodes, node, bit, sym, next);
                 }
                 else
                 {
-                    // Промежуточный шаг — создаём/спускаемся
-                    if (bit is 0)
-                    {
-                        if (n.Left is 0)
-                        {
-                            n.Left = next;
-                            nodes[next] = new Node { Symbol = -1 };
-                            next++;
-                        }
-
-                        node = n.Left;
-                    }
-                    else
-                    {
-                        if (n.Right is 0)
-                        {
-                            n.Right = next;
-                            nodes[next] = new Node { Symbol = -1 };
-                            next++;
-                        }
-
-                        node = n.Right;
-                    }
+                    (node, next) = HandleIntermediateStep(localNodes, node, bit, next);
                 }
             }
         }
+    }
 
-        HPackHuffman.nodes = nodes;
+    /// <summary>
+    /// Обрабатывает терминальный шаг построения дерева Хаффмана.
+    /// </summary>
+    private static int HandleTerminalStep(Node[] localNodes, int node, int bit, int sym, int next)
+    {
+        ref var n = ref localNodes[node];
+        if (bit is 0)
+        {
+            if (n.Left is 0)
+            {
+                n.Left = next;
+                localNodes[next] = new Node { Symbol = sym };
+                return next + 1;
+            }
+            if (localNodes[n.Left].Symbol is not -1)
+                throw new InvalidOperationException("HPACK Huffman: конфликт кодов (терминал слева).");
+            throw new InvalidOperationException("HPACK Huffman: код пересекается с существующим префиксом.");
+        }
+        if (n.Right is 0)
+        {
+            n.Right = next;
+            localNodes[next] = new Node { Symbol = sym };
+            return next + 1;
+        }
+        if (localNodes[n.Right].Symbol is not -1)
+            throw new InvalidOperationException("HPACK Huffman: конфликт кодов (терминал справа).");
+        throw new InvalidOperationException("HPACK Huffman: код пересекается с существующим префиксом.");
+    }
+
+    /// <summary>
+    /// Обрабатывает промежуточный шаг построения дерева Хаффмана.
+    /// </summary>
+    private static (int node, int next) HandleIntermediateStep(Node[] localNodes, int node, int bit, int next)
+    {
+        ref var n = ref localNodes[node];
+        if (bit is 0)
+        {
+            if (n.Left is 0)
+            {
+                n.Left = next;
+                localNodes[next] = new Node { Symbol = -1 };
+                return (n.Left, next + 1);
+            }
+            return (n.Left, next);
+        }
+        if (n.Right is 0)
+        {
+            n.Right = next;
+            localNodes[next] = new Node { Symbol = -1 };
+            return (n.Right, next + 1);
+        }
+        return (n.Right, next);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static byte[] EnsureScratch(int minCapacity)
     {
         var a = decodeScratch;
-
         if (a is null || a.Length < minCapacity)
         {
             var cap = a == null ? 1024 : a.Length;
             while (cap < minCapacity) cap <<= 1;
             decodeScratch = a = new byte[cap];
         }
-
         return a;
     }
 }

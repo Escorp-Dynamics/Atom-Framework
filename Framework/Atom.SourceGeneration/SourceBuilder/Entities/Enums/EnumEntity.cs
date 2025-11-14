@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Atom.Buffers;
 using Atom.Collections;
@@ -6,7 +7,7 @@ using Atom.Collections;
 namespace Atom.SourceGeneration;
 
 /// <summary>
-/// Представляет строителя для <c>enum</c>.
+/// Представляет строителя для <see langword="enum"/>.
 /// </summary>
 public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
 {
@@ -22,7 +23,7 @@ public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
     public IEnumerable<EnumMember> Values => values;
 
     /// <inheritdoc/>
-    public bool IsFlags => Attributes.Contains("Flags");
+    public bool IsFlags => Attributes.Contains("Flags", StringComparer.Ordinal);
 
     /// <inheritdoc/>
     public override bool IsValid => !string.IsNullOrEmpty(Name) && values.CurrentIndex >= 0;
@@ -49,6 +50,7 @@ public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override EnumEntity WithComment(string? comment)
     {
         Comment = comment;
@@ -56,6 +58,7 @@ public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override EnumEntity WithAttribute([NotNull] params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
@@ -63,6 +66,7 @@ public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public EnumEntity WithAccessModifier(AccessModifier modifier)
     {
         AccessModifier = modifier;
@@ -134,7 +138,7 @@ public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
     }
 
     /// <summary>
-    /// Инициализирует нового строителя для <c>enum</c>.
+    /// Инициализирует нового строителя для <see langword="enum"/>.
     /// </summary>
     public static EnumEntity Create() => ObjectPool<EnumEntity>.Shared.Rent();
 }

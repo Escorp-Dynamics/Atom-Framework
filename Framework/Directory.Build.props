@@ -1,0 +1,54 @@
+<Project>
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <LangVersion>preview</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <OptimizationPreference>speed</OptimizationPreference>
+
+        <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+        <AnalysisLevel>latest-all</AnalysisLevel>
+        <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+        <WarningLevel>9999</WarningLevel>
+        <AnalysisMode>AllEnabledByDefault</AnalysisMode>
+        <EnableNETAnalyzers>true</EnableNETAnalyzers>
+
+        <IsTrimmable>true</IsTrimmable>
+        <IsAotCompatible>true</IsAotCompatible>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+
+        <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
+        <IlcOptimizationPreference>speed</IlcOptimizationPreference>
+
+        <!-- Тримминг/AOT: повысь чувствительность к опасным API -->
+        <PublishTrimmed Condition="'$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe'">true</PublishTrimmed>
+        <PublishTrimmed Condition="'$(OutputType)' != 'Exe' and '$(OutputType)' != 'WinExe'">false</PublishTrimmed>
+        <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+
+        <!-- В Release – любая диагностика = ошибка -->
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
+
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <RunAnalyzersDuringLiveAnalysis>true</RunAnalyzersDuringLiveAnalysis>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="*"
+            PrivateAssets="all" />
+        <PackageReference Include="Meziantou.Analyzer" Version="*" PrivateAssets="all" />
+        <PackageReference Include="Roslynator.Analyzers" Version="*" PrivateAssets="all" />
+        <PackageReference Include="ErrorProne.NET.CoreAnalyzers" Version="*" PrivateAssets="all" />
+        <PackageReference Include="IDisposableAnalyzers" Version="*" PrivateAssets="all" />
+        <PackageReference Include="ReflectionAnalyzers" Version="*" PrivateAssets="all" />
+        <PackageReference Include="SmartAnalyzers.MultithreadingAnalyzer" Version="*"
+            PrivateAssets="all" />
+        <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="*"
+            PrivateAssets="all" />
+        <PackageReference Include="AsyncFixer" Version="*" PrivateAssets="all" />
+        <PackageReference Include="SecurityCodeScan.VS2019" Version="*" PrivateAssets="all" />
+        <PackageReference Include="SonarAnalyzer.CSharp" Version="*" PrivateAssets="all" />
+    </ItemGroup>
+</Project>

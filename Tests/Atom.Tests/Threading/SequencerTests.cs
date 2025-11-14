@@ -21,16 +21,16 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
 
         static Worker()
         {
-            Sequencer.Started += args => Log("Секвенция запущена");
-            Sequencer.Stopped += args => Log("Секвенция остановлена");
-            Sequencer.Added += args => Log($"{((Worker)args.Task!.Target!).Id} Задача добавлена, {args.Mode}");
-            Sequencer.Updated += args => Log($"{((Worker)args.Task!.Target!).Id} Задача обновлена, {args.Mode}");
-            Sequencer.Removed += args => Log($"{((Worker)args.Task!.Target!).Id} Задача удалена, {args.Mode}");
-            Sequencer.Sequence += args => Log($"{((Worker)args.Task!.Target!).Id} Выполнение, {args.Mode}");
-            Sequencer.Failed += args => Log($"{((Worker)args.Task!.Target!).Id} {args.Exception?.Message ?? "Ошибка"}, {args.Mode}");
-            Sequencer.Paused += args => Log($"{((Worker)args.Task!.Target!).Id} Задача приостановлена, {args.Mode}");
-            Sequencer.Resumed += args => Log($"{((Worker)args.Task!.Target!).Id} Задача возобновлена, {args.Mode}");
-            Sequencer.Changed += args => Log($"{((Worker)args.Task!.Target!).Id} Задача изменена, {args.Mode}");
+            Sequencer.Started += (_, args) => Log("Секвенция запущена");
+            Sequencer.Stopped += (_, args) => Log("Секвенция остановлена");
+            Sequencer.Added += (_, args) => Log($"{((Worker)args.Task!.Target!).Id} Задача добавлена, {args.Mode}");
+            Sequencer.Updated += (_, args) => Log($"{((Worker)args.Task!.Target!).Id} Задача обновлена, {args.Mode}");
+            Sequencer.Removed += (_, args) => Log($"{((Worker)args.Task!.Target!).Id} Задача удалена, {args.Mode}");
+            Sequencer.Sequence += (_, args) => Log($"{((Worker)args.Task!.Target!).Id} Выполнение, {args.Mode}");
+            Sequencer.Failed += (_, args) => Log($"{((Worker)args.Task!.Target!).Id} {args.Exception?.Message ?? "Ошибка"}, {args.Mode}");
+            Sequencer.Paused += (_, args) => Log($"{((Worker)args.Task!.Target!).Id} Задача приостановлена, {args.Mode}");
+            Sequencer.Resumed += (_, args) => Log($"{((Worker)args.Task!.Target!).Id} Задача возобновлена, {args.Mode}");
+            Sequencer.Changed += (_, args) => Log($"{((Worker)args.Task!.Target!).Id} Задача изменена, {args.Mode}");
 
             Context = new();
         }
@@ -71,35 +71,35 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
 
     public SequencerTests() : this(ConsoleLogger.Unicode)
     {
-        manualSequencer.Started += args => Log("Секвенция запущена");
-        manualSequencer.Stopped += args => Log("Секвенция остановлена");
-        manualSequencer.Added += args => Log($"Задача добавлена: {args.Task?.Method.Name}");
-        manualSequencer.Updated += args => Log($"Задача обновлена {args.Task?.Method.Name}");
-        manualSequencer.Removed += args => Log($"Задача удалена {args.Task?.Method.Name}");
-        manualSequencer.Sequence += args => Log($"Выполнение {args.Task?.Method.Name}");
-        manualSequencer.Failed += args => Log(args.Exception?.Message);
-        manualSequencer.Paused += args => Log($"Задача приостановлена {args.Task?.Method.Name}");
-        manualSequencer.Resumed += args => Log($"Задача возобновлена {args.Task?.Method.Name}");
+        manualSequencer.Started += (_, args) => Log("Секвенция запущена");
+        manualSequencer.Stopped += (_, args) => Log("Секвенция остановлена");
+        manualSequencer.Added += (_, args) => Log($"Задача добавлена: {args.Task?.Method.Name}");
+        manualSequencer.Updated += (_, args) => Log($"Задача обновлена {args.Task?.Method.Name}");
+        manualSequencer.Removed += (_, args) => Log($"Задача удалена {args.Task?.Method.Name}");
+        manualSequencer.Sequence += (_, args) => Log($"Выполнение {args.Task?.Method.Name}");
+        manualSequencer.Failed += (_, args) => Log(args.Exception?.Message);
+        manualSequencer.Paused += (_, args) => Log($"Задача приостановлена {args.Task?.Method.Name}");
+        manualSequencer.Resumed += (_, args) => Log($"Задача возобновлена {args.Task?.Method.Name}");
 
-        loopSequencer.Started += args => Log("Секвенция запущена");
-        loopSequencer.Stopped += args => Log("Секвенция остановлена");
-        loopSequencer.Added += args => Log($"Задача добавлена {args.Task?.Method.Name}");
-        loopSequencer.Updated += args => Log($"Задача обновлена {args.Task?.Method.Name}");
-        loopSequencer.Removed += args => Log($"Задача удалена {args.Task?.Method.Name}");
-        loopSequencer.Sequence += args => Log($"Выполнение {args.Task?.Method.Name}");
-        loopSequencer.Failed += args => Log(args.Exception?.Message);
-        loopSequencer.Paused += args => Log($"Задача приостановлена {args.Task?.Method.Name}");
-        loopSequencer.Resumed += args => Log($"Задача возобновлена {args.Task?.Method.Name}");
+        loopSequencer.Started += (_, args) => Log("Секвенция запущена");
+        loopSequencer.Stopped += (_, args) => Log("Секвенция остановлена");
+        loopSequencer.Added += (_, args) => Log($"Задача добавлена {args.Task?.Method.Name}");
+        loopSequencer.Updated += (_, args) => Log($"Задача обновлена {args.Task?.Method.Name}");
+        loopSequencer.Removed += (_, args) => Log($"Задача удалена {args.Task?.Method.Name}");
+        loopSequencer.Sequence += (_, args) => Log($"Выполнение {args.Task?.Method.Name}");
+        loopSequencer.Failed += (_, args) => Log(args.Exception?.Message);
+        loopSequencer.Paused += (_, args) => Log($"Задача приостановлена {args.Task?.Method.Name}");
+        loopSequencer.Resumed += (_, args) => Log($"Задача возобновлена {args.Task?.Method.Name}");
 
-        loopWithWaitingSequencer.Started += args => Log("Секвенция запущена");
-        loopWithWaitingSequencer.Stopped += args => Log("Секвенция остановлена");
-        loopWithWaitingSequencer.Added += args => Log($"Задача добавлена {args.Task?.Method.Name}");
-        loopWithWaitingSequencer.Updated += args => Log($"Задача обновлена {args.Task?.Method.Name}");
-        loopWithWaitingSequencer.Removed += args => Log($"Задача удалена {args.Task?.Method.Name}");
-        loopWithWaitingSequencer.Sequence += args => Log($"Выполнение {args.Task?.Method.Name}");
-        loopWithWaitingSequencer.Failed += args => Log(args.Exception?.Message);
-        loopWithWaitingSequencer.Paused += args => Log($"Задача приостановлена {args.Task?.Method.Name}");
-        loopWithWaitingSequencer.Resumed += args => Log($"Задача возобновлена {args.Task?.Method.Name}");
+        loopWithWaitingSequencer.Started += (_, args) => Log("Секвенция запущена");
+        loopWithWaitingSequencer.Stopped += (_, args) => Log("Секвенция остановлена");
+        loopWithWaitingSequencer.Added += (_, args) => Log($"Задача добавлена {args.Task?.Method.Name}");
+        loopWithWaitingSequencer.Updated += (_, args) => Log($"Задача обновлена {args.Task?.Method.Name}");
+        loopWithWaitingSequencer.Removed += (_, args) => Log($"Задача удалена {args.Task?.Method.Name}");
+        loopWithWaitingSequencer.Sequence += (_, args) => Log($"Выполнение {args.Task?.Method.Name}");
+        loopWithWaitingSequencer.Failed += (_, args) => Log(args.Exception?.Message);
+        loopWithWaitingSequencer.Paused += (_, args) => Log($"Задача приостановлена {args.Task?.Method.Name}");
+        loopWithWaitingSequencer.Resumed += (_, args) => Log($"Задача возобновлена {args.Task?.Method.Name}");
     }
 
     private void Log(string? message)
@@ -107,12 +107,6 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
         message = $"{DateTime.UtcNow:HH:mm:ss.fff} {message}";
         Logger.WriteLineInfo(message);
         Trace.TraceInformation(message);
-    }
-
-    private ValueTask TestCallback()
-    {
-        Log("TestCallback()");
-        return ValueTask.CompletedTask;
     }
 
     private async ValueTask TestCallbackAsync()
@@ -123,14 +117,14 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
     }
 
     [TestCase(TestName = "Тест проверки секвенсора (Manual)"), Benchmark]
-    public async Task ManualTest()
+    public async Task ManualTestAsync()
     {
-        manualSequencer.Add(TestCallback);
+        manualSequencer.Add(TestCallbackAsync);
         manualSequencer.Add(TestCallbackAsync);
 
         manualSequencer.Start();
 
-        var result = await manualSequencer.WaitAsync(TestCallback);
+        var result = await manualSequencer.WaitAsync(TestCallbackAsync);
         Assert.That(result, Is.False);
 
         result = await manualSequencer.WaitAsync(TestCallbackAsync);
@@ -138,9 +132,9 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
     }
 
     [TestCase(TestName = "Тест проверки секвенсора (Loop)"), Benchmark]
-    public async Task LoopTest()
+    public async Task LoopTestAsync()
     {
-        loopSequencer.Add(TestCallback);
+        loopSequencer.Add(TestCallbackAsync);
         loopSequencer.Add(TestCallbackAsync);
 
         loopSequencer.Start();
@@ -148,10 +142,10 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
         _ = Task.Run(async () =>
         {
             await Task.Delay(TimeSpan.FromSeconds(3));
-            loopSequencer.Remove(TestCallback);
+            loopSequencer.Remove(TestCallbackAsync);
         });
 
-        var result = await loopSequencer.WaitAsync(TestCallback);
+        var result = await loopSequencer.WaitAsync(TestCallbackAsync);
         Assert.That(result, Is.False);
 
         _ = Task.Run(async () =>
@@ -165,9 +159,9 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
     }
 
     [TestCase(TestName = "Тест проверки секвенсора (LoopWithWaiting)"), Benchmark]
-    public async Task LoopWithWaitingTest()
+    public async Task LoopWithWaitingTestAsync()
     {
-        loopWithWaitingSequencer.Add(TestCallback);
+        loopWithWaitingSequencer.Add(TestCallbackAsync);
         loopWithWaitingSequencer.Add(TestCallbackAsync);
 
         loopWithWaitingSequencer.Start();
@@ -178,14 +172,14 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
             loopWithWaitingSequencer.Stop();
         });
 
-        var result = await loopWithWaitingSequencer.WaitAsync(TestCallback);
+        var result = await loopWithWaitingSequencer.WaitAsync(TestCallbackAsync);
         Assert.That(result, Is.True);
     }
 
     [TestCase(TestName = "Тест проверки секвенсора с паузой (Manual)"), Benchmark]
-    public async Task ManualWithPauseTest()
+    public async Task ManualWithPauseTestAsync()
     {
-        manualSequencer.Add(TestCallback);
+        manualSequencer.Add(TestCallbackAsync);
         manualSequencer.Add(TestCallbackAsync);
 
         manualSequencer.Start();
@@ -197,7 +191,7 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
             manualSequencer.Resume(TestCallbackAsync);
         });
 
-        var result = await manualSequencer.WaitAsync(TestCallback);
+        var result = await manualSequencer.WaitAsync(TestCallbackAsync);
         Assert.That(result, Is.False);
 
         result = await manualSequencer.WaitAsync(TestCallbackAsync);
@@ -205,9 +199,9 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
     }
 
     [TestCase(TestName = "Тест проверки секвенсора с паузой (Loop)"), Benchmark]
-    public async Task LoopWithPauseTest()
+    public async Task LoopWithPauseTestAsync()
     {
-        loopSequencer.Add(TestCallback);
+        loopSequencer.Add(TestCallbackAsync);
         loopSequencer.Add(TestCallbackAsync);
 
         loopSequencer.Start();
@@ -222,10 +216,10 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
         _ = Task.Run(async () =>
         {
             await Task.Delay(TimeSpan.FromSeconds(5));
-            loopSequencer.Remove(TestCallback);
+            loopSequencer.Remove(TestCallbackAsync);
         });
 
-        var result = await loopSequencer.WaitAsync(TestCallback);
+        var result = await loopSequencer.WaitAsync(TestCallbackAsync);
         Assert.That(result, Is.False);
 
         _ = Task.Run(async () =>
@@ -239,9 +233,9 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
     }
 
     [TestCase(TestName = "Тест проверки секвенсора с паузой (LoopWithWaiting)"), Benchmark]
-    public async Task LoopWithWaitingWithPauseTest()
+    public async Task LoopWithWaitingWithPauseTestAsync()
     {
-        loopWithWaitingSequencer.Add(TestCallback);
+        loopWithWaitingSequencer.Add(TestCallbackAsync);
         loopWithWaitingSequencer.Add(TestCallbackAsync);
 
         loopWithWaitingSequencer.Start();
@@ -259,12 +253,12 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
             loopWithWaitingSequencer.Stop();
         });
 
-        var result = await loopWithWaitingSequencer.WaitAsync(TestCallback);
+        var result = await loopWithWaitingSequencer.WaitAsync(TestCallbackAsync);
         Assert.That(result, Is.True);
     }
 
     [TestCase(TestName = "Тест удаления коллбэка"), Benchmark]
-    public async Task LoopRemovingTest()
+    public async Task LoopRemovingTestAsync()
     {
         IsRemoveTest = true;
         Worker.Context = this;
@@ -282,7 +276,7 @@ public class SequencerTests(ILogger logger) : BenchmarkTests<SequencerTests>(log
     }
 
     [TestCase(TestName = "Тест паузы и смены режимов"), Benchmark]
-    public async Task LoopPauseAndChangeModeTest()
+    public async Task LoopPauseAndChangeModeTestAsync()
     {
         Worker.Context = this;
 

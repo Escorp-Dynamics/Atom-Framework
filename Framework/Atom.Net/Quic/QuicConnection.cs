@@ -70,7 +70,7 @@ public sealed class QuicConnection : IAsyncDisposable, IDisposable
         await udp.ConnectAsync(host, port, ct).ConfigureAwait(false);
 
         // Стартуем цикл приёма (без аллокаций в горячем пути).
-        rxLoop = Task.Run(ReceiveLoop, CancellationToken.None);
+        rxLoop = Task.Run(ReceiveLoopAsync, CancellationToken.None);
     }
 
     /// <summary>
@@ -83,19 +83,22 @@ public sealed class QuicConnection : IAsyncDisposable, IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public async ValueTask<int> SendPacketAsync(Func<Span<byte>, int> packetBuilder, CancellationToken cancellationToken)
     {
-        var buf = rxBuffer.AsSpan(); // временно переиспользуем — отдельный TX-буфер добавим при внедрении AEAD
-        var len = packetBuilder(buf);
-        if ((uint)len > (uint)buf.Length) throw new ArgumentOutOfRangeException(nameof(packetBuilder));
+        ArgumentNullException.ThrowIfNull(packetBuilder);
+        var spanBuf = rxBuffer.AsSpan(); // временно переиспользуем — отдельный TX-буфер добавим при внедрении AEAD
+        var len = packetBuilder(spanBuf);
+        if ((uint)len > (uint)spanBuf.Length) throw new ArgumentOutOfRangeException(nameof(packetBuilder));
 
         // Для connected UDP — обычная запись; дейтаграмма должна уйти целиком.
-        await udp.WriteAsync(buf[..len], cancellationToken).ConfigureAwait(false);
+        // Socket API ожидает ReadOnlyMemory<byte> для асинхронной записи, поэтому используем Memory сегмент.
+        var mem = rxBuffer.AsMemory(0, len);
+        await udp.WriteAsync(mem, cancellationToken).ConfigureAwait(false);
         return len;
     }
 
     /// <summary>
     /// Читает дейтаграммы и парсит QUIC-заголовки (без дешифрования).
     /// </summary>
-    private async Task ReceiveLoop()
+    private async Task ReceiveLoopAsync()
     {
         var mem = rxBuffer.AsMemory();
 
@@ -150,7 +153,7 @@ public sealed class QuicConnection : IAsyncDisposable, IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Dispose()
     {
-        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
+        if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
 
         try { udp.Dispose(); } catch { /* ignore */ }
         try { rxLoop?.Wait(); } catch { /* ignore */ }
@@ -160,7 +163,7 @@ public sealed class QuicConnection : IAsyncDisposable, IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public async ValueTask DisposeAsync()
     {
-        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
+        if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
 
         try { await udp.DisposeAsync().ConfigureAwait(false); } catch { /* ignore */ }
 

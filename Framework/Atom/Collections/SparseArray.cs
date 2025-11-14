@@ -61,7 +61,6 @@ public class SparseArray<T> : IEnumerable<T>
     /// Инициализирует новый экземпляр <see cref="SparseArray{T}"/>.
     /// </summary>
     /// <param name="array">Исходный массив.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public SparseArray(T[] array)
     {
         isExternal = true;
@@ -73,20 +72,13 @@ public class SparseArray<T> : IEnumerable<T>
     /// Инициализирует новый экземпляр <see cref="SparseArray{T}"/>.
     /// </summary>
     /// <param name="capacity">Ёмкость массива.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public SparseArray(int capacity) : this(ArrayPool<T>.Shared.Rent(capacity)) => isExternal = default;
-
-    /// <summary>
-    /// Финализирует <see cref="SparseArray{T}"/>.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    ~SparseArray() => Release();
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ValidateIndex(int index)
     {
         if (IsReleased) throw new InvalidOperationException("Ресурсы были высвобождены");
-        else if (index < 0 || index >= values.Length) throw new ArgumentOutOfRangeException(nameof(index));
+        if (index < 0 || index >= values.Length) throw new ArgumentOutOfRangeException(nameof(index));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -105,7 +97,6 @@ public class SparseArray<T> : IEnumerable<T>
     /// </summary>
     /// <param name="index">Индекс элемента.</param>
     /// <param name="value">Значение элемента.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public unsafe void AddOrUpdate(int index, T value)
     {
         ValidateIndex(index);
@@ -141,7 +132,6 @@ public class SparseArray<T> : IEnumerable<T>
     /// Добавляет значения в конец массива.
     /// </summary>
     /// <param name="values">Добавляемые значения.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public unsafe void AddRange([NotNull] params IEnumerable<T> values)
     {
         foreach (var value in values)
@@ -185,7 +175,7 @@ public class SparseArray<T> : IEnumerable<T>
         IsReleased = true;
 
         if (!isExternal) ArrayPool<T>.Shared.Return(values, clearArray);
-        indexPool.Return(indexes, true);
+        indexPool.Return(indexes, clearArray: true);
     }
 
     /// <summary>

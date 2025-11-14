@@ -19,7 +19,6 @@ public static class Extensions
     /// <param name="analyzerProvider">Синтаксический провайдер анализатора.</param>
     /// <typeparam name="TSymbol">Тип символа.</typeparam>
     /// <typeparam name="TSyntaxNode">Тип синтаксического узла провайдера.</typeparam>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IncrementalGeneratorInitializationContext UseProvider<TSymbol, TSyntaxNode>(this IncrementalGeneratorInitializationContext context,
         [NotNull] ISyntaxProvider<TSymbol, TSyntaxNode> generatorProvider, IAnalyzerSyntaxProvider? analyzerProvider)
         where TSymbol : ISymbol
@@ -35,7 +34,7 @@ public static class Extensions
 
         var diagnostics = context.CompilationProvider.SelectMany((compilation, _) =>
             compilation.GetDiagnostics(_)
-            .Where(d => d.Id == analyzerProvider.Id));
+            .Where(d => string.Equals(d.Id, analyzerProvider.Id, StringComparison.Ordinal)));
 
         context.RegisterSourceOutput(diagnostics, (context, diagnostic) =>
         {
@@ -53,7 +52,6 @@ public static class Extensions
     /// <param name="generatorProvider">Синтаксический провайдер генератора.</param>
     /// <typeparam name="TSymbol">Тип символа.</typeparam>
     /// <typeparam name="TSyntaxNode">Тип синтаксического узла провайдера.</typeparam>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IncrementalGeneratorInitializationContext UseProvider<TSymbol, TSyntaxNode>(this IncrementalGeneratorInitializationContext context,
         [NotNull] ISyntaxProvider<TSymbol, TSyntaxNode> generatorProvider)
         where TSymbol : ISymbol
@@ -65,7 +63,6 @@ public static class Extensions
     /// </summary>
     /// <param name="context">Контекст анализатора.</param>
     /// <param name="provider">Провайдер.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static AnalysisContext UseProvider([NotNull] this AnalysisContext context, [NotNull] IAnalyzerSyntaxProvider provider)
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.Analyze | GeneratedCodeAnalysisFlags.ReportDiagnostics);
@@ -103,62 +100,52 @@ public static class Extensions
         var xmlDocumentation = symbol.GetDocumentationCommentXml();
         if (string.IsNullOrEmpty(xmlDocumentation)) return symbol;
 
-        try
-        {
-            var xmlDoc = XDocument.Parse(xmlDocumentation);
-            if (xmlDoc is null || xmlDoc.Root is null) return symbol;
+        var xmlDoc = XDocument.Parse(xmlDocumentation);
+        if (xmlDoc is null || xmlDoc.Root is null) return symbol;
 
-            foreach (var element in xmlDoc.Root.Elements())
+        foreach (var element in xmlDoc.Root.Elements())
+        {
+            var elementName = element.Name.LocalName;
+            if (string.IsNullOrEmpty(elementName)) continue;
+
+            switch (elementName)
             {
-                var elementName = element.Name.LocalName;
-                if (string.IsNullOrEmpty(elementName)) continue;
+                case "summary":
+                    summary = element.Value.Trim();
+                    break;
 
-                switch (elementName)
-                {
-                    case "summary":
-                        summary = element.Value.Trim();
-                        break;
+                case "returns":
+                    returnsComment = element.Value.Trim();
+                    break;
 
-                    case "returns":
-                        returnsComment = element.Value.Trim();
-                        break;
+                case "value":
+                    setterComment = element.Value.Trim();
+                    break;
 
-                    case "value":
-                        setterComment = element.Value.Trim();
-                        break;
+                case "remarks":
+                    remarks = element.Value.Trim();
+                    break;
 
-                    case "remarks":
-                        remarks = element.Value.Trim();
-                        break;
+                case "param":
+                    var paramName = element.Attribute("name")?.Value;
 
-                    case "param":
-                        var paramName = element.Attribute("name")?.Value;
+                    if (!string.IsNullOrEmpty(paramName))
+                    {
+                        paramComments ??= new Dictionary<string, string>(StringComparer.Ordinal);
+                        paramComments[paramName] = element.Value.Trim();
+                    }
+                    break;
 
-                        if (!string.IsNullOrEmpty(paramName))
-                        {
-                            paramComments ??= new Dictionary<string, string>();
-                            paramComments[paramName] = element.Value.Trim();
-                        }
-                        break;
+                case "typeparam":
+                    var typeparamName = element.Attribute("name")?.Value;
 
-                    case "typeparam":
-                        var typeparamName = element.Attribute("name")?.Value;
-
-                        if (!string.IsNullOrEmpty(typeparamName))
-                        {
-                            typeparamComments ??= new Dictionary<string, string>();
-                            typeparamComments[typeparamName] = element.Value.Trim();
-                        }
-                        break;
-
-                    default:
-                        break;
-                }
+                    if (!string.IsNullOrEmpty(typeparamName))
+                    {
+                        typeparamComments ??= new Dictionary<string, string>(StringComparer.Ordinal);
+                        typeparamComments[typeparamName] = element.Value.Trim();
+                    }
+                    break;
             }
-        }
-        catch
-        {
-            // Noncompliant: is the block empty on purpose, or is code missing?
         }
 
         return symbol;
@@ -169,7 +156,6 @@ public static class Extensions
     /// </summary>
     /// <param name="symbol">Синтаксический символ.</param>
     /// <param name="summary">Общий комментарий.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ISymbol TryParseXmlDocumentation(this ISymbol symbol, out string? summary)
         => symbol.TryParseXmlDocumentation(out summary, out _, out _, out _, out _, out _);
 

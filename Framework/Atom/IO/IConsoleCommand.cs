@@ -23,26 +23,25 @@ public interface IConsoleCommand
     /// <summary>
     /// Происходит в момент парсинга команды.
     /// </summary>
-    event AsyncEventHandler<IConsoleCommand, ParseCommandEventArgs>? Parsing;
+    event AsyncEventHandler<object, ParseCommandEventArgs>? Parsing;
 
     /// <summary>
     /// Происходит в момент выполнения команды.
     /// </summary>
-    event AsyncEventHandler<IConsoleCommand, ExecuteCommandEventArgs>? Execution;
+    event AsyncEventHandler<object, ExecuteCommandEventArgs>? Execution;
 
     /// <summary>
     /// Происходит в момент отмены команды.
     /// </summary>
-    event AsyncEventHandler<IConsoleCommand, ExecuteCommandEventArgs>? Cancelling;
+    event AsyncEventHandler<object, ExecuteCommandEventArgs>? Cancelling;
 
     /// <summary>
     /// Парсит команду.
     /// </summary>
     /// <param name="command">Исходная строка команды.</param>
-    /// <param name="args">Аргументы команды.</param>
-    /// <param name="isCancellation">Указывает, находится ли команда в режиме отмены.</param>
-    /// <returns>True, если парсинг был успешен, иначе false.</returns>
-    bool TryParse(string command, out IEnumerable<string> args, out bool isCancellation);
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Результат операции парсинга.</returns>
+    ValueTask<ConsoleCommandParseResult> TryParseAsync(string command, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Выполняет команду с заданными аргументами.

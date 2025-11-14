@@ -1,34 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFramework>net9.0</TargetFramework>
-		<LangVersion>preview</LangVersion>
-		<ImplicitUsings>enable</ImplicitUsings>
-		<Nullable>enable</Nullable>
-		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-		<OptimizationPreference>speed</OptimizationPreference>
 		<AssemblyName>Escorp.Atom.Media.Video</AssemblyName>
 
-		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-		<AnalysisLevel>latest-all</AnalysisLevel>
-		<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
-		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-		<CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
-		<WarningLevel>9999</WarningLevel>
-		<AnalysisMode>AllEnabledByDefault</AnalysisMode>
-
-		<IsTrimmable>true</IsTrimmable>
-		<IsAotCompatible>true</IsAotCompatible>
-		<InvariantGlobalization>true</InvariantGlobalization>
-		<JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
-
-		<IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
-		<IlcOptimizationPreference>speed</IlcOptimizationPreference>
-
-		<GenerateDocumentationFile>true</GenerateDocumentationFile>
-		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.3.3</Version>
+		<Version>0.3.5</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -38,7 +14,7 @@
 		<PackageIcon>icon.png</PackageIcon>
 		<PackageTags>atom;framework;escorp;exomode;media;video;camera</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
-  </PropertyGroup>
+	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
@@ -54,11 +30,12 @@
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(Configuration)' == 'Release'">
-		<PackageReference Include="Escorp.Atom.Media" Version="0.1.2" />
+		<PackageReference Include="Escorp.Atom.Media" Version="*" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="0.5.0" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="*" PrivateAssets="all"
+			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -66,17 +43,21 @@
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
 
-	<Target Name="PublishPackages" AfterTargets="Pack">
+	<Target Name="PublishPackages" AfterTargets="Pack"
+		Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
 		<PropertyGroup>
 			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
 		</PropertyGroup>
 
 		<ItemGroup>
 			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" />
-			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg" Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
+			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg"
+				Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
 		</ItemGroup>
 
-		<Exec Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;" Condition="'%(PackageFiles.Identity)' != ''" IgnoreExitCode="true">
+		<Exec
+			Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;"
+			Condition="'%(PackageFiles.Identity)' != ''" IgnoreExitCode="true">
 			<Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
 		</Exec>
 

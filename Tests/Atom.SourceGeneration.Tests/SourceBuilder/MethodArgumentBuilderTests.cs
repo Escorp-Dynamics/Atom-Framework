@@ -1,5 +1,6 @@
 namespace Atom.SourceGeneration.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class MethodArgumentBuilderTests(ILogger logger) : BenchmarkTests<MethodArgumentBuilderTests>(logger)
 {
     private static string? methodArgumentReference;
@@ -27,11 +28,11 @@ public class MethodArgumentBuilderTests(ILogger logger) : BenchmarkTests<MethodA
     [TestCase(TestName = "Тест сборки аргумента метода"), Benchmark]
     public void FieldTest()
     {
-        var src = MethodArgumentMember.Create<int>("arg1").Build(true);
-        src += ", " + MethodArgumentMember.CreateIn<string>("arg2").Build(true);
-        src += ", " + MethodArgumentMember.CreateOut<char>("arg3").Build(true);
-        src += ", " + MethodArgumentMember.CreateRef<bool>("arg4").Build(true);
-        src += ", " + MethodArgumentMember.CreateParams<byte>("arg5").Build(true);
+        var src = MethodArgumentMember.Create<int>("arg1").Build(release: true);
+        src += ", " + MethodArgumentMember.CreateIn<string>("arg2").Build(release: true);
+        src += ", " + MethodArgumentMember.CreateOut<char>("arg3").Build(release: true);
+        src += ", " + MethodArgumentMember.CreateRef<bool>("arg4").Build(release: true);
+        src += ", " + MethodArgumentMember.CreateParams<byte>("arg5").Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {

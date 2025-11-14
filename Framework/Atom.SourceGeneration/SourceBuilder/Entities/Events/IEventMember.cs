@@ -114,7 +114,7 @@ public interface IEventMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что событие должно быть доступно только для чтения.
     /// </summary>
-    T AsReadOnly() => AsReadOnly(true);
+    T AsReadOnly() => AsReadOnly(value: true);
 
     /// <summary>
     /// Определяет, что событие должно быть небезопасным.
@@ -125,7 +125,7 @@ public interface IEventMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что событие должно быть небезопасным.
     /// </summary>
-    T AsUnsafe() => AsUnsafe(true);
+    T AsUnsafe() => AsUnsafe(value: true);
 
     /// <summary>
     /// Определяет, что событие должно быть абстрактным.
@@ -136,7 +136,7 @@ public interface IEventMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что событие должно быть абстрактным.
     /// </summary>
-    T AsAbstract() => AsAbstract(true);
+    T AsAbstract() => AsAbstract(value: true);
 
     /// <summary>
     /// Определяет, что событие должно быть виртуальным.
@@ -147,7 +147,7 @@ public interface IEventMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что событие должно быть виртуальным.
     /// </summary>
-    T AsVirtual() => AsVirtual(true);
+    T AsVirtual() => AsVirtual(value: true);
 
     /// <summary>
     /// Определяет, что событие должно быть перезаписанным.
@@ -158,7 +158,7 @@ public interface IEventMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что событие должно быть перезаписанным.
     /// </summary>
-    T AsOverride() => AsOverride(true);
+    T AsOverride() => AsOverride(value: true);
 
     /// <summary>
     /// Определяет, что событие должно быть переназначенным.
@@ -169,5 +169,5 @@ public interface IEventMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что событие должно быть переназначенным.
     /// </summary>
-    T AsNew() => AsNew(true);
+    T AsNew() => AsNew(value: true);
 }

@@ -1,4 +1,4 @@
-﻿#pragma warning disable IDE0046
+﻿#pragma warning disable IDE0046, MA0051
 
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
@@ -74,189 +74,189 @@ public sealed partial class Currency
 
     #region Инициализации
 
-    private static readonly Lazy<Currency> aed = new(() => new Currency("Дирхам (ОАЭ)", "UAE Dirham", 784, "AED"), true);
-    private static readonly Lazy<Currency> afn = new(() => new Currency("Афгани", "Afghani", 971, "AFN", '؋'), true);
-    private static readonly Lazy<Currency> all = new(() => new Currency("Лек", "Lek", 008, "ALL"), true);
-    private static readonly Lazy<Currency> amd = new(() => new Currency("Армянский драм", "Armenian Dram", 051, "AMD", '֏'), true);
-    private static readonly Lazy<Currency> ang = new(() => new Currency("Нидерландский антильский гульден", "Netherlands Antillean Guilder", 532, "ANG", 'ƒ'), true);
-    private static readonly Lazy<Currency> aoa = new(() => new Currency("Кванза", "Kwanza", 973, "AOA", "B59"), true);
-    private static readonly Lazy<Currency> ars = new(() => new Currency("Аргентинское песо", "Argentine Peso", 032, "ARS", '$'), true);
-    private static readonly Lazy<Currency> aud = new(() => new Currency("Австралийский доллар", "Australian Dollar", 036, "AUD", "B67", '$'), true);
-    private static readonly Lazy<Currency> awg = new(() => new Currency("Арубанский флорин", "Aruban Florin", 533, "AWG", 'ƒ'), true);
-    private static readonly Lazy<Currency> azn = new(() => new Currency("Азербайджанский манат", "Azerbaijanian Manat", 944, "AZN"), true);
-    private static readonly Lazy<Currency> bam = new(() => new Currency("Конвертируемая марка", "Convertible Mark", 977, "BAM"), true);
-    private static readonly Lazy<Currency> bbd = new(() => new Currency("Барбадосский доллар", "Barbados Dollar", 052, "BBD", '$'), true);
-    private static readonly Lazy<Currency> bdt = new(() => new Currency("Така", "Taka", 050, "BDT", '৳'), true);
-    private static readonly Lazy<Currency> bgn = new(() => new Currency("Болгарский лев", "Bulgarian Lev", 975, "BGN", "3"), true);
-    private static readonly Lazy<Currency> bhd = new(() => new Currency("Бахрейнский динар", "Bahraini Dinar", 048, "BHD"), true);
-    private static readonly Lazy<Currency> bif = new(() => new Currency("Бурундийский франк", "Burundi Franc", 108, "BIF"), true);
-    private static readonly Lazy<Currency> bmd = new(() => new Currency("Бермудский доллар", "Bermudian Dollar", 060, "BMD", '$'), true);
-    private static readonly Lazy<Currency> bnd = new(() => new Currency("Брунейский доллар", "Brunei Dollar", 096, "BND", '$'), true);
-    private static readonly Lazy<Currency> bob = new(() => new Currency("Боливиано", "Boliviano", 068, "BOB"), true);
-    private static readonly Lazy<Currency> bov = new(() => new Currency("Мвдол", "Mvdol", 984, "BOV"), true);
-    private static readonly Lazy<Currency> brl = new(() => new Currency("Бразильский реал", "Brazilian Real", 986, "BRL", "C42"), true);
-    private static readonly Lazy<Currency> bsd = new(() => new Currency("Багамский доллар", "Bahamian Dollar", 044, "BSD", '$'), true);
-    private static readonly Lazy<Currency> btn = new(() => new Currency("Нгултрум", "Ngultrum", 064, "BTN"), true);
-    private static readonly Lazy<Currency> bwp = new(() => new Currency("Пула", "Pula", 072, "BWP"), true);
-    private static readonly Lazy<Currency> byn = new(() => new Currency("Белорусский рубль", "Belarussian Ruble", 933, "BYN"), true);
-    private static readonly Lazy<Currency> bzd = new(() => new Currency("Белизский доллар", "Belize Dollar", 084, "BZD", '$'), true);
-    private static readonly Lazy<Currency> cad = new(() => new Currency("Канадский доллар", "Canadian Dollar", 124, "CAD", '$'), true);
-    private static readonly Lazy<Currency> cdf = new(() => new Currency("Конголезский франк", "Congolese Franc", 976, "CDF"), true);
-    private static readonly Lazy<Currency> che = new(() => new Currency("WIR-евро", "WIR Euro", 947, "CHE"), true);
-    private static readonly Lazy<Currency> chf = new(() => new Currency("Швейцарский франк", "Swiss Franc", 756, "CHF", "12"), true);
-    private static readonly Lazy<Currency> chw = new(() => new Currency("WIR-франк", "WIR Franc", 948, "CHW"), true);
-    private static readonly Lazy<Currency> clf = new(() => new Currency("Единица развития", "Unidades de Fomento", 990, "CLF"), true);
-    private static readonly Lazy<Currency> clp = new(() => new Currency("Чилийское песо", "Chilean Peso", 152, "CLP", '$'), true);
-    private static readonly Lazy<Currency> cny = new(() => new Currency("Юань", "Yuan Renminbi", 156, "CNY", '¥'), true);
-    private static readonly Lazy<Currency> cop = new(() => new Currency("Колумбийское песо", "Colombian Peso", 170, "COP", '$'), true);
-    private static readonly Lazy<Currency> cou = new(() => new Currency("Единица реальной стоимости", "Unidad de Valor Real", 970, "COU"), true);
-    private static readonly Lazy<Currency> crc = new(() => new Currency("Коста-риканский колон", "Costa Rican Colon", 188, "CRC", '₡'), true);
-    private static readonly Lazy<Currency> cuc = new(() => new Currency("Конвертируемое песо", "Peso Convertible", 931, "CUC", '$'), true);
-    private static readonly Lazy<Currency> cup = new(() => new Currency("Кубинское песо", "Cuban Peso", 192, "CUP", "2", '$'), true);
-    private static readonly Lazy<Currency> cve = new(() => new Currency("Эскудо Кабо-Верде", "Cape Verde Escudo", 132, "CVE", '$'), true);
-    private static readonly Lazy<Currency> czk = new(() => new Currency("Чешская крона", "Czech Koruna", 203, "CZK", "4"), true);
-    private static readonly Lazy<Currency> djf = new(() => new Currency("Франк Джибути", "Djibouti Franc", 262, "DJF"), true);
-    private static readonly Lazy<Currency> dkk = new(() => new Currency("Датская крона", "Danish Krone", 208, "DKK"), true);
-    private static readonly Lazy<Currency> dop = new(() => new Currency("Доминиканское песо", "Dominican Peso", 214, "DOP", '$'), true);
-    private static readonly Lazy<Currency> dzd = new(() => new Currency("Алжирский динар", "Algerian Dinar", 012, "DZD", "E71"), true);
-    private static readonly Lazy<Currency> egp = new(() => new Currency("Египетский фунт", "Egyptian Pound", 818, "EGP", '£'), true);
-    private static readonly Lazy<Currency> ern = new(() => new Currency("Накфа", "Nakfa", 232, "ERN"), true);
-    private static readonly Lazy<Currency> etb = new(() => new Currency("Эфиопский быр", "Ethiopian Birr", 230, "ETB", "C27"), true);
-    private static readonly Lazy<Currency> eur = new(() => new Currency("Евро", "Euro", 978, "EUR", "31", '€'), true);
-    private static readonly Lazy<Currency> fjd = new(() => new Currency("Доллар Фиджи", "Fiji Dollar", 242, "FJD", '$'), true);
-    private static readonly Lazy<Currency> fkp = new(() => new Currency("Фунт Фолклендских островов", "Falkland Islands Pound", 238, "FKP", '£'), true);
-    private static readonly Lazy<Currency> gbp = new(() => new Currency("Фунт стерлингов", "Pound Sterling", 826, "GBP", "27", '£'), true);
-    private static readonly Lazy<Currency> gel = new(() => new Currency("Лари", "Lari", 981, "GEL"), true);
-    private static readonly Lazy<Currency> ghs = new(() => new Currency("Ганский седи", "Ghana Cedi", 936, "GHS", '₵'), true);
-    private static readonly Lazy<Currency> gip = new(() => new Currency("Гибралтарский фунт", "Gibraltar Pound", 292, "GIP", '£'), true);
-    private static readonly Lazy<Currency> gmd = new(() => new Currency("Даласи", "Dalasi", 270, "GMD"), true);
-    private static readonly Lazy<Currency> gnf = new(() => new Currency("Гвинейский франк", "Guinea Franc", 324, "GNF"), true);
-    private static readonly Lazy<Currency> gtq = new(() => new Currency("Кетсаль", "Quetzal", 320, "GTQ"), true);
-    private static readonly Lazy<Currency> gyd = new(() => new Currency("Гайанский доллар", "Guyana Dollar", 328, "GYD", '$'), true);
-    private static readonly Lazy<Currency> hkd = new(() => new Currency("Гонконгский доллар", "Hong Kong Dollar", 344, "HKD", "2", '$'), true);
-    private static readonly Lazy<Currency> hnl = new(() => new Currency("Лемпира", "Lempira", 340, "HNL"), true);
-    private static readonly Lazy<Currency> hrk = new(() => new Currency("Хорватская куна", "Kuna", 191, "HRK"), true);
-    private static readonly Lazy<Currency> htg = new(() => new Currency("Гурд", "Gourde", 332, "HTG"), true);
-    private static readonly Lazy<Currency> huf = new(() => new Currency("Форинт", "Forint", 348, "HUF", "K85"), true);
-    private static readonly Lazy<Currency> idr = new(() => new Currency("Рупия", "Rupiah", 360, "IDR", '₨'), true);
-    private static readonly Lazy<Currency> ils = new(() => new Currency("Новый израильский шекель", "New Israeli Sheqel", 376, "ILS", '₪'), true);
-    private static readonly Lazy<Currency> inr = new(() => new Currency("Индийская рупия", "Indian Rupee", 356, "INR", "2", '₹'), true);
-    private static readonly Lazy<Currency> iqd = new(() => new Currency("Иракский динар", "Iraqi Dinar", 368, "IQD", "3"), true);
-    private static readonly Lazy<Currency> irr = new(() => new Currency("Иранский риал", "Iranian Rial", 364, "IRR", '﷼'), true);
-    private static readonly Lazy<Currency> isk = new(() => new Currency("Исландская крона", "Iceland Krona", 352, "ISK"), true);
-    private static readonly Lazy<Currency> jmd = new(() => new Currency("Ямайский доллар", "Jamaican Dollar", 388, "JMD", '$'), true);
-    private static readonly Lazy<Currency> jod = new(() => new Currency("Иорданский динар", "Jordanian Dinar", 400, "JOD"), true);
-    private static readonly Lazy<Currency> jpy = new(() => new Currency("Иена", "Yen", 392, "JPY", "2", '¥'), true);
-    private static readonly Lazy<Currency> kes = new(() => new Currency("Кенийский шиллинг", "Kenyan Shilling", 404, "KES"), true);
-    private static readonly Lazy<Currency> kgs = new(() => new Currency("Сом", "Som", 417, "KGS"), true);
-    private static readonly Lazy<Currency> khr = new(() => new Currency("Риель", "Riel", 116, "KHR", "C23", '៛'), true);
-    private static readonly Lazy<Currency> kmf = new(() => new Currency("Франк Комор", "Comoro Franc", 174, "KMF"), true);
-    private static readonly Lazy<Currency> kpw = new(() => new Currency("Северокорейская вона", "North Korean Won", 408, "KPW", "2", '₩'), true);
-    private static readonly Lazy<Currency> krw = new(() => new Currency("Вона", "Won", 410, "KRW", "K09", '₩'), true);
-    private static readonly Lazy<Currency> kwd = new(() => new Currency("Кувейтский динар", "Kuwaiti Dinar", 414, "KWD"), true);
-    private static readonly Lazy<Currency> kyd = new(() => new Currency("Доллар Островов Кайман", "Cayman Islands Dollar", 136, "KYD", '$'), true);
-    private static readonly Lazy<Currency> kzt = new(() => new Currency("Тенге", "Tenge", 398, "KZT", '₸'), true);
-    private static readonly Lazy<Currency> lak = new(() => new Currency("Кип", "Kip", 418, "LAK", '₭'), true);
-    private static readonly Lazy<Currency> lbp = new(() => new Currency("Ливанский фунт", "Lebanese Pound", 422, "LBP", '£'), true);
-    private static readonly Lazy<Currency> lkr = new(() => new Currency("Шри-ланкийская рупия", "Sri Lanka Rupee", 144, "LKR", "A43", '₨'), true);
-    private static readonly Lazy<Currency> lrd = new(() => new Currency("Либерийский доллар", "Liberian Dollar", 430, "LRD", '$'), true);
-    private static readonly Lazy<Currency> lsl = new(() => new Currency("Лоти", "Loti", 426, "LSL"), true);
-    private static readonly Lazy<Currency> ltl = new(() => new Currency("Литовский лит", "Lithuanian Litas", 440, "LTL"), true);
-    private static readonly Lazy<Currency> lyd = new(() => new Currency("Ливийский динар", "Libyan Dinar", 434, "LYD"), true);
-    private static readonly Lazy<Currency> mad = new(() => new Currency("Марокканский дирхам", "Moroccan Dirham", 504, "MAD"), true);
-    private static readonly Lazy<Currency> mdl = new(() => new Currency("Молдавский лей", "Moldovan Leu", 498, "MDL"), true);
-    private static readonly Lazy<Currency> mga = new(() => new Currency("Малагасийский ариари", "Malagasy Ariary", 969, "MGA"), true);
-    private static readonly Lazy<Currency> mkd = new(() => new Currency("Денар", "Denar", 807, "MKD"), true);
-    private static readonly Lazy<Currency> mmk = new(() => new Currency("Кьят", "Kyat", 104, "MMK"), true);
-    private static readonly Lazy<Currency> mnt = new(() => new Currency("Тугрик", "Tugrik", 496, "MNT", "4", '₮'), true);
-    private static readonly Lazy<Currency> mop = new(() => new Currency("Патака", "Pataca", 446, "MOP"), true);
-    private static readonly Lazy<Currency> mru = new(() => new Currency("Угия", "Ouguiya", 929, "MRU"), true);
-    private static readonly Lazy<Currency> mur = new(() => new Currency("Маврикийская рупия", "Mauritius Rupee", 480, "MUR", '₨'), true);
-    private static readonly Lazy<Currency> mvr = new(() => new Currency("Руфия", "Rufiyaa", 462, "MVR"), true);
-    private static readonly Lazy<Currency> mwk = new(() => new Currency("Квача", "Kwacha", 454, "MWK"), true);
-    private static readonly Lazy<Currency> mxn = new(() => new Currency("Мексиканское песо", "Mexican Peso", 484, "MXN", "E43", '$'), true);
-    private static readonly Lazy<Currency> mxv = new(() => new Currency("Мексиканская инверсионная единица", "Mexican Unidad de Inversion", 979, "MXV"), true);
-    private static readonly Lazy<Currency> myr = new(() => new Currency("Малайзийский ринггит", "Malaysian Ringgit", 458, "MYR", "A36"), true);
-    private static readonly Lazy<Currency> mzn = new(() => new Currency("Мозамбикский метикал", "Mozambique Metical", 943, "MZN"), true);
-    private static readonly Lazy<Currency> nad = new(() => new Currency("Доллар Намибии", "Namibia Dollar", 516, "NAD", '$'), true);
-    private static readonly Lazy<Currency> ngn = new(() => new Currency("Найра", "Naira", 566, "NGN", '₦'), true);
-    private static readonly Lazy<Currency> nio = new(() => new Currency("Золотая кордоба", "Cordoba Oro", 558, "NIO"), true);
-    private static readonly Lazy<Currency> nok = new(() => new Currency("Норвежская крона", "Norwegian Krone", 578, "NOK"), true);
-    private static readonly Lazy<Currency> npr = new(() => new Currency("Непальская рупия", "Nepalese Rupee", 524, "NPR", '₨'), true);
-    private static readonly Lazy<Currency> nzd = new(() => new Currency("Новозеландский доллар", "New Zealand Dollar", 554, "NZD", '$'), true);
-    private static readonly Lazy<Currency> omr = new(() => new Currency("Оманский риал", "Rial Omani", 512, "OMR", '﷼'), true);
-    private static readonly Lazy<Currency> pab = new(() => new Currency("Бальбоа", "Balboa", 590, "PAB"), true);
-    private static readonly Lazy<Currency> pen = new(() => new Currency("Соль", "Sol", 604, "PEN"), true);
-    private static readonly Lazy<Currency> pgk = new(() => new Currency("Кина", "Kina", 598, "PGK"), true);
-    private static readonly Lazy<Currency> php = new(() => new Currency("Филиппинское песо", "Philippine Peso", 608, "PHP", '₱'), true);
-    private static readonly Lazy<Currency> pkr = new(() => new Currency("Пакистанская рупия", "Pakistan Rupee", 586, "PKR", "2", '₨'), true);
-    private static readonly Lazy<Currency> pln = new(() => new Currency("Злотый", "Zloty", 985, "PLN", "3"), true);
-    private static readonly Lazy<Currency> pyg = new(() => new Currency("Гуарани", "Guarani", 600, "PYG", '₲'), true);
-    private static readonly Lazy<Currency> qar = new(() => new Currency("Катарский риал", "Qatari Rial", 634, "QAR", '﷼'), true);
-    private static readonly Lazy<Currency> ron = new(() => new Currency("Новый румынский лей", "Romanian Leu", 946, "RON", "2"), true);
-    private static readonly Lazy<Currency> rsd = new(() => new Currency("Сербский динар", "Serbian Dinar", 941, "RSD"), true);
-    private static readonly Lazy<Currency> rub = new(() => new Currency("Российский рубль", "Russian Ruble", 643, "RUB", '₽'), true);
-    private static readonly Lazy<Currency> rwf = new(() => new Currency("Франк Руанды", "Rwanda Franc", 646, "RWF"), true);
-    private static readonly Lazy<Currency> sar = new(() => new Currency("Саудовский риял", "Saudi Riyal", 682, "SAR"), true);
-    private static readonly Lazy<Currency> sbd = new(() => new Currency("Доллар Соломоновых Островов", "Solomon Islands Dollar", 090, "SBD", '$'), true);
-    private static readonly Lazy<Currency> scr = new(() => new Currency("Сейшельская рупия", "Seychelles Rupee", 690, "SCR", '₨'), true);
-    private static readonly Lazy<Currency> sdg = new(() => new Currency("Суданский фунт", "Sudanese Pound", 938, "SDG", "2", '£'), true);
-    private static readonly Lazy<Currency> sek = new(() => new Currency("Шведская крона", "Swedish Krona", 752, "SEK", "B07"), true);
-    private static readonly Lazy<Currency> sgd = new(() => new Currency("Сингапурский доллар", "Singapore Dollar", 702, "SGD", '$'), true);
-    private static readonly Lazy<Currency> shp = new(() => new Currency("Фунт Святой Елены", "Saint Helena Pound", 654, "SHP", '£'), true);
-    private static readonly Lazy<Currency> sll = new(() => new Currency("Леоне", "Leone", 694, "SLL"), true);
-    private static readonly Lazy<Currency> sos = new(() => new Currency("Сомалийский шиллинг", "Somali Shilling", 706, "SOS"), true);
-    private static readonly Lazy<Currency> srd = new(() => new Currency("Суринамский доллар", "Surinam Dollar", 968, "SRD", '$'), true);
-    private static readonly Lazy<Currency> ssp = new(() => new Currency("Южносуданский фунт", "South Sudanese Pound", 728, "SSP", '£'), true);
-    private static readonly Lazy<Currency> stn = new(() => new Currency("Добра", "Dobra", 930, "STN"), true);
-    private static readonly Lazy<Currency> svc = new(() => new Currency("Сальвадорский колон", "El Salvador Colon", 222, "SVC", '₡'), true);
-    private static readonly Lazy<Currency> syp = new(() => new Currency("Сирийский фунт", "Syrian Pound", 760, "SYP", '£'), true);
-    private static readonly Lazy<Currency> szl = new(() => new Currency("Лилангени", "Lilangeni", 748, "SZL"), true);
-    private static readonly Lazy<Currency> thb = new(() => new Currency("Бат", "Baht", 764, "THB", "B70", '฿'), true);
-    private static readonly Lazy<Currency> tjs = new(() => new Currency("Сомони", "Somoni", 972, "TJS"), true);
-    private static readonly Lazy<Currency> tmt = new(() => new Currency("Новый туркменский манат", "Turkmenistan New Manat", 934, "TMT"), true);
-    private static readonly Lazy<Currency> tnd = new(() => new Currency("Тунисский динар", "Tunisian Dinar", 788, "TND", "B76"), true);
-    private static readonly Lazy<Currency> top = new(() => new Currency("Паанга", "Pa’anga", 776, "TOP"), true);
-    private static readonly Lazy<Currency> @try = new(() => new Currency("Турецкая лира", "Turkish Lira", 949, "TRY", "A13", '₺'), true);
-    private static readonly Lazy<Currency> ttd = new(() => new Currency("Доллар Тринидада и Тобаго", "Trinidad and Tobago Dollar", 780, "TTD", '$'), true);
-    private static readonly Lazy<Currency> twd = new(() => new Currency("Новый тайваньский доллар", "New Taiwan Dollar", 901, "TWD", '$'), true);
-    private static readonly Lazy<Currency> tzs = new(() => new Currency("Танзанийский шиллинг", "Tanzanian Shilling", 834, "TZS"), true);
-    private static readonly Lazy<Currency> uah = new(() => new Currency("Гривна", "Hryvnia", 980, "UAH", '₴'), true);
-    private static readonly Lazy<Currency> ugx = new(() => new Currency("Угандийский шиллинг", "Uganda Shilling", 800, "UGX"), true);
-    private static readonly Lazy<Currency> usd = new(() => new Currency("Доллар США", "US Dollar", 840, "USD", "119", '$'), true);
-    private static readonly Lazy<Currency> usn = new(() => new Currency("Доллар следующего дня", "US Dollar (Next day)", 997, "USN", '$'), true);
-    private static readonly Lazy<Currency> uss = new(() => new Currency("Доллар того же дня", "US Dollar (Same day)", 998, "USS", '$'), true);
-    private static readonly Lazy<Currency> uyi = new(() => new Currency("Уругвайское песо в индексированных единицах", "Urguguay Peso en Unidades Indexadas", 940, "UYI", '$'), true);
-    private static readonly Lazy<Currency> uyu = new(() => new Currency("Уругвайское песо", "Peso Uruguayo", 858, "UYU", '$'), true);
-    private static readonly Lazy<Currency> uzs = new(() => new Currency("Узбекский сум", "Uzbekistan Sum", 860, "UZS"), true);
-    private static readonly Lazy<Currency> vef = new(() => new Currency("Боливар фуэрте", "Bolivar", 937, "VEF"), true);
-    private static readonly Lazy<Currency> vnd = new(() => new Currency("Донг", "Dong", 704, "VND", "2", '₫'), true);
-    private static readonly Lazy<Currency> vuv = new(() => new Currency("Вату", "Vatu", 548, "VUV"), true);
-    private static readonly Lazy<Currency> wst = new(() => new Currency("Тала", "Tala", 882, "WST"), true);
-    private static readonly Lazy<Currency> xaf = new(() => new Currency("Франк КФА BEAC", "CFA Franc BEAC", 950, "XAF", "2"), true);
-    private static readonly Lazy<Currency> xag = new(() => new Currency("Серебро (тройская унция)", "Silver", 961, "XAG", "A91"), true);
-    private static readonly Lazy<Currency> xau = new(() => new Currency("Золото (тройская унция)", "Gold", 959, "XAU", "A90"), true);
-    private static readonly Lazy<Currency> xba = new(() => new Currency("Европейская составная единица EURCO", "European Composite Unit (EURCO)", 955, "XBA"), true);
-    private static readonly Lazy<Currency> xbb = new(() => new Currency("Европейская валютная единица EMU-6", "European Monetary Unit (E.M.U.-6)", 956, "XBB"), true);
-    private static readonly Lazy<Currency> xbc = new(() => new Currency("Европейская расчётная единица EUA-9", "European Unit of Account 9 (E.U.A.-9)", 957, "XBC"), true);
-    private static readonly Lazy<Currency> xbd = new(() => new Currency("Европейская расчётная единица EUA-17", "European Unit of Account 17 (E.U.A.-17)", 958, "XBD"), true);
-    private static readonly Lazy<Currency> xcd = new(() => new Currency("Восточно-карибский доллар", "East Caribbean Dollar", 951, "XCD", '$'), true);
-    private static readonly Lazy<Currency> xdr = new(() => new Currency("СДР (специальные права заимствования)", "SDR (Special Drawing Right)", 960, "XDR"), true);
-    private static readonly Lazy<Currency> xof = new(() => new Currency("Франк КФА BCEAO", "CFA Franc BCEAO", 952, "XOF"), true);
-    private static readonly Lazy<Currency> xpd = new(() => new Currency("Палладий (тройская унция)", "Palladium", 964, "XPD", "A34"), true);
-    private static readonly Lazy<Currency> xpf = new(() => new Currency("Франк КФП", "CFP Franc", 953, "XPF"), true);
-    private static readonly Lazy<Currency> xpt = new(() => new Currency("Платина (тройская унция)", "Platinum", 962, "XPT", "A92"), true);
-    private static readonly Lazy<Currency> xsu = new(() => new Currency("Сукре", "Sucre", 994, "XSU"), true);
-    private static readonly Lazy<Currency> xts = new(() => new Currency("Тестовый код", "Testing Code", 963, "XTS"), true);
-    private static readonly Lazy<Currency> xua = new(() => new Currency("Расчётная единица ADB", "ADB Unit of Account", 965, "XUA"), true);
-    private static readonly Lazy<Currency> xxx = new(() => new Currency("Без валюты", "No Currency", 999, "XXX"), true);
-    private static readonly Lazy<Currency> yer = new(() => new Currency("Йеменский риал", "Yemeni Rial", 886, "YER", "2", '﷼'), true);
-    private static readonly Lazy<Currency> zar = new(() => new Currency("Рэнд", "Rand", 710, "ZAR"), true);
-    private static readonly Lazy<Currency> zmw = new(() => new Currency("Замбийская квача", "Zambian Kwacha", 967, "ZMW"), true);
-    private static readonly Lazy<Currency> zwl = new(() => new Currency("Доллар Зимбабве", "Zimbabwe Dollar", 932, "ZWL", '$'), true);
-    private static readonly Lazy<Currency> imp = new(() => new Currency("Фунты Острова Мэн", "Manx pound", 0, "IMP", "IMP", "B91", '£'), true);
-    private static readonly Lazy<Currency> ggp = new(() => new Currency("Гернсийский фунт", "Guernsey pound", 0, "GGP", "GGP", '£'), true);
-    private static readonly Lazy<Currency> jep = new(() => new Currency("Джерсийский фунт", "Jersey pound", 0, "JEP", "JEP", '£'), true);
+    private static readonly Lazy<Currency> aed = new(() => new Currency("Дирхам (ОАЭ)", "UAE Dirham", 784, "AED"), isThreadSafe: true);
+    private static readonly Lazy<Currency> afn = new(() => new Currency("Афгани", "Afghani", 971, "AFN", '؋'), isThreadSafe: true);
+    private static readonly Lazy<Currency> all = new(() => new Currency("Лек", "Lek", 008, "ALL"), isThreadSafe: true);
+    private static readonly Lazy<Currency> amd = new(() => new Currency("Армянский драм", "Armenian Dram", 051, "AMD", '֏'), isThreadSafe: true);
+    private static readonly Lazy<Currency> ang = new(() => new Currency("Нидерландский антильский гульден", "Netherlands Antillean Guilder", 532, "ANG", 'ƒ'), isThreadSafe: true);
+    private static readonly Lazy<Currency> aoa = new(() => new Currency("Кванза", "Kwanza", 973, "AOA", "B59"), isThreadSafe: true);
+    private static readonly Lazy<Currency> ars = new(() => new Currency("Аргентинское песо", "Argentine Peso", 032, "ARS", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> aud = new(() => new Currency("Австралийский доллар", "Australian Dollar", 036, "AUD", "B67", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> awg = new(() => new Currency("Арубанский флорин", "Aruban Florin", 533, "AWG", 'ƒ'), isThreadSafe: true);
+    private static readonly Lazy<Currency> azn = new(() => new Currency("Азербайджанский манат", "Azerbaijanian Manat", 944, "AZN"), isThreadSafe: true);
+    private static readonly Lazy<Currency> bam = new(() => new Currency("Конвертируемая марка", "Convertible Mark", 977, "BAM"), isThreadSafe: true);
+    private static readonly Lazy<Currency> bbd = new(() => new Currency("Барбадосский доллар", "Barbados Dollar", 052, "BBD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> bdt = new(() => new Currency("Така", "Taka", 050, "BDT", '৳'), isThreadSafe: true);
+    private static readonly Lazy<Currency> bgn = new(() => new Currency("Болгарский лев", "Bulgarian Lev", 975, "BGN", "3"), isThreadSafe: true);
+    private static readonly Lazy<Currency> bhd = new(() => new Currency("Бахрейнский динар", "Bahraini Dinar", 048, "BHD"), isThreadSafe: true);
+    private static readonly Lazy<Currency> bif = new(() => new Currency("Бурундийский франк", "Burundi Franc", 108, "BIF"), isThreadSafe: true);
+    private static readonly Lazy<Currency> bmd = new(() => new Currency("Бермудский доллар", "Bermudian Dollar", 060, "BMD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> bnd = new(() => new Currency("Брунейский доллар", "Brunei Dollar", 096, "BND", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> bob = new(() => new Currency("Боливиано", "Boliviano", 068, "BOB"), isThreadSafe: true);
+    private static readonly Lazy<Currency> bov = new(() => new Currency("Мвдол", "Mvdol", 984, "BOV"), isThreadSafe: true);
+    private static readonly Lazy<Currency> brl = new(() => new Currency("Бразильский реал", "Brazilian Real", 986, "BRL", "C42"), isThreadSafe: true);
+    private static readonly Lazy<Currency> bsd = new(() => new Currency("Багамский доллар", "Bahamian Dollar", 044, "BSD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> btn = new(() => new Currency("Нгултрум", "Ngultrum", 064, "BTN"), isThreadSafe: true);
+    private static readonly Lazy<Currency> bwp = new(() => new Currency("Пула", "Pula", 072, "BWP"), isThreadSafe: true);
+    private static readonly Lazy<Currency> byn = new(() => new Currency("Белорусский рубль", "Belarussian Ruble", 933, "BYN"), isThreadSafe: true);
+    private static readonly Lazy<Currency> bzd = new(() => new Currency("Белизский доллар", "Belize Dollar", 084, "BZD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> cad = new(() => new Currency("Канадский доллар", "Canadian Dollar", 124, "CAD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> cdf = new(() => new Currency("Конголезский франк", "Congolese Franc", 976, "CDF"), isThreadSafe: true);
+    private static readonly Lazy<Currency> che = new(() => new Currency("WIR-евро", "WIR Euro", 947, "CHE"), isThreadSafe: true);
+    private static readonly Lazy<Currency> chf = new(() => new Currency("Швейцарский франк", "Swiss Franc", 756, "CHF", "12"), isThreadSafe: true);
+    private static readonly Lazy<Currency> chw = new(() => new Currency("WIR-франк", "WIR Franc", 948, "CHW"), isThreadSafe: true);
+    private static readonly Lazy<Currency> clf = new(() => new Currency("Единица развития", "Unidades de Fomento", 990, "CLF"), isThreadSafe: true);
+    private static readonly Lazy<Currency> clp = new(() => new Currency("Чилийское песо", "Chilean Peso", 152, "CLP", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> cny = new(() => new Currency("Юань", "Yuan Renminbi", 156, "CNY", '¥'), isThreadSafe: true);
+    private static readonly Lazy<Currency> cop = new(() => new Currency("Колумбийское песо", "Colombian Peso", 170, "COP", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> cou = new(() => new Currency("Единица реальной стоимости", "Unidad de Valor Real", 970, "COU"), isThreadSafe: true);
+    private static readonly Lazy<Currency> crc = new(() => new Currency("Коста-риканский колон", "Costa Rican Colon", 188, "CRC", '₡'), isThreadSafe: true);
+    private static readonly Lazy<Currency> cuc = new(() => new Currency("Конвертируемое песо", "Peso Convertible", 931, "CUC", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> cup = new(() => new Currency("Кубинское песо", "Cuban Peso", 192, "CUP", "2", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> cve = new(() => new Currency("Эскудо Кабо-Верде", "Cape Verde Escudo", 132, "CVE", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> czk = new(() => new Currency("Чешская крона", "Czech Koruna", 203, "CZK", "4"), isThreadSafe: true);
+    private static readonly Lazy<Currency> djf = new(() => new Currency("Франк Джибути", "Djibouti Franc", 262, "DJF"), isThreadSafe: true);
+    private static readonly Lazy<Currency> dkk = new(() => new Currency("Датская крона", "Danish Krone", 208, "DKK"), isThreadSafe: true);
+    private static readonly Lazy<Currency> dop = new(() => new Currency("Доминиканское песо", "Dominican Peso", 214, "DOP", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> dzd = new(() => new Currency("Алжирский динар", "Algerian Dinar", 012, "DZD", "E71"), isThreadSafe: true);
+    private static readonly Lazy<Currency> egp = new(() => new Currency("Египетский фунт", "Egyptian Pound", 818, "EGP", '£'), isThreadSafe: true);
+    private static readonly Lazy<Currency> ern = new(() => new Currency("Накфа", "Nakfa", 232, "ERN"), isThreadSafe: true);
+    private static readonly Lazy<Currency> etb = new(() => new Currency("Эфиопский быр", "Ethiopian Birr", 230, "ETB", "C27"), isThreadSafe: true);
+    private static readonly Lazy<Currency> eur = new(() => new Currency("Евро", "Euro", 978, "EUR", "31", '€'), isThreadSafe: true);
+    private static readonly Lazy<Currency> fjd = new(() => new Currency("Доллар Фиджи", "Fiji Dollar", 242, "FJD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> fkp = new(() => new Currency("Фунт Фолклендских островов", "Falkland Islands Pound", 238, "FKP", '£'), isThreadSafe: true);
+    private static readonly Lazy<Currency> gbp = new(() => new Currency("Фунт стерлингов", "Pound Sterling", 826, "GBP", "27", '£'), isThreadSafe: true);
+    private static readonly Lazy<Currency> gel = new(() => new Currency("Лари", "Lari", 981, "GEL"), isThreadSafe: true);
+    private static readonly Lazy<Currency> ghs = new(() => new Currency("Ганский седи", "Ghana Cedi", 936, "GHS", '₵'), isThreadSafe: true);
+    private static readonly Lazy<Currency> gip = new(() => new Currency("Гибралтарский фунт", "Gibraltar Pound", 292, "GIP", '£'), isThreadSafe: true);
+    private static readonly Lazy<Currency> gmd = new(() => new Currency("Даласи", "Dalasi", 270, "GMD"), isThreadSafe: true);
+    private static readonly Lazy<Currency> gnf = new(() => new Currency("Гвинейский франк", "Guinea Franc", 324, "GNF"), isThreadSafe: true);
+    private static readonly Lazy<Currency> gtq = new(() => new Currency("Кетсаль", "Quetzal", 320, "GTQ"), isThreadSafe: true);
+    private static readonly Lazy<Currency> gyd = new(() => new Currency("Гайанский доллар", "Guyana Dollar", 328, "GYD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> hkd = new(() => new Currency("Гонконгский доллар", "Hong Kong Dollar", 344, "HKD", "2", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> hnl = new(() => new Currency("Лемпира", "Lempira", 340, "HNL"), isThreadSafe: true);
+    private static readonly Lazy<Currency> hrk = new(() => new Currency("Хорватская куна", "Kuna", 191, "HRK"), isThreadSafe: true);
+    private static readonly Lazy<Currency> htg = new(() => new Currency("Гурд", "Gourde", 332, "HTG"), isThreadSafe: true);
+    private static readonly Lazy<Currency> huf = new(() => new Currency("Форинт", "Forint", 348, "HUF", "K85"), isThreadSafe: true);
+    private static readonly Lazy<Currency> idr = new(() => new Currency("Рупия", "Rupiah", 360, "IDR", '₨'), isThreadSafe: true);
+    private static readonly Lazy<Currency> ils = new(() => new Currency("Новый израильский шекель", "New Israeli Sheqel", 376, "ILS", '₪'), isThreadSafe: true);
+    private static readonly Lazy<Currency> inr = new(() => new Currency("Индийская рупия", "Indian Rupee", 356, "INR", "2", '₹'), isThreadSafe: true);
+    private static readonly Lazy<Currency> iqd = new(() => new Currency("Иракский динар", "Iraqi Dinar", 368, "IQD", "3"), isThreadSafe: true);
+    private static readonly Lazy<Currency> irr = new(() => new Currency("Иранский риал", "Iranian Rial", 364, "IRR", '﷼'), isThreadSafe: true);
+    private static readonly Lazy<Currency> isk = new(() => new Currency("Исландская крона", "Iceland Krona", 352, "ISK"), isThreadSafe: true);
+    private static readonly Lazy<Currency> jmd = new(() => new Currency("Ямайский доллар", "Jamaican Dollar", 388, "JMD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> jod = new(() => new Currency("Иорданский динар", "Jordanian Dinar", 400, "JOD"), isThreadSafe: true);
+    private static readonly Lazy<Currency> jpy = new(() => new Currency("Иена", "Yen", 392, "JPY", "2", '¥'), isThreadSafe: true);
+    private static readonly Lazy<Currency> kes = new(() => new Currency("Кенийский шиллинг", "Kenyan Shilling", 404, "KES"), isThreadSafe: true);
+    private static readonly Lazy<Currency> kgs = new(() => new Currency("Сом", "Som", 417, "KGS"), isThreadSafe: true);
+    private static readonly Lazy<Currency> khr = new(() => new Currency("Риель", "Riel", 116, "KHR", "C23", '៛'), isThreadSafe: true);
+    private static readonly Lazy<Currency> kmf = new(() => new Currency("Франк Комор", "Comoro Franc", 174, "KMF"), isThreadSafe: true);
+    private static readonly Lazy<Currency> kpw = new(() => new Currency("Северокорейская вона", "North Korean Won", 408, "KPW", "2", '₩'), isThreadSafe: true);
+    private static readonly Lazy<Currency> krw = new(() => new Currency("Вона", "Won", 410, "KRW", "K09", '₩'), isThreadSafe: true);
+    private static readonly Lazy<Currency> kwd = new(() => new Currency("Кувейтский динар", "Kuwaiti Dinar", 414, "KWD"), isThreadSafe: true);
+    private static readonly Lazy<Currency> kyd = new(() => new Currency("Доллар Островов Кайман", "Cayman Islands Dollar", 136, "KYD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> kzt = new(() => new Currency("Тенге", "Tenge", 398, "KZT", '₸'), isThreadSafe: true);
+    private static readonly Lazy<Currency> lak = new(() => new Currency("Кип", "Kip", 418, "LAK", '₭'), isThreadSafe: true);
+    private static readonly Lazy<Currency> lbp = new(() => new Currency("Ливанский фунт", "Lebanese Pound", 422, "LBP", '£'), isThreadSafe: true);
+    private static readonly Lazy<Currency> lkr = new(() => new Currency("Шри-ланкийская рупия", "Sri Lanka Rupee", 144, "LKR", "A43", '₨'), isThreadSafe: true);
+    private static readonly Lazy<Currency> lrd = new(() => new Currency("Либерийский доллар", "Liberian Dollar", 430, "LRD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> lsl = new(() => new Currency("Лоти", "Loti", 426, "LSL"), isThreadSafe: true);
+    private static readonly Lazy<Currency> ltl = new(() => new Currency("Литовский лит", "Lithuanian Litas", 440, "LTL"), isThreadSafe: true);
+    private static readonly Lazy<Currency> lyd = new(() => new Currency("Ливийский динар", "Libyan Dinar", 434, "LYD"), isThreadSafe: true);
+    private static readonly Lazy<Currency> mad = new(() => new Currency("Марокканский дирхам", "Moroccan Dirham", 504, "MAD"), isThreadSafe: true);
+    private static readonly Lazy<Currency> mdl = new(() => new Currency("Молдавский лей", "Moldovan Leu", 498, "MDL"), isThreadSafe: true);
+    private static readonly Lazy<Currency> mga = new(() => new Currency("Малагасийский ариари", "Malagasy Ariary", 969, "MGA"), isThreadSafe: true);
+    private static readonly Lazy<Currency> mkd = new(() => new Currency("Денар", "Denar", 807, "MKD"), isThreadSafe: true);
+    private static readonly Lazy<Currency> mmk = new(() => new Currency("Кьят", "Kyat", 104, "MMK"), isThreadSafe: true);
+    private static readonly Lazy<Currency> mnt = new(() => new Currency("Тугрик", "Tugrik", 496, "MNT", "4", '₮'), isThreadSafe: true);
+    private static readonly Lazy<Currency> mop = new(() => new Currency("Патака", "Pataca", 446, "MOP"), isThreadSafe: true);
+    private static readonly Lazy<Currency> mru = new(() => new Currency("Угия", "Ouguiya", 929, "MRU"), isThreadSafe: true);
+    private static readonly Lazy<Currency> mur = new(() => new Currency("Маврикийская рупия", "Mauritius Rupee", 480, "MUR", '₨'), isThreadSafe: true);
+    private static readonly Lazy<Currency> mvr = new(() => new Currency("Руфия", "Rufiyaa", 462, "MVR"), isThreadSafe: true);
+    private static readonly Lazy<Currency> mwk = new(() => new Currency("Квача", "Kwacha", 454, "MWK"), isThreadSafe: true);
+    private static readonly Lazy<Currency> mxn = new(() => new Currency("Мексиканское песо", "Mexican Peso", 484, "MXN", "E43", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> mxv = new(() => new Currency("Мексиканская инверсионная единица", "Mexican Unidad de Inversion", 979, "MXV"), isThreadSafe: true);
+    private static readonly Lazy<Currency> myr = new(() => new Currency("Малайзийский ринггит", "Malaysian Ringgit", 458, "MYR", "A36"), isThreadSafe: true);
+    private static readonly Lazy<Currency> mzn = new(() => new Currency("Мозамбикский метикал", "Mozambique Metical", 943, "MZN"), isThreadSafe: true);
+    private static readonly Lazy<Currency> nad = new(() => new Currency("Доллар Намибии", "Namibia Dollar", 516, "NAD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> ngn = new(() => new Currency("Найра", "Naira", 566, "NGN", '₦'), isThreadSafe: true);
+    private static readonly Lazy<Currency> nio = new(() => new Currency("Золотая кордоба", "Cordoba Oro", 558, "NIO"), isThreadSafe: true);
+    private static readonly Lazy<Currency> nok = new(() => new Currency("Норвежская крона", "Norwegian Krone", 578, "NOK"), isThreadSafe: true);
+    private static readonly Lazy<Currency> npr = new(() => new Currency("Непальская рупия", "Nepalese Rupee", 524, "NPR", '₨'), isThreadSafe: true);
+    private static readonly Lazy<Currency> nzd = new(() => new Currency("Новозеландский доллар", "New Zealand Dollar", 554, "NZD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> omr = new(() => new Currency("Оманский риал", "Rial Omani", 512, "OMR", '﷼'), isThreadSafe: true);
+    private static readonly Lazy<Currency> pab = new(() => new Currency("Бальбоа", "Balboa", 590, "PAB"), isThreadSafe: true);
+    private static readonly Lazy<Currency> pen = new(() => new Currency("Соль", "Sol", 604, "PEN"), isThreadSafe: true);
+    private static readonly Lazy<Currency> pgk = new(() => new Currency("Кина", "Kina", 598, "PGK"), isThreadSafe: true);
+    private static readonly Lazy<Currency> php = new(() => new Currency("Филиппинское песо", "Philippine Peso", 608, "PHP", '₱'), isThreadSafe: true);
+    private static readonly Lazy<Currency> pkr = new(() => new Currency("Пакистанская рупия", "Pakistan Rupee", 586, "PKR", "2", '₨'), isThreadSafe: true);
+    private static readonly Lazy<Currency> pln = new(() => new Currency("Злотый", "Zloty", 985, "PLN", "3"), isThreadSafe: true);
+    private static readonly Lazy<Currency> pyg = new(() => new Currency("Гуарани", "Guarani", 600, "PYG", '₲'), isThreadSafe: true);
+    private static readonly Lazy<Currency> qar = new(() => new Currency("Катарский риал", "Qatari Rial", 634, "QAR", '﷼'), isThreadSafe: true);
+    private static readonly Lazy<Currency> ron = new(() => new Currency("Новый румынский лей", "Romanian Leu", 946, "RON", "2"), isThreadSafe: true);
+    private static readonly Lazy<Currency> rsd = new(() => new Currency("Сербский динар", "Serbian Dinar", 941, "RSD"), isThreadSafe: true);
+    private static readonly Lazy<Currency> rub = new(() => new Currency("Российский рубль", "Russian Ruble", 643, "RUB", '₽'), isThreadSafe: true);
+    private static readonly Lazy<Currency> rwf = new(() => new Currency("Франк Руанды", "Rwanda Franc", 646, "RWF"), isThreadSafe: true);
+    private static readonly Lazy<Currency> sar = new(() => new Currency("Саудовский риял", "Saudi Riyal", 682, "SAR"), isThreadSafe: true);
+    private static readonly Lazy<Currency> sbd = new(() => new Currency("Доллар Соломоновых Островов", "Solomon Islands Dollar", 090, "SBD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> scr = new(() => new Currency("Сейшельская рупия", "Seychelles Rupee", 690, "SCR", '₨'), isThreadSafe: true);
+    private static readonly Lazy<Currency> sdg = new(() => new Currency("Суданский фунт", "Sudanese Pound", 938, "SDG", "2", '£'), isThreadSafe: true);
+    private static readonly Lazy<Currency> sek = new(() => new Currency("Шведская крона", "Swedish Krona", 752, "SEK", "B07"), isThreadSafe: true);
+    private static readonly Lazy<Currency> sgd = new(() => new Currency("Сингапурский доллар", "Singapore Dollar", 702, "SGD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> shp = new(() => new Currency("Фунт Святой Елены", "Saint Helena Pound", 654, "SHP", '£'), isThreadSafe: true);
+    private static readonly Lazy<Currency> sll = new(() => new Currency("Леоне", "Leone", 694, "SLL"), isThreadSafe: true);
+    private static readonly Lazy<Currency> sos = new(() => new Currency("Сомалийский шиллинг", "Somali Shilling", 706, "SOS"), isThreadSafe: true);
+    private static readonly Lazy<Currency> srd = new(() => new Currency("Суринамский доллар", "Surinam Dollar", 968, "SRD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> ssp = new(() => new Currency("Южносуданский фунт", "South Sudanese Pound", 728, "SSP", '£'), isThreadSafe: true);
+    private static readonly Lazy<Currency> stn = new(() => new Currency("Добра", "Dobra", 930, "STN"), isThreadSafe: true);
+    private static readonly Lazy<Currency> svc = new(() => new Currency("Сальвадорский колон", "El Salvador Colon", 222, "SVC", '₡'), isThreadSafe: true);
+    private static readonly Lazy<Currency> syp = new(() => new Currency("Сирийский фунт", "Syrian Pound", 760, "SYP", '£'), isThreadSafe: true);
+    private static readonly Lazy<Currency> szl = new(() => new Currency("Лилангени", "Lilangeni", 748, "SZL"), isThreadSafe: true);
+    private static readonly Lazy<Currency> thb = new(() => new Currency("Бат", "Baht", 764, "THB", "B70", '฿'), isThreadSafe: true);
+    private static readonly Lazy<Currency> tjs = new(() => new Currency("Сомони", "Somoni", 972, "TJS"), isThreadSafe: true);
+    private static readonly Lazy<Currency> tmt = new(() => new Currency("Новый туркменский манат", "Turkmenistan New Manat", 934, "TMT"), isThreadSafe: true);
+    private static readonly Lazy<Currency> tnd = new(() => new Currency("Тунисский динар", "Tunisian Dinar", 788, "TND", "B76"), isThreadSafe: true);
+    private static readonly Lazy<Currency> top = new(() => new Currency("Паанга", "Pa’anga", 776, "TOP"), isThreadSafe: true);
+    private static readonly Lazy<Currency> @try = new(() => new Currency("Турецкая лира", "Turkish Lira", 949, "TRY", "A13", '₺'), isThreadSafe: true);
+    private static readonly Lazy<Currency> ttd = new(() => new Currency("Доллар Тринидада и Тобаго", "Trinidad and Tobago Dollar", 780, "TTD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> twd = new(() => new Currency("Новый тайваньский доллар", "New Taiwan Dollar", 901, "TWD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> tzs = new(() => new Currency("Танзанийский шиллинг", "Tanzanian Shilling", 834, "TZS"), isThreadSafe: true);
+    private static readonly Lazy<Currency> uah = new(() => new Currency("Гривна", "Hryvnia", 980, "UAH", '₴'), isThreadSafe: true);
+    private static readonly Lazy<Currency> ugx = new(() => new Currency("Угандийский шиллинг", "Uganda Shilling", 800, "UGX"), isThreadSafe: true);
+    private static readonly Lazy<Currency> usd = new(() => new Currency("Доллар США", "US Dollar", 840, "USD", "119", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> usn = new(() => new Currency("Доллар следующего дня", "US Dollar (Next day)", 997, "USN", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> uss = new(() => new Currency("Доллар того же дня", "US Dollar (Same day)", 998, "USS", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> uyi = new(() => new Currency("Уругвайское песо в индексированных единицах", "Urguguay Peso en Unidades Indexadas", 940, "UYI", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> uyu = new(() => new Currency("Уругвайское песо", "Peso Uruguayo", 858, "UYU", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> uzs = new(() => new Currency("Узбекский сум", "Uzbekistan Sum", 860, "UZS"), isThreadSafe: true);
+    private static readonly Lazy<Currency> vef = new(() => new Currency("Боливар фуэрте", "Bolivar", 937, "VEF"), isThreadSafe: true);
+    private static readonly Lazy<Currency> vnd = new(() => new Currency("Донг", "Dong", 704, "VND", "2", '₫'), isThreadSafe: true);
+    private static readonly Lazy<Currency> vuv = new(() => new Currency("Вату", "Vatu", 548, "VUV"), isThreadSafe: true);
+    private static readonly Lazy<Currency> wst = new(() => new Currency("Тала", "Tala", 882, "WST"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xaf = new(() => new Currency("Франк КФА BEAC", "CFA Franc BEAC", 950, "XAF", "2"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xag = new(() => new Currency("Серебро (тройская унция)", "Silver", 961, "XAG", "A91"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xau = new(() => new Currency("Золото (тройская унция)", "Gold", 959, "XAU", "A90"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xba = new(() => new Currency("Европейская составная единица EURCO", "European Composite Unit (EURCO)", 955, "XBA"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xbb = new(() => new Currency("Европейская валютная единица EMU-6", "European Monetary Unit (E.M.U.-6)", 956, "XBB"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xbc = new(() => new Currency("Европейская расчётная единица EUA-9", "European Unit of Account 9 (E.U.A.-9)", 957, "XBC"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xbd = new(() => new Currency("Европейская расчётная единица EUA-17", "European Unit of Account 17 (E.U.A.-17)", 958, "XBD"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xcd = new(() => new Currency("Восточно-карибский доллар", "East Caribbean Dollar", 951, "XCD", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> xdr = new(() => new Currency("СДР (специальные права заимствования)", "SDR (Special Drawing Right)", 960, "XDR"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xof = new(() => new Currency("Франк КФА BCEAO", "CFA Franc BCEAO", 952, "XOF"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xpd = new(() => new Currency("Палладий (тройская унция)", "Palladium", 964, "XPD", "A34"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xpf = new(() => new Currency("Франк КФП", "CFP Franc", 953, "XPF"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xpt = new(() => new Currency("Платина (тройская унция)", "Platinum", 962, "XPT", "A92"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xsu = new(() => new Currency("Сукре", "Sucre", 994, "XSU"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xts = new(() => new Currency("Тестовый код", "Testing Code", 963, "XTS"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xua = new(() => new Currency("Расчётная единица ADB", "ADB Unit of Account", 965, "XUA"), isThreadSafe: true);
+    private static readonly Lazy<Currency> xxx = new(() => new Currency("Без валюты", "No Currency", 999, "XXX"), isThreadSafe: true);
+    private static readonly Lazy<Currency> yer = new(() => new Currency("Йеменский риал", "Yemeni Rial", 886, "YER", "2", '﷼'), isThreadSafe: true);
+    private static readonly Lazy<Currency> zar = new(() => new Currency("Рэнд", "Rand", 710, "ZAR"), isThreadSafe: true);
+    private static readonly Lazy<Currency> zmw = new(() => new Currency("Замбийская квача", "Zambian Kwacha", 967, "ZMW"), isThreadSafe: true);
+    private static readonly Lazy<Currency> zwl = new(() => new Currency("Доллар Зимбабве", "Zimbabwe Dollar", 932, "ZWL", '$'), isThreadSafe: true);
+    private static readonly Lazy<Currency> imp = new(() => new Currency("Фунты Острова Мэн", "Manx pound", 0, "IMP", "IMP", "B91", '£'), isThreadSafe: true);
+    private static readonly Lazy<Currency> ggp = new(() => new Currency("Гернсийский фунт", "Guernsey pound", 0, "GGP", "GGP", '£'), isThreadSafe: true);
+    private static readonly Lazy<Currency> jep = new(() => new Currency("Джерсийский фунт", "Jersey pound", 0, "JEP", "JEP", '£'), isThreadSafe: true);
 
     #endregion
 
@@ -1204,7 +1204,7 @@ public sealed partial class Currency
     /// Инициализирует новый экземпляр <see cref="Currency"/>.
     /// </summary>
     /// <param name="name">Название (на русском).</param>
-    /// <param name="internationalName">Название (интернациональное).</param> 
+    /// <param name="internationalName">Название (интернациональное).</param>
     /// <param name="code">Цифровой код валюты.</param>
     /// <param name="isoCode">Символьный код валюты (ISO 4217).</param>
     /// <param name="taylorCode">Код Тэйлора.</param>
@@ -1225,7 +1225,7 @@ public sealed partial class Currency
     /// Инициализирует новый экземпляр <see cref="Currency"/>.
     /// </summary>
     /// <param name="name">Название (на русском).</param>
-    /// <param name="internationalName">Название (интернациональное).</param> 
+    /// <param name="internationalName">Название (интернациональное).</param>
     /// <param name="code">Цифровой код валюты.</param>
     /// <param name="isoCode">Символьный код валюты (ISO 4217).</param>
     /// <param name="taylorCode">Код Тэйлора.</param>
@@ -1253,22 +1253,22 @@ public sealed partial class Currency
     /// </summary>
     /// <param name="obj">Объект для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
+    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
-    public override bool Equals(object? obj)
+    public override bool Equals(object? obj) => obj switch
     {
-        if (obj is string str) return str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == IsoCode.GetHashCode(StringComparison.InvariantCultureIgnoreCase);
-        else if (obj is ushort с) return с.GetHashCode() == Code.GetHashCode();
-        else if (obj is Currency currency) return currency.GetHashCode() == GetHashCode();
-        else return false;
-    }
+        string str => str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == IsoCode.GetHashCode(StringComparison.InvariantCultureIgnoreCase),
+        ushort с => с.GetHashCode() == Code.GetHashCode(),
+        Currency currency => currency.GetHashCode() == GetHashCode(),
+        _ => default,
+    };
 
     /// <summary>
     /// Сравнивает текущий экземпляр <see cref="Currency"/> с заданным экземпляром <see cref="Currency"/>.
     /// </summary>
     /// <param name="other">Экземпляр <see cref="Currency"/> для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
+    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public bool Equals(Currency? other) => Equals(other as object);
 
@@ -1290,7 +1290,7 @@ public sealed partial class Currency
     /// <param name="s">Символьный код валюты.</param>
     /// <param name="provider">Параметры форматирования.</param>
     /// <param name="result">Экземпляр <see cref="Currency"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse([NotNullWhen(true)] string? s, IFormatProvider? provider, [MaybeNullWhen(false)] out Currency? result)
     {
         result = s?.Trim().ToUpperInvariant() switch
@@ -1490,7 +1490,7 @@ public sealed partial class Currency
     /// </summary>
     /// <param name="s">Символьный код валюты.</param>
     /// <param name="result">Экземпляр <see cref="Currency"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse([NotNullWhen(true)] string? s, [MaybeNullWhen(false)] out Currency? result) => TryParse(s, default, out result);
 
     /// <summary>
@@ -1498,7 +1498,7 @@ public sealed partial class Currency
     /// </summary>
     /// <param name="code">Цифровой код валюты.</param>
     /// <param name="currency">Экземпляр <see cref="Currency"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse(ushort code, [MaybeNullWhen(false)] out Currency? currency)
     {
         currency = code switch
@@ -1691,7 +1691,7 @@ public sealed partial class Currency
     }
 
     /// <summary>
-    /// Возвращает экземпляр <see cref="Currency"/> по его символьному коду. 
+    /// Возвращает экземпляр <see cref="Currency"/> по его символьному коду.
     /// </summary>
     /// <param name="s">Символьный код валюты.</param>
     /// <param name="provider">Параметры форматирования.</param>
@@ -1700,7 +1700,7 @@ public sealed partial class Currency
     public static Currency Parse(string s, IFormatProvider? provider) => !TryParse(s, provider, out var result) || result is null ? throw new FormatException() : result;
 
     /// <summary>
-    /// Возвращает экземпляр <see cref="Currency"/> по его символьному коду. 
+    /// Возвращает экземпляр <see cref="Currency"/> по его символьному коду.
     /// </summary>
     /// <param name="s">Символьный код валюты.</param>
     /// <returns>Экземпляр <see cref="Currency"/>.</returns>
@@ -1708,7 +1708,7 @@ public sealed partial class Currency
     public static Currency Parse(string s) => Parse(s, default);
 
     /// <summary>
-    /// Возвращает экземпляр <see cref="Currency"/> по его цифровому коду. 
+    /// Возвращает экземпляр <see cref="Currency"/> по его цифровому коду.
     /// </summary>
     /// <param name="code">Цифровой код валюты.</param>
     /// <returns>Экземпляр <see cref="Currency"/>.</returns>
@@ -1761,7 +1761,7 @@ public sealed partial class Currency
     /// <param name="currency">Экземпляр <see cref="Currency"/>.</param>
     /// <param name="str">Строка для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
+    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public static bool operator ==(Currency? currency, string? str) => (currency is null && str is null) || (currency is not null && str is not null && currency.Equals(str));
 
@@ -1771,7 +1771,7 @@ public sealed partial class Currency
     /// <param name="currency">Экземпляр <see cref="Currency"/>.</param>
     /// <param name="str">Строка для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов не совпадают, иначе <c>false</c>.
+    /// <c>True</c>, если хеш-коды объектов не совпадают, иначе <see langword="false"/>.
     /// </returns>
     public static bool operator !=(Currency? currency, string? str) => !(currency == str);
 }

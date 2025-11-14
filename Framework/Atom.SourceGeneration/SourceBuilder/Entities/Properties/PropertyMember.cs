@@ -79,56 +79,90 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     {
         var tabs = (spaces.Length / 4) + 1;
 
-        Getter?.ParentAccessModifier = AccessModifier;
-        Setter?.ParentAccessModifier = AccessModifier;
-
+        PrepareAccessors();
         var getter = Getter?.Build(tabs);
         var setter = Setter?.Build(tabs);
 
-        var isAuto = (!string.IsNullOrEmpty(getter) && getter.EndsWith("get;")) || (!string.IsNullOrEmpty(setter) && (setter.EndsWith("set;") || setter.EndsWith("init;")));
-        var isSimpleGetter = Getter is not null && Setter is null && !isAuto && !string.IsNullOrEmpty(getter) && getter.Trim().StartsWith("get =>");
+        if (IsSimpleGetter(getter, setter))
+        {
+            AppendSimpleGetter(sb, getter!);
+            return;
+        }
 
-        if (isSimpleGetter)
-            sb.AppendLine(getter!.Trim()[3..]);
-        else
-            AppendBody(sb, spaces, getter, setter, isAuto);
+        var isAuto = IsAutoImplemented(getter, setter);
+        AppendAccessorBody(sb, spaces, getter, setter, isAuto);
     }
 
-    private void AppendBody(StringBuilder sb, string spaces, string? getter, string? setter, bool isAuto)
+    private void PrepareAccessors()
     {
-        if (isAuto)
-            sb.Append($" {{");
-        else
-            sb.AppendLine($"\n{spaces}{{");
+        Getter?.ParentAccessModifier = AccessModifier;
+        Setter?.ParentAccessModifier = AccessModifier;
+    }
 
-        if (!string.IsNullOrEmpty(getter))
+    private bool IsSimpleGetter(string? getter, string? setter)
+        => Getter is not null
+           && Setter is null
+           && !IsAutoImplemented(getter, setter)
+           && !string.IsNullOrEmpty(getter)
+           && getter.Trim().StartsWith("get =>", StringComparison.Ordinal);
+
+    private void AppendAccessorBody(StringBuilder sb, string spaces, string? getter, string? setter, bool isAuto)
+    {
+        AppendBodyStart(sb, spaces, isAuto);
+        AppendAccessor(sb, getter, isAuto);
+        AppendSetter(sb, getter, setter, isAuto);
+        AppendBodyEnd(sb, spaces, isAuto);
+        AppendInitializer(sb);
+    }
+
+    private static bool IsAutoImplemented(string? getter, string? setter)
+        => (!string.IsNullOrEmpty(getter) && getter.EndsWith("get;", StringComparison.Ordinal))
+           || (!string.IsNullOrEmpty(setter) && (setter.EndsWith("set;", StringComparison.Ordinal) || setter.EndsWith("init;", StringComparison.Ordinal)));
+
+    private static void AppendSimpleGetter(StringBuilder sb, string getter)
+        => sb.AppendLine(getter.Trim()[3..]);
+
+    private static void AppendBodyStart(StringBuilder sb, string spaces, bool isAuto)
+    {
+        if (isAuto) sb.Append(" {");
+        else sb.AppendLine($"\n{spaces}{{");
+    }
+
+    private static void AppendAccessor(StringBuilder sb, string? accessor, bool isAuto)
+    {
+        if (string.IsNullOrEmpty(accessor)) return;
+        var trimmed = accessor.TrimStart();
+        sb.Append(isAuto ? $" {trimmed}" : accessor);
+    }
+
+    private static void AppendSetter(StringBuilder sb, string? getter, string? setter, bool isAuto)
+    {
+        if (string.IsNullOrEmpty(setter)) return;
+        var trimmed = setter.TrimStart();
+        if (isAuto)
         {
-            if (isAuto)
-                sb.Append($" {getter.TrimStart()}");
-            else
-                sb.Append($"{getter}");
+            sb.Append($" {trimmed}");
+            return;
         }
 
-        if (!string.IsNullOrEmpty(setter))
-        {
-            if (isAuto)
-            {
-                sb.Append($" {setter.TrimStart()}");
-            }
-            else
-            {
-                if (!string.IsNullOrEmpty(getter) && getter.TrimStart().StartsWith("get =>") && !setter.TrimStart().StartsWith("set =>")) sb.AppendLine();
-                sb.Append($"{setter}");
-            }
-        }
+        if (RequiresSeparator(getter, trimmed)) sb.AppendLine();
+        sb.Append(setter);
+    }
 
-        if (isAuto)
-            sb.Append($" }}");
-        else
-            sb.Append($"{spaces}}}");
+    private static bool RequiresSeparator(string? getter, string setterText)
+        => !string.IsNullOrEmpty(getter)
+           && getter.TrimStart().StartsWith("get =>", StringComparison.Ordinal)
+           && !setterText.StartsWith("set =>", StringComparison.Ordinal);
 
+    private static void AppendBodyEnd(StringBuilder sb, string spaces, bool isAuto)
+    {
+        if (isAuto) sb.Append(" }");
+        else sb.Append($"{spaces}}}");
+    }
+
+    private void AppendInitializer(StringBuilder sb)
+    {
         if (!string.IsNullOrEmpty(InitialValue)) sb.Append($" = {InitialValue};");
-
         sb.AppendLine();
     }
 
@@ -178,7 +212,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    public PropertyMember AsPartial() => AsPartial(true);
+    public PropertyMember AsPartial() => AsPartial(value: true);
 
     /// <inheritdoc/>
     public virtual PropertyMember AsReadOnly(bool value)
@@ -188,7 +222,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    public PropertyMember AsReadOnly() => AsReadOnly(true);
+    public PropertyMember AsReadOnly() => AsReadOnly(value: true);
 
     /// <inheritdoc/>
     public virtual PropertyMember AsReadOnlyRef(bool value)
@@ -198,7 +232,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    public PropertyMember AsReadOnlyRef() => AsReadOnlyRef(true);
+    public PropertyMember AsReadOnlyRef() => AsReadOnlyRef(value: true);
 
     /// <inheritdoc/>
     public virtual PropertyMember AsRef(bool value)
@@ -208,7 +242,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    public PropertyMember AsRef() => AsRef(true);
+    public PropertyMember AsRef() => AsRef(value: true);
 
     /// <inheritdoc/>
     public virtual PropertyMember AsUnsafe(bool value)
@@ -218,7 +252,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    public PropertyMember AsUnsafe() => AsUnsafe(true);
+    public PropertyMember AsUnsafe() => AsUnsafe(value: true);
 
     /// <inheritdoc/>
     public virtual PropertyMember AsAbstract(bool value)
@@ -228,7 +262,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    public PropertyMember AsAbstract() => AsAbstract(true);
+    public PropertyMember AsAbstract() => AsAbstract(value: true);
 
     /// <inheritdoc/>
     public virtual PropertyMember AsVirtual(bool value)
@@ -238,7 +272,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    public PropertyMember AsVirtual() => AsVirtual(true);
+    public PropertyMember AsVirtual() => AsVirtual(value: true);
 
     /// <inheritdoc/>
     public virtual PropertyMember AsOverride(bool value)
@@ -248,7 +282,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    public PropertyMember AsOverride() => AsOverride(true);
+    public PropertyMember AsOverride() => AsOverride(value: true);
 
     /// <inheritdoc/>
     public virtual PropertyMember AsNew(bool value)
@@ -258,7 +292,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    public PropertyMember AsNew() => AsNew(true);
+    public PropertyMember AsNew() => AsNew(value: true);
 
     /// <inheritdoc/>
     public virtual PropertyMember WithGetter(PropertyAccessorMember getter)
@@ -423,7 +457,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     /// </summary>
     /// <param name="name">Имя свойства.</param>
     /// <typeparam name="T">Тип свойства.</typeparam>
-    public static PropertyMember Create<T>(string name) => Create<T>(name, false);
+    public static PropertyMember Create<T>(string name) => Create<T>(name, isInit: false);
 
     /// <summary>
     /// Создаёт новый экземпляр строителя свойств c асессором.
@@ -479,5 +513,5 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     /// </summary>
     /// <param name="name">Имя свойства.</param>
     /// <typeparam name="T">Тип свойства.</typeparam>
-    public static PropertyMember CreateWithSetterOnly<T>(string name) => CreateWithSetterOnly<T>(name, false);
+    public static PropertyMember CreateWithSetterOnly<T>(string name) => CreateWithSetterOnly<T>(name, isInit: false);
 }

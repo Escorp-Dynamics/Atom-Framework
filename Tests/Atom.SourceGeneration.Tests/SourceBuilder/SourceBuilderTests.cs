@@ -1,5 +1,6 @@
 namespace Atom.SourceGeneration.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class SourceBuilderTests(ILogger logger) : BenchmarkTests<SourceBuilderTests>(logger)
 {
     private static string? sourceReference;
@@ -34,7 +35,7 @@ public class SourceBuilderTests(ILogger logger) : BenchmarkTests<SourceBuilderTe
                 .WithProperty<int>("TestProperty")
                 .WithMethod<ValueTask>("OnPropertyChanged")
             )
-            .Build(true);
+            .Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {

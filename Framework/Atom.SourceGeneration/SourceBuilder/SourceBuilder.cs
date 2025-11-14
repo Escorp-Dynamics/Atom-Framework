@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Atom.Buffers;
 using Atom.Collections;
@@ -27,6 +28,7 @@ public class SourceBuilder : ISourceBuilder
     public IEnumerable<IEntity> Entities => entities;
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ISourceBuilder WithDirective(params IEnumerable<string> directives)
     {
         this.directives.AddRange(directives);
@@ -34,6 +36,7 @@ public class SourceBuilder : ISourceBuilder
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ISourceBuilder WithUsing(params IEnumerable<string> ns)
     {
         usings.AddRange(ns);
@@ -41,6 +44,7 @@ public class SourceBuilder : ISourceBuilder
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ISourceBuilder WithNamespace(string? ns)
     {
         Namespace = ns;
@@ -48,6 +52,7 @@ public class SourceBuilder : ISourceBuilder
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ISourceBuilder WithEntity(params IEnumerable<IEntity> entities)
     {
         this.entities.AddRange(entities);
@@ -55,12 +60,15 @@ public class SourceBuilder : ISourceBuilder
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ISourceBuilder WithEnum(params IEnumerable<EnumEntity> enums) => WithEntity(enums);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ISourceBuilder WithInterface(params IEnumerable<InterfaceEntity> interfaces) => WithEntity(interfaces);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ISourceBuilder WithClass(params IEnumerable<ClassEntity> classes) => WithEntity(classes);
 
     /// <inheritdoc/>
@@ -96,7 +104,7 @@ public class SourceBuilder : ISourceBuilder
 
         if (!string.IsNullOrEmpty(Namespace)) tmp.Add(Namespace);
 
-        string[] allUsings = [.. tmp.Where(x => !string.IsNullOrEmpty(x)).Distinct().OrderByDescending(x => x.Length)];
+        string[] allUsings = [.. tmp.Where(x => !string.IsNullOrEmpty(x)).Distinct(StringComparer.Ordinal).OrderByDescending(x => x.Length)];
         ObjectPool<List<string>>.Shared.Return(tmp, x => x.Clear());
 
         foreach (var entity in entities)
@@ -115,6 +123,7 @@ public class SourceBuilder : ISourceBuilder
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string? Build() => Build(default);
 
     /// <inheritdoc/>
@@ -135,6 +144,7 @@ public class SourceBuilder : ISourceBuilder
     /// <summary>
     /// Инициализирует нового строителя исходного кода.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ISourceBuilder Create() => ObjectPool<SourceBuilder>.Shared.Rent()
         .WithUsing("System",
             "System.Collections",

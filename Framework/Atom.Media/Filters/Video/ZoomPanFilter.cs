@@ -54,12 +54,12 @@ public class ZoomPanFilter(float from, float to, TimeSpan duration) : VideoFilte
         if (!From.Equals(To)) zoom = $"if(lte(time,{d}),{func}({zoom}{sign}(time/{d}),{value}),{value})";
 
         sb.Append(base.Calculate())
-          .Append($"z='{zoom}':")
+          .Append(string.Create(CultureInfo.InvariantCulture, $"z='{zoom}':"))
           .Append("d=1:")
-          .Append($"x='{x}':")
-          .Append($"y='{y}':")
-          .Append($"fps={FrameRate}:")
-          .Append($"s={Resolution.Width}x{Resolution.Height}");
+          .Append(string.Create(CultureInfo.InvariantCulture, $"x='{x}':"))
+          .Append(string.Create(CultureInfo.InvariantCulture, $"y='{y}':"))
+          .Append(string.Create(CultureInfo.InvariantCulture, $"fps={FrameRate}:"))
+          .Append(string.Create(CultureInfo.InvariantCulture, $"s={Resolution.Width}x{Resolution.Height}"));
 
         var spec = sb.ToString();
         ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());

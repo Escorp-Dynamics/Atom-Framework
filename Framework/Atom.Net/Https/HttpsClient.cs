@@ -271,7 +271,7 @@ public class HttpsClient : HttpClient
         var oldHandler = this.handler;
         this.handler = handler;
 
-        if (!Interlocked.CompareExchange(ref oldHandler.isReadyForDisposing, true, false) && oldHandler.activeRequests is 0)
+        if (!Interlocked.CompareExchange(ref oldHandler.isReadyForDisposing, value: true, comparand: false) && oldHandler.activeRequests is 0)
             oldHandler.Dispose();
     }
 
@@ -353,12 +353,12 @@ public class HttpsClient : HttpClient
     /// <param name="responseTypeInfo">Метаданные типа ответа.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns>Данные ответа JSON, десериализованные в коллекцию объектов.</returns>
-    public virtual async IAsyncEnumerable<T?> SendAsyncEnumerable<T>(HttpRequestMessage request, JsonTypeInfo<T> responseTypeInfo, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public virtual async IAsyncEnumerable<T?> SendAsyncEnumerableAsync<T>(HttpRequestMessage request, JsonTypeInfo<T> responseTypeInfo, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (response.Content.Headers.ContentLength is 0) yield break;
 
-        var enumerable = response.Content.AsJsonAsyncEnumerable(responseTypeInfo, cancellationToken).ConfigureAwait(false);
+        var enumerable = response.Content.AsJsonAsyncEnumerableAsync(responseTypeInfo, cancellationToken).ConfigureAwait(false);
         var iterator = enumerable.GetAsyncEnumerator();
 
         await using (iterator)
@@ -376,7 +376,7 @@ public class HttpsClient : HttpClient
     /// <param name="responseTypeInfo">Метаданные типа ответа.</param>
     /// <returns>Данные ответа JSON, десериализованные в коллекцию объектов.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public IAsyncEnumerable<TResponse?> SendAsyncEnumerable<TResponse>(HttpRequestMessage request, JsonTypeInfo<TResponse> responseTypeInfo) => SendAsyncEnumerable(request, responseTypeInfo, CancellationToken.None);
+    public IAsyncEnumerable<TResponse?> SendAsyncEnumerableAsync<TResponse>(HttpRequestMessage request, JsonTypeInfo<TResponse> responseTypeInfo) => SendAsyncEnumerableAsync(request, responseTypeInfo, CancellationToken.None);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -10,14 +10,14 @@ public class Signal<T>
     /// <summary>
     /// Происходит в момент отправки сигнала.
     /// </summary>
-    public event MutableEventHandler<SignalEventArgs<T>>? Sended;
+    public event MutableEventHandler<object, SignalEventArgs<T>>? Sended;
 
     /// <summary>
     /// Посылает сигнал.
     /// </summary>
     /// <param name="state">Состояние.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Send(T? state) => Sended.On(args => args.State = state);
+    public void Send(T? state) => Sended.On(this, args => args.State = state);
 
     /// <summary>
     /// Посылает сигнал.

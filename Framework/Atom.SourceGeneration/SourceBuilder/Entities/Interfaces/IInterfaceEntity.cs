@@ -156,7 +156,7 @@ public interface IInterfaceEntity<out T> : IEntity<T> where T : IEntity
     /// <summary>
     /// Указывает, является ли частичным.
     /// </summary>
-    T AsPartial() => AsPartial(true);
+    T AsPartial() => AsPartial(value: true);
 
     /// <summary>
     /// Указывает, является ли небезопасным.
@@ -167,5 +167,5 @@ public interface IInterfaceEntity<out T> : IEntity<T> where T : IEntity
     /// <summary>
     /// Указывает, является ли небезопасным.
     /// </summary>
-    T AsUnsafe() => AsUnsafe(true);
+    T AsUnsafe() => AsUnsafe(value: true);
 }

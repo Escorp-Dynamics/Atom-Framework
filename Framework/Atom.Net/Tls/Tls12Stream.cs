@@ -191,13 +191,13 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
 
             if (!aeadRead12.TryDecrypt(nonce, aad, cipherTag, plain.AsSpan(0, plainLen), out var got))
             {
-                ArrayPool<byte>.Shared.Return(plain, true);
+                ArrayPool<byte>.Shared.Return(plain, clearArray: true);
                 throw new CryptographicException("AEAD decrypt failed (TLS1.2)");
             }
 
             if (got != plainLen)
             {
-                ArrayPool<byte>.Shared.Return(plain, true);
+                ArrayPool<byte>.Shared.Return(plain, clearArray: true);
                 throw new CryptographicException("AEAD length mismatch (TLS1.2)");
             }
 
@@ -207,7 +207,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         finally
         {
             CryptographicOperations.ZeroMemory(payload.AsSpan());
-            ArrayPool<byte>.Shared.Return(payload, true);
+            ArrayPool<byte>.Shared.Return(payload, clearArray: true);
         }
     }
 
@@ -451,7 +451,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(toSign, true);
+            ArrayPool<byte>.Shared.Return(toSign, clearArray: true);
         }
     }
 
@@ -528,7 +528,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         if (chosenGroup is NamedGroup.X25519)
         {
             // клиентский pub = 32 байта
-            var p = ecdhe!.ExportParameters(false);
+            var p = ecdhe!.ExportParameters(includePrivateParameters: false);
             if (p.Q.X is not { Length: 32 }) throw new CryptographicException("X25519 pub invalid");
 
             Span<byte> body = stackalloc byte[1 + 32];
@@ -555,7 +555,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
                 _ => throw new NotSupportedException()
             };
 
-            var pub = ecdhe!.ExportParameters(false);
+            var pub = ecdhe!.ExportParameters(includePrivateParameters: false);
             if (pub.Q.X is null || pub.Q.Y is null) throw new CryptographicException("ECDHE public invalid");
 
             Span<byte> q = stackalloc byte[1 + (fieldLen * 2)];
@@ -636,7 +636,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(payload, true);
+            ArrayPool<byte>.Shared.Return(payload, clearArray: true);
         }
 
         // Finished (encrypted Handshake)
@@ -676,9 +676,6 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private async ValueTask ReadOptionalNewSessionTicketsAsync(CancellationToken cancellationToken)
     {
-        Span<byte> nonce = stackalloc byte[12]; // 4 (salt) + 8 (explicit_iv)
-        Span<byte> aad = stackalloc byte[13]; // 8 + 1 + 2 + 2
-
         while (true)
         {
             var (hdr, payload) = await ReadRecordAsync(cancellationToken).ConfigureAwait(false);
@@ -692,6 +689,11 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
                 var explicitIv = payload.AsSpan(0, 8);
                 var cipherTag = payload.AsSpan(8, hdr.Length - 8);
                 var plainLen = cipherTag.Length - aeadRead12.TagSize;
+
+                // nonce and aad are small stack-allocated buffers; allocate them here
+                // after the await so they are not captured across an async suspension.
+                Span<byte> nonce = stackalloc byte[12]; // 4 (salt) + 8 (explicit_iv)
+                Span<byte> aad = stackalloc byte[13]; // 8 + 1 + 2 + 2
 
                 BuildAadAndNonceForRead(TlsContentType.Handshake, plainLen, seqRead12, explicitIv, nonce, aad);
 
@@ -1610,11 +1612,11 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     private static bool HostnameMatches(X509Certificate2 cert, string host)
     {
         // Быстрый путь: .NET вернёт предпочитаемое имя (обычно SAN).
-        var name = cert.GetNameInfo(X509NameType.DnsName, false);
+        var name = cert.GetNameInfo(X509NameType.DnsName, forIssuer: false);
         if (!string.IsNullOrEmpty(name) && WildcardMatch(name, host)) return true;
 
         // Запасной путь: если SAN не прочитался, попробуем CN:
-        var cn = cert.GetNameInfo(X509NameType.SimpleName, false);
+        var cn = cert.GetNameInfo(X509NameType.SimpleName, forIssuer: false);
         if (!string.IsNullOrEmpty(cn) && WildcardMatch(cn, host)) return true;
 
         return default;

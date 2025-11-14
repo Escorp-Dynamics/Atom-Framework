@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Atom.Buffers;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Atom.Net.Tls.Extensions;
 
@@ -20,7 +21,7 @@ public abstract partial class TlsExtension : ITlsExtension
     public static PskKeyExchangeModesTlsExtension PskKeyExchangeModes => Rent<PskKeyExchangeModesTlsExtension>();
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public static PreSharedKeyTlsExtension PreSharedKey => Rent<PreSharedKeyTlsExtension>();
 
@@ -90,6 +91,11 @@ public abstract partial class TlsExtension : ITlsExtension
     public static StatusRequestTlsExtension StatusRequest => Rent<StatusRequestTlsExtension>();
 
     /// <summary>
+    /// Signed Certificate Timestamp (SCT) extension placeholder.
+    /// </summary>
+    public static SignedCertificateTimestampTlsExtension SignedCertificateTimestamp => Rent<SignedCertificateTimestampTlsExtension>();
+
+    /// <summary>
     /// delegated_credentials (0x0037).
     /// </summary>
     public static DelegatedCredentialsTlsExtension DelegatedCredentials => Rent<DelegatedCredentialsTlsExtension>();
@@ -132,4 +138,14 @@ public abstract partial class TlsExtension : ITlsExtension
     [Pooled]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void Reset() { }
+
+    /// <summary>
+    /// Helper to rent pooled objects for extensions when source-generated helpers are not available.
+    /// </summary>
+    public static T Rent<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>() => ObjectPool<T>.Shared.Rent();
+
+    /// <summary>
+    /// Helper to return pooled objects.
+    /// </summary>
+    public static void Return<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>(T value) => ObjectPool<T>.Shared.Return(value!);
 }

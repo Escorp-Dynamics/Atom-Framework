@@ -1,10 +1,12 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Atom.Net.Https.Http;
 
 /// <summary>
 /// 
 /// </summary>
+[StructLayout(LayoutKind.Auto)]
 public readonly struct ConnectionIdLengths : IEquatable<ConnectionIdLengths>
 {
     /// <summary>

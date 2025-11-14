@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text;
 using Atom.Buffers;
 
@@ -23,7 +24,7 @@ public class EnumMember : Entity<EnumMember>
         if (Value < 0)
             sb.AppendLine($"{spaces}{Name},");
         else
-            sb.AppendLine($"{spaces}{Name} = {Value},");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{spaces}{Name} = {Value},");
     }
 
     /// <inheritdoc/>

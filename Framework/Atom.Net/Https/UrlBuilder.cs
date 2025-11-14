@@ -94,7 +94,7 @@ public partial class UrlBuilder : IBuilder<Uri, UrlBuilder>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual UrlBuilder WithEndingSlash()
     {
-        Volatile.Write(ref isEndingSlashEnabled, true);
+        Volatile.Write(ref isEndingSlashEnabled, value: true);
         return this;
     }
 

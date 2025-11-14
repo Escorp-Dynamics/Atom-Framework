@@ -1,34 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
-    <LangVersion>preview</LangVersion>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <OptimizationPreference>speed</OptimizationPreference>
     <AssemblyName>Escorp.Atom.Testing</AssemblyName>
-
-    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-    <AnalysisLevel>latest-all</AnalysisLevel>
-    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
-    <WarningLevel>9999</WarningLevel>
-    <AnalysisMode>AllEnabledByDefault</AnalysisMode>
-
-    <IsTrimmable>true</IsTrimmable>
-    <IsAotCompatible>true</IsAotCompatible>
-    <InvariantGlobalization>true</InvariantGlobalization>
-    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
-
-    <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
-    <IlcOptimizationPreference>speed</IlcOptimizationPreference>
-
     <NoWarn>CA1515</NoWarn>
+    <IsPackable>true</IsPackable>
 
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>$(AssemblyName)</PackageId>
-    <Version>0.0.1</Version>
+    <Version>0.0.2</Version>
     <Authors>Yuriy Yesin, Escorp Labs</Authors>
     <Company>Escorp Dynamics</Company>
     <Product>Escorp.$(AssemblyName)</Product>
@@ -54,22 +33,22 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(Configuration)' == 'Release'">
-    <PackageReference Include="Escorp.Atom" Version="0.8.6" />
+    <PackageReference Include="Escorp.Atom" Version="*" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="coverlet.collector" Version="6.0.4">
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="*" />
+    <PackageReference Include="coverlet.collector" Version="*">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="NUnit.Analyzers" Version="4.10.0">
+    <PackageReference Include="NUnit.Analyzers" Version="*">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="NUnit3TestAdapter" Version="5.1.0" />
-    <PackageReference Include="BenchmarkDotNet" Version="0.15.2" />
-    <PackageReference Include="NUnit" Version="4.4.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="*" />
+    <PackageReference Include="BenchmarkDotNet" Version="*" />
+    <PackageReference Include="NUnit" Version="*" />
   </ItemGroup>
 
   <ItemGroup>
@@ -77,7 +56,7 @@
     <None Update="README.md" PackagePath="\" Pack="true" />
   </ItemGroup>
 
-  <Target Name="PublishPackages" AfterTargets="Pack">
+  <Target Name="PublishPackages" AfterTargets="Pack" Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
     <PropertyGroup>
       <PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
     </PropertyGroup>

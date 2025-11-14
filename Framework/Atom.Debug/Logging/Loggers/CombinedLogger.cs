@@ -125,14 +125,14 @@ public class CombinedLogger : Logger
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override IDisposable? BeginScope<TState>(TState state)
     {
-        var scope = base.BeginScope(state) as ScopeContext;
+        var scopeContext = base.BeginScope(state) as ScopeContext;
 
         foreach (var logger in loggers)
         {
-            if (logger is Logger l) l.scope.Value = scope;
+            if (logger is Logger l) l.scope.Value = scopeContext;
         }
 
-        return scope;
+        return scopeContext;
     }
 
     /// <inheritdoc/>

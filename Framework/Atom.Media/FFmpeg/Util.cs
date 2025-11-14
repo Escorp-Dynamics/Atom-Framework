@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -100,7 +101,7 @@ internal static partial class FFmpeg
         var descr = Util.GetErrorDescription(errorCode);
         locker?.Release();
 
-        throw new VideoStreamException($"{message}: {descr} ({errorCode})");
+        throw new VideoStreamException(string.Create(CultureInfo.InvariantCulture, $"{message}: {descr} ({errorCode})"));
     }
 
     public static int ThrowIfErrors(this int errorCode, string message) => errorCode.ThrowIfErrors(message, default);

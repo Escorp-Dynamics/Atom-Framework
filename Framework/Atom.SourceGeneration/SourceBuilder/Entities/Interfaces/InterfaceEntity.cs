@@ -16,6 +16,17 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
     private readonly SparseArray<EventMember> events = new(128);
     private readonly SparseArray<MethodMember> methods = new(128);
     private readonly SparseArray<IEntity> others = new(128);
+    private bool HasMembers() => !(properties.IsEmpty && events.IsEmpty && methods.IsEmpty && others.IsEmpty);
+
+    private static void AppendMembers<TMember>(StringBuilder sb, int tabs, IEnumerable<TMember> members, params IEnumerable<string> usings)
+        where TMember : IEntity
+    {
+        foreach (var member in members)
+        {
+            var built = member.Build(tabs, usings);
+            if (!string.IsNullOrEmpty(built)) sb.AppendLine(built);
+        }
+    }
 
     /// <inheritdoc/>
     public AccessModifier AccessModifier { get; protected set; }
@@ -105,7 +116,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
         AppendParents(sb, usings);
         AppendGenericsLimitations(sb);
 
-        if (properties.IsEmpty && events.IsEmpty && methods.IsEmpty && others.IsEmpty)
+        if (!HasMembers())
         {
             sb.Append(';');
             return;
@@ -114,29 +125,10 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
         sb.AppendLine($"\n{spaces}{{");
         var tabs = (spaces.Length / 4) + 1;
 
-        foreach (var property in properties)
-        {
-            var p = property.Build(tabs, usings);
-            if (!string.IsNullOrEmpty(p)) sb.AppendLine(p);
-        }
-
-        foreach (var e in events)
-        {
-            var p = e.Build(tabs, usings);
-            if (!string.IsNullOrEmpty(p)) sb.AppendLine(p);
-        }
-
-        foreach (var method in methods)
-        {
-            var p = method.Build(tabs, usings);
-            if (!string.IsNullOrEmpty(p)) sb.AppendLine(p);
-        }
-
-        foreach (var other in others)
-        {
-            var p = other.Build(tabs, usings);
-            if (!string.IsNullOrEmpty(p)) sb.AppendLine(p);
-        }
+        AppendMembers(sb, tabs, properties, usings);
+        AppendMembers(sb, tabs, events, usings);
+        AppendMembers(sb, tabs, methods, usings);
+        AppendMembers(sb, tabs, others, usings);
 
         if (sb[^1] is '\n') sb.Remove(sb.Length - 1, 1);
         sb.AppendLine($"{spaces}}}");
@@ -246,7 +238,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
     }
 
     /// <inheritdoc/>
-    public InterfaceEntity AsPartial() => AsPartial(true);
+    public InterfaceEntity AsPartial() => AsPartial(value: true);
 
     /// <inheritdoc/>
     public virtual InterfaceEntity AsUnsafe(bool value)
@@ -256,7 +248,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
     }
 
     /// <inheritdoc/>
-    public InterfaceEntity AsUnsafe() => AsUnsafe(true);
+    public InterfaceEntity AsUnsafe() => AsUnsafe(value: true);
 
     /// <inheritdoc/>
     public override void Release()

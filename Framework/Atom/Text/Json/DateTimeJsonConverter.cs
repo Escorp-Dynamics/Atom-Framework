@@ -10,7 +10,7 @@ namespace Atom.Text.Json;
 /// </summary>
 public sealed class DateTimeJsonConverter : JsonConverter<DateTime>
 {
-    private static readonly Lazy<DateTimeJsonConverter> defaultConverter = new(() => new(), true);
+    private static readonly Lazy<DateTimeJsonConverter> defaultConverter = new(() => new(), isThreadSafe: true);
 
     /// <summary>
     /// Формат.
@@ -34,6 +34,6 @@ public sealed class DateTimeJsonConverter : JsonConverter<DateTime>
     {
         if (options.DefaultIgnoreCondition is JsonIgnoreCondition.Always) return;
         if (options.DefaultIgnoreCondition is JsonIgnoreCondition.WhenWritingDefault && value == default) return;
-        writer.WriteStringValue(value.ToString(DefaultFormat));
+        writer.WriteStringValue(value.ToString(DefaultFormat, CultureInfo.InvariantCulture));
     }
 }

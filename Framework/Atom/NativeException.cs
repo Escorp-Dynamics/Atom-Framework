@@ -34,7 +34,7 @@ public partial class NativeException : Exception
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     private static partial nint ErrorUnix(int errorNo);
 
-    private static unsafe string? GetError() => RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+    private static unsafe string? GetError() => OperatingSystem.IsWindows()
         ? Marshal.GetLastPInvokeErrorMessage()
         : Marshal.PtrToStringAnsi(ErrorUnix(Marshal.GetLastWin32Error()));
 }

@@ -1,4 +1,4 @@
-#pragma warning disable CA1000, CS0067, CS8618
+#pragma warning disable CA1000
 
 using System.IO.Pipelines;
 using System.Text.Json;
@@ -16,12 +16,12 @@ public interface IJsonContext<T>
     /// <summary>
     /// Происходит в момент неудачной сериализации.
     /// </summary>
-    static event MutableEventHandler<FailedEventArgs>? SerializationFailed;
+    static abstract event MutableEventHandler<object, FailedEventArgs>? SerializationFailed;
 
     /// <summary>
     /// Метаданные типа.
     /// </summary>
-    static JsonTypeInfo<T> TypeInfo { get; }
+    static abstract JsonTypeInfo<T> TypeInfo { get; }
 
     /// <summary>
     /// Сериализует текущий объект в строку.

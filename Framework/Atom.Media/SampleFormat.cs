@@ -17,5 +17,5 @@ internal enum SampleFormat
     S64,
     S64P,
 
-    NB
+    NB,
 }

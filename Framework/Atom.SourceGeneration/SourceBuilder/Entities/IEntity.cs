@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Atom.SourceGeneration;
 
 /// <summary>
@@ -31,6 +33,7 @@ public interface IEntity
     /// <param name="tabs">Количество отступов.</param>
     /// <param name="usings">Используемые пространства имён.</param>
     /// <returns>Строка представления строителя сущности.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     string? Build(int tabs, params IEnumerable<string> usings);
 
     /// <summary>
@@ -40,6 +43,7 @@ public interface IEntity
     /// <param name="release">Указывает, нужно ли освободить ресурсы сущности.</param>
     /// <param name="usings">Используемые пространства имён.</param>
     /// <returns>Строка представления строителя сущности.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     string? Build(int tabs, bool release, params IEnumerable<string> usings)
     {
         var result = Build(tabs, usings);
@@ -53,6 +57,7 @@ public interface IEntity
     /// <param name="release">Указывает, нужно ли освободить ресурсы сущности.</param>
     /// <param name="usings">Используемые пространства имён.</param>
     /// <returns>Строка представления строителя сущности.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     string? Build(bool release, params IEnumerable<string> usings) => Build(default, release, usings);
 
     /// <summary>
@@ -60,11 +65,13 @@ public interface IEntity
     /// </summary>
     /// <param name="usings">Используемые пространства имён.</param>
     /// <returns>Строка представления строителя сущности.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     string? Build(params IEnumerable<string> usings) => Build(default, default, usings);
 
     /// <summary>
     /// Возвращает сущность обратно в пул для повторного использования.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     void Release();
 }
 
@@ -78,17 +85,20 @@ public interface IEntity<out T> : IEntity where T : IEntity
     /// Добавляет комментарий.
     /// </summary>
     /// <param name="comment">Комментарий.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     T WithComment(string? comment);
 
     /// <summary>
     /// Добавляет название.
     /// </summary>
     /// <param name="name">Название.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     T WithName(string name);
 
     /// <summary>
     /// Добавляет атрибуты к строителю.
     /// </summary>
     /// <param name="attributes">Массив атрибутов для добавления.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     T WithAttribute(params IEnumerable<string> attributes);
 }

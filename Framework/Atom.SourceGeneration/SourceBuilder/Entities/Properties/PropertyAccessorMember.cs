@@ -47,22 +47,19 @@ public class PropertyAccessorMember : Entity<PropertyAccessorMember>
         var access = AccessModifier.AsString(ParentAccessModifier);
         if (!string.IsNullOrEmpty(access)) access += ' ';
 
-        sb.Append($"{spaces}{access}");
-
-        if (IsReadOnly)
-            sb.Append("readonly ");
-
+        sb.Append(spaces).Append(access);
+        if (IsReadOnly) sb.Append("readonly ");
         sb.Append(Name);
 
         if (!string.IsNullOrEmpty(Code))
         {
             sb.Append(' ');
 
-            if (Code.StartsWith("return"))
+            if (Code.StartsWith("return", StringComparison.Ordinal))
             {
                 sb.AppendLine($"=> {Code[6..].TrimStart()}");
             }
-            else if (Code.CountOf(';') is 1)
+            else if (Code.CountOf(';', StringComparison.Ordinal) is 1)
             {
                 sb.AppendLine($"=> {Code}");
             }
@@ -115,7 +112,7 @@ public class PropertyAccessorMember : Entity<PropertyAccessorMember>
     /// <summary>
     /// Определяет, что поле должно быть доступно только для чтения.
     /// </summary>
-    public PropertyAccessorMember AsReadOnly() => AsReadOnly(true);
+    public PropertyAccessorMember AsReadOnly() => AsReadOnly(value: true);
 
     /// <inheritdoc/>
     public override PropertyAccessorMember WithAttribute(params IEnumerable<string> attributes)

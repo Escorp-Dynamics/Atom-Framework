@@ -2,6 +2,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Atom.Buffers;
 
 namespace Atom.Collections;
@@ -15,6 +16,7 @@ namespace Atom.Collections;
 /// </remarks>
 /// <param name="array">Исходный массив.</param>
 [method: MethodImpl(MethodImplOptions.AggressiveInlining)]
+[StructLayout(LayoutKind.Auto)]
 public ref struct SparseSpan<T>(Span<T> array)
 {
     private const int DefaultLength = 1024;
@@ -89,7 +91,7 @@ public ref struct SparseSpan<T>(Span<T> array)
     private readonly void ValidateIndex(int index)
     {
         if (IsReleased) throw new InvalidOperationException("Ресурсы были высвобождены");
-        else if (index < 0 || index >= values.Length) throw new ArgumentOutOfRangeException(nameof(index));
+        if (index < 0 || index >= values.Length) throw new ArgumentOutOfRangeException(nameof(index));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

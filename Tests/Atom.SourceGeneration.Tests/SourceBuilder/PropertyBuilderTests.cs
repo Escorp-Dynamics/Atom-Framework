@@ -1,5 +1,6 @@
 namespace Atom.SourceGeneration.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class PropertyBuilderTests(ILogger logger) : BenchmarkTests<PropertyBuilderTests>(logger)
 {
     private static string? propertyReference;
@@ -36,7 +37,7 @@ public class PropertyBuilderTests(ILogger logger) : BenchmarkTests<PropertyBuild
             .WithName("TestProperty")
             .WithType<int>()
             .WithGetter()
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + PropertyMember.Create()
             .WithComment("Тестовое свойство")
@@ -44,11 +45,11 @@ public class PropertyBuilderTests(ILogger logger) : BenchmarkTests<PropertyBuild
             .WithName("TestProperty")
             .WithType<object>()
             .WithSetter()
-            .Build(true);
+            .Build(release: true);
 
-        src += Environment.NewLine + PropertyMember.CreateWithGetterOnly<string>("Test2").WithInitialValue<string>("str").Build(true);
-        src += Environment.NewLine + PropertyMember.CreateWithGetterOnly<bool>("Test2").WithInitialValue("anotherVar").Build(true);
-        src += Environment.NewLine + PropertyMember.CreateWithSetterOnly<int>("Test2", true).Build(true);
+        src += Environment.NewLine + PropertyMember.CreateWithGetterOnly<string>("Test2").WithInitialValue<string>("str").Build(release: true);
+        src += Environment.NewLine + PropertyMember.CreateWithGetterOnly<bool>("Test2").WithInitialValue("anotherVar").Build(release: true);
+        src += Environment.NewLine + PropertyMember.CreateWithSetterOnly<int>("Test2", isInit: true).Build(release: true);
 
         src += Environment.NewLine + PropertyMember.Create()
             .WithComment("Тестовое свойство")
@@ -56,7 +57,7 @@ public class PropertyBuilderTests(ILogger logger) : BenchmarkTests<PropertyBuild
             .WithName("TestProperty")
             .WithType<object>()
             .WithGetter("field")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + PropertyMember.Create()
             .WithComment("Тестовое свойство")
@@ -65,7 +66,7 @@ public class PropertyBuilderTests(ILogger logger) : BenchmarkTests<PropertyBuild
             .WithType<object>()
             .WithGetter("field")
             .WithSetter("field = value")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + PropertyMember.Create()
             .WithComment("Тестовое свойство")
@@ -76,7 +77,7 @@ public class PropertyBuilderTests(ILogger logger) : BenchmarkTests<PropertyBuild
                 var value = SomeMethod();
                 return value;
             ")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + PropertyMember.Create()
             .WithComment("Тестовое свойство")
@@ -88,7 +89,7 @@ public class PropertyBuilderTests(ILogger logger) : BenchmarkTests<PropertyBuild
                 SomeMethod(value);
                 field = value;
             ")
-            .Build(true);
+            .Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {

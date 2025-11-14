@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Atom.Buffers;
 
@@ -39,7 +40,7 @@ public class TransposeFilter : VideoFilter
         var sb = ObjectPool<StringBuilder>.Shared.Rent();
 
         sb.Append(base.Calculate())
-          .Append($"{Value}");
+          .Append(Value.ToString(CultureInfo.InvariantCulture));
 
         var spec = sb.ToString();
         ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());

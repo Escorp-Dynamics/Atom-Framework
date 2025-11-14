@@ -67,7 +67,7 @@ public readonly struct UdpSettings() : IEquatable<UdpSettings>
     public TimeSpan AttemptTimeout { get; init; } = TimeSpan.FromSeconds(3);
 
     /// <summary>
-    /// Подавлять Windows SIO_UDP_CONNRESET (ICMP Port Unreachable → исключение). Рекомендуется <c>true</c>.
+    /// Подавлять Windows SIO_UDP_CONNRESET (ICMP Port Unreachable → исключение). Рекомендуется <see langword="true"/>.
     /// </summary>
     public bool UseConnectionResetWorkaround { get; init; } = true;
 
@@ -78,7 +78,7 @@ public readonly struct UdpSettings() : IEquatable<UdpSettings>
     public bool UsePacketInfo { get; init; }
 
     /// <summary>
-    /// 
+    /// Включить Explicit Congestion Notification (ECN) для UDP сокета, если поддерживается ОС.
     /// </summary>
     public bool UseEcn { get; init; }
 

@@ -130,7 +130,7 @@ public static class HttpsExtensions
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     /// <returns>Преобразованная коллекция объектов.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static async IAsyncEnumerable<T?> AsJsonAsyncEnumerable<T>(this HttpContent? content, JsonTypeInfo<T> typeInfo, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public static async IAsyncEnumerable<T?> AsJsonAsyncEnumerableAsync<T>(this HttpContent? content, JsonTypeInfo<T> typeInfo, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (content is null) yield break;
 
@@ -151,7 +151,7 @@ public static class HttpsExtensions
     /// <param name="typeInfo">Метаданные типа.</param>
     /// <returns>Преобразованная коллекция объектов.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static IAsyncEnumerable<T?> AsJsonAsyncEnumerable<T>(this HttpContent? content, JsonTypeInfo<T> typeInfo) => content.AsJsonAsyncEnumerable(typeInfo, CancellationToken.None);
+    public static IAsyncEnumerable<T?> AsJsonAsyncEnumerableAsync<T>(this HttpContent? content, JsonTypeInfo<T> typeInfo) => content.AsJsonAsyncEnumerableAsync(typeInfo, CancellationToken.None);
 
     /// <summary>
     /// Преобразует <see cref="HttpRequestHeaders"/> в простое представление заголовков.

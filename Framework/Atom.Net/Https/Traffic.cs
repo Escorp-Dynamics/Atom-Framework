@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using Atom.Buffers;
 
@@ -8,6 +9,7 @@ namespace Atom.Net.Https;
 /// <summary>
 /// Представляет данные о трафике.
 /// </summary>
+[StructLayout(LayoutKind.Auto)]
 public struct Traffic : IEquatable<Traffic>
 {
     private static readonly string[] suffixes = ["Б", "КБ", "МБ", "ГБ", "ТБ"];
@@ -64,7 +66,7 @@ public struct Traffic : IEquatable<Traffic>
     /// Сбрасывает данные о трафике.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Reset() => Reset(true, true);
+    public void Reset() => Reset(sended: true, received: true);
 
     /// <summary>
     /// Получает хэш-код текущего экземпляра.

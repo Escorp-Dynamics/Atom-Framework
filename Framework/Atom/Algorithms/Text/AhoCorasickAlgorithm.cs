@@ -26,8 +26,8 @@ public class AhoCorasickAlgorithm : TextAlgorithm
 
             ObjectPool<TrieNode>.Shared.Return(node, x =>
             {
-                if (x.OutputRef is null) x.Output?.Release(true);
-                x.Children.Release(true);
+                if (x.OutputRef is null) x.Output?.Release(clearArray: true);
+                x.Children.Release(clearArray: true);
 
                 x.Fail = default;
                 x.OutputCount = default;

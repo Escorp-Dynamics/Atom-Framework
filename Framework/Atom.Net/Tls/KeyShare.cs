@@ -41,7 +41,7 @@ public class KeyShare
             {
                 var curve = ECCurve.CreateFromFriendlyName("X25519");
                 var ecdh = ECDiffieHellman.Create(curve);
-                var p = ecdh.ExportParameters(false);
+                var p = ecdh.ExportParameters(includePrivateParameters: false);
 
                 if (p.Q.X is { Length: 32 })
                 {
@@ -71,7 +71,7 @@ public class KeyShare
         get
         {
             var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            var p = ecdh.ExportParameters(false);
+            var p = ecdh.ExportParameters(includePrivateParameters: false);
             // Формируем ANSI X9.62 uncompressed: 0x04 | X(32) | Y(32)
             var pub = new byte[1 + p.Q.X!.Length + p.Q.Y!.Length];
             pub[0] = 0x04;
@@ -92,7 +92,7 @@ public class KeyShare
         get
         {
             var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP384);
-            var p = ecdh.ExportParameters(false);
+            var p = ecdh.ExportParameters(includePrivateParameters: false);
             var pub = new byte[1 + p.Q.X!.Length + p.Q.Y!.Length];
             pub[0] = 0x04;
             Buffer.BlockCopy(p.Q.X!, 0, pub, 1, p.Q.X!.Length);

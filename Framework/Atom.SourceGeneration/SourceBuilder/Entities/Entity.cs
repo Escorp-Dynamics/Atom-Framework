@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Atom.Buffers;
 using Atom.Collections;
@@ -28,11 +29,13 @@ public abstract class Entity : IEntity
     /// Добавляет атрибуты.
     /// </summary>
     /// <param name="attributes">Коллекция атрибутов.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected virtual void AddAttribute([NotNull] params IEnumerable<string> attributes) => this.attributes.AddRange(attributes);
 
     /// <summary>
     /// Очищает установленные атрибуты.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected void ClearAttributes() => attributes.Reset();
 
     /// <summary>
@@ -40,6 +43,7 @@ public abstract class Entity : IEntity
     /// </summary>
     /// <param name="sb">Сборщик строки.</param>
     /// <param name="spaces">Отступ.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected virtual void OnBuildingComment([NotNull] StringBuilder sb, string spaces)
     {
         if (string.IsNullOrEmpty(Comment)) return;
@@ -60,6 +64,7 @@ public abstract class Entity : IEntity
     /// </summary>
     /// <param name="sb">Сборщик строки.</param>
     /// <param name="spaces">Отступ.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected virtual void OnBuildingAttributes([NotNull] StringBuilder sb, string spaces)
     {
         foreach (var attr in Attributes) sb.AppendLine($"{spaces}[{attr}]");
@@ -97,15 +102,19 @@ public abstract class Entity : IEntity
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string? Build(int tabs, params IEnumerable<string> usings) => Build(tabs, default, usings);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string? Build(bool release, params IEnumerable<string> usings) => Build(default, release, usings);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string? Build(params IEnumerable<string> usings) => Build(default, default, usings);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void Release()
     {
         attributes.Reset();
@@ -118,6 +127,7 @@ public abstract class Entity : IEntity
     /// </summary>
     /// <param name="tabs">Количество табуляций.</param>
     /// <returns>Строка, состоящая из заданного количества табуляций.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected static string GetSpaces(int tabs) => new(' ', tabs * 4);
 }
 
@@ -128,11 +138,14 @@ public abstract class Entity : IEntity
 public abstract class Entity<T> : Entity, IEntity<T> where T : IEntity
 {
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public abstract T WithName(string name);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public abstract T WithComment(string? comment);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public abstract T WithAttribute(params IEnumerable<string> attributes);
 }

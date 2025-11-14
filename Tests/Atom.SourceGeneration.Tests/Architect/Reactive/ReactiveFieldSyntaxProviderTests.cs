@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.Testing;
 
 namespace Atom.Architect.Reactive.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class ReactiveFieldSyntaxProviderTests(ILogger logger) : BenchmarkTests<ReactiveFieldSyntaxProviderTests>(logger)
 {
     private static string? source;
@@ -33,7 +34,7 @@ public class ReactiveFieldSyntaxProviderTests(ILogger logger) : BenchmarkTests<R
     }
 
     [TestCase(TestName = "Тест анализатора реактивных свойств"), Benchmark]
-    public async Task AnalyzerTest()
+    public async Task AnalyzerTestAsync()
     {
         var test = new CSharpAnalyzerTest<ReactivelySourceAnalyzer, DefaultVerifier>
         {
@@ -68,7 +69,7 @@ public class ReactiveFieldSyntaxProviderTests(ILogger logger) : BenchmarkTests<R
     }
 
     [TestCase(TestName = "Тест генератора реактивных свойств"), Benchmark]
-    public async Task GeneratorTest()
+    public async Task GeneratorTestAsync()
     {
         var test = new CSharpSourceGeneratorTest<ReactivelySourceGenerator, DefaultVerifier>
         {

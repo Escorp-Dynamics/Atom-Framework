@@ -91,7 +91,7 @@ public class MethodArgumentMember : Entity<MethodArgumentMember>
     /// <summary>
     /// Указывает, что аргумент будет входным.
     /// </summary>
-    public MethodArgumentMember AsIn() => AsIn(true);
+    public MethodArgumentMember AsIn() => AsIn(value: true);
 
     /// <summary>
     /// Указывает, что аргумент будет выходным.
@@ -106,7 +106,7 @@ public class MethodArgumentMember : Entity<MethodArgumentMember>
     /// <summary>
     /// Указывает, что аргумент будет выходным.
     /// </summary>
-    public MethodArgumentMember AsOut() => AsOut(true);
+    public MethodArgumentMember AsOut() => AsOut(value: true);
 
     /// <summary>
     /// Указывает, что аргумент будет ссылочным.
@@ -121,7 +121,7 @@ public class MethodArgumentMember : Entity<MethodArgumentMember>
     /// <summary>
     /// Указывает, что аргумент будет ссылочным.
     /// </summary>
-    public MethodArgumentMember AsRef() => AsRef(true);
+    public MethodArgumentMember AsRef() => AsRef(value: true);
 
     /// <summary>
     /// Указывает, что аргумент будет параметрическим.
@@ -136,7 +136,7 @@ public class MethodArgumentMember : Entity<MethodArgumentMember>
     /// <summary>
     /// Указывает, что аргумент будет параметрическим.
     /// </summary>
-    public MethodArgumentMember AsParams() => AsParams(true);
+    public MethodArgumentMember AsParams() => AsParams(value: true);
 
     /// <summary>
     /// Указывает, что аргумент будет расширяемым.
@@ -151,7 +151,7 @@ public class MethodArgumentMember : Entity<MethodArgumentMember>
     /// <summary>
     /// Указывает, что аргумент будет расширяемым.
     /// </summary>
-    public MethodArgumentMember AsExtension() => AsExtension(true);
+    public MethodArgumentMember AsExtension() => AsExtension(value: true);
 
     /// <summary>
     /// Назначает тип.

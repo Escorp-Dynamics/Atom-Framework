@@ -17,7 +17,7 @@ namespace Atom.Net;
 /// Сокет должен быть создан и (для TCP) подключён к удалённой стороне.
 /// </remarks>
 /// <param name="socket">Экземпляр сокета, которым будет управлять поток.</param>
-/// <param name="ownsSocket">Если <c>true</c>, сокет будет закрыт при <see cref="Dispose(bool)"/></param>
+/// <param name="ownsSocket">Если <see langword="true"/>, сокет будет закрыт при <see cref="Dispose(bool)"/></param>
 [method: MethodImpl(MethodImplOptions.AggressiveInlining)]
 public abstract class NetworkStream([NotNull] Socket socket, bool ownsSocket) : Stream
 {
@@ -193,13 +193,13 @@ public abstract class NetworkStream([NotNull] Socket socket, bool ownsSocket) : 
     /// </summary>
     /// <param name="socket">Экземпляр сокета, которым будет управлять поток.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected NetworkStream([NotNull] Socket socket) : this(socket, true) { }
+    protected NetworkStream([NotNull] Socket socket) : this(socket, ownsSocket: true) { }
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected override void Dispose(bool disposing)
     {
-        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
+        if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
 
         try
         {
@@ -297,7 +297,7 @@ public abstract class NetworkStream([NotNull] Socket socket, bool ownsSocket) : 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override ValueTask DisposeAsync()
     {
-        Dispose(true);
+        Dispose(disposing: true);
         GC.SuppressFinalize(this);
         return ValueTask.CompletedTask;
     }

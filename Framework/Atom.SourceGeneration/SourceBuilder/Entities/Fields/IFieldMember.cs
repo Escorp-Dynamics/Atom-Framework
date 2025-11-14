@@ -53,7 +53,7 @@ public interface IFieldMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что поле должно быть доступно только для чтения.
     /// </summary>
-    T AsReadOnly() => AsReadOnly(true);
+    T AsReadOnly() => AsReadOnly(value: true);
 
     /// <summary>
     /// Определяет, что поле должно быть волатильным.
@@ -64,7 +64,7 @@ public interface IFieldMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что поле должно быть волатильным.
     /// </summary>
-    T AsVolatile() => AsVolatile(true);
+    T AsVolatile() => AsVolatile(value: true);
 
     /// <summary>
     /// Определяет, что поле должно быть константным.
@@ -75,7 +75,7 @@ public interface IFieldMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что поле должно быть константным.
     /// </summary>
-    T AsConstant() => AsConstant(true);
+    T AsConstant() => AsConstant(value: true);
 
     /// <summary>
     /// Определяет, что поле должно быть ссылочным.
@@ -86,5 +86,5 @@ public interface IFieldMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что поле должно быть ссылочным.
     /// </summary>
-    T AsRef() => AsRef(true);
+    T AsRef() => AsRef(value: true);
 }

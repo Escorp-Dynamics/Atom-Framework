@@ -53,6 +53,7 @@ internal unsafe struct MediaFrame
 }
 
 #pragma warning disable CA1823, CS0169
+[StructLayout(LayoutKind.Auto)]
 internal unsafe struct Fixed<T> where T : unmanaged
 {
     private const uint Size = 8;

@@ -1,9 +1,10 @@
-#pragma warning disable CA1000, IDE0044, IDE0051
+#pragma warning disable CA1000, MA0018
 
 using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Atom.Buffers;
 
@@ -13,6 +14,7 @@ namespace Atom.Buffers;
 /// <typeparam name="T">Тип объекта.</typeparam>
 public unsafe class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T> : IDisposable
 {
+    [StructLayout(LayoutKind.Auto)]
     private struct CacheLine
     {
         public T Value;
@@ -20,23 +22,16 @@ public unsafe class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMe
     }
 
     private const int DefaultCapacity = 1 << 20;
-
     private const int BatchSize = 64;
 
     private readonly CacheLine[] globalBuffer;
     private int globalIndex;
     private readonly int mask;
     private readonly Func<T> factory;
+    private readonly ThreadLocal<T[]?> threadBuffer;
+    private readonly ThreadLocal<int> threadIndex;
 
     private bool isDisposed;
-
-    private static readonly Lazy<Func<T>> defaultFactory = new(GetDefaultFactory, true);
-
-    [ThreadStatic]
-    private static T[]? threadBuffer;
-
-    [ThreadStatic]
-    private static int threadIndex;
 
     /// <summary>
     /// Общий доступ к <see cref="ObjectPool{T}"/>.
@@ -49,7 +44,9 @@ public unsafe class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMe
         capacity = (int)BitOperations.RoundUpToPowerOf2((uint)capacity);
         globalBuffer = GC.AllocateArray<CacheLine>(capacity, pinned: true);
         mask = capacity - 1;
-        this.factory = factory ?? defaultFactory.Value;
+        this.factory = factory ?? CreateDefaultFactory();
+        threadBuffer = new ThreadLocal<T[]?>(() => null, trackAllValues: false);
+        threadIndex = new ThreadLocal<int>(() => 0, trackAllValues: false);
     }
 
     /// <summary>
@@ -59,7 +56,12 @@ public unsafe class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMe
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected virtual void Dispose(bool disposing)
     {
-        if (!Interlocked.CompareExchange(ref isDisposed, true, default)) Array.Clear(globalBuffer);
+        if (!disposing) return;
+        if (Interlocked.Exchange(ref isDisposed, value: true)) return;
+
+        Array.Clear(globalBuffer);
+        threadBuffer.Dispose();
+        threadIndex.Dispose();
     }
 
     /// <summary>
@@ -67,11 +69,19 @@ public unsafe class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMe
     /// </summary>
     /// <returns>Арендованный объект.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public virtual T Rent([NotNull] Func<T> factory)
+    public virtual T Rent(Func<T> itemFactory)
     {
-        var buffer = Volatile.Read(ref threadBuffer);
+        ArgumentNullException.ThrowIfNull(itemFactory);
 
-        if (buffer is not null && Volatile.Read(ref threadIndex) > 0) return buffer[Interlocked.Decrement(ref threadIndex)];
+        var buffer = threadBuffer.Value;
+        var count = threadIndex.Value;
+
+        if (buffer is not null && count > 0)
+        {
+            count--;
+            threadIndex.Value = count;
+            return buffer[count];
+        }
 
         var newIndex = Interlocked.Add(ref globalIndex, -BatchSize);
         var startIndex = (newIndex + BatchSize) & mask;
@@ -83,18 +93,24 @@ public unsafe class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMe
 
             if (Volatile.Read(ref slot.OwnerThreadId) is 0)
             {
-                Interlocked.Exchange(ref slot.Value, factory());
+                Interlocked.Exchange(ref slot.Value, itemFactory());
                 Volatile.Write(ref slot.OwnerThreadId, Environment.CurrentManagedThreadId);
             }
         }
 
         buffer = new T[BatchSize];
-        Volatile.Write(ref threadBuffer, buffer);
+        threadBuffer.Value = buffer;
 
-        for (var i = 0; i < BatchSize; ++i) buffer[i] = globalBuffer[(startIndex + i) & mask].Value;
+        for (var i = 0; i < BatchSize; ++i)
+        {
+            buffer[i] = globalBuffer[(startIndex + i) & mask].Value;
+        }
 
-        Volatile.Write(ref threadIndex, BatchSize);
-        return buffer[Interlocked.Decrement(ref threadIndex)];
+        const int initialCount = BatchSize;
+        threadIndex.Value = initialCount;
+        var nextCount = initialCount - 1;
+        threadIndex.Value = nextCount;
+        return buffer[nextCount];
     }
 
     /// <summary>
@@ -111,12 +127,13 @@ public unsafe class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMe
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void Return(T item)
     {
-        var buffer = Volatile.Read(ref threadBuffer);
+        var buffer = threadBuffer.Value;
+        var count = threadIndex.Value;
 
-        if (buffer is not null && Volatile.Read(ref threadIndex) < buffer.Length)
+        if (buffer is not null && count < buffer.Length)
         {
-            var idx = Interlocked.Increment(ref threadIndex) - 1;
-            buffer[idx] = item;
+            buffer[count] = item;
+            threadIndex.Value = count + 1;
             return;
         }
 
@@ -162,7 +179,7 @@ public unsafe class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMe
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Func<T> GetDefaultFactory()
+    private static Func<T> CreateDefaultFactory()
     {
         if (typeof(T).IsValueType) return () => default!;
         var ctor = typeof(T).GetConstructor(Type.EmptyTypes) ?? throw new InvalidOperationException($"Тип {typeof(T)} не содержит конструктор по умолчанию");
@@ -175,14 +192,18 @@ public unsafe class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMe
     /// <param name="factory">Функция возврата значения из пула, если он пуст.</param>
     /// <param name="capacity">Размер пула.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static ObjectPool<T> Create([NotNull] Func<T> factory, int capacity) => new(factory, capacity);
+    public static ObjectPool<T> Create(Func<T> factory, int capacity)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        return new(factory, capacity);
+    }
 
     /// <summary>
     /// Создает новый пул объектов.
     /// </summary>
     /// <param name="factory">Функция возврата значения из пула, если он пуст.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static ObjectPool<T> Create([NotNull] Func<T> factory) => Create(factory, DefaultCapacity);
+    public static ObjectPool<T> Create(Func<T> factory) => Create(factory, DefaultCapacity);
 
     /// <summary>
     /// Создает новый пул объектов.

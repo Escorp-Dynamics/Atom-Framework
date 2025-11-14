@@ -1,10 +1,11 @@
-#pragma warning disable IDE0046, IDE0060
+#pragma warning disable IDE0044, IDE0046, IDE0060, CS0649, IDISP026
 
 using Atom.Architect.Reactive;
 using Atom.Distribution;
 using Atom.Media.Filters;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
+using System.Globalization;
 
 namespace Atom.Media.Video;
 
@@ -61,7 +62,7 @@ public partial class VirtualCamera : IAsyncDisposable
     /// <summary>
     /// Путь к устройству камеры.
     /// </summary>
-    public string Path => $"/dev/video{Number}";
+    public string Path => string.Create(CultureInfo.InvariantCulture, $"/dev/video{Number}");
 
     /// <summary>
     /// Определяет, активен ли захват видеопотока.
@@ -278,7 +279,7 @@ public partial class VirtualCamera : IAsyncDisposable
     /// </summary>
     /// <param name="path">Путь к файлу видеозахвата.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    public ValueTask StartCaptureAsync(string path, CancellationToken cancellationToken) => StartCaptureAsync(path, false, cancellationToken);
+    public ValueTask StartCaptureAsync(string path, CancellationToken cancellationToken) => StartCaptureAsync(path, isLooped: false, cancellationToken);
 
     #endregion
 
@@ -369,7 +370,7 @@ public partial class VirtualCamera : IAsyncDisposable
     /// </summary>
     /// <param name="url">Ссылка к файлу видеозахвата.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    public ValueTask StartCaptureAsync(Uri url, CancellationToken cancellationToken) => StartCaptureAsync(url, false, cancellationToken);
+    public ValueTask StartCaptureAsync(Uri url, CancellationToken cancellationToken) => StartCaptureAsync(url, isLooped: false, cancellationToken);
 
     #endregion
 
@@ -529,7 +530,7 @@ public partial class VirtualCamera : IAsyncDisposable
     /// </summary>
     public virtual async ValueTask DisposeAsync()
     {
-        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
+        if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
 
         await StopCaptureAsync().ConfigureAwait(false);
 
@@ -545,7 +546,7 @@ public partial class VirtualCamera : IAsyncDisposable
     {
         for (var i = 0; i < int.MaxValue; ++i)
         {
-            var path = $"/dev/video{i}";
+            var path = string.Create(CultureInfo.InvariantCulture, $"/dev/video{i}");
             if (!File.Exists(path)) return i;
         }
 

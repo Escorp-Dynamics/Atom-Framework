@@ -1,0 +1,27 @@
+<Solution>
+  <Folder Name="/Framework/">
+    <Project Path="Framework/Atom.Debug/Atom.Debug.csproj" />
+    <Project Path="Framework/Atom.IO.Compression/Atom.IO.Compression.csproj" />
+    <Project Path="Framework/Atom.Media.Video/Atom.Media.Video.csproj" />
+    <Project Path="Framework/Atom.Media/Atom.Media.csproj" />
+    <Project Path="Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj" />
+    <Project Path="Framework/Atom.Net.Browsing/Atom.Net.Browsing.csproj" />
+    <Project Path="Framework/Atom.Net/Atom.Net.csproj" />
+    <Project Path="Framework/Atom.SourceGeneration/Atom.SourceGeneration.csproj" />
+    <Project Path="Framework/Atom.Testing/Atom.Testing.csproj" />
+    <Project Path="Framework/Atom.Web/Atom.Web.csproj" />
+    <Project Path="Framework/Atom/Atom.csproj" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="Tests/Atom.Debug.Tests/Atom.Debug.Tests.csproj" />
+    <Project Path="Tests/Atom.IO.Compression.Tests/Atom.IO.Compression.Tests.csproj" />
+    <Project Path="Tests/Atom.Media.Tests/Atom.Media.Tests.csproj" />
+    <Project Path="Tests/Atom.Media.Video.Tests/Atom.Media.Video.Tests.csproj" />
+    <Project Path="Tests/Atom.Net.Browsing.Tests/Atom.Net.Browsing.Tests.csproj" />
+    <Project Path="Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj" />
+    <Project Path="Tests/Atom.Net.Tests/Atom.Net.Tests.csproj" />
+    <Project Path="Tests/Atom.SourceGeneration.Tests/Atom.SourceGeneration.Tests.csproj" />
+    <Project Path="Tests/Atom.Tests/Atom.Tests.csproj" />
+    <Project Path="Tests/Atom.Web.Tests/Atom.Web.Tests.csproj" />
+  </Folder>
+</Solution>

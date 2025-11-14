@@ -111,76 +111,86 @@ public sealed class HPackEncoder : IHeadersEncoder
             var name = kv.Key.AsSpan();
             var value = kv.Value.AsSpan();
 
-            // 1) Пытаемся найти точное совпадение (name+value) в статике/динамике → чисто индексированная форма.
             if (TryFindIndexed(name, value, out var fullIndex))
             {
-                // 1xxxxxxx — Indexed Header Field (prefix 7)
                 HeadersBinaryPrimitives.WriteVarInt(ref bw, fullIndex, 7, 0b1000_0000, 0b0111_1111);
                 continue;
             }
 
-            // 2) Определяем режим индексирования
             var mode = IndexingSelector is null ? DefaultMode(name) : IndexingSelector(kv.Key);
-
-            // 3) Пытаемся найти индекс имени (без значения)
             var nameIndex = TryFindNameIndex(name);
 
-            // 4) Кодируем в выбранном представлении
             switch (mode)
             {
                 case HPackIndexingMode.Incremental:
-                    // 01xxxxxx — Literal with Incremental Indexing
-                    if (nameIndex > 0)
-                    {
-                        // Indexed Name
-                        HeadersBinaryPrimitives.WriteVarInt(ref bw, nameIndex, 6, 0b0100_0000, 0b0011_1111);
-                        WriteString(ref bw, value, UseHuffman);
-                    }
-                    else
-                    {
-                        // New Name
-                        bw.WriteByte(0b0100_0000);
-                        WriteString(ref bw, name, UseHuffman);
-                        WriteString(ref bw, value, UseHuffman);
-                    }
-                    // Добавляем (name,value) в динамическую таблицу
-                    dynamicTable.Add(name, value);
+                    EncodeIncremental(ref bw, name, value, nameIndex);
                     break;
-
                 case HPackIndexingMode.NeverIndexed:
-                    // 0001xxxx — Literal Never Indexed (prefix 4)
-                    if (nameIndex > 0)
-                    {
-                        HeadersBinaryPrimitives.WriteVarInt(ref bw, nameIndex, 4, 0b0001_0000, 0b0000_1111);
-                        WriteString(ref bw, value, UseHuffman);
-                    }
-                    else
-                    {
-                        bw.WriteByte(0b0001_0000);
-                        WriteString(ref bw, name, UseHuffman);
-                        WriteString(ref bw, value, UseHuffman);
-                    }
+                    EncodeNeverIndexed(ref bw, name, value, nameIndex);
                     break;
-
-                case HPackIndexingMode.WithoutIndexing:
+                // Без отдельного case: обработка по default
                 default:
-                    // 0000xxxx — Literal Without Indexing (prefix 4)
-                    if (nameIndex > 0)
-                    {
-                        HeadersBinaryPrimitives.WriteVarInt(ref bw, nameIndex, 4, 0b0000_0000, 0b0000_1111);
-                        WriteString(ref bw, value, UseHuffman);
-                    }
-                    else
-                    {
-                        bw.WriteByte(0b0000_0000);
-                        WriteString(ref bw, name, UseHuffman);
-                        WriteString(ref bw, value, UseHuffman);
-                    }
+                    EncodeWithoutIndexing(ref bw, name, value, nameIndex);
                     break;
             }
         }
 
         bw.Flush();
+    }
+
+    /// <summary>
+    /// Кодирует заголовок с режимом Incremental Indexing.
+    /// </summary>
+    private void EncodeIncremental(ref BufferWriter bw, ReadOnlySpan<char> name, ReadOnlySpan<char> value, int nameIndex)
+    {
+        if (nameIndex > 0)
+        {
+            HeadersBinaryPrimitives.WriteVarInt(ref bw, nameIndex, 6, 0b0100_0000, 0b0011_1111);
+            WriteString(ref bw, value, UseHuffman);
+        }
+        else
+        {
+            bw.WriteByte(0b0100_0000);
+            WriteString(ref bw, name, UseHuffman);
+            WriteString(ref bw, value, UseHuffman);
+        }
+        dynamicTable.Add(name, value);
+    }
+
+    /// <summary>
+    /// Кодирует заголовок с режимом Never Indexed.
+    /// </summary>
+    private void EncodeNeverIndexed(ref BufferWriter bw, ReadOnlySpan<char> name, ReadOnlySpan<char> value, int nameIndex)
+    {
+        if (nameIndex > 0)
+        {
+            HeadersBinaryPrimitives.WriteVarInt(ref bw, nameIndex, 4, 0b0001_0000, 0b0000_1111);
+            WriteString(ref bw, value, UseHuffman);
+        }
+        else
+        {
+            bw.WriteByte(0b0001_0000);
+            WriteString(ref bw, name, UseHuffman);
+            WriteString(ref bw, value, UseHuffman);
+        }
+    }
+
+    /// <summary>
+    /// Кодирует заголовок с режимом Without Indexing.
+    /// </summary>
+    private void EncodeWithoutIndexing(ref BufferWriter bw, ReadOnlySpan<char> name, ReadOnlySpan<char> value, int nameIndex)
+    {
+        if (nameIndex > 0)
+        {
+            HeadersBinaryPrimitives.WriteVarInt(ref bw, nameIndex, 4, 0b0000_0000, 0b0000_1111);
+            WriteString(ref bw, value, UseHuffman);
+        }
+        else
+        {
+            bw.WriteByte(0b0000_0000);
+            WriteString(ref bw, name, UseHuffman);
+            WriteString(ref bw, value, UseHuffman);
+        }
     }
 
     /// <summary>

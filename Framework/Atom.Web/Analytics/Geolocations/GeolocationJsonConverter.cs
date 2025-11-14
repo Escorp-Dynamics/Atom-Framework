@@ -1,3 +1,8 @@
+#pragma warning disable S125 // Sections of code should not be commented out
+#pragma warning disable MA0051 // Method is too long
+#pragma warning disable S3776 // Cognitive Complexity of methods should not be too high
+#pragma warning disable IDISP004 // Don't ignore created IDisposable
+
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -8,7 +13,7 @@ namespace Atom.Web.Analytics;
 /// Представляет JSON-конвертер для <see cref="Geolocation"/>.
 /// </summary>
 /// <typeparam name="T">Тип геолокации.</typeparam>
-public class GeolocationJsonConverter<T> : ExtendableJsonConverter<T> where T : Geolocation, new()
+public class GeolocationJsonConverter<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T> : ExtendableJsonConverter<T> where T : Geolocation, new()
 {
     /// <inheritdoc/>
     protected override T? OnReading(ref Utf8JsonReader reader, JsonElement root, Type typeToConvert, JsonSerializerOptions options)
@@ -62,9 +67,6 @@ public class GeolocationJsonConverter<T> : ExtendableJsonConverter<T> where T : 
             geolocation.Latitude = latitude;
             geolocation.Longitude = longitude;
 
-            if (rootElement.TryGetProperty("continent", out var continentElement) && Continent.TryParse(continentElement.GetString(), out var continent))
-                geolocation.Continent = continent;
-
             if (rootElement.TryGetProperty("country", out var countryElement) && Country.TryParse(countryElement.GetString(), out var country))
                 geolocation.Country = country;
 
@@ -86,7 +88,6 @@ public class GeolocationJsonConverter<T> : ExtendableJsonConverter<T> where T : 
     /// <inheritdoc/>
     protected override void OnWriting([NotNull] Utf8JsonWriter writer, [NotNull] T value, JsonSerializerOptions options)
     {
-        WriteProperty(writer, nameof(Geolocation.Continent), value.Continent, options, Continent.TypeInfo);
         WriteProperty(writer, nameof(Geolocation.Country), value.Country, options, Country.TypeInfo);
         WriteProperty(writer, nameof(Geolocation.Region), value.Region, options);
         WriteProperty(writer, nameof(Geolocation.City), value.City, options);

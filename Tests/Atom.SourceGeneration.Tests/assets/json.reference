@@ -40,7 +40,7 @@ public partial class Proxy : IJsonContext<Proxy>
     public new static JsonTypeInfo<Proxy> TypeInfo => typeInfo.Value;
 
     /// <inheritdoc/>
-    public static new event MutableEventHandler<FailedEventArgs>? SerializationFailed;
+    public static new event MutableEventHandler<object, FailedEventArgs>? SerializationFailed;
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -52,7 +52,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(this, args => args.Exception = ex);
             return default;
         }
     }
@@ -67,7 +67,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(this, args => args.Exception = ex);
         }
     }
 
@@ -81,7 +81,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(this, args => args.Exception = ex);
         }
     }
 
@@ -95,7 +95,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(this, args => args.Exception = ex);
             return default;
         }
     }
@@ -110,7 +110,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(this, args => args.Exception = ex);
             return default;
         }
     }
@@ -125,7 +125,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(this, args => args.Exception = ex);
             return default;
         }
     }
@@ -140,7 +140,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(this, args => args.Exception = ex);
             return default;
         }
     }
@@ -155,7 +155,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(this, args => args.Exception = ex);
         }
     }
 
@@ -169,7 +169,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(this, args => args.Exception = ex);
         }
     }
 
@@ -183,7 +183,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(string.Empty, args => args.Exception = ex);
             return default;
         }
     }
@@ -198,7 +198,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(string.Empty, args => args.Exception = ex);
             return default;
         }
     }
@@ -213,7 +213,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(string.Empty, args => args.Exception = ex);
             return default;
         }
     }
@@ -228,7 +228,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(string.Empty, args => args.Exception = ex);
             return default;
         }
     }
@@ -243,7 +243,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(string.Empty, args => args.Exception = ex);
             return default;
         }
     }
@@ -258,7 +258,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(string.Empty, args => args.Exception = ex);
             return default;
         }
     }
@@ -273,7 +273,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(string.Empty, args => args.Exception = ex);
             return default;
         }
     }
@@ -288,7 +288,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(string.Empty, args => args.Exception = ex);
             return default;
         }
     }
@@ -303,7 +303,7 @@ public partial class Proxy : IJsonContext<Proxy>
         }
         catch (JsonException ex)
         {
-            SerializationFailed.On(args => args.Exception = ex);
+            SerializationFailed.On(string.Empty, args => args.Exception = ex);
             return default;
         }
     }

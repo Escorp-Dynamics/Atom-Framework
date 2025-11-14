@@ -37,7 +37,7 @@ public sealed class ReactivelyAttribute(string propertyName, AccessModifier acce
     /// </summary>
     /// <param name="propertyName">Имя свойства, для которого будет генерироваться код событий изменения.</param>
     /// <param name="accessModifier">Модификатор доступа свойства.</param>
-    public ReactivelyAttribute(string propertyName, AccessModifier accessModifier) : this(propertyName, accessModifier, false) { }
+    public ReactivelyAttribute(string propertyName, AccessModifier accessModifier) : this(propertyName, accessModifier, isVirtual: false) { }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="ReactivelyAttribute"/>
@@ -57,7 +57,7 @@ public sealed class ReactivelyAttribute(string propertyName, AccessModifier acce
     /// Инициализирует новый экземпляр <see cref="ReactivelyAttribute"/>
     /// </summary>
     /// <param name="accessModifier">Модификатор доступа свойства.</param>
-    public ReactivelyAttribute(AccessModifier accessModifier) : this(accessModifier, false) { }
+    public ReactivelyAttribute(AccessModifier accessModifier) : this(accessModifier, isVirtual: false) { }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="ReactivelyAttribute"/>
@@ -69,10 +69,10 @@ public sealed class ReactivelyAttribute(string propertyName, AccessModifier acce
     /// Инициализирует новый экземпляр <see cref="ReactivelyAttribute"/>
     /// </summary>
     /// <param name="propertyName">Имя свойства, для которого будет генерироваться код событий изменения.</param>
-    public ReactivelyAttribute(string propertyName) : this(propertyName, false) { }
+    public ReactivelyAttribute(string propertyName) : this(propertyName, isVirtual: false) { }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="ReactivelyAttribute"/>
     /// </summary>
-    public ReactivelyAttribute() : this(false) { }
+    public ReactivelyAttribute() : this(isVirtual: false) { }
 }

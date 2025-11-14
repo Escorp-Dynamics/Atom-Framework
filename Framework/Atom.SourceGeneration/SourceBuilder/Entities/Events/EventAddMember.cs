@@ -56,11 +56,11 @@ public class EventAddMember : Entity<EventAddMember>
         {
             sb.Append(' ');
 
-            if (Code.StartsWith("return"))
+            if (Code.StartsWith("return", StringComparison.Ordinal))
             {
                 sb.AppendLine($"=> {Code[6..].TrimStart()}");
             }
-            else if (Code.CountOf(';') is 1)
+            else if (Code.CountOf(';', StringComparison.Ordinal) is 1)
             {
                 sb.AppendLine($"=> {Code}");
             }

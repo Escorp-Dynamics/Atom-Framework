@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using Atom.Threading;
 
@@ -5,6 +6,7 @@ namespace Atom.Media;
 
 internal static unsafe class WhiteNoiseGenerator
 {
+    [SuppressMessage("Meziantou.Analyzer", "MA0051:Method is too long", Justification = "FFmpeg frame generation requires a fixed sequence of native API calls.")]
     public static void WriteVideoFrame(CodecContext* context, FormatContext* outputContext, int streamIndex, ref long videoPts, Locker? locker)
     {
         var frame = FFmpeg.Util.FrameAlloc();
@@ -90,6 +92,7 @@ internal static unsafe class WhiteNoiseGenerator
         FFmpeg.Util.FrameFree(&frame);
     }
 
+    [SuppressMessage("Meziantou.Analyzer", "MA0051:Method is too long", Justification = "FFmpeg frame generation requires a fixed sequence of native API calls.")]
     public static void WriteAudioFrame(CodecContext* context, FormatContext* outputContext, int streamIndex, ref long audioPts, Locker? locker)
     {
         var frame = FFmpeg.Util.FrameAlloc();
@@ -165,7 +168,8 @@ internal static unsafe class WhiteNoiseGenerator
 
             return;
         }
-        else if (context->PixelFormat is PixelFormat.YUVA420P)
+
+        if (context->PixelFormat is PixelFormat.YUVA420P)
         {
             var ySize = context->width * context->height;
             var uvSize = context->width / 2 * (context->height / 2);
@@ -178,7 +182,8 @@ internal static unsafe class WhiteNoiseGenerator
 
             return;
         }
-        else if (context->PixelFormat is PixelFormat.BGRA)
+
+        if (context->PixelFormat is PixelFormat.BGRA)
         {
             rng.GetBytes(new Span<byte>(frame->data[0], context->width * context->height * 4));
             return;

@@ -1,5 +1,6 @@
 namespace Atom.SourceGeneration.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class EventBuilderTests(ILogger logger) : BenchmarkTests<EventBuilderTests>(logger)
 {
     private static string? eventReference;
@@ -36,7 +37,7 @@ public class EventBuilderTests(ILogger logger) : BenchmarkTests<EventBuilderTest
             .WithName("TestEvent")
             .WithType<int>()
             .WithAdder()
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + EventMember.Create()
             .WithComment("Тестовое событие")
@@ -44,10 +45,10 @@ public class EventBuilderTests(ILogger logger) : BenchmarkTests<EventBuilderTest
             .WithName("TestEvent")
             .WithType<object>()
             .WithRemover()
-            .Build(true);
+            .Build(release: true);
 
-        src += Environment.NewLine + EventMember.CreateWithAdderOnly<int>("Test2").Build(true);
-        src += Environment.NewLine + EventMember.CreateWithRemoverOnly<int>("Test2").Build(true);
+        src += Environment.NewLine + EventMember.CreateWithAdderOnly<int>("Test2").Build(release: true);
+        src += Environment.NewLine + EventMember.CreateWithRemoverOnly<int>("Test2").Build(release: true);
 
         src += Environment.NewLine + EventMember.Create()
             .WithComment("Тестовое событие")
@@ -55,7 +56,7 @@ public class EventBuilderTests(ILogger logger) : BenchmarkTests<EventBuilderTest
             .WithName("TestEvent")
             .WithType<object>()
             .WithAdder("SomeEvent += value")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + EventMember.Create()
             .WithComment("Тестовое событие")
@@ -64,7 +65,7 @@ public class EventBuilderTests(ILogger logger) : BenchmarkTests<EventBuilderTest
             .WithType<object>()
             .WithAdder("SomeEvent += value")
             .WithRemover("SomeEvent -= value")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + EventMember.Create()
             .WithComment("Тестовое событие")
@@ -75,7 +76,7 @@ public class EventBuilderTests(ILogger logger) : BenchmarkTests<EventBuilderTest
                 var value = SomeMethod();
                 SomeEvent += value;
             ")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + EventMember.Create()
             .WithComment("Тестовое событие")
@@ -87,9 +88,9 @@ public class EventBuilderTests(ILogger logger) : BenchmarkTests<EventBuilderTest
                 SomeMethod(value);
                 SomeEvent -= value;
             ")
-            .Build(true);
+            .Build(release: true);
 
-        src += Environment.NewLine + EventMember.Create<Type?>("SimpleEvent").Build(true);
+        src += Environment.NewLine + EventMember.Create<Type?>("SimpleEvent").Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {

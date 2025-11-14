@@ -1,5 +1,6 @@
 namespace Atom.SourceGeneration.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class MethodBuilderTests(ILogger logger) : BenchmarkTests<MethodBuilderTests>(logger)
 {
     private static string? methodReference;
@@ -32,30 +33,30 @@ public class MethodBuilderTests(ILogger logger) : BenchmarkTests<MethodBuilderTe
             .WithArgument<string>("arg2", "NotNull")
             .WithComment("Тестовый метод")
             .AsAbstract()
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + MethodMember.Create("TestMethod", AccessModifier.ProtectedInternal)
             .WithArgument<bool>("arg1")
             .WithArgument<string>("arg2", "NotNull", "Test")
             .WithComment("Тестовый метод")
             .AsVirtual()
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + MethodMember.Create("TestMethod", AccessModifier.ProtectedInternal)
             .WithArgument<bool>("arg1")
             .WithArgument<string>("arg2", "NotNull", "Test")
             .WithComment("Тестовый метод")
             .AsVirtual()
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + MethodMember.Create<bool>("TestMethod")
             .WithArgument<bool>("arg1")
             .WithArgument<string>("arg2")
             .WithComment("Тестовый метод")
             .WithCode("arg1 && !string.IsNullOrEmpty(arg2)")
-            .Build(true);
+            .Build(release: true);
 
-        src += Environment.NewLine + MethodMember.Create("TestMethod", true)
+        src += Environment.NewLine + MethodMember.Create("TestMethod", isStatic: true)
             .WithArgument<bool>("arg1")
             .WithArgument<string>("arg2")
             .WithComment("Тестовый метод")
@@ -63,9 +64,9 @@ public class MethodBuilderTests(ILogger logger) : BenchmarkTests<MethodBuilderTe
                 var test = arg1 && !string.IsNullOrEmpty(arg2);
                 SomeMethod(test);
             ")
-            .Build(true);
+            .Build(release: true);
 
-        src += Environment.NewLine + MethodMember.Create("TestMethod", true)
+        src += Environment.NewLine + MethodMember.Create("TestMethod", isStatic: true)
             .WithArgument<bool>("arg1")
             .WithArgument<string>("arg2")
             .WithComment("Тестовый метод")
@@ -74,7 +75,7 @@ public class MethodBuilderTests(ILogger logger) : BenchmarkTests<MethodBuilderTe
                 var test = arg1 && !string.IsNullOrEmpty(arg2);
                 SomeMethod(test);
             ")
-            .Build(true);
+            .Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {

@@ -61,13 +61,13 @@ public sealed class UdpStream : NetworkStream
     /// Инициализирует новый экземпляр <see cref="UdpStream"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public UdpStream(Socket socket, in UdpSettings settings) : this(socket, settings, true) { }
+    public UdpStream(Socket socket, in UdpSettings settings) : this(socket, settings, ownsSocket: true) { }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="UdpStream"/>
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public UdpStream(in UdpSettings settings) : this(CreateSocket(), settings, true) { }
+    public UdpStream(in UdpSettings settings) : this(CreateSocket(), settings, ownsSocket: true) { }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void PostConfigureSocket()
@@ -110,10 +110,13 @@ public sealed class UdpStream : NetworkStream
     {
         CountFamilies(addresses, out var n6, out var n4);
 
-        var idx6 = n6 <= 16 ? stackalloc int[n6] : new int[n6];
-        var idx4 = n4 <= 16 ? stackalloc int[n4] : new int[n4];
+        // Use heap-allocated arrays here because Span<T> (stackalloc) cannot be
+        // stored across await boundaries. We copy indices into arrays and pass
+        // their spans to the FillFamilyIndices helper.
+        var idx6Arr = n6 > 0 ? new int[n6] : Array.Empty<int>();
+        var idx4Arr = n4 > 0 ? new int[n4] : Array.Empty<int>();
 
-        FillFamilyIndices(addresses, idx6, idx4, out var i6, out var i4);
+        FillFamilyIndices(addresses, idx6Arr.AsSpan(), idx4Arr.AsSpan(), out var i6, out var i4);
 
         var p6 = 0;
         var p4 = 0;
@@ -126,7 +129,7 @@ public sealed class UdpStream : NetworkStream
         {
             if (turnV6 && p6 < i6)
             {
-                if (await TryConnectOneAsync(addresses[idx6[p6++]], port, cancellationToken).ConfigureAwait(false)) return;
+                if (await TryConnectOneAsync(addresses[idx6Arr[p6++]], port, cancellationToken).ConfigureAwait(false)) return;
                 turnV6 = false;
 
                 if (!firstV4Delayed) { firstV4Delayed = true; await Task.Delay(initialDelay, cancellationToken).ConfigureAwait(false); }
@@ -134,14 +137,14 @@ public sealed class UdpStream : NetworkStream
             }
             else if (!turnV6 && p4 < i4)
             {
-                if (await TryConnectOneAsync(addresses[idx4[p4++]], port, cancellationToken).ConfigureAwait(false)) return;
+                if (await TryConnectOneAsync(addresses[idx4Arr[p4++]], port, cancellationToken).ConfigureAwait(false)) return;
                 turnV6 = true;
                 await Task.Delay(stepDelay, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                if (p6 < i6) { if (await TryConnectOneAsync(addresses[idx6[p6++]], port, cancellationToken).ConfigureAwait(false)) return; }
-                else if (p4 < i4) { if (await TryConnectOneAsync(addresses[idx4[p4++]], port, cancellationToken).ConfigureAwait(false)) return; }
+                if (p6 < i6) { if (await TryConnectOneAsync(addresses[idx6Arr[p6++]], port, cancellationToken).ConfigureAwait(false)) return; }
+                else if (p4 < i4) { if (await TryConnectOneAsync(addresses[idx4Arr[p4++]], port, cancellationToken).ConfigureAwait(false)) return; }
             }
         }
 
@@ -168,7 +171,7 @@ public sealed class UdpStream : NetworkStream
 
         try
         {
-            Socket.IOControl((IOControlCode)(-1744830452) /* 0x9800000C */, [0, 0, 0, 0], null);
+            Socket.IOControl((IOControlCode)(-1744830452) /* 0x9800000C */, [0, 0, 0, 0], optionOutValue: null);
         }
         catch { /* мягкая деградация */ }
     }
@@ -285,11 +288,11 @@ public sealed class UdpStream : NetworkStream
     private static void EnablePacketInfo(Socket s)
     {
         // IPv4: IP_PKTINFO → SocketOptionLevel.IP / PacketInformation
-        try { s.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.PacketInformation, true); }
+        try { s.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.PacketInformation, optionValue: true); }
         catch { /* не поддерживается/не требуется — мягкая деградация */ }
 
         // IPv6: IPV6_RECVPKTINFO → SocketOptionLevel.IPv6 / PacketInformation
-        try { s.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.PacketInformation, true); }
+        try { s.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.PacketInformation, optionValue: true); }
         catch { /* не поддерживается/не требуется — мягкая деградация */ }
     }
 }

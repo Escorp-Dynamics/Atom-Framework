@@ -67,9 +67,9 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
         var adder = Adder?.Build(tabs);
         var remover = Remover?.Build(tabs);
 
-        var isAuto = adder?.EndsWith("add;") is true || remover?.EndsWith("remove;") is true;
-        var isSimpleAuto = adder?.EndsWith("add;") is true && remover?.EndsWith("remove;") is true;
-        var isSimpleAdder = Adder is not null && Remover is null && !isAuto && adder?.Trim().StartsWith("add =>") is true;
+        var isAuto = adder?.EndsWith("add;", StringComparison.Ordinal) is true || remover?.EndsWith("remove;", StringComparison.Ordinal) is true;
+        var isSimpleAuto = adder?.EndsWith("add;", StringComparison.Ordinal) is true && remover?.EndsWith("remove;", StringComparison.Ordinal) is true;
+        var isSimpleAdder = Adder is not null && Remover is null && !isAuto && adder?.Trim().StartsWith("add =>", StringComparison.Ordinal) is true;
 
         if (!isSimpleAuto)
         {
@@ -130,7 +130,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     }
 
     /// <inheritdoc/>
-    public EventMember AsReadOnly() => AsReadOnly(true);
+    public EventMember AsReadOnly() => AsReadOnly(value: true);
 
     /// <inheritdoc/>
     public virtual EventMember AsUnsafe(bool value)
@@ -140,7 +140,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     }
 
     /// <inheritdoc/>
-    public EventMember AsUnsafe() => AsUnsafe(true);
+    public EventMember AsUnsafe() => AsUnsafe(value: true);
 
     /// <inheritdoc/>
     public virtual EventMember AsAbstract(bool value)
@@ -150,7 +150,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     }
 
     /// <inheritdoc/>
-    public EventMember AsAbstract() => AsAbstract(true);
+    public EventMember AsAbstract() => AsAbstract(value: true);
 
     /// <inheritdoc/>
     public virtual EventMember AsVirtual(bool value)
@@ -160,7 +160,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     }
 
     /// <inheritdoc/>
-    public EventMember AsVirtual() => AsVirtual(true);
+    public EventMember AsVirtual() => AsVirtual(value: true);
 
     /// <inheritdoc/>
     public virtual EventMember AsOverride(bool value)
@@ -170,7 +170,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     }
 
     /// <inheritdoc/>
-    public EventMember AsOverride() => AsOverride(true);
+    public EventMember AsOverride() => AsOverride(value: true);
 
     /// <inheritdoc/>
     public virtual EventMember AsNew(bool value)
@@ -180,7 +180,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     }
 
     /// <inheritdoc/>
-    public EventMember AsNew() => AsNew(true);
+    public EventMember AsNew() => AsNew(value: true);
 
     /// <inheritdoc/>
     public virtual EventMember WithAdder(EventAddMember adder)
@@ -288,36 +288,49 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
 
     private static void AppendEventHandlersBlock(StringBuilder sb, string spaces, string? adder, string? remover, bool isAuto)
     {
-        if (isAuto)
-            sb.Append($" {{");
-        else
-            sb.AppendLine($"\n{spaces}{{");
+        AppendBlockStart(sb, spaces, isAuto);
+        AppendAccessor(sb, adder, isAuto);
+        AppendRemover(sb, remover, adder, isAuto);
+        AppendBlockEnd(sb, spaces, isAuto);
+    }
 
-        if (!string.IsNullOrEmpty(adder))
-        {
-            if (isAuto)
-                sb.Append($" {adder.TrimStart()}");
-            else
-                sb.Append($"{adder}");
-        }
+    private static void AppendBlockStart(StringBuilder sb, string spaces, bool isAuto)
+    {
+        if (isAuto) sb.Append(" {");
+        else sb.AppendLine($"\n{spaces}{{");
+    }
 
-        if (!string.IsNullOrEmpty(remover))
-        {
-            if (isAuto)
-            {
-                sb.Append($" {remover.TrimStart()}");
-            }
-            else
-            {
-                if (!string.IsNullOrEmpty(adder) && adder.TrimStart().StartsWith("add =>") && !remover.TrimStart().StartsWith("remove =>")) sb.AppendLine();
-                sb.Append($"{remover}");
-            }
-        }
+    private static void AppendAccessor(StringBuilder sb, string? accessor, bool isAuto)
+    {
+        if (string.IsNullOrEmpty(accessor)) return;
+        var trimmed = accessor.TrimStart();
+        sb.Append(isAuto ? $" {trimmed}" : accessor);
+    }
+
+    private static void AppendRemover(StringBuilder sb, string? remover, string? adder, bool isAuto)
+    {
+        if (string.IsNullOrEmpty(remover)) return;
+        var trimmed = remover.TrimStart();
 
         if (isAuto)
-            sb.AppendLine($" }}");
-        else
-            sb.AppendLine($"{spaces}}}");
+        {
+            sb.Append($" {trimmed}");
+            return;
+        }
+
+        if (NeedsSeparator(adder, trimmed)) sb.AppendLine();
+        sb.Append(remover);
+    }
+
+    private static bool NeedsSeparator(string? adder, string removerText)
+        => !string.IsNullOrEmpty(adder)
+           && adder.TrimStart().StartsWith("add =>", StringComparison.Ordinal)
+           && !removerText.StartsWith("remove =>", StringComparison.Ordinal);
+
+    private static void AppendBlockEnd(StringBuilder sb, string spaces, bool isAuto)
+    {
+        if (isAuto) sb.AppendLine(" }");
+        else sb.AppendLine($"{spaces}}}");
     }
 
     /// <summary>
@@ -340,7 +353,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     /// <param name="name">Имя события.</param>
     /// <param name="accessModifier">Модификатор доступа.</param>
     public static EventMember Create(string name, AccessModifier accessModifier)
-        => Create().WithType<MutableEventHandler>().WithName(name).WithAccessModifier(accessModifier).WithAdder().WithRemover();
+        => Create().WithType<MutableEventHandler<object, EventArgs>>().WithName(name).WithAccessModifier(accessModifier).WithAdder().WithRemover();
 
     /// <summary>
     /// Создаёт новый экземпляр строителя событий.

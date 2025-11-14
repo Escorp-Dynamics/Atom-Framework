@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text.Json.Serialization;
 using Atom.Buffers;
@@ -41,7 +42,7 @@ public partial class Proxy : WebProxy
         set
         {
             if (string.IsNullOrEmpty(value)) return;
-            Address = new Uri($"{Scheme}://{value}:{Port}");
+            Address = new Uri($"{Scheme}://{value}:{Port.ToString(CultureInfo.InvariantCulture)}");
         }
     }
 
@@ -58,7 +59,7 @@ public partial class Proxy : WebProxy
             if (value <= 0) return;
             if (string.IsNullOrEmpty(Host)) Host = "localhost";
 
-            Address = new Uri($"{Scheme}://{Host}:{value}");
+            Address = new Uri($"{Scheme}://{Host}:{value.ToString(CultureInfo.InvariantCulture)}");
         }
     }
 

@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace Atom.Media;
 
-internal partial class FFmpeg
+internal static partial class FFmpeg
 {
     public static unsafe partial class Codec
     {

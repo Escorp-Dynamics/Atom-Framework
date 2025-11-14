@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 
+#pragma warning disable IDISP003, IDISP007, IDISP017, IDE0022
+
 namespace Atom.Threading;
 
 /// <summary>
@@ -18,11 +20,16 @@ public sealed class ResettableCancellationTokenSource : CancellationTokenSource
     /// <summary>
     /// Определяет, был ли токен отменён.
     /// </summary>
-    public new bool IsCancellationRequested => cts.IsCancellationRequested;
+    public new bool IsCancellationRequested
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => cts.IsCancellationRequested;
+    }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="ResettableCancellationTokenSource"/>.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ResettableCancellationTokenSource() => cts = new CancellationTokenSource();
 
     /// <summary>
@@ -30,38 +37,36 @@ public sealed class ResettableCancellationTokenSource : CancellationTokenSource
     /// </summary>
     /// <param name="delay">Задержка перед отменой.</param>
     /// <param name="timeProvider">Провайдер таймера.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ResettableCancellationTokenSource(TimeSpan delay, TimeProvider timeProvider) => cts = new CancellationTokenSource(delay, timeProvider);
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="ResettableCancellationTokenSource"/>.
     /// </summary>
     /// <param name="delay">Задержка перед отменой.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ResettableCancellationTokenSource(TimeSpan delay) => cts = new CancellationTokenSource(delay);
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="ResettableCancellationTokenSource"/>.
     /// </summary>
     /// <param name="millisecondsDelay">Задержка перед отменой.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ResettableCancellationTokenSource(int millisecondsDelay) => cts = new CancellationTokenSource(millisecondsDelay);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void Reset(Func<CancellationTokenSource> factory)
+    private void Reset(CancellationTokenSource newCts)
     {
-        do
+        if (Volatile.Read(ref isDisposed))
         {
-            if (Volatile.Read(ref isDisposed)) return;
-
-            var currentCts = Volatile.Read(ref cts);
-            var newCts = factory();
-            var previousCts = Interlocked.CompareExchange(ref cts, newCts, currentCts);
-
-            if (previousCts == currentCts)
-            {
-                previousCts.Dispose();
-                return;
-            }
+            newCts.Dispose();
+            return;
         }
-        while (true);
+
+        var previousCts = Interlocked.Exchange(ref cts, newCts);
+#pragma warning disable IDISP007 // Источник создаётся и освобождается текущим типом.
+        previousCts.Dispose();
+#pragma warning restore IDISP007
     }
 
     /// <summary>
@@ -110,34 +115,55 @@ public sealed class ResettableCancellationTokenSource : CancellationTokenSource
     /// <param name="delay">Задержка перед отменой.</param>
     /// <param name="timeProvider">Провайдер таймера.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Reset(TimeSpan delay, TimeProvider timeProvider) => Reset(() => new CancellationTokenSource(delay, timeProvider));
+    public void Reset(TimeSpan delay, TimeProvider timeProvider)
+    {
+#pragma warning disable IDISP003, IDISP017
+        Reset(new CancellationTokenSource(delay, timeProvider));
+#pragma warning restore IDISP003, IDISP017
+    }
 
     /// <summary>
     /// Сбрасывает источник токена.
     /// </summary>
     /// <param name="delay">Задержка перед отменой.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Reset(TimeSpan delay) => Reset(() => new CancellationTokenSource(delay));
+    public void Reset(TimeSpan delay)
+    {
+#pragma warning disable IDISP003, IDISP017
+        Reset(new CancellationTokenSource(delay));
+#pragma warning restore IDISP003, IDISP017
+    }
 
     /// <summary>
     /// Сбрасывает источник токена.
     /// </summary>
     /// <param name="millisecondsDelay">Задержка перед отменой.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Reset(int millisecondsDelay) => Reset(() => new CancellationTokenSource(millisecondsDelay));
+    public void Reset(int millisecondsDelay)
+    {
+#pragma warning disable IDISP003, IDISP017
+        Reset(new CancellationTokenSource(millisecondsDelay));
+#pragma warning restore IDISP003, IDISP017
+    }
 
     /// <summary>
     /// Сбрасывает источник токена.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Reset() => Reset(() => new CancellationTokenSource());
+    public void Reset()
+    {
+#pragma warning disable IDISP003, IDISP017
+        Reset(new CancellationTokenSource());
+#pragma warning restore IDISP003, IDISP017
+    }
 
     /// <inheritdoc/>
     protected override void Dispose(bool disposing)
     {
-        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
-
+        if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
         base.Dispose(disposing);
-        cts.Dispose();
+        if (disposing) cts.Dispose();
     }
 }
+
+#pragma warning restore IDISP003, IDISP007, IDISP017, IDE0022

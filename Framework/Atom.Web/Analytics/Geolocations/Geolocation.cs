@@ -1,3 +1,5 @@
+#pragma warning disable S4035
+
 using System.Text.Json.Serialization;
 using Atom.Buffers;
 using Atom.Text.Json;
@@ -19,11 +21,6 @@ namespace Atom.Web.Analytics;
 )]
 public partial class Geolocation : IEquatable<Geolocation>
 {
-    /// <summary>
-    /// Континент геолокации.
-    /// </summary>
-    public Continent? Continent { get; set; }
-
     /// <summary>
     /// Страна геолокации.
     /// </summary>
@@ -63,7 +60,6 @@ public partial class Geolocation : IEquatable<Geolocation>
     [Pooled]
     public virtual void Reset()
     {
-        Continent = default;
         Country = default;
         Region = default;
         City = default;

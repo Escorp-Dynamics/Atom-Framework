@@ -9,19 +9,20 @@ namespace Atom.SourceGeneration;
 /// </summary>
 public static class SourceBuilderExtensions
 {
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static string GetTypeName(this string name, [NotNull] params IEnumerable<string> usings)
     {
         if (string.IsNullOrEmpty(name)) return "void";
-        var type = name.Replace("global::", null);
+        var type = name.Replace("global::", newValue: null, StringComparison.Ordinal);
 
         foreach (var u in usings)
         {
-            var dots = u.CountOf('.') + 1;
-            var currentDots = type.CountOf('.');
+            var dots = u.CountOf('.', StringComparison.Ordinal) + 1;
+            var currentDots = type.CountOf('.', StringComparison.Ordinal);
 
             if (dots != currentDots) continue;
 
-            type = type.Replace(u + '.', null);
+            type = type.Replace(u + '.', newValue: null);
         }
 
         return type;

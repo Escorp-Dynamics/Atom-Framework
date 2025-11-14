@@ -44,19 +44,19 @@ public sealed partial class Continent
 
     #region Инициализации
 
-    private static readonly Lazy<Continent> af = new(() => new Continent("Африка", "Africa", "AF"), true);
+    private static readonly Lazy<Continent> af = new(() => new Continent("Африка", "Africa", "AF"), isThreadSafe: true);
 
-    private static readonly Lazy<Continent> an = new(() => new Continent("Антарктида", "Antarctica", "AN"), true);
+    private static readonly Lazy<Continent> an = new(() => new Continent("Антарктида", "Antarctica", "AN"), isThreadSafe: true);
 
-    private static readonly Lazy<Continent> @as = new(() => new Continent("Азия", "Asia", "AS"), true);
+    private static readonly Lazy<Continent> @as = new(() => new Continent("Азия", "Asia", "AS"), isThreadSafe: true);
 
-    private static readonly Lazy<Continent> eu = new(() => new Continent("Европа", "Europe", "EU"), true);
+    private static readonly Lazy<Continent> eu = new(() => new Continent("Европа", "Europe", "EU"), isThreadSafe: true);
 
-    private static readonly Lazy<Continent> na = new(() => new Continent("Северная Америка", "North America", "NA"), true);
+    private static readonly Lazy<Continent> na = new(() => new Continent("Северная Америка", "North America", "NA"), isThreadSafe: true);
 
-    private static readonly Lazy<Continent> oc = new(() => new Continent("Океания", "Oceania", "OC"), true);
+    private static readonly Lazy<Continent> oc = new(() => new Continent("Океания", "Oceania", "OC"), isThreadSafe: true);
 
-    private static readonly Lazy<Continent> sa = new(() => new Continent("Южная Америка", "South America", "SA"), true);
+    private static readonly Lazy<Continent> sa = new(() => new Continent("Южная Америка", "South America", "SA"), isThreadSafe: true);
 
     #endregion
 
@@ -115,7 +115,7 @@ public sealed partial class Continent
     /// </summary>
     /// <param name="obj">Объект для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
+    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public override bool Equals(object? obj)
     {
@@ -134,7 +134,7 @@ public sealed partial class Continent
     /// </summary>
     /// <param name="other">Экземпляр <see cref="Continent"/> для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
+    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public bool Equals(Continent? other) => Equals(other as object);
 
@@ -150,7 +150,7 @@ public sealed partial class Continent
     /// <param name="s">Символьный код континента.</param>
     /// <param name="provider">Параметры форматирования.</param>
     /// <param name="result">Экземпляр <see cref="Continent"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse([NotNullWhen(true)] string? s, IFormatProvider? provider, [MaybeNullWhen(false)] out Continent? result)
     {
         result = s?.Trim().ToUpperInvariant() switch
@@ -173,7 +173,7 @@ public sealed partial class Continent
     /// </summary>
     /// <param name="s">Символьный код континента.</param>
     /// <param name="result">Экземпляр <see cref="Continent"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse([NotNullWhen(true)] string? s, [MaybeNullWhen(false)] out Continent? result) => TryParse(s, default, out result);
 
     /// <summary>
@@ -219,7 +219,7 @@ public sealed partial class Continent
     /// <param name="continent">Экземпляр <see cref="Continent"/>.</param>
     /// <param name="str">Строка для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
+    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public static bool operator ==(Continent? continent, string? str) => (continent is null && str is null) || (continent is not null && str is not null && continent.Equals(str));
 
@@ -229,7 +229,7 @@ public sealed partial class Continent
     /// <param name="continent">Экземпляр <see cref="Continent"/>.</param>
     /// <param name="str">Строка для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов не совпадают, иначе <c>false</c>.
+    /// <c>True</c>, если хеш-коды объектов не совпадают, иначе <see langword="false"/>.
     /// </returns>
     public static bool operator !=(Continent? continent, string? str) => !(continent == str);
 }

@@ -1,10 +1,12 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Atom.Net.Https.Http;
 
 /// <summary>
 /// Представляет данные о приоритете потока.
 /// </summary>
+[StructLayout(LayoutKind.Auto)]
 public readonly struct StreamPriority : IEquatable<StreamPriority>
 {
     /// <summary>

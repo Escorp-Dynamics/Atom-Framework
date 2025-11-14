@@ -35,7 +35,7 @@ public static class OS
 
         foreach (var line in lines)
         {
-            if (line.StartsWith("ID=") && Enum.TryParse<Distributive>(line[3..].Trim('"'), true, out var kind))
+            if (line.StartsWith("ID=", StringComparison.Ordinal) && Enum.TryParse<Distributive>(line[3..].Trim('"'), ignoreCase: true, out var kind))
                 return kind;
         }
 

@@ -61,7 +61,7 @@ public class HttpsClientHandler : HttpMessageHandler
     /// <summary>
     /// Если используется прокси-сервер по умолчанию (системный), возвращает или задает учетные данные,
     /// отправляемые на прокси-сервер по умолчанию для проверки подлинности.
-    /// Прокси-сервер по умолчанию используется только если <see cref="UseProxy"/> задано значение <c>true</c> и <see cref="Proxy"/> задано значение <c>null</c>.
+    /// Прокси-сервер по умолчанию используется только если <see cref="UseProxy"/> задано значение <see langword="true"/> и <see cref="Proxy"/> задано значение <see langword="null"/>.
     /// </summary>
     public ICredentials? DefaultProxyCredentials { get; set; }
 
@@ -156,7 +156,7 @@ public class HttpsClientHandler : HttpMessageHandler
 
     /// <summary>
     /// Возвращает или задает средство распространения, используемое при распространении распределенной трассировки и контекста.
-    /// Используйте <c>null</c> для отключения распространения.
+    /// Используйте <see langword="null"/> для отключения распространения.
     /// </summary>
     public DistributedContextPropagator? ActivityHeadersPropagator { get; set; } = DistributedContextPropagator.Current;
 
@@ -313,7 +313,7 @@ public class HttpsClientHandler : HttpMessageHandler
             _ => Http11.Tls,
         };
 
-        if (!Interlocked.CompareExchange(ref isFirstRequestSended, true, default)) ClientHelloValidator?.Validate(tlsSettings);
+        if (!Interlocked.CompareExchange(ref isFirstRequestSended, value: true, default)) ClientHelloValidator?.Validate(tlsSettings);
 
         try
         {

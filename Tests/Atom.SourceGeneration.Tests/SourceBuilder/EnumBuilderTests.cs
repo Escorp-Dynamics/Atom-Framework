@@ -1,5 +1,6 @@
 namespace Atom.SourceGeneration.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class EnumBuilderTests(ILogger logger) : BenchmarkTests<EnumBuilderTests>(logger)
 {
     private static string? enumReference;
@@ -37,7 +38,7 @@ public class EnumBuilderTests(ILogger logger) : BenchmarkTests<EnumBuilderTests>
             .WithValue("Value2", 0x01, "Значение 2")
             .WithValue("Value3", 0x02, "Значение 3")
             .AsFlags()
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + EnumEntity.Create()
             .WithComment("Тестовое перечисление")
@@ -47,7 +48,7 @@ public class EnumBuilderTests(ILogger logger) : BenchmarkTests<EnumBuilderTests>
             .WithValue("Value1", "Значение 1")
             .WithValue("Value2", "Значение 2")
             .WithValue("Value3", "Значение 3")
-            .Build(true);
+            .Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {

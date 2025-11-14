@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using Atom.Net.Https.Tls.Extensions;
+using Atom.Net.Tls.Extensions;
 
 namespace Atom.Net.Tls;
 
@@ -9,7 +9,7 @@ namespace Atom.Net.Tls;
 /// </summary>
 public abstract class ClientHelloValidator : IClientHelloValidator
 {
-    private static readonly Lazy<ChromeClientHelloValidator> chrome = new(() => new(), true);
+    private static readonly Lazy<ChromeClientHelloValidator> chrome = new(() => new(), isThreadSafe: true);
 
     /// <summary>
     /// Google Chrome.

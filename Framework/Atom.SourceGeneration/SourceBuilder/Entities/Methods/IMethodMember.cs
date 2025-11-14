@@ -86,7 +86,7 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что метод должен быть доступно только для чтения.
     /// </summary>
-    T AsReadOnly() => AsReadOnly(true);
+    T AsReadOnly() => AsReadOnly(value: true);
 
     /// <summary>
     /// Определяет, что метод должен быть частичным.
@@ -97,7 +97,7 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что метод должен быть частичным.
     /// </summary>
-    T AsPartial() => AsPartial(true);
+    T AsPartial() => AsPartial(value: true);
 
     /// <summary>
     /// Определяет, что метод должен возвращать ссылку.
@@ -108,7 +108,7 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что метод должен возвращать ссылку.
     /// </summary>
-    T AsRef() => AsRef(true);
+    T AsRef() => AsRef(value: true);
 
     /// <summary>
     /// Определяет, что метод должен возвращать ссылку только для чтения.
@@ -119,7 +119,7 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что метод должен возвращать ссылку только для чтения.
     /// </summary>
-    T AsReadOnlyRef() => AsReadOnlyRef(true);
+    T AsReadOnlyRef() => AsReadOnlyRef(value: true);
 
     /// <summary>
     /// Определяет, что метод должен быть небезопасным.
@@ -130,7 +130,7 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что метод должен быть небезопасным.
     /// </summary>
-    T AsUnsafe() => AsUnsafe(true);
+    T AsUnsafe() => AsUnsafe(value: true);
 
     /// <summary>
     /// Определяет, что метод должен быть абстрактным.
@@ -141,7 +141,7 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что метод должен быть абстрактным.
     /// </summary>
-    T AsAbstract() => AsAbstract(true);
+    T AsAbstract() => AsAbstract(value: true);
 
     /// <summary>
     /// Определяет, что метод должен быть виртуальным.
@@ -152,7 +152,7 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что метод должен быть виртуальным.
     /// </summary>
-    T AsVirtual() => AsVirtual(true);
+    T AsVirtual() => AsVirtual(value: true);
 
     /// <summary>
     /// Определяет, что метод должен быть перезаписанным.
@@ -163,7 +163,7 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что метод должен быть перезаписанным.
     /// </summary>
-    T AsOverride() => AsOverride(true);
+    T AsOverride() => AsOverride(value: true);
 
     /// <summary>
     /// Определяет, что метод должен быть переназначенным.
@@ -174,7 +174,7 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что метод должен быть переназначенным.
     /// </summary>
-    T AsNew() => AsNew(true);
+    T AsNew() => AsNew(value: true);
 
     /// <summary>
     /// Определяет, что метод должен быть асинхронным.
@@ -185,7 +185,7 @@ public interface IMethodMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что метод должен быть асинхронным.
     /// </summary>
-    T AsAsync() => AsAsync(true);
+    T AsAsync() => AsAsync(value: true);
 
     /// <summary>
     /// Добавляет аргументы к методу.

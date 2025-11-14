@@ -18,10 +18,10 @@ public class Component1 : IComponent
     public bool IsAttachedByOwner { get; init; }
 
     /// <inheritdoc/>
-    public event MutableEventHandler<ComponentEventArgs>? Attached;
+    public event MutableEventHandler<object, ComponentEventArgs>? Attached;
 
     /// <inheritdoc/>
-    public event MutableEventHandler<ComponentEventArgs>? Detached;
+    public event MutableEventHandler<object, ComponentEventArgs>? Detached;
 
     /// <summary>
     /// Происходит в момент присоединения компонента к новому владельцу.
@@ -29,7 +29,7 @@ public class Component1 : IComponent
     /// <param name="owner">Новый владелец компонента.</param>
     protected virtual void OnAttached(IComponentOwner owner)
     {
-        if (Attached.On(args => { args.Owner = Owner; args.Component = this; })) Owner = owner;
+        if (Attached.On(this, args => { args.Owner = Owner; args.Component = this; })) Owner = owner;
     }
 
     /// <summary>
@@ -38,7 +38,7 @@ public class Component1 : IComponent
     /// <param name="owner">Старый владелец компонента.</param>
     protected virtual void OnDetached(IComponentOwner owner)
     {
-        if (Detached.On(args => { args.Owner = Owner; args.Component = this; })) Owner = default;
+        if (Detached.On(this, args => { args.Owner = Owner; args.Component = this; })) Owner = default;
     }
 
     /// <inheritdoc/>
@@ -49,7 +49,7 @@ public class Component1 : IComponent
             if (ReferenceEquals(owner, Owner)) throw new InvalidOperationException("Компонент уже присоединён к этому владельцу");
             throw new InvalidOperationException("Компонент уже присоединён к другому владельцу");
         }
-        
+
         OnAttached(owner);
     }
 
@@ -73,10 +73,10 @@ public class Component2 : IComponent
     public bool IsAttachedByOwner { get; init; }
 
     /// <inheritdoc/>
-    public event MutableEventHandler<ComponentEventArgs>? Attached;
+    public event MutableEventHandler<object, ComponentEventArgs>? Attached;
 
     /// <inheritdoc/>
-    public event MutableEventHandler<ComponentEventArgs>? Detached;
+    public event MutableEventHandler<object, ComponentEventArgs>? Detached;
 
     /// <summary>
     /// Происходит в момент присоединения компонента к новому владельцу.
@@ -84,7 +84,7 @@ public class Component2 : IComponent
     /// <param name="owner">Новый владелец компонента.</param>
     protected virtual void OnAttached(IComponentOwner owner)
     {
-        if (Attached.On(args => { args.Owner = Owner; args.Component = this; })) Owner = owner;
+        if (Attached.On(this, args => { args.Owner = Owner; args.Component = this; })) Owner = owner;
     }
 
     /// <summary>
@@ -93,7 +93,7 @@ public class Component2 : IComponent
     /// <param name="owner">Старый владелец компонента.</param>
     protected virtual void OnDetached(IComponentOwner owner)
     {
-        if (Detached.On(args => { args.Owner = Owner; args.Component = this; })) Owner = default;
+        if (Detached.On(this, args => { args.Owner = Owner; args.Component = this; })) Owner = default;
     }
 
     /// <inheritdoc/>
@@ -104,7 +104,7 @@ public class Component2 : IComponent
             if (ReferenceEquals(owner, Owner)) throw new InvalidOperationException("Компонент уже присоединён к этому владельцу");
             throw new InvalidOperationException("Компонент уже присоединён к другому владельцу");
         }
-        
+
         OnAttached(owner);
     }
 

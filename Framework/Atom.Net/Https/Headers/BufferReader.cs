@@ -1,7 +1,9 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Atom.Net.Https.Headers;
 
+[StructLayout(LayoutKind.Auto)]
 internal ref struct BufferReader
 {
     private readonly ReadOnlySpan<byte> span;

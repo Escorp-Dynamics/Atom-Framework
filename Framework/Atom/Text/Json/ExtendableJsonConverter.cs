@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization.Metadata;
 
@@ -18,7 +19,7 @@ public abstract class ExtendableJsonConverter<T> : JsonConverter<T> where T : ne
     /// <param name="root">Корневой элемент.</param>
     /// <param name="typeToConvert">Тип, в который будет десериализовано значение.</param>
     /// <param name="options">Опции сериализации JSON.</param>
-    /// <returns>Десериализованный экземпляр, если операция чтения прошла успешно; иначе - <c>null</c>.</returns>
+    /// <returns>Десериализованный экземпляр, если операция чтения прошла успешно; иначе - <see langword="null"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected abstract T? OnReading(ref Utf8JsonReader reader, JsonElement root, Type typeToConvert, JsonSerializerOptions options);
 
@@ -72,7 +73,7 @@ public abstract class ExtendableJsonConverter<T> : JsonConverter<T> where T : ne
     /// <param name="reader">Читатель JSON, из которого будет считываться значение.</param>
     /// <param name="typeToConvert">Тип, в который будет десериализовано значение.</param>
     /// <param name="options">Опции сериализации JSON.</param>
-    /// <returns>Десериализованный экземпляр, если операция чтения прошла успешно; иначе - <c>null</c>.</returns>
+    /// <returns>Десериализованный экземпляр, если операция чтения прошла успешно; иначе - <see langword="null"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override T? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
@@ -123,10 +124,10 @@ public abstract class ExtendableJsonConverter<T> : JsonConverter<T> where T : ne
             case float:
             case double:
             case decimal:
-                writer.WriteNumberValue(Convert.ToDecimal(value));
+                writer.WriteNumberValue(Convert.ToDecimal(value, CultureInfo.InvariantCulture));
                 break;
             case Enum enumValue:
-                writer.WriteNumberValue(Convert.ToInt32(enumValue));
+                writer.WriteNumberValue(Convert.ToInt32(enumValue, CultureInfo.InvariantCulture));
                 break;
             case DateTime dt:
                 writer.WriteStringValue(dt);

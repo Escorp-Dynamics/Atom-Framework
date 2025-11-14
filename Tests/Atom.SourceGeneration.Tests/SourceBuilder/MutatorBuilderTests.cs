@@ -1,5 +1,6 @@
 namespace Atom.SourceGeneration.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class MutatorBuilderTests(ILogger logger) : BenchmarkTests<MutatorBuilderTests>(logger)
 {
     private static string? propertyMutatorReference;
@@ -34,7 +35,7 @@ public class MutatorBuilderTests(ILogger logger) : BenchmarkTests<MutatorBuilder
         var src = PropertyMutatorMember.Create()
             .WithAttribute("Test")
             .WithCode("test = value")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + PropertyMutatorMember.Create()
             .WithAttribute("Test")
@@ -42,11 +43,11 @@ public class MutatorBuilderTests(ILogger logger) : BenchmarkTests<MutatorBuilder
                 SomeMethod(value);
                 test = value;
             ")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + PropertyMutatorMember.Create()
             .WithAttribute("Test")
-            .Build(true);
+            .Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {
@@ -61,7 +62,7 @@ public class MutatorBuilderTests(ILogger logger) : BenchmarkTests<MutatorBuilder
         var src = EventRemoveMember.Create()
             .WithAttribute("Test")
             .WithCode("Test -= OnTest")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + EventRemoveMember.Create()
             .WithAttribute("Test")
@@ -69,11 +70,11 @@ public class MutatorBuilderTests(ILogger logger) : BenchmarkTests<MutatorBuilder
                 SomeMethod();
                 Test -= OnTest;
             ")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + EventRemoveMember.Create()
             .WithAttribute("Test")
-            .Build(true);
+            .Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {

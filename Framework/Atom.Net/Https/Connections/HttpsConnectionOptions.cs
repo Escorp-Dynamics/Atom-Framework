@@ -37,7 +37,7 @@ internal readonly record struct HttpsConnectionOptions
 
     /// <summary>
     /// Локальная привязка (если нужна мимикрия конкретного интерфейса/адреса).
-    /// При значении <c>null</c> выбор остаётся за стеком TCP/UDP.
+    /// При значении <see langword="null"/> выбор остаётся за стеком TCP/UDP.
     /// </summary>
     public IPEndPoint? LocalEndPoint { get; init; }
 

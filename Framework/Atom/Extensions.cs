@@ -11,10 +11,10 @@ namespace Atom;
 /// </summary>
 public static class Extensions
 {
-    private static readonly Lazy<char[]> upperCaseTable = new(() => CreateTable(true), true);
-    private static readonly Lazy<char[]> invariantUpperCaseTable = new(() => CreateTable(true, true), true);
-    private static readonly Lazy<char[]> lowerCaseTable = new(() => CreateTable(), true);
-    private static readonly Lazy<char[]> invariantLowerCaseTable = new(() => CreateTable(default, true), true);
+    private static readonly Lazy<char[]> upperCaseTable = new(() => CreateTable(upper: true), isThreadSafe: true);
+    private static readonly Lazy<char[]> invariantUpperCaseTable = new(() => CreateTable(upper: true), isThreadSafe: true);
+    private static readonly Lazy<char[]> lowerCaseTable = new(() => CreateTable(), isThreadSafe: true);
+    private static readonly Lazy<char[]> invariantLowerCaseTable = new(() => CreateTable(default, invariant: true), isThreadSafe: true);
 
     private static readonly Dictionary<string, ConsoleColor> colorMap = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -49,10 +49,43 @@ public static class Extensions
         ["WHITE"] = ConsoleColor.White,
         ["W"] = ConsoleColor.White,
         ["BLACK"] = ConsoleColor.Black,
-        ["BL"] = ConsoleColor.Black
+        ["BL"] = ConsoleColor.Black,
     };
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static readonly Dictionary<string, string> PrimitiveAliases = new(StringComparer.Ordinal)
+    {
+        ["System.String"] = "string",
+        ["String"] = "string",
+        ["System.Boolean"] = "bool",
+        ["Boolean"] = "bool",
+        ["System.Char"] = "char",
+        ["Char"] = "char",
+        ["System.SByte"] = "sbyte",
+        ["SByte"] = "sbyte",
+        ["System.Byte"] = "byte",
+        ["Byte"] = "byte",
+        ["System.UInt16"] = "ushort",
+        ["UInt16"] = "ushort",
+        ["System.Int16"] = "short",
+        ["Int16"] = "short",
+        ["System.UInt32"] = "uint",
+        ["UInt32"] = "uint",
+        ["System.Int32"] = "int",
+        ["Int32"] = "int",
+        ["System.UInt64"] = "ulong",
+        ["UInt64"] = "ulong",
+        ["System.Int64"] = "long",
+        ["Int64"] = "long",
+        ["System.Single"] = "float",
+        ["Single"] = "float",
+        ["System.Double"] = "double",
+        ["Double"] = "double",
+        ["System.Decimal"] = "decimal",
+        ["Decimal"] = "decimal",
+        ["System.Object"] = "object",
+        ["Object"] = "object",
+    };
+
     private static char[] CreateTable(bool upper = default, bool invariant = default)
     {
         var table = new char[ushort.MaxValue + 1];
@@ -68,10 +101,9 @@ public static class Extensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static char GetChar(char c, char[] table) => c is >= 'a' and <= 'z' ? (char)(c - 'a' + 'A') : table[c];
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string GetGenericName(Type type, string name, bool withNamespaces, bool withGenericNullable)
     {
-        var index = name.IndexOf('`');
+        var index = name.IndexOf('`', StringComparison.Ordinal);
         name = index > 0 ? name[..index] : name;
 
         var genericArgs = type.GetGenericArguments();
@@ -97,30 +129,15 @@ public static class Extensions
         return result;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string SimplifyTypeName(string name)
     {
-        if (name.EndsWith("[]")) return SimplifyTypeName(name[..^2]) + "[]";
-
-        return name switch
+        if (name.EndsWith("[]", StringComparison.Ordinal))
         {
-            "System.String" or "String" => "string",
-            "System.Boolean" or "Boolean" => "bool",
-            "System.Char" or "Char" => "char",
-            "System.SByte" or "SByte" => "sbyte",
-            "System.Byte" or "Byte" => "byte",
-            "System.UInt16" or "UInt16" => "ushort",
-            "System.Int16" or "Int16" => "short",
-            "System.UInt32" or "UInt32" => "uint",
-            "System.Int32" or "Int32" => "int",
-            "System.UInt64" or "UInt64" => "ulong",
-            "System.Int64" or "Int64" => "long",
-            "System.Single" or "Single" => "float",
-            "System.Double" or "Double" => "double",
-            "System.Decimal" or "Decimal" => "decimal",
-            "System.Object" or "Object" => "object",
-            _ => name,
-        };
+            var elementName = SimplifyTypeName(name[..^2]);
+            return elementName + "[]";
+        }
+
+        return PrimitiveAliases.TryGetValue(name, out var alias) ? alias : name;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -171,12 +188,12 @@ public static class Extensions
     /// <param name="c1">Первый символ.</param>
     /// <param name="c2">Второй символ.</param>
     /// <param name="comparison">Способ сравнения.</param>
-    /// <returns><c>true</c>, если символы равны, иначе <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если символы равны, иначе <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool Equals(this char c1, char c2, StringComparison comparison) => GetUpperChar(c1, comparison) == GetUpperChar(c2, comparison);
 
     /// <summary>
-    /// Определяет, является ли тип допускающим <c>null</c>.
+    /// Определяет, является ли тип допускающим <see langword="null"/>.
     /// </summary>
     /// <param name="type">Метаданные типа.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -214,11 +231,11 @@ public static class Extensions
     /// <param name="ex">Экземпляр исключения.</param>
     public static IReadOnlyDictionary<string, string?> AsDictionary([NotNull] this Exception ex)
     {
-        var error = new Dictionary<string, string?>
+        var error = new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             { "type", ex.GetType().ToString() },
             { "message", ex.Message },
-            { "stackTrace", ex.StackTrace }
+            { "stackTrace", ex.StackTrace },
         };
 
         foreach (DictionaryEntry data in ex.Data)
@@ -236,7 +253,7 @@ public static class Extensions
     /// </summary>
     /// <param name="name">Строковое представление цвета.</param>
     /// <param name="color">Консольный цвет.</param>
-    /// <returns><c>True</c>, если операция была удачной, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если операция была удачной, иначе <see langword="false"/>.</returns>
     public static bool TryGetColor(this string name, out ConsoleColor color) => colorMap.TryGetValue(name, out color);
 
     /// <summary>
@@ -355,7 +372,7 @@ public static class Extensions
     /// </summary>
     /// <param name="name">Строковое представление стиля.</param>
     /// <param name="style">Консольный стиль.</param>
-    /// <returns><c>True</c>, если операция была удачной, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если операция была удачной, иначе <see langword="false"/>.</returns>
     public static bool TryGetStyle(this string? name, out ConsoleStyle? style)
     {
         style = name?.ToUpperInvariant() switch
@@ -373,11 +390,12 @@ public static class Extensions
     /// Выполняет обработчик события.
     /// </summary>
     /// <param name="handler">Обработчик события.</param>
+    /// <param name="sender">Источник события.</param>
     /// <param name="argsModifier">модификатор аргументов события.</param>
     /// <typeparam name="T">Тип аргументов события.</typeparam>
     /// <returns>True, если событие было успешно выполнено и не отменено, иначе false.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool On<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>(this MutableEventHandler<T>? handler, Action<T>? argsModifier) where T : MutableEventArgs
+    public static bool On<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>(this MutableEventHandler<object, T>? handler, [NotNull] object sender, Action<T>? argsModifier = default) where T : MutableEventArgs
     {
         if (handler is null) return true;
 
@@ -385,20 +403,11 @@ public static class Extensions
         argsModifier?.Invoke(args);
         args.Restart();
 
-        handler(args);
+        handler(sender, args);
 
         var isCancelled = args.IsCancelled;
         MutableEventArgs.Return(args);
 
         return !isCancelled;
     }
-
-    /// <summary>
-    /// Выполняет обработчик события.
-    /// </summary>
-    /// <param name="handler">Обработчик события.</param>
-    /// <typeparam name="T">Тип аргументов события.</typeparam>
-    /// <returns>True, если событие было успешно выполнено и не отменено, иначе false.</returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool On<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>(this MutableEventHandler<T>? handler) where T : MutableEventArgs => handler.On(default);
 }

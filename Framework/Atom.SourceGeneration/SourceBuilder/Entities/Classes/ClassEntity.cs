@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Atom.Buffers;
 using Atom.Collections;
@@ -17,6 +18,12 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     private readonly SparseArray<EventMember> events = new(128);
     private readonly SparseArray<MethodMember> methods = new(128);
     private readonly SparseArray<IEntity> others = new(128);
+
+    private bool HasEntities
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => !(fields.IsEmpty && properties.IsEmpty && events.IsEmpty && methods.IsEmpty && others.IsEmpty);
+    }
 
     /// <inheritdoc/>
     public AccessModifier AccessModifier { get; protected set; }
@@ -57,6 +64,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     /// <inheritdoc/>
     public override bool IsValid => !string.IsNullOrEmpty(Name);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AppendGenerics(StringBuilder sb)
     {
         if (generics.IsEmpty) return;
@@ -74,6 +82,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
         sb.Append('>');
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AppendParents(StringBuilder sb, params IEnumerable<string> usings)
     {
         if (parents.IsEmpty) return;
@@ -89,6 +98,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
         sb.Remove(sb.Length - 2, 2);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AppendGenericsLimitations(StringBuilder sb)
     {
         if (generics.IsEmpty) return;
@@ -101,9 +111,10 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AppendEntities(StringBuilder sb, string spaces, params IEnumerable<string> usings)
     {
-        if (fields.IsEmpty && properties.IsEmpty && events.IsEmpty && methods.IsEmpty && others.IsEmpty)
+        if (!HasEntities)
         {
             sb.Append(';');
             return;
@@ -112,35 +123,11 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
         sb.AppendLine($"\n{spaces}{{");
         var tabs = (spaces.Length / 4) + 1;
 
-        foreach (var field in fields)
-        {
-            var p = field.Build(tabs, usings);
-            if (!string.IsNullOrEmpty(p)) sb.AppendLine(p);
-        }
-
-        foreach (var property in properties)
-        {
-            var p = property.Build(tabs, usings);
-            if (!string.IsNullOrEmpty(p)) sb.AppendLine(p);
-        }
-
-        foreach (var e in events)
-        {
-            var p = e.Build(tabs, usings);
-            if (!string.IsNullOrEmpty(p)) sb.AppendLine(p);
-        }
-
-        foreach (var method in methods)
-        {
-            var p = method.Build(tabs, usings);
-            if (!string.IsNullOrEmpty(p)) sb.AppendLine(p);
-        }
-
-        foreach (var other in others)
-        {
-            var p = other.Build(tabs, usings);
-            if (!string.IsNullOrEmpty(p)) sb.AppendLine(p);
-        }
+        AppendMembers(sb, tabs, fields, usings);
+        AppendMembers(sb, tabs, properties, usings);
+        AppendMembers(sb, tabs, events, usings);
+        AppendMembers(sb, tabs, methods, usings);
+        AppendMembers(sb, tabs, others, usings);
 
         if (sb[^1] is '\n') sb.Remove(sb.Length - 1, 1);
         sb.AppendLine($"{spaces}}}");
@@ -152,7 +139,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
         var access = AccessModifier.AsString();
         if (!string.IsNullOrEmpty(access)) access += ' ';
 
-        sb.Append($"{spaces}{access}");
+        sb.Append(spaces).Append(access);
         if (IsSealed) sb.Append("sealed ");
         if (IsPartial) sb.Append("partial ");
         sb.Append($"class {Name}");
@@ -164,6 +151,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ClassEntity WithEvent([NotNull] params IEnumerable<EventMember> events)
     {
         this.events.AddRange(events);
@@ -171,12 +159,15 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ClassEntity WithEvent<TType>(string name, AccessModifier access, string? comment = default) => WithEvent(EventMember.Create<TType>(name, access).WithComment(comment));
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ClassEntity WithEvent<TType>(string name) => WithEvent<TType>(name, default);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ClassEntity WithGeneric([NotNull] params IEnumerable<GenericEntity> generics)
     {
         this.generics.AddRange(generics);
@@ -184,9 +175,11 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ClassEntity WithGeneric(string name, params IEnumerable<string> limitations) => WithGeneric(GenericEntity.Create(name, limitations));
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ClassEntity WithMethod([NotNull] params IEnumerable<MethodMember> methods)
     {
         this.methods.AddRange(methods);
@@ -194,12 +187,15 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ClassEntity WithMethod(string name) => WithMethod(MethodMember.Create(name));
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ClassEntity WithMethod<TType>(string name) => WithMethod(MethodMember.Create<TType>(name));
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ClassEntity WithOther([NotNull] params IEnumerable<IEntity> entities)
     {
         others.AddRange(entities);
@@ -207,6 +203,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ClassEntity WithParent([NotNull] params IEnumerable<string> parents)
     {
         this.parents.AddRange(parents);
@@ -214,9 +211,11 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ClassEntity WithParent<TType>(bool withNamespaces = true, bool withNullable = true, bool withGenericNullable = true) => WithParent(typeof(TType).GetFriendlyName(withNamespaces, withNullable, withGenericNullable));
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ClassEntity WithProperty([NotNull] params IEnumerable<PropertyMember> properties)
     {
         this.properties.AddRange(properties);
@@ -224,9 +223,11 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ClassEntity WithProperty<TType>(string name) => WithProperty(PropertyMember.CreateWithGetterOnly<TType>(name));
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ClassEntity WithField([NotNull] params IEnumerable<FieldMember> fields)
     {
         this.fields.AddRange(fields);
@@ -234,15 +235,19 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ClassEntity WithField<TType>(string name, string? value) => WithField(FieldMember.Create<TType>(name, value));
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ClassEntity WithField<TType>(string name, TType value) => WithField(FieldMember.Create(name, value));
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ClassEntity WithField<TType>(string name) => WithField(FieldMember.Create<TType>(name));
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ClassEntity AsPartial(bool value)
     {
         IsPartial = value;
@@ -250,9 +255,11 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
-    public ClassEntity AsPartial() => AsPartial(true);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ClassEntity AsPartial() => AsPartial(value: true);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ClassEntity AsUnsafe(bool value)
     {
         IsUnsafe = value;
@@ -260,9 +267,11 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
-    public ClassEntity AsUnsafe() => AsUnsafe(true);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ClassEntity AsUnsafe() => AsUnsafe(value: true);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ClassEntity AsStatic(bool value)
     {
         IsStatic = value;
@@ -270,9 +279,11 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
-    public ClassEntity AsStatic() => AsStatic(true);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ClassEntity AsStatic() => AsStatic(value: true);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual ClassEntity AsSealed(bool value)
     {
         IsSealed = value;
@@ -280,9 +291,11 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
-    public ClassEntity AsSealed() => AsSealed(true);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ClassEntity AsSealed() => AsSealed(value: true);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ClassEntity WithAccessModifier(AccessModifier modifier)
     {
         AccessModifier = modifier;
@@ -290,6 +303,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override ClassEntity WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
@@ -297,6 +311,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override ClassEntity WithComment(string? comment)
     {
         Comment = comment;
@@ -304,6 +319,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override ClassEntity WithName(string name)
     {
         Name = name;
@@ -311,6 +327,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override void Release()
     {
         base.Release();
@@ -339,15 +356,27 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
         });
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void AppendMembers<TMember>(StringBuilder sb, int tabs, IEnumerable<TMember> members, params IEnumerable<string> usings) where TMember : IEntity
+    {
+        foreach (var member in members)
+        {
+            var built = member.Build(tabs, usings);
+            if (!string.IsNullOrEmpty(built)) sb.AppendLine(built);
+        }
+    }
+
     /// <summary>
     /// Создаёт новый экземпляр строителя интерфейса.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ClassEntity Create() => ObjectPool<ClassEntity>.Shared.Rent();
 
     /// <summary>
     /// Создаёт новый экземпляр строителя интерфейса.
     /// </summary>
     /// <param name="name">Имя интерфейса.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ClassEntity Create(string name) => Create().WithName(name);
 
     /// <summary>
@@ -355,5 +384,6 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     /// </summary>
     /// <param name="name">Имя интерфейса.</param>
     /// <param name="access">Модификатор доступа.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ClassEntity Create(string name, AccessModifier access) => Create(name).WithAccessModifier(access);
 }

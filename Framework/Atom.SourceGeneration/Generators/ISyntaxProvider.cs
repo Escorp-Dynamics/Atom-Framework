@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using Microsoft.CodeAnalysis;
 
 namespace Atom.SourceGeneration;
@@ -20,6 +21,7 @@ public interface ISyntaxProvider<TSymbol, TSyntaxNode> where TSymbol : ISymbol w
     /// </summary>
     /// <param name="node">Синтаксический узел.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     bool Predicate(SyntaxNode node, CancellationToken cancellationToken);
 
     /// <summary>
@@ -27,6 +29,7 @@ public interface ISyntaxProvider<TSymbol, TSyntaxNode> where TSymbol : ISymbol w
     /// </summary>
     /// <param name="context">Контекст генерации кода.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     ISyntaxProviderInfo<TSymbol, TSyntaxNode> Transform(GeneratorSyntaxContext context, CancellationToken cancellationToken);
 
     /// <summary>
@@ -34,5 +37,6 @@ public interface ISyntaxProvider<TSymbol, TSyntaxNode> where TSymbol : ISymbol w
     /// </summary>
     /// <param name="context">Контекст генерации.</param>
     /// <param name="sources">Доступные источники.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     void Execute(SourceProductionContext context, ImmutableArray<ISyntaxProviderInfo<TSymbol, TSyntaxNode>> sources);
 }

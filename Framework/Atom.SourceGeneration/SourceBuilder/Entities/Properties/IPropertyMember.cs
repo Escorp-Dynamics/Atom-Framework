@@ -170,7 +170,7 @@ public interface IPropertyMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что свойство должно быть доступно только для чтения.
     /// </summary>
-    T AsReadOnly() => AsReadOnly(true);
+    T AsReadOnly() => AsReadOnly(value: true);
 
     /// <summary>
     /// Определяет, что свойство должно быть частичным.
@@ -181,7 +181,7 @@ public interface IPropertyMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что свойство должно быть частичным.
     /// </summary>
-    T AsPartial() => AsPartial(true);
+    T AsPartial() => AsPartial(value: true);
 
     /// <summary>
     /// Определяет, что свойство должно возвращать ссылку.
@@ -192,7 +192,7 @@ public interface IPropertyMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что свойство должно возвращать ссылку.
     /// </summary>
-    T AsRef() => AsRef(true);
+    T AsRef() => AsRef(value: true);
 
     /// <summary>
     /// Определяет, что свойство должно возвращать ссылку только для чтения.
@@ -203,7 +203,7 @@ public interface IPropertyMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что свойство должно возвращать ссылку только для чтения.
     /// </summary>
-    T AsReadOnlyRef() => AsReadOnlyRef(true);
+    T AsReadOnlyRef() => AsReadOnlyRef(value: true);
 
     /// <summary>
     /// Определяет, что свойство должно быть небезопасным.
@@ -214,7 +214,7 @@ public interface IPropertyMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что свойство должно быть небезопасным.
     /// </summary>
-    T AsUnsafe() => AsUnsafe(true);
+    T AsUnsafe() => AsUnsafe(value: true);
 
     /// <summary>
     /// Определяет, что свойство должно быть абстрактным.
@@ -225,7 +225,7 @@ public interface IPropertyMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что свойство должно быть абстрактным.
     /// </summary>
-    T AsAbstract() => AsAbstract(true);
+    T AsAbstract() => AsAbstract(value: true);
 
     /// <summary>
     /// Определяет, что свойство должно быть виртуальным.
@@ -236,7 +236,7 @@ public interface IPropertyMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что свойство должно быть виртуальным.
     /// </summary>
-    T AsVirtual() => AsVirtual(true);
+    T AsVirtual() => AsVirtual(value: true);
 
     /// <summary>
     /// Определяет, что свойство должно быть перезаписанным.
@@ -247,7 +247,7 @@ public interface IPropertyMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что свойство должно быть перезаписанным.
     /// </summary>
-    T AsOverride() => AsOverride(true);
+    T AsOverride() => AsOverride(value: true);
 
     /// <summary>
     /// Определяет, что свойство должно быть переназначенным.
@@ -258,5 +258,5 @@ public interface IPropertyMember<out T> : IMember<T> where T : IEntity
     /// <summary>
     /// Определяет, что свойство должно быть переназначенным.
     /// </summary>
-    T AsNew() => AsNew(true);
+    T AsNew() => AsNew(value: true);
 }

@@ -23,12 +23,12 @@ public interface IComponent
     /// <summary>
     /// Происходит в момент присоединения компонента к новому владельцу.
     /// </summary>
-    event MutableEventHandler<ComponentEventArgs>? Attached;
+    event MutableEventHandler<object, ComponentEventArgs>? Attached;
 
     /// <summary>
     /// Происходит в момент отсоединения компонента от старого владельца.
     /// </summary>
-    event MutableEventHandler<ComponentEventArgs>? Detached;
+    event MutableEventHandler<object, ComponentEventArgs>? Detached;
 
     /// <summary>
     /// Присоединяет компонент к новому владельцу.

@@ -21,11 +21,11 @@ public class RateLimiterTests(ILogger logger) : BenchmarkTests<RateLimiterTests>
     }
 
     [TestCase(TestName = "Тест проверки пропускной способности"), Benchmark]
-    public async Task ManualTest()
+    public async Task ManualTestAsync()
     {
         using var limiter = new RateLimiter(1, 1000);
 
-        for (var i = 0; i < 10; ++i) await limiter.Call(TestCallbackAsync);
+        for (var i = 0; i < 10; ++i) await limiter.CallAsync(TestCallbackAsync);
 
         if (!IsBenchmarkEnabled) Assert.Pass();
     }

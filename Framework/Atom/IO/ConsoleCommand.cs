@@ -1,4 +1,6 @@
-﻿namespace Atom.Debug;
+﻿using System.Runtime.CompilerServices;
+
+namespace Atom.Debug;
 
 /// <summary>
 /// Представляет базовую реализацию консольной команды.
@@ -16,33 +18,34 @@ public abstract class ConsoleCommand(IEnumerable<string> aliases) : IConsoleComm
     public abstract string Name { get; protected set; }
 
     /// <inheritdoc/>
-    public event AsyncEventHandler<IConsoleCommand, ParseCommandEventArgs>? Parsing;
+    public event AsyncEventHandler<object, ParseCommandEventArgs>? Parsing;
 
     /// <inheritdoc/>
-    public event AsyncEventHandler<IConsoleCommand, ExecuteCommandEventArgs>? Execution;
+    public event AsyncEventHandler<object, ExecuteCommandEventArgs>? Execution;
 
     /// <inheritdoc/>
-    public event AsyncEventHandler<IConsoleCommand, ExecuteCommandEventArgs>? Cancelling;
+    public event AsyncEventHandler<object, ExecuteCommandEventArgs>? Cancelling;
 
     /// <summary>
-    /// Представляет базовую реализацию консольной команды. 
+    /// Представляет базовую реализацию консольной команды.
     /// </summary>
     /// <param name="alias">Псевдоним команды.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected ConsoleCommand(string alias) : this([alias]) { }
 
     /// <summary>
     /// Происходит в момент парсинга команды.
     /// </summary>
     /// <param name="e">Аргументы события.</param>
-    /// <returns></returns>
-    protected virtual ValueTask OnParsing(ParseCommandEventArgs e) => Parsing?.Invoke(this, e) ?? ValueTask.CompletedTask;
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    protected virtual ValueTask OnParsingAsync(ParseCommandEventArgs e) => Parsing?.Invoke(this, e) ?? ValueTask.CompletedTask;
 
     /// <summary>
     /// Происходит в момент выполнения команды.
     /// </summary>
     /// <param name="e">Аргументы события.</param>
-    /// <returns></returns>
-    protected virtual async ValueTask<bool> OnExecution(ExecuteCommandEventArgs e)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    protected virtual async ValueTask<bool> OnExecutionAsync(ExecuteCommandEventArgs e)
     {
         if (Execution is not null) await Execution(this, e).ConfigureAwait(false);
         return e is { IsCancelled: false, IsSuccess: true };
@@ -52,64 +55,58 @@ public abstract class ConsoleCommand(IEnumerable<string> aliases) : IConsoleComm
     /// Происходит в момент отмены команды.
     /// </summary>
     /// <param name="e">Аргументы события.</param>
-    /// <returns></returns>
-    protected virtual async ValueTask<bool> OnCancelling(ExecuteCommandEventArgs e)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    protected virtual async ValueTask<bool> OnCancellingAsync(ExecuteCommandEventArgs e)
     {
         if (Cancelling is not null) await Cancelling(this, e).ConfigureAwait(false);
         return e is { IsCancelled: false, IsSuccess: true };
     }
 
     /// <inheritdoc/>
-    public virtual bool TryParse(string command, out IEnumerable<string> args, out bool isCancellation)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public virtual async ValueTask<ConsoleCommandParseResult> TryParseAsync(string command, CancellationToken cancellationToken = default)
     {
-        args = [];
-        isCancellation = default;
-        var eventArgs = new ParseCommandEventArgs(command, args) { IsCancelled = true, };
+        var (isParsed, args, isCancellation) = ParseCommand(command);
+        var eventArgs = CreateParseEventArgs(command, args, isParsed, cancellationToken);
 
-        if (string.IsNullOrEmpty(command))
-        {
-            OnParsing(eventArgs).AsTask().GetAwaiter().GetResult();
-            return !eventArgs.IsCancelled;
-        }
+        await OnParsingAsync(eventArgs).ConfigureAwait(false);
+
+        var isSuccess = !eventArgs.IsCancelled;
+        return new ConsoleCommandParseResult(isSuccess, args, isSuccess && isCancellation);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private (bool IsParsed, string[] Args, bool IsCancellation) ParseCommand(string command)
+    {
+        if (string.IsNullOrWhiteSpace(command)) return (false, Array.Empty<string>(), false);
 
         var parts = command.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0 || string.IsNullOrEmpty(parts[0])) return (false, Array.Empty<string>(), false);
 
-        if (parts.Length is 0 || string.IsNullOrEmpty(parts[0]))
-        {
-            OnParsing(eventArgs).AsTask().GetAwaiter().GetResult();
-            return !eventArgs.IsCancelled;
-        }
+        var (alias, isCancellation) = NormalizeAlias(parts[0]);
+        if (string.IsNullOrEmpty(alias)) return (false, Array.Empty<string>(), false);
+        if (!Aliases.Any(x => x.Equals(alias, StringComparison.OrdinalIgnoreCase))) return (false, Array.Empty<string>(), false);
 
-        if (parts[0][0] is '-')
-        {
-            if (!IsCancellable)
-            {
-                OnParsing(eventArgs).AsTask().GetAwaiter().GetResult();
-                return !eventArgs.IsCancelled;
-            }
+        var args = ExtractArguments(parts);
+        return (true, args, isCancellation);
+    }
 
-            isCancellation = true;
-            parts[0] = parts[0][1..];
-        }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private (string Alias, bool IsCancellation) NormalizeAlias(string rawAlias)
+    {
+        if (string.IsNullOrEmpty(rawAlias)) return (string.Empty, false);
+        if (rawAlias[0] is not '-') return (rawAlias, false);
 
-        if (!Aliases.Any(x => x.Equals(parts[0], StringComparison.OrdinalIgnoreCase)))
-        {
-            OnParsing(eventArgs).AsTask().GetAwaiter().GetResult();
-            return !eventArgs.IsCancelled;
-        }
+        if (!IsCancellable) return (string.Empty, false);
+        return (rawAlias[1..], true);
+    }
 
-        eventArgs.IsCancelled = default;
-        eventArgs.IsParsed = true;
-        eventArgs.IsValid = true;
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static string[] ExtractArguments(string[] parts)
+    {
+        if (parts.Length <= 1) return [];
 
-        if (parts.Length is 1)
-        {
-            OnParsing(eventArgs).AsTask().GetAwaiter().GetResult();
-            return !eventArgs.IsCancelled;
-        }
-
-        var parsedArgs = new List<string>();
-
+        var parsedArgs = new List<string>(parts.Length - 1);
         for (var i = 1; i < parts.Length; ++i)
         {
             var parsedArg = parts[i].Trim('"', '\'').Trim();
@@ -117,41 +114,56 @@ public abstract class ConsoleCommand(IEnumerable<string> aliases) : IConsoleComm
             parsedArgs.Add(parsedArg);
         }
 
-        if (parsedArgs.Count is not 0) args = [.. parsedArgs];
-
-        OnParsing(eventArgs).AsTask().GetAwaiter().GetResult();
-        return !eventArgs.IsCancelled;
+        return parsedArgs.Count == 0 ? [] : [.. parsedArgs];
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ParseCommandEventArgs CreateParseEventArgs(string command, string[] args, bool isParsed, CancellationToken cancellationToken)
+        => new(command, args)
+        {
+            CancellationToken = cancellationToken,
+            IsCancelled = !isParsed,
+            IsParsed = isParsed,
+            IsValid = isParsed,
+        };
+
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ValueTask<bool> ExecuteAsync(IEnumerable<string> args, CancellationToken cancellationToken)
     {
         var eventArgs = new ExecuteCommandEventArgs(args);
-        return OnExecution(eventArgs);
+        return OnExecutionAsync(eventArgs);
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ValueTask<bool> ExecuteAsync(params IEnumerable<string> args) => ExecuteAsync(args, CancellationToken.None);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ValueTask<bool> ExecuteAsync(CancellationToken cancellationToken) => ExecuteAsync([], cancellationToken);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ValueTask<bool> ExecuteAsync() => ExecuteAsync(CancellationToken.None);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ValueTask<bool> CancelAsync(IEnumerable<string> args, CancellationToken cancellationToken)
     {
         var eventArgs = new ExecuteCommandEventArgs(args);
-        return OnCancelling(eventArgs);
+        return OnCancellingAsync(eventArgs);
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ValueTask<bool> CancelAsync(params IEnumerable<string> args) => CancelAsync(args, CancellationToken.None);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ValueTask<bool> CancelAsync(CancellationToken cancellationToken) => CancelAsync([], cancellationToken);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ValueTask<bool> CancelAsync() => CancelAsync(CancellationToken.None);
 }

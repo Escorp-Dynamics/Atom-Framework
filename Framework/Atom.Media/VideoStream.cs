@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
+using System.Globalization;
 using System.Text;
 using Atom.Buffers;
 using Atom.Media.Filters;
@@ -36,8 +37,8 @@ public class VideoStream : Stream
     private unsafe MediaFilterInOut* filterInputs;
     private unsafe MediaFilterInOut* filterOutputs;
 
-    private readonly unsafe void* bufferSourceContext;
-    private readonly unsafe void* bufferSinkContext;
+    private readonly unsafe void* bufferSourceContext = null;
+    private readonly unsafe void* bufferSinkContext = null;
 
     private Task? processingTask;
     private CancellationTokenSource cts;
@@ -130,7 +131,7 @@ public class VideoStream : Stream
 
         set
         {
-            if (outputPath == value) return;
+            if (string.Equals(outputPath, value, StringComparison.Ordinal)) return;
             outputPath = value;
             SetUpEncoder();
         }
@@ -278,7 +279,9 @@ public class VideoStream : Stream
     /// <summary>
     /// Деструктор класса MediaStream, вызывающий метод Dispose(false).
     /// </summary>
+#pragma warning disable MA0055
     ~VideoStream() => Dispose(disposing: false);
+#pragma warning restore MA0055
 
     static unsafe VideoStream()
     {
@@ -291,6 +294,31 @@ public class VideoStream : Stream
         FFmpeg.Device.RegisterAll();
         FFmpeg.Format.NetworkInit();
     }
+
+    [SuppressMessage("Usage", "VSTHRD002:Avoid problematic synchronous waits", Justification = "Reconfiguring FFmpeg contexts requires the background task to stop deterministically.")]
+    private void StopProcessingTask()
+    {
+        if (processingTask is null) return;
+
+        try
+        {
+            cts.Cancel();
+            processingTask.Wait();
+        }
+        finally
+        {
+            processingTask = default;
+        }
+    }
+
+    private void ResetCancellationTokenSource()
+    {
+        var previous = cts;
+        cts = new CancellationTokenSource();
+        previous.Dispose();
+    }
+
+    private void StartProcessingTask() => processingTask = Task.Run(async () => await ProcessAsync(cts.Token).ConfigureAwait(false));
 
     private unsafe void SetUpVideoDecoder()
     {
@@ -408,59 +436,69 @@ public class VideoStream : Stream
         SetUpAudioEncoder();
     }
 
+#pragma warning disable S3776
+    [SuppressMessage("SonarAnalyzer.CSharp", "S3776", Justification = "FFmpeg pipeline orchestration is intentionally sequential and tightly coupled to native contexts.")]
     private void SetUpDecoder()
     {
         isInputReady = default;
 
-        if (processingTask is not null)
-        {
-            cts.Cancel();
-            processingTask.Wait();
-            processingTask = default;
-        }
+        StopProcessingTask();
 
         locker.Wait();
 
-        inputVideoStreamIndex = -1;
-        inputAudioStreamIndex = -1;
+        ResetInputStreams();
 
         CloseDecoder();
 
-        cts = new CancellationTokenSource();
-        processingTask = Task.Run(async () => await ProcessAsync(cts.Token).ConfigureAwait(false));
+        ResetCancellationTokenSource();
+        StartProcessingTask();
 
-        if (string.IsNullOrEmpty(inputPath) || inputPath is DevNull)
+        if (ShouldSkipInput())
         {
             locker.Release();
             return;
         }
 
-        unsafe
-        {
-            fixed (FormatContext** ctx = &input)
-            {
-                FFmpeg.Format.OpenInput(ctx, inputPath, default, default)
-                .ThrowIfErrors("Не удалось инициализировать контекст входного формата", locker);
-            }
-
-            FFmpeg.Format.FindStreamInfo(input, default).ThrowIfErrors("Не удалось найти информацию о входном потоке", locker);
-
-            SetUpVideoDecoder();
-            SetUpAudioDecoder();
-
-            if (videoDecoder is null && audioDecoder is null)
-            {
-                locker.Release();
-                throw new VideoStreamException("Не удалось найти ни одного аудио и видео потока");
-            }
-
-            if (resolution == default && videoDecoder is not null) resolution = new Size(videoDecoder->width, videoDecoder->height);
-        }
+        InitializeInputContext();
 
         isInputReady = true;
         locker.Release();
     }
+#pragma warning restore S3776
 
+    private void ResetInputStreams()
+    {
+        inputVideoStreamIndex = -1;
+        inputAudioStreamIndex = -1;
+    }
+
+    private bool ShouldSkipInput() => string.IsNullOrEmpty(inputPath) || inputPath is DevNull;
+
+    private unsafe void InitializeInputContext()
+    {
+        fixed (FormatContext** ctx = &input)
+        {
+            FFmpeg.Format.OpenInput(ctx, inputPath, default, default)
+            .ThrowIfErrors("Не удалось инициализировать контекст входного формата", locker);
+        }
+
+        FFmpeg.Format.FindStreamInfo(input, default).ThrowIfErrors("Не удалось найти информацию о входном потоке", locker);
+
+        SetUpVideoDecoder();
+        SetUpAudioDecoder();
+
+        if (videoDecoder is null && audioDecoder is null)
+        {
+            locker.Release();
+            throw new VideoStreamException("Не удалось найти ни одного аудио и видео потока");
+        }
+
+        if (resolution == default && videoDecoder is not null) resolution = new Size(videoDecoder->width, videoDecoder->height);
+    }
+
+#pragma warning disable S3776
+    [SuppressMessage("SonarAnalyzer.CSharp", "S3776", Justification = "Video encoder configuration follows FFmpeg requirements and is intentionally verbose.")]
+    [SuppressMessage("Meziantou.Analyzer", "MA0051:Method is too long", Justification = "Encoder setup touches many native fields sequentially; splitting risks inconsistent state.")]
     private unsafe void SetUpVideoEncoder()
     {
         fixed (CodecContext** ctx = &videoEncoder)
@@ -584,7 +622,11 @@ public class VideoStream : Stream
 
         outputVideoStreamIndex = outputStream->index;
     }
+#pragma warning restore S3776
 
+#pragma warning disable S3776
+    [SuppressMessage("SonarAnalyzer.CSharp", "S3776", Justification = "Audio encoder configuration mirrors FFmpeg expectations; altering the sequence risks regressions.")]
+    [SuppressMessage("Meziantou.Analyzer", "MA0051:Method is too long", Justification = "Encoder setup touches many native fields sequentially; splitting risks inconsistent state.")]
     private unsafe void SetUpAudioEncoder()
     {
         if (IsMuted) return;
@@ -691,17 +733,13 @@ public class VideoStream : Stream
 
         outputAudioStreamIndex = outputStream->index;
     }
+#pragma warning restore S3776
 
     private void SetUpEncoder()
     {
         readyFrames = default;
 
-        if (processingTask is not null)
-        {
-            cts.Cancel();
-            processingTask.Wait();
-            processingTask = default;
-        }
+        StopProcessingTask();
 
         locker.Wait();
 
@@ -713,8 +751,8 @@ public class VideoStream : Stream
         CloseEncoder();
 
         isOutputReady = default;
-        cts = new CancellationTokenSource();
-        processingTask = Task.Run(async () => await ProcessAsync(cts.Token).ConfigureAwait(false));
+        ResetCancellationTokenSource();
+        StartProcessingTask();
 
         if (string.IsNullOrEmpty(outputPath) || outputPath is DevNull)
         {
@@ -724,7 +762,7 @@ public class VideoStream : Stream
 
         unsafe
         {
-            isDevice = outputPath.StartsWith("/dev/");
+            isDevice = outputPath.StartsWith("/dev/", StringComparison.Ordinal);
             var shortName = isDevice ? "v4l2" : default;
             var fileName = isDevice ? default : outputPath;
 
@@ -752,6 +790,7 @@ public class VideoStream : Stream
         locker.Release();
     }
 
+    [SuppressMessage("Meziantou.Analyzer", "MA0051:Method is too long", Justification = "Filter graph initialization mirrors FFmpeg API calls and must remain sequential.")]
     private unsafe void SetUpFilters()
     {
         CloseFilters();
@@ -779,7 +818,7 @@ public class VideoStream : Stream
             sb.Append(filter.Calculate()).Append(',');
         }
 
-        sb.Append($"scale={resolution.Width}:{resolution.Height}");
+        sb.Append(string.Create(CultureInfo.InvariantCulture, $"scale={resolution.Width}:{resolution.Height}"));
 
         var filterSpec = sb.ToString();
         ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
@@ -795,7 +834,7 @@ public class VideoStream : Stream
             sampleAspectRatio = videoEncoder->sample_aspect_ratio;
         }
 
-        var bufferSourceArgs = $"video_size={resolution.Width}x{resolution.Height}:pix_fmt={Enum.GetName(format)?.ToLowerInvariant() ?? "yuv420p"}:time_base={timeBase.num}/{timeBase.den}:pixel_aspect={sampleAspectRatio.num}/{sampleAspectRatio.den}";
+        var bufferSourceArgs = string.Create(CultureInfo.InvariantCulture, $"video_size={resolution.Width}x{resolution.Height}:pix_fmt={Enum.GetName(format)?.ToLowerInvariant() ?? "yuv420p"}:time_base={timeBase.num}/{timeBase.den}:pixel_aspect={sampleAspectRatio.num}/{sampleAspectRatio.den}");
 
         var bufferSource = FFmpeg.Filter.GetByName("buffer");
         var bufferSink = FFmpeg.Filter.GetByName("buffersink");
@@ -865,6 +904,7 @@ public class VideoStream : Stream
         return convertedFrame;
     }
 
+    [SuppressMessage("Meziantou.Analyzer", "MA0051:Method is too long", Justification = "Scaling math and unmanaged buffer handling are tightly coupled and must stay together.")]
     private unsafe MediaFrame* ScaleCover(MediaFrame* frame, PixelFormat format, int width, int height)
     {
         var srcAspect = (double)frame->width / frame->height;
@@ -964,6 +1004,7 @@ public class VideoStream : Stream
         return finalFrame;
     }
 
+    [SuppressMessage("Meziantou.Analyzer", "MA0051:Method is too long", Justification = "Scaling math and unmanaged buffer handling are tightly coupled and must stay together.")]
     private unsafe MediaFrame* ScaleFit(MediaFrame* frame, PixelFormat format, int width, int height)
     {
         var srcAspect = (double)frame->width / frame->height;
@@ -1083,6 +1124,9 @@ public class VideoStream : Stream
         return filteredFrame;
     }
 
+#pragma warning disable S3776
+    [SuppressMessage("SonarAnalyzer.CSharp", "S3776", Justification = "Encoding logic directly mirrors FFmpeg's state machine and cannot be simplified safely.")]
+    [SuppressMessage("Meziantou.Analyzer", "MA0051:Method is too long", Justification = "Encoding loop interacts with unmanaged queues and must remain monolithic for correctness.")]
     private unsafe bool Encode(CodecContext* encoder, MediaStream* inputStream, MediaStream* outputStream, MediaFrame* frame, int samples, Ratio inputTimeBase, Ratio outputTimeBase)
     {
         if (neededFrames > 0 && readyFrames > neededFrames) return default;
@@ -1152,7 +1196,9 @@ public class VideoStream : Stream
 
         return true;
     }
+#pragma warning restore S3776
 
+    [SuppressMessage("Meziantou.Analyzer", "MA0051:Method is too long", Justification = "Decoder loop mirrors FFmpeg state machine; splitting would complicate error handling and resource cleanup.")]
     private unsafe MediaFrame* Decode(CodecContext* decoder, MediaPacket* packet, int encoderFormat, int encoderWidth, int encoderHeight, Ratio inputTimeBase, Ratio outputTimeBase)
     {
         var frame = FFmpeg.Util.FrameAlloc();
@@ -1221,6 +1267,9 @@ public class VideoStream : Stream
         return frame;
     }
 
+#pragma warning disable S3776
+    [SuppressMessage("SonarAnalyzer.CSharp", "S3776", Justification = "Input processing interleaves decoding and encoding steps that must remain in this order.")]
+    [SuppressMessage("Meziantou.Analyzer", "MA0051:Method is too long", Justification = "Processing loop coordinates multiple unmanaged resources and must remain intact.")]
     private unsafe bool ProcessInput()
     {
         if (!CanRead || !CanWrite) return default;
@@ -1292,7 +1341,7 @@ public class VideoStream : Stream
                         continue;
                     }
 
-                    if (!string.IsNullOrEmpty(previousInputPath) && previousInputPath != inputPath) break;
+                    if (!string.IsNullOrEmpty(previousInputPath) && !string.Equals(previousInputPath, inputPath, StringComparison.Ordinal)) break;
 
                     locker.Wait();
 
@@ -1323,6 +1372,7 @@ public class VideoStream : Stream
 
         return !output->oformat->IsImage || readyFrames <= 0;
     }
+#pragma warning restore S3776
 
     private unsafe bool ProcessWhiteNoise()
     {
@@ -1415,22 +1465,38 @@ public class VideoStream : Stream
     /// <summary>
     /// Освобождает неуправляемые ресурсы, используемые объектом.
     /// </summary>
+    [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP023:Don't use reference types in finalizer context", Justification = "Unmanaged FFmpeg resources must be released even if the finalizer runs.")]
     protected override void Dispose(bool disposing)
     {
-        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
+        if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
 
-        if (processingTask is not null) cts.Cancel();
+        try
+        {
+            if (disposing)
+            {
+                StopProcessingTask();
+            }
 
-        Close();
-        cts.Dispose();
-        base.Dispose(disposing);
-        locker.Dispose();
+            CloseInternal();
+        }
+        finally
+        {
+            if (disposing)
+            {
+                cts.Dispose();
+                locker.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
     }
 
     /// <summary>
     /// Закрывает медиа вход.
     /// </summary>
-    public override void Close()
+    public override void Close() => CloseInternal();
+
+    private void CloseInternal()
     {
         if (IsClosed) return;
         IsClosed = true;

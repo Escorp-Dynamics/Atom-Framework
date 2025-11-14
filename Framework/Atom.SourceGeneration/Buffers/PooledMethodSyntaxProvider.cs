@@ -17,10 +17,13 @@ public class PooledMethodSyntaxProvider : MethodSyntaxProvider
     /// Инициализирует новый экземпляр <see cref="PooledMethodSyntaxProvider"/>.
     /// </summary>
     /// <param name="context">Контекст генератора.</param>
-    public PooledMethodSyntaxProvider(IncrementalGeneratorInitializationContext context) : base(context) => WithAttribute("Pooled");
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public PooledMethodSyntaxProvider(IncrementalGeneratorInitializationContext context) : base(context) => WithAttribute();
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void WithAttribute() => WithAttribute("Pooled");
 
     /// <inheritdoc/>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected override void OnExecute(SourceProductionContext context, string entityName, ImmutableArray<ISyntaxProviderInfo<IMethodSymbol, MethodDeclarationSyntax>> sources)
     {
         var type = sources[0];
@@ -52,7 +55,7 @@ public class PooledMethodSyntaxProvider : MethodSyntaxProvider
             .WithUsing("System.Diagnostics.CodeAnalysis", "Atom.Buffers")
             .WithClass(classBuilder);
 
-        var src = sourceCode.Build(true);
+        var src = sourceCode.Build(release: true);
         if (!string.IsNullOrEmpty(src)) context.AddSource($"{entityName}.Pooled.g.cs", SourceText.From(src, Encoding.UTF8));
     }
 }

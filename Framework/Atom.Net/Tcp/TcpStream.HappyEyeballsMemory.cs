@@ -55,9 +55,7 @@ public sealed partial class TcpStream : NetworkStream
             if (string.IsNullOrEmpty(host)) return;
 
             var fp = Fingerprint(host);
-            var p = family is AddressFamily.InterNetwork ? (byte)4
-                   : family is AddressFamily.InterNetworkV6 ? (byte)6 : (byte)0;
-
+            var p = family is AddressFamily.InterNetwork ? (byte)4 : family is AddressFamily.InterNetworkV6 ? (byte)6 : (byte)0;
             if (p is 0) return;
 
             var idx = (Interlocked.Increment(ref next) - 1) & (Capacity - 1);

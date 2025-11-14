@@ -97,8 +97,8 @@ public class JsonContext<T>(JsonSerializerOptions options, JsonConverter? conver
     {
         for (var i = 0; i < options.Converters.Count; ++i)
         {
-            var converter = options.Converters[i];
-            if (converter?.CanConvert(type) is true) return ExpandConverter(type, converter, options, validateCanConvert: false);
+            var cv = options.Converters[i];
+            if (cv?.CanConvert(type) is true) return ExpandConverter(type, cv, options, validateCanConvert: false);
         }
 
         return default;
@@ -107,11 +107,11 @@ public class JsonContext<T>(JsonSerializerOptions options, JsonConverter? conver
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool TryGetTypeInfoForRuntimeCustomConverter(JsonSerializerOptions options, out JsonTypeInfo<T>? jsonTypeInfo)
     {
-        var converter = GetRuntimeConverterForType(typeof(T), options);
+        var cv = GetRuntimeConverterForType(typeof(T), options);
 
-        if (converter is not null)
+        if (cv is not null)
         {
-            jsonTypeInfo = JsonMetadataServices.CreateValueInfo<T>(options, converter);
+            jsonTypeInfo = JsonMetadataServices.CreateValueInfo<T>(options, cv);
             return true;
         }
 

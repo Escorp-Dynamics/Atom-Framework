@@ -33,7 +33,7 @@ public abstract class ProxyValidator(HttpsRequestBuilder request, TimeSpan speed
         cancellationToken.ThrowIfCancellationRequested();
 
         using var handler = new HttpsClientHandler { Proxy = proxy, UseProxy = true, CheckCertificateRevocationList = true };
-        using var client = new HttpsClient(handler, true);
+        using var client = new HttpsClient(handler, disposeHandler: true);
         using var speedCts = new CancellationTokenSource(speed);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, speedCts.Token);
 

@@ -1,5 +1,6 @@
 namespace Atom.SourceGeneration.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class AccessorBuilderTests(ILogger logger) : BenchmarkTests<AccessorBuilderTests>(logger)
 {
     private static string? propertyAccessorReference;
@@ -35,7 +36,7 @@ public class AccessorBuilderTests(ILogger logger) : BenchmarkTests<AccessorBuild
             .WithAttribute("Test")
             .AsReadOnly()
             .WithCode("test")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + PropertyAccessorMember.Create()
             .WithAttribute("Test")
@@ -44,11 +45,11 @@ public class AccessorBuilderTests(ILogger logger) : BenchmarkTests<AccessorBuild
                 SomeMethod();
                 return test;
             ")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + PropertyAccessorMember.Create()
             .WithAttribute("Test")
-            .Build(true);
+            .Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {
@@ -63,7 +64,7 @@ public class AccessorBuilderTests(ILogger logger) : BenchmarkTests<AccessorBuild
         var src = EventAddMember.Create()
             .WithAttribute("Test")
             .WithCode("Test += OnTest")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + EventAddMember.Create()
             .WithAttribute("Test")
@@ -71,11 +72,11 @@ public class AccessorBuilderTests(ILogger logger) : BenchmarkTests<AccessorBuild
                 SomeMethod();
                 Test += OnTest;
             ")
-            .Build(true);
+            .Build(release: true);
 
         src += Environment.NewLine + EventAddMember.Create()
             .WithAttribute("Test")
-            .Build(true);
+            .Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {

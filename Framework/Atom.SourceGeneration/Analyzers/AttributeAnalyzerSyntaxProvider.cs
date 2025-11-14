@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -36,6 +37,7 @@ public abstract class AttributeAnalyzerSyntaxProvider : AnalyzerSyntaxProvider
     );
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override void Execute(SyntaxNodeAnalysisContext context)
     {
         if (context.Node is not AttributeSyntax node) return;

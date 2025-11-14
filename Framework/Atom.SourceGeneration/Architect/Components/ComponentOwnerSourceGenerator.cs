@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Atom.SourceGeneration;
 using Microsoft.CodeAnalysis;
 
@@ -13,6 +14,7 @@ public class ComponentOwnerSourceGenerator : IIncrementalGenerator
     /// Инициализирует генератор.
     /// </summary>
     /// <param name="context">Контекст генератора.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void Initialize(IncrementalGeneratorInitializationContext context)
         => context.UseProvider(new ComponentOwnerTypeSyntaxProvider(context), new ComponentOwnerAttributeAnalyzerSyntaxProvider());
 }

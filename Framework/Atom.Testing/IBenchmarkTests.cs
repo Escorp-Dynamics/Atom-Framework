@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Loggers;
 
 namespace Atom.Testing;
@@ -20,20 +21,24 @@ public interface IBenchmarkTests
     /// <summary>
     /// Устанавливает настройки для всех тестов.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     void GlobalSetUp();
 
     /// <summary>
     /// Устанавливает настройки для каждого теста.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     void OneTimeSetUp();
 
     /// <summary>
     /// Вызывается при завершении всех тестов.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     void GlobalTearDown();
 
     /// <summary>
     /// Вызывается при завершении каждого теста.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     void OneTimeTearDown();
 }

@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Atom.Net.Https;
 
@@ -64,6 +65,7 @@ public enum JitterDistribution : byte
 /// Инициализирует новый экземпляр <see cref="JitterSettings"/>.
 /// </remarks>
 [method: MethodImpl(MethodImplOptions.AggressiveInlining)]
+[StructLayout(LayoutKind.Auto)]
 public readonly struct JitterSettings() : IEquatable<JitterSettings>
 {
     /// <summary>

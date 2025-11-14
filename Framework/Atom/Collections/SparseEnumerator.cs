@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Atom.Collections;
 
@@ -12,6 +13,7 @@ namespace Atom.Collections;
 /// <param name="indexes">Исходный массив индексов.</param>
 /// <param name="currentIndex">Текущий индекс массива.</param>
 [method: MethodImpl(MethodImplOptions.AggressiveInlining)]
+[StructLayout(LayoutKind.Auto)]
 public ref struct SparseEnumerator<T>(ReadOnlySpan<T> values, ReadOnlySpan<int> indexes, int currentIndex)
 {
     private readonly ReadOnlySpan<T> values = values;

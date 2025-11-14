@@ -27,7 +27,7 @@ internal interface IHttpsConnection : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// Соединение поддерживает мультиплексирование запросов (HTTP/2/3).
-    /// Для HTTP/1.1 всегда <c>false</c>.
+    /// Для HTTP/1.1 всегда <see langword="false"/>.
     /// </summary>
     bool IsMultiplexing { get; }
 
@@ -44,7 +44,7 @@ internal interface IHttpsConnection : IDisposable, IAsyncDisposable
     int MaxConcurrentStreams { get; }
 
     /// <summary>
-    /// Текущее состояние дренажа: если <c>true</c>, новые запросы больше не принимаются,
+    /// Текущее состояние дренажа: если <see langword="true"/>, новые запросы больше не принимаются,
     /// но активные корректно завершаются.
     /// </summary>
     bool IsDraining { get; }
@@ -72,7 +72,7 @@ internal interface IHttpsConnection : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// Проверка, может ли соединение принять ещё один запрос немедленно (без очереди).
-    /// Для HTTP/1.1 вернёт <c>true</c>, если нет активного запроса; для h2/h3 — если не достигнут лимит потоков.
+    /// Для HTTP/1.1 вернёт <see langword="true"/>, если нет активного запроса; для h2/h3 — если не достигнут лимит потоков.
     /// </summary>
     bool HasCapacity { get; }
 
@@ -162,7 +162,7 @@ internal interface IHttpsConnection : IDisposable, IAsyncDisposable
     /// Необязательно посылать сетевой пакет: реализация может использовать эвристику браузера.
     /// </summary>
     /// <param name="cancellationToken">Токен отмены.</param>
-    /// <returns><c>true</c>, если соединение подтверждено живым и пригодным к повторному использованию; иначе <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если соединение подтверждено живым и пригодным к повторному использованию; иначе <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     ValueTask<bool> PingAsync(CancellationToken cancellationToken);
 
@@ -170,7 +170,7 @@ internal interface IHttpsConnection : IDisposable, IAsyncDisposable
     /// Быстрый пинг для поддержания keep-alive (например, HTTP/2 PING, HTTP/3 DATAGRAM/PATH-CHALLENGE, HTTP/1.1 — TCP keep-alive).
     /// Необязательно посылать сетевой пакет: реализация может использовать эвристику браузера.
     /// </summary>
-    /// <returns><c>true</c>, если соединение подтверждено живым и пригодным к повторному использованию; иначе <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если соединение подтверждено живым и пригодным к повторному использованию; иначе <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     ValueTask<bool> PingAsync() => PingAsync(CancellationToken.None);
 

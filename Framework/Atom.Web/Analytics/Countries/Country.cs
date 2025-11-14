@@ -1,4 +1,4 @@
-﻿#pragma warning disable IDE0046
+﻿#pragma warning disable IDE0046, MA0051
 
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
@@ -88,6 +88,11 @@ public sealed partial class Country(
     public string? IOC { get; } = ioc;
 
     /// <summary>
+    /// Континент, к которому относится страна.
+    /// </summary>
+    public Continent Continent { get; init; } = ResolveContinent(isoCode2);
+
+    /// <summary>
     /// Смещение часового пояса от UTC.
     /// </summary>
     public TimeSpan TimeZoneOffset { get; } = timeZoneOffset;
@@ -99,260 +104,508 @@ public sealed partial class Country(
 
     /// <summary>
     /// Информация о часовом поясе.
-    /// </summary>
-    public TimeZoneInfo? TimeZone => TimeZoneInfo.GetSystemTimeZones().FirstOrDefault(t => t.BaseUtcOffset == TimeZoneOffset);
+	/// </summary>
+	public TimeZoneInfo? TimeZone => TimeZoneInfo.GetSystemTimeZones().FirstOrDefault(t => t.BaseUtcOffset == TimeZoneOffset);
+
+    private static readonly Dictionary<string, Continent> Iso2ToContinent = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["AU"] = Continent.OC,
+        ["AT"] = Continent.EU,
+        ["AZ"] = Continent.AS,
+        ["AX"] = Continent.EU,
+        ["AL"] = Continent.EU,
+        ["DZ"] = Continent.AF,
+        ["AS"] = Continent.OC,
+        ["AI"] = Continent.NA,
+        ["AO"] = Continent.AF,
+        ["AD"] = Continent.EU,
+        ["AQ"] = Continent.AN,
+        ["AG"] = Continent.NA,
+        ["AR"] = Continent.SA,
+        ["AM"] = Continent.AS,
+        ["AW"] = Continent.NA,
+        ["AF"] = Continent.AS,
+        ["BS"] = Continent.NA,
+        ["BD"] = Continent.AS,
+        ["BB"] = Continent.NA,
+        ["BH"] = Continent.AS,
+        ["BZ"] = Continent.NA,
+        ["BY"] = Continent.EU,
+        ["BE"] = Continent.EU,
+        ["BJ"] = Continent.AF,
+        ["BM"] = Continent.NA,
+        ["BG"] = Continent.EU,
+        ["BO"] = Continent.SA,
+        ["BQ"] = Continent.NA,
+        ["BA"] = Continent.EU,
+        ["BW"] = Continent.AF,
+        ["BR"] = Continent.SA,
+        ["IO"] = Continent.AF,
+        ["BN"] = Continent.AS,
+        ["BF"] = Continent.AF,
+        ["BI"] = Continent.AF,
+        ["BT"] = Continent.AS,
+        ["VU"] = Continent.OC,
+        ["VA"] = Continent.EU,
+        ["GB"] = Continent.EU,
+        ["HU"] = Continent.EU,
+        ["VE"] = Continent.SA,
+        ["UM"] = Continent.OC,
+        ["TL"] = Continent.AS,
+        ["VN"] = Continent.AS,
+        ["GA"] = Continent.AF,
+        ["HT"] = Continent.NA,
+        ["GY"] = Continent.SA,
+        ["GM"] = Continent.AF,
+        ["GH"] = Continent.AF,
+        ["GP"] = Continent.NA,
+        ["GT"] = Continent.NA,
+        ["GN"] = Continent.AF,
+        ["GW"] = Continent.AF,
+        ["DE"] = Continent.EU,
+        ["GI"] = Continent.EU,
+        ["HN"] = Continent.NA,
+        ["HK"] = Continent.AS,
+        ["GD"] = Continent.NA,
+        ["GR"] = Continent.EU,
+        ["GE"] = Continent.AS,
+        ["GU"] = Continent.OC,
+        ["DK"] = Continent.EU,
+        ["DJ"] = Continent.AF,
+        ["DM"] = Continent.NA,
+        ["DO"] = Continent.NA,
+        ["CD"] = Continent.AF,
+        ["EG"] = Continent.AF,
+        ["ZM"] = Continent.AF,
+        ["EH"] = Continent.AF,
+        ["ZW"] = Continent.AF,
+        ["IL"] = Continent.AS,
+        ["IN"] = Continent.AS,
+        ["ID"] = Continent.AS,
+        ["JO"] = Continent.AS,
+        ["IQ"] = Continent.AS,
+        ["IR"] = Continent.AS,
+        ["IE"] = Continent.EU,
+        ["IS"] = Continent.EU,
+        ["ES"] = Continent.EU,
+        ["IT"] = Continent.EU,
+        ["YE"] = Continent.AS,
+        ["CV"] = Continent.AF,
+        ["KZ"] = Continent.AS,
+        ["KY"] = Continent.NA,
+        ["KH"] = Continent.AS,
+        ["CM"] = Continent.AF,
+        ["CA"] = Continent.NA,
+        ["QA"] = Continent.AS,
+        ["KE"] = Continent.AF,
+        ["CY"] = Continent.AS,
+        ["KG"] = Continent.AS,
+        ["KI"] = Continent.OC,
+        ["KP"] = Continent.AS,
+        ["CN"] = Continent.AS,
+        ["CO"] = Continent.SA,
+        ["KM"] = Continent.AF,
+        ["CR"] = Continent.NA,
+        ["CI"] = Continent.AF,
+        ["CU"] = Continent.NA,
+        ["KW"] = Continent.AS,
+        ["CW"] = Continent.NA,
+        ["LA"] = Continent.AS,
+        ["LV"] = Continent.EU,
+        ["LS"] = Continent.AF,
+        ["LR"] = Continent.AF,
+        ["LB"] = Continent.AS,
+        ["LY"] = Continent.AF,
+        ["LT"] = Continent.EU,
+        ["LI"] = Continent.EU,
+        ["LU"] = Continent.EU,
+        ["MU"] = Continent.AF,
+        ["MR"] = Continent.AF,
+        ["MG"] = Continent.AF,
+        ["YT"] = Continent.AF,
+        ["MO"] = Continent.AS,
+        ["MK"] = Continent.EU,
+        ["MW"] = Continent.AF,
+        ["MY"] = Continent.AS,
+        ["ML"] = Continent.AF,
+        ["MV"] = Continent.AS,
+        ["MT"] = Continent.EU,
+        ["MA"] = Continent.AF,
+        ["MQ"] = Continent.NA,
+        ["MH"] = Continent.OC,
+        ["MX"] = Continent.NA,
+        ["FM"] = Continent.OC,
+        ["MZ"] = Continent.AF,
+        ["MD"] = Continent.EU,
+        ["MC"] = Continent.EU,
+        ["MN"] = Continent.AS,
+        ["MS"] = Continent.NA,
+        ["MM"] = Continent.AS,
+        ["NA"] = Continent.AF,
+        ["NR"] = Continent.OC,
+        ["NP"] = Continent.AS,
+        ["NE"] = Continent.AF,
+        ["NG"] = Continent.AF,
+        ["NL"] = Continent.EU,
+        ["NI"] = Continent.NA,
+        ["NU"] = Continent.OC,
+        ["NZ"] = Continent.OC,
+        ["NC"] = Continent.OC,
+        ["NO"] = Continent.EU,
+        ["AE"] = Continent.AS,
+        ["OM"] = Continent.AS,
+        ["BV"] = Continent.SA,
+        ["IM"] = Continent.EU,
+        ["CK"] = Continent.OC,
+        ["NF"] = Continent.OC,
+        ["PN"] = Continent.OC,
+        ["SH"] = Continent.AF,
+        ["PK"] = Continent.AS,
+        ["PW"] = Continent.OC,
+        ["PS"] = Continent.AS,
+        ["PA"] = Continent.NA,
+        ["PG"] = Continent.OC,
+        ["PY"] = Continent.SA,
+        ["PE"] = Continent.SA,
+        ["PL"] = Continent.EU,
+        ["PT"] = Continent.EU,
+        ["PR"] = Continent.NA,
+        ["CG"] = Continent.AF,
+        ["KR"] = Continent.AS,
+        ["RE"] = Continent.AF,
+        ["RU"] = Continent.EU,
+        ["RW"] = Continent.AF,
+        ["RO"] = Continent.EU,
+        ["SV"] = Continent.NA,
+        ["WS"] = Continent.OC,
+        ["SM"] = Continent.EU,
+        ["ST"] = Continent.AF,
+        ["SA"] = Continent.AS,
+        ["SZ"] = Continent.AF,
+        ["MP"] = Continent.OC,
+        ["SC"] = Continent.AF,
+        ["PM"] = Continent.NA,
+        ["SN"] = Continent.AF,
+        ["VC"] = Continent.NA,
+        ["KN"] = Continent.NA,
+        ["LC"] = Continent.NA,
+        ["RS"] = Continent.EU,
+        ["SG"] = Continent.AS,
+        ["SX"] = Continent.NA,
+        ["SY"] = Continent.AS,
+        ["SK"] = Continent.EU,
+        ["SI"] = Continent.EU,
+        ["SB"] = Continent.OC,
+        ["SO"] = Continent.AF,
+        ["SD"] = Continent.AF,
+        ["SR"] = Continent.SA,
+        ["US"] = Continent.NA,
+        ["SL"] = Continent.AF,
+        ["TJ"] = Continent.AS,
+        ["TH"] = Continent.AS,
+        ["TZ"] = Continent.AF,
+        ["TC"] = Continent.NA,
+        ["TG"] = Continent.AF,
+        ["TK"] = Continent.OC,
+        ["TO"] = Continent.OC,
+        ["TT"] = Continent.NA,
+        ["TV"] = Continent.OC,
+        ["TN"] = Continent.AF,
+        ["TM"] = Continent.AS,
+        ["TR"] = Continent.AS,
+        ["UG"] = Continent.AF,
+        ["UZ"] = Continent.AS,
+        ["UA"] = Continent.EU,
+        ["WF"] = Continent.OC,
+        ["UY"] = Continent.SA,
+        ["FO"] = Continent.EU,
+        ["FJ"] = Continent.OC,
+        ["PH"] = Continent.AS,
+        ["FI"] = Continent.EU,
+        ["FK"] = Continent.SA,
+        ["FR"] = Continent.EU,
+        ["PF"] = Continent.OC,
+        ["TF"] = Continent.AF,
+        ["HM"] = Continent.OC,
+        ["HR"] = Continent.EU,
+        ["CF"] = Continent.AF,
+        ["TD"] = Continent.AF,
+        ["ME"] = Continent.EU,
+        ["CZ"] = Continent.EU,
+        ["CL"] = Continent.SA,
+        ["CH"] = Continent.EU,
+        ["SE"] = Continent.EU,
+        ["SJ"] = Continent.EU,
+        ["LK"] = Continent.AS,
+        ["EC"] = Continent.SA,
+        ["GQ"] = Continent.AF,
+        ["ER"] = Continent.AF,
+        ["EE"] = Continent.EU,
+        ["ET"] = Continent.AF,
+        ["ZA"] = Continent.AF,
+        ["GS"] = Continent.SA,
+        ["SS"] = Continent.AF,
+        ["JM"] = Continent.NA,
+        ["JP"] = Continent.AS,
+    };
+
+    private static Continent ResolveContinent(string isoCode2)
+    {
+        if (Iso2ToContinent.TryGetValue(isoCode2, out var continent)) return continent;
+        return Continent.AN;
+    }
 
     #region Инициализации
 
-    private static readonly Lazy<Country> aus = new(() => new Country("Австралия", "Australia", 036, "AU", "AUS", new TimeSpan(10, 0, 0), Currency.AUD, 61, ".au", "AUS"), true);
-    private static readonly Lazy<Country> aut = new(() => new Country("Австрия", "Austria", 040, "AT", "AUT", new TimeSpan(1, 0, 0), 43, ".at", "AUT"), true);
-    private static readonly Lazy<Country> aze = new(() => new Country("Азербайджан", "Azerbaijan", 031, "AZ", "AZE", new TimeSpan(4, 0, 0), Currency.AZN, 994, ".az", "AZE"), true);
-    private static readonly Lazy<Country> ala = new(() => new Country("Аландские острова", "Åland Islands", 248, "AX", "ALA", new TimeSpan(2, 0, 0), 0, ".ax"), true);
-    private static readonly Lazy<Country> alb = new(() => new Country("Албания", "Albania", 008, "AL", "ALB", new TimeSpan(1, 0, 0), Currency.ALL, 355, ".al", "ALB"), true);
-    private static readonly Lazy<Country> dza = new(() => new Country("Алжир", "Algeria", 012, "DZ", "DZA", new TimeSpan(1, 0, 0), Currency.DZD, 213, ".dz", "ALG"), true);
-    private static readonly Lazy<Country> vir = new(() => new Country("Виргинские Острова (США)", "Virgin Islands", 850, "VI", "VIR", new TimeSpan(-4, 0, 0), 0, ".vi", "ISV"), true);
-    private static readonly Lazy<Country> asm = new(() => new Country("Американское Самоа", "American Samoa", 016, "AS", "ASM", new TimeSpan(-11, 0, 0), 0, ".as", "ASA"), true);
-    private static readonly Lazy<Country> aia = new(() => new Country("Ангилья", "Anguilla", 660, "AI", "AIA", new TimeSpan(-4, 0, 0), 0, ".ai"), true);
-    private static readonly Lazy<Country> ago = new(() => new Country("Ангола", "Angola", 024, "AO", "AGO", new TimeSpan(1, 0, 0), Currency.AOA, 244, ".ao", "ANG"), true);
-    private static readonly Lazy<Country> and = new(() => new Country("Андорра", "Andorra", 020, "AD", "AND", new TimeSpan(1, 0, 0), 376, ".ad", "AND"), true);
-    private static readonly Lazy<Country> ata = new(() => new Country("Антарктика", "Antarctica", 010, "AQ", "ATA", new TimeSpan(-3, 0, 0), 0, ".aq"), true);
-    private static readonly Lazy<Country> atg = new(() => new Country("Антигуа и Барбуда", "Antigua and Barbuda", 028, "AG", "ATG", new TimeSpan(-4, 0, 0), 1268, ".ag", "ANT"), true);
-    private static readonly Lazy<Country> arg = new(() => new Country("Аргентина", "Argentina", 032, "AR", "ARG", new TimeSpan(-3, 0, 0), Currency.ARS, 54, ".ar", "ARG"), true);
-    private static readonly Lazy<Country> arm = new(() => new Country("Армения", "Armenia", 051, "AM", "ARM", new TimeSpan(4, 0, 0), Currency.AMD, 374, ".am", "ARM"), true);
-    private static readonly Lazy<Country> abw = new(() => new Country("Аруба", "Aruba", 533, "AW", "ABW", new TimeSpan(-4, 0, 0), Currency.AWG, 0, ".aw", "ARU"), true);
-    private static readonly Lazy<Country> afg = new(() => new Country("Афганистан", "Afghanistan", 004, "AF", "AFG", new TimeSpan(4, 30, 0), Currency.AFN, 93, ".af", "AFG"), true);
-    private static readonly Lazy<Country> bhs = new(() => new Country("Багамские Острова", "Bahamas", 044, "BS", "BHS", new TimeSpan(-5, 0, 0), Currency.BSD, 1242, ".bs", "BAH"), true);
-    private static readonly Lazy<Country> bgd = new(() => new Country("Бангладеш", "Bangladesh", 050, "BD", "BGD", new TimeSpan(6, 0, 0), Currency.BDT, 880, ".bd", "BAN"), true);
-    private static readonly Lazy<Country> brb = new(() => new Country("Барбадос", "Barbados", 052, "BB", "BRB", new TimeSpan(-4, 0, 0), Currency.BBD, 1246, ".bb", "BAR"), true);
-    private static readonly Lazy<Country> bhr = new(() => new Country("Бахрейн", "Bahrain", 048, "BH", "BHR", new TimeSpan(3, 0, 0), Currency.BHD, 973, ".bh", "BRN"), true);
-    private static readonly Lazy<Country> blz = new(() => new Country("Белиз", "Belize", 084, "BZ", "BLZ", new TimeSpan(-6, 0, 0), Currency.BZD, 501, ".bz", "BIZ"), true);
-    private static readonly Lazy<Country> blr = new(() => new Country("Белоруссия", "Belarus", 112, "BY", "BLR", new TimeSpan(3, 0, 0), Currency.BYN, 375, ".by", "BLR"), true);
-    private static readonly Lazy<Country> bel = new(() => new Country("Бельгия", "Belgium", 056, "BE", "BEL", new TimeSpan(1, 0, 0), 32, ".be", "BEL"), true);
-    private static readonly Lazy<Country> ben = new(() => new Country("Бенин", "Benin", 204, "BJ", "BEN", new TimeSpan(1, 0, 0), 229, ".bj", "BEN"), true);
-    private static readonly Lazy<Country> bmu = new(() => new Country("Бермудские Острова", "Bermuda", 060, "BM", "BMU", new TimeSpan(-4, 0, 0), Currency.BMD, 0, ".bm", "BER"), true);
-    private static readonly Lazy<Country> bgr = new(() => new Country("Болгария", "Bulgaria", 100, "BG", "BGR", new TimeSpan(2, 0, 0), Currency.BGN, 359, ".bg", "BUL"), true);
-    private static readonly Lazy<Country> bol = new(() => new Country("Боливия", "Bolivia", 068, "BO", "BOL", new TimeSpan(-4, 0, 0), [Currency.BOB, Currency.BOV], 591, ".bo", "BOL"), true);
-    private static readonly Lazy<Country> bes = new(() => new Country("Бонайре, Синт-Эстатиус и Саба", "Caribbean Netherlands", 535, "BQ", "BES", new TimeSpan(-4, 0, 0), 0, ".bq"), true);
-    private static readonly Lazy<Country> bih = new(() => new Country("Босния и Герцеговина", "Bosnia and Herzegovina", 070, "BA", "BIH", new TimeSpan(1, 0, 0), Currency.BAM, 387, ".ba", "BIH"), true);
-    private static readonly Lazy<Country> bwa = new(() => new Country("Ботсвана", "Botswana", 072, "BW", "BWA", new TimeSpan(2, 0, 0), Currency.BWP, 267, ".bw", "BOT"), true);
-    private static readonly Lazy<Country> bra = new(() => new Country("Бразилия", "Brazil", 076, "BR", "BRA", new TimeSpan(-3, 0, 0), Currency.BRL, 55, ".br", "BRA"), true);
-    private static readonly Lazy<Country> iot = new(() => new Country("Британская Территория в Индийском Океане", "British Indian Ocean Territory", 086, "IO", "IOT", new TimeSpan(6, 0, 0), 0, ".io"), true);
-    private static readonly Lazy<Country> vgb = new(() => new Country("Виргинские Острова (Великобритания)", "British Virgin Islands", 092, "VG", "VGB", new TimeSpan(-4, 0, 0), 0, ".vg", "IVB"), true);
-    private static readonly Lazy<Country> brn = new(() => new Country("Бруней", "Brunei", 096, "BN", "BRN", new TimeSpan(8, 0, 0), Currency.BND, 673, ".bn", "BRU"), true);
-    private static readonly Lazy<Country> bfa = new(() => new Country("Буркина-Фасо", "Burkina Faso", 854, "BF", "BFA", new TimeSpan(), 226, ".bf", "BUR"), true);
-    private static readonly Lazy<Country> bdi = new(() => new Country("Бурунди", "Burundi", 108, "BI", "BDI", new TimeSpan(2, 0, 0), Currency.BIF, 257, ".bi", "BDI"), true);
-    private static readonly Lazy<Country> btn = new(() => new Country("Бутан", "Bhutan", 064, "BT", "BTN", new TimeSpan(6, 0, 0), Currency.BTN, 975, ".bt", "BHU"), true);
-    private static readonly Lazy<Country> vut = new(() => new Country("Вануату", "Vanuatu", 548, "VU", "VUT", new TimeSpan(11, 0, 0), Currency.VUV, 678, ".vu", "VAN"), true);
-    private static readonly Lazy<Country> vat = new(() => new Country("Ватикан", "Vatican City", 336, "VA", "VAT", new TimeSpan(1, 0, 0), 379, ".va"), true);
-    private static readonly Lazy<Country> gbr = new(() => new Country("Великобритания", "United Kingdom", 826, "GB", "GBR", new TimeSpan(), Currency.GBP, 44, ".uk", "GBR"), true);
-    private static readonly Lazy<Country> hun = new(() => new Country("Венгрия", "Hungary", 348, "HU", "HUN", new TimeSpan(1, 0, 0), Currency.HUF, 36, ".hu", "HUN"), true);
-    private static readonly Lazy<Country> ven = new(() => new Country("Венесуэла", "Venezuela", 862, "VE", "VEN", new TimeSpan(-4, -30, 0), Currency.VEF, 58, ".ve", "VEN"), true);
-    private static readonly Lazy<Country> umi = new(() => new Country("Внешние малые острова США", "United States Minor Outlying Islands", 581, "UM", "UMI", new TimeSpan(-11, 0, 0), 0, ".us"), true);
-    private static readonly Lazy<Country> tls = new(() => new Country("Восточный Тимор", "East Timor", 626, "TL", "TLS", new TimeSpan(9, 0, 0), 670, ".tl", "TLS"), true);
-    private static readonly Lazy<Country> vnm = new(() => new Country("Вьетнам", "Vietnam", 704, "VN", "VNM", new TimeSpan(7, 0, 0), Currency.VND, 84, ".vn", "VIE"), true);
-    private static readonly Lazy<Country> gab = new(() => new Country("Габон", "Gabon", 266, "GA", "GAB", new TimeSpan(1, 0, 0), 241, ".ga", "GAB"), true);
-    private static readonly Lazy<Country> hti = new(() => new Country("Республика Гаити", "Haiti", 332, "HT", "HTI", new TimeSpan(-5, 0, 0), Currency.HTG, 509, ".ht", "HAI"), true);
-    private static readonly Lazy<Country> guy = new(() => new Country("Гайана", "Guyana", 328, "GY", "GUY", new TimeSpan(-4, 0, 0), Currency.GYD, 592, ".gy", "GUY"), true);
-    private static readonly Lazy<Country> gmb = new(() => new Country("Гамбия", "Gambia", 270, "GM", "GMB", new TimeSpan(), Currency.GMD, 220, ".gm", "GAM"), true);
-    private static readonly Lazy<Country> gha = new(() => new Country("Гана", "Ghana", 288, "GH", "GHA", new TimeSpan(), Currency.GHS, 233, ".gh", "GHA"), true);
-    private static readonly Lazy<Country> glp = new(() => new Country("Гваделупа", "Guadeloupe", 312, "GP", "GLP", new TimeSpan(-4, 0, 0), 0, ".gp"), true);
-    private static readonly Lazy<Country> gtm = new(() => new Country("Гватемала", "Guatemala", 320, "GT", "GTM", new TimeSpan(-6, 0, 0), Currency.GTQ, 502, ".gt", "GUA"), true);
-    private static readonly Lazy<Country> guf = new(() => new Country("Гвиана (департамент Франции)", "French Guiana", 254, "GF", "GUF", new TimeSpan(-3, 0, 0), 0, ".gf"), true);
-    private static readonly Lazy<Country> gin = new(() => new Country("Гвинея", "Guinea", 324, "GN", "GIN", new TimeSpan(), Currency.GNF, 224, ".gn", "GUI"), true);
-    private static readonly Lazy<Country> gnb = new(() => new Country("Гвинея-Бисау", "Guinea-Bissau", 624, "GW", "GNB", new TimeSpan(), 245, ".gw", "GBS"), true);
-    private static readonly Lazy<Country> deu = new(() => new Country("Германия", "Germany", 276, "DE", "DEU", new TimeSpan(1, 0, 0), 49, ".de", "GER"), true);
-    private static readonly Lazy<Country> ggy = new(() => new Country("Гернси (коронное владение)", "Guernsey", 831, "GG", "GGY", new TimeSpan(), Currency.GGP, 0, ".gg"), true);
-    private static readonly Lazy<Country> gib = new(() => new Country("Гибралтар", "Gibraltar", 292, "GI", "GIB", new TimeSpan(1, 0, 0), Currency.GIP, 0, ".gi"), true);
-    private static readonly Lazy<Country> hnd = new(() => new Country("Гондурас", "Honduras", 340, "HN", "HND", new TimeSpan(-6, 0, 0), Currency.HNL, 504, ".hn", "HON"), true);
-    private static readonly Lazy<Country> hkg = new(() => new Country("Гонконг", "Hong Kong", 344, "HK", "HKG", new TimeSpan(8, 0, 0), Currency.HKD, 0, ".hk", "HKG"), true);
-    private static readonly Lazy<Country> grd = new(() => new Country("Гренада", "Grenada", 308, "GD", "GRD", new TimeSpan(-4, 0, 0), 1473, ".gd", "GRN"), true);
-    private static readonly Lazy<Country> grl = new(() => new Country("Гренландия (административная единица)", "Greenland", 304, "GL", "GRL", new TimeSpan(-3, 0, 0), 0, ".gl"), true);
-    private static readonly Lazy<Country> grc = new(() => new Country("Греция", "Greece", 300, "GR", "GRC", new TimeSpan(2, 0, 0), 30, ".gr", "GRE"), true);
-    private static readonly Lazy<Country> geo = new(() => new Country("Грузия", "Georgia", 268, "GE", "GEO", new TimeSpan(4, 0, 0), Currency.GEL, 995, ".ge", "GEO"), true);
-    private static readonly Lazy<Country> gum = new(() => new Country("Гуам", "Guam", 316, "GU", "GUM", new TimeSpan(10, 0, 0), 0, ".gu", "GUM"), true);
-    private static readonly Lazy<Country> dnk = new(() => new Country("Дания", "Denmark", 208, "DK", "DNK", new TimeSpan(1, 0, 0), Currency.DKK, 45, ".dk", "DEN"), true);
-    private static readonly Lazy<Country> jey = new(() => new Country("Джерси (остров)", "Jersey", 832, "JE", "JEY", new TimeSpan(), Currency.JEP, 0, ".je"), true);
-    private static readonly Lazy<Country> dji = new(() => new Country("Джибути", "Djibouti", 262, "DJ", "DJI", new TimeSpan(3, 0, 0), Currency.DJF, 253, ".dj", "DJI"), true);
-    private static readonly Lazy<Country> dma = new(() => new Country("Доминика", "Dominica", 212, "DM", "DMA", new TimeSpan(-4, 0, 0), 1767, ".dm", "DMA"), true);
-    private static readonly Lazy<Country> dom = new(() => new Country("Доминиканская Республика", "Dominican Republic", 214, "DO", "DOM", new TimeSpan(-4, 0, 0), Currency.DOP, 1809, ".do", "DOM"), true);
-    private static readonly Lazy<Country> cod = new(() => new Country("Демократическая Республика Конго", "Democratic Republic of the Congo", 180, "CD", "COD", new TimeSpan(1, 0, 0), Currency.CDF, 243, ".cd", "COD"), true);
-    private static readonly Lazy<Country> egy = new(() => new Country("Египет", "Egypt", 818, "EG", "EGY", new TimeSpan(2, 0, 0), Currency.EGP, 20, ".eg", "EGY"), true);
-    private static readonly Lazy<Country> zmb = new(() => new Country("Замбия", "Zambia", 894, "ZM", "ZMB", new TimeSpan(2, 0, 0), Currency.ZMW, 260, ".zm", "ZAM"), true);
-    private static readonly Lazy<Country> esh = new(() => new Country("Сахарская Арабская Демократическая Республика", "Western Sahara", 732, "EH", "ESH", new TimeSpan(), 0, ".eh"), true);
-    private static readonly Lazy<Country> zwe = new(() => new Country("Зимбабве", "Zimbabwe", 716, "ZW", "ZWE", new TimeSpan(2, 0, 0), Currency.ZWL, 263, ".zw", "ZIM"), true);
-    private static readonly Lazy<Country> isr = new(() => new Country("Израиль", "Israel", 376, "IL", "ISR", new TimeSpan(2, 0, 0), Currency.ILS, 972, ".il", "ISR"), true);
-    private static readonly Lazy<Country> ind = new(() => new Country("Индия", "India", 356, "IN", "IND", new TimeSpan(5, 30, 0), Currency.INR, 91, ".in", "IND"), true);
-    private static readonly Lazy<Country> idn = new(() => new Country("Индонезия", "Indonesia", 360, "ID", "IDN", new TimeSpan(7, 0, 0), Currency.IDR, 62, ".id", "INA"), true);
-    private static readonly Lazy<Country> jor = new(() => new Country("Иордания", "Jordan", 400, "JO", "JOR", new TimeSpan(2, 0, 0), Currency.JOD, 962, ".jo", "JOR"), true);
-    private static readonly Lazy<Country> irq = new(() => new Country("Ирак", "Iraq", 368, "IQ", "IRQ", new TimeSpan(3, 0, 0), Currency.IQD, 964, ".iq", "IRQ"), true);
-    private static readonly Lazy<Country> irn = new(() => new Country("Иран", "Iran", 364, "IR", "IRN", new TimeSpan(3, 30, 0), Currency.IRR, 98, ".ir", "IRI"), true);
-    private static readonly Lazy<Country> irl = new(() => new Country("Ирландия", "Ireland", 372, "IE", "IRL", new TimeSpan(), 353, ".ie", "IRL"), true);
-    private static readonly Lazy<Country> isl = new(() => new Country("Исландия", "Iceland", 352, "IS", "ISL", new TimeSpan(), Currency.ISK, 354, ".is", "ISL"), true);
-    private static readonly Lazy<Country> esp = new(() => new Country("Испания", "Spain", 724, "ES", "ESP", new TimeSpan(1, 0, 0), 34, ".es", "ESP"), true);
-    private static readonly Lazy<Country> ita = new(() => new Country("Италия", "Italy", 380, "IT", "ITA", new TimeSpan(1, 0, 0), 39, ".it", "ITA"), true);
-    private static readonly Lazy<Country> yem = new(() => new Country("Йемен", "Yemen", 887, "YE", "YEM", new TimeSpan(3, 0, 0), Currency.YER, 967, ".ye", "YEM"), true);
-    private static readonly Lazy<Country> cpv = new(() => new Country("Кабо-Верде", "Cape Verde", 132, "CV", "CPV", new TimeSpan(-1, 0, 0), Currency.CVE, 238, ".cv", "CPV"), true);
-    private static readonly Lazy<Country> kaz = new(() => new Country("Казахстан", "Kazakhstan", 398, "KZ", "KAZ", new TimeSpan(6, 0, 0), Currency.KZT, 7, ".kz", "KAZ"), true);
-    private static readonly Lazy<Country> cym = new(() => new Country("Острова Кайман", "Cayman Islands", 136, "KY", "CYM", new TimeSpan(-5, 0, 0), Currency.KYD, 0, ".ky", "CAY"), true);
-    private static readonly Lazy<Country> khm = new(() => new Country("Камбоджа", "Cambodia", 116, "KH", "KHM", new TimeSpan(7, 0, 0), Currency.KHR, 855, ".kh", "CAM"), true);
-    private static readonly Lazy<Country> cmr = new(() => new Country("Камерун", "Cameroon", 120, "CM", "CMR", new TimeSpan(1, 0, 0), 237, ".cm", "CMR"), true);
-    private static readonly Lazy<Country> can = new(() => new Country("Канада", "Canada", 124, "CA", "CAN", new TimeSpan(-5, 0, 0), Currency.CAD, 1, ".ca", "CAN"), true);
-    private static readonly Lazy<Country> qat = new(() => new Country("Катар", "Qatar", 634, "QA", "QAT", new TimeSpan(3, 0, 0), Currency.QAR, 974, ".qa", "QAT"), true);
-    private static readonly Lazy<Country> ken = new(() => new Country("Кения", "Kenya", 404, "KE", "KEN", new TimeSpan(3, 0, 0), Currency.KES, 254, ".ke", "KEN"), true);
-    private static readonly Lazy<Country> cyp = new(() => new Country("Республика Кипр", "Cyprus", 196, "CY", "CYP", new TimeSpan(2, 0, 0), 357, ".cy", "CYP"), true);
-    private static readonly Lazy<Country> kgz = new(() => new Country("Кыргызстан", "Kyrgyzstan", 417, "KG", "KGZ", new TimeSpan(6, 0, 0), Currency.KGS, 996, ".kg", "KGZ"), true);
-    private static readonly Lazy<Country> kir = new(() => new Country("Кирибати", "Kiribati", 296, "KI", "KIR", new TimeSpan(12, 0, 0), 686, ".ki", "KIR"), true);
-    private static readonly Lazy<Country> twn = new(() => new Country("Китайская Республика (Тайвань)", "Taiwan", 158, "TW", "TWN", new TimeSpan(8, 0, 0), Currency.TWD, 0, ".tw", "TPE"), true);
-    private static readonly Lazy<Country> prk = new(() => new Country("Корейская Народно-Демократическая Республика", "North Korea", 408, "KP", "PRK", new TimeSpan(9, 0, 0), Currency.KPW, 850, ".kp", "PRK"), true);
-    private static readonly Lazy<Country> chn = new(() => new Country("Китай", "China", 156, "CN", "CHN", new TimeSpan(8, 0, 0), Currency.CNY, 86, ".cn", "CHN"), true);
-    private static readonly Lazy<Country> cck = new(() => new Country("Кокосовые острова", "Cocos (Keeling) Islands", 166, "CC", "CCK", new TimeSpan(6, 30, 0), 0, ".cc"), true);
-    private static readonly Lazy<Country> col = new(() => new Country("Колумбия", "Colombia", 170, "CO", "COL", new TimeSpan(-5, 0, 0), [Currency.COP, Currency.COU], 57, ".co", "COL"), true);
-    private static readonly Lazy<Country> com = new(() => new Country("Коморы", "Comoros", 174, "KM", "COM", new TimeSpan(3, 0, 0), Currency.KMF, 269, ".km", "COM"), true);
-    private static readonly Lazy<Country> cri = new(() => new Country("Коста-Рика", "Costa Rica", 188, "CR", "CRI", new TimeSpan(-6, 0, 0), Currency.CRC, 506, ".cr", "CRC"), true);
-    private static readonly Lazy<Country> civ = new(() => new Country("Кот-д’Ивуар", "Ivory Coast", 384, "CI", "CIV", new TimeSpan(), 225, ".ci", "CIV"), true);
-    private static readonly Lazy<Country> cub = new(() => new Country("Куба", "Cuba", 192, "CU", "CUB", new TimeSpan(-5, 0, 0), [Currency.CUC, Currency.CUP], 53, ".cu", "CUB"), true);
-    private static readonly Lazy<Country> kwt = new(() => new Country("Кувейт", "Kuwait", 414, "KW", "KWT", new TimeSpan(3, 0, 0), Currency.KWD, 965, ".kw", "KUW"), true);
-    private static readonly Lazy<Country> cuw = new(() => new Country("Кюрасао", "Curacao", 531, "CW", "CUW", new TimeSpan(-4, 0, 0), 0, ".cw"), true);
-    private static readonly Lazy<Country> lao = new(() => new Country("Лаос", "Laos", 418, "LA", "LAO", new TimeSpan(7, 0, 0), Currency.LAK, 856, ".la", "LAO"), true);
-    private static readonly Lazy<Country> lva = new(() => new Country("Латвия", "Latvia", 428, "LV", "LVA", new TimeSpan(2, 0, 0), 371, ".lv", "LAT"), true);
-    private static readonly Lazy<Country> lso = new(() => new Country("Лесото", "Lesotho", 426, "LS", "LSO", new TimeSpan(2, 0, 0), Currency.LSL, 266, ".ls", "LES"), true);
-    private static readonly Lazy<Country> lbr = new(() => new Country("Либерия", "Liberia", 430, "LR", "LBR", new TimeSpan(), Currency.LRD, 231, ".lr", "LBR"), true);
-    private static readonly Lazy<Country> lbn = new(() => new Country("Ливан", "Lebanon", 422, "LB", "LBN", new TimeSpan(2, 0, 0), Currency.LBP, 961, ".lb", "LBN"), true);
-    private static readonly Lazy<Country> lby = new(() => new Country("Ливия", "Libya", 434, "LY", "LBY", new TimeSpan(2, 0, 0), Currency.LYD, 218, ".ly", "LBA"), true);
-    private static readonly Lazy<Country> ltu = new(() => new Country("Литва", "Lithuania", 440, "LT", "LTU", new TimeSpan(2, 0, 0), Currency.LTL, 370, ".lt", "LTU"), true);
-    private static readonly Lazy<Country> lie = new(() => new Country("Лихтенштейн", "Liechtenstein", 438, "LI", "LIE", new TimeSpan(1, 0, 0), 423, ".li", "LIE"), true);
-    private static readonly Lazy<Country> lux = new(() => new Country("Люксембург", "Luxembourg", 442, "LU", "LUX", new TimeSpan(1, 0, 0), 352, ".lu", "LUX"), true);
-    private static readonly Lazy<Country> mus = new(() => new Country("Маврикий", "Mauritius", 480, "MU", "MUS", new TimeSpan(4, 0, 0), Currency.MUR, 230, ".mu", "MRI"), true);
-    private static readonly Lazy<Country> mrt = new(() => new Country("Мавритания", "Mauritania", 478, "MR", "MRT", new TimeSpan(), Currency.MRU, 222, ".mr", "MTN"), true);
-    private static readonly Lazy<Country> mdg = new(() => new Country("Мадагаскар", "Madagascar", 450, "MG", "MDG", new TimeSpan(3, 0, 0), Currency.MGA, 261, ".mg", "MAD"), true);
-    private static readonly Lazy<Country> myt = new(() => new Country("Майотта", "Mayotte", 175, "YT", "MYT", new TimeSpan(3, 0, 0), 0, ".yt"), true);
-    private static readonly Lazy<Country> mac = new(() => new Country("Макао", "Macao", 446, "MO", "MAC", new TimeSpan(8, 0, 0), Currency.MOP, 0, ".mo"), true);
-    private static readonly Lazy<Country> mkd = new(() => new Country("Северная Македония", "North Macedonia", 807, "MK", "MKD", new TimeSpan(1, 0, 0), Currency.MKD, 389, ".mk", "MKD"), true);
-    private static readonly Lazy<Country> mwi = new(() => new Country("Малави", "Malawi", 454, "MW", "MWI", new TimeSpan(2, 0, 0), Currency.MWK, 265, ".mw", "MAW"), true);
-    private static readonly Lazy<Country> mys = new(() => new Country("Малайзия", "Malaysia", 458, "MY", "MYS", new TimeSpan(8, 0, 0), Currency.MYR, 60, ".my", "MAS"), true);
-    private static readonly Lazy<Country> mli = new(() => new Country("Мали", "Mali", 466, "ML", "MLI", new TimeSpan(), 223, ".ml", "MLI"), true);
-    private static readonly Lazy<Country> mdv = new(() => new Country("Мальдивы", "Maldives", 462, "MV", "MDV", new TimeSpan(5, 0, 0), Currency.MVR, 960, ".mv", "MDV"), true);
-    private static readonly Lazy<Country> mlt = new(() => new Country("Мальта", "Malta", 470, "MT", "MLT", new TimeSpan(1, 0, 0), 356, ".mt", "MLT"), true);
-    private static readonly Lazy<Country> mar = new(() => new Country("Марокко", "Morocco", 504, "MA", "MAR", new TimeSpan(), Currency.MAD, 212, ".ma", "MAR"), true);
-    private static readonly Lazy<Country> mtq = new(() => new Country("Мартиника", "Martinique", 474, "MQ", "MTQ", new TimeSpan(-4, 0, 0), 0, ".mq"), true);
-    private static readonly Lazy<Country> mhl = new(() => new Country("Маршалловы Острова", "Marshall Islands", 584, "MH", "MHL", new TimeSpan(12, 0, 0), 692, ".mh", "MHL"), true);
-    private static readonly Lazy<Country> mex = new(() => new Country("Мексика", "Mexico", 484, "MX", "MEX", new TimeSpan(-6, 0, 0), [Currency.MXN, Currency.MXV], 52, ".mx", "MEX"), true);
-    private static readonly Lazy<Country> fsm = new(() => new Country("Федеративные Штаты Микронезии", "Federated States of Micronesia", 583, "FM", "FSM", new TimeSpan(10, 0, 0), 691, ".fm", "FSM"), true);
-    private static readonly Lazy<Country> moz = new(() => new Country("Мозамбик", "Mozambique", 508, "MZ", "MOZ", new TimeSpan(2, 0, 0), Currency.MZN, 258, ".mz", "MOZ"), true);
-    private static readonly Lazy<Country> mda = new(() => new Country("Молдавия", "Moldova", 498, "MD", "MDA", new TimeSpan(2, 0, 0), Currency.MDL, 373, ".md", "MDA"), true);
-    private static readonly Lazy<Country> mco = new(() => new Country("Монако", "Principality of Monaco", 492, "MC", "MCO", new TimeSpan(1, 0, 0), 377, ".mc", "MON"), true);
-    private static readonly Lazy<Country> mng = new(() => new Country("Монголия", "Mongolia", 496, "MN", "MNG", new TimeSpan(8, 0, 0), Currency.MNT, 976, ".mn", "MGL"), true);
-    private static readonly Lazy<Country> msr = new(() => new Country("Монтсеррат", "Montserrat", 500, "MS", "MSR", new TimeSpan(-4, 0, 0), 0, ".ms"), true);
-    private static readonly Lazy<Country> mmr = new(() => new Country("Мьянма", "Myanmar", 104, "MM", "MMR", new TimeSpan(6, 30, 0), Currency.MMK, 95, ".mm", "MYA"), true);
-    private static readonly Lazy<Country> nam = new(() => new Country("Намибия", "Namibia", 516, "NA", "NAM", new TimeSpan(1, 0, 0), Currency.NAD, 264, ".na", "NAM"), true);
-    private static readonly Lazy<Country> nru = new(() => new Country("Науру", "Nauru", 520, "NR", "NRU", new TimeSpan(12, 0, 0), 674, ".nr", "NRU"), true);
-    private static readonly Lazy<Country> npl = new(() => new Country("Непал", "Nepal", 524, "NP", "NPL", new TimeSpan(5, 45, 0), Currency.NPR, 977, ".np", "NEP"), true);
-    private static readonly Lazy<Country> ner = new(() => new Country("Нигер", "Niger", 562, "NE", "NER", new TimeSpan(1, 0, 0), 227, ".ne", "NIG"), true);
-    private static readonly Lazy<Country> nga = new(() => new Country("Нигерия", "Nigeria", 566, "NG", "NGA", new TimeSpan(1, 0, 0), Currency.NGN, 234, ".ng", "NGR"), true);
-    private static readonly Lazy<Country> nld = new(() => new Country("Нидерланды", "Netherlands", 528, "NL", "NLD", new TimeSpan(1, 0, 0), 31, ".nl", "NED"), true);
-    private static readonly Lazy<Country> nic = new(() => new Country("Никарагуа", "Nicaragua", 558, "NI", "NIC", new TimeSpan(-6, 0, 0), Currency.NIO, 505, ".ni", "NCA"), true);
-    private static readonly Lazy<Country> niu = new(() => new Country("Ниуэ", "Niue", 570, "NU", "NIU", new TimeSpan(-11, 0, 0), 0, ".nu"), true);
-    private static readonly Lazy<Country> nzl = new(() => new Country("Новая Зеландия", "New Zealand", 554, "NZ", "NZL", new TimeSpan(12, 0, 0), Currency.NZD, 64, ".nz", "NZL"), true);
-    private static readonly Lazy<Country> ncl = new(() => new Country("Новая Каледония", "New Caledonia", 540, "NC", "NCL", new TimeSpan(11, 0, 0), 0, ".nc"), true);
-    private static readonly Lazy<Country> nor = new(() => new Country("Норвегия", "Norway", 578, "NO", "NOR", new TimeSpan(1, 0, 0), Currency.NOK, 47, ".no", "NOR"), true);
-    private static readonly Lazy<Country> are = new(() => new Country("Объединённые Арабские Эмираты", "United Arab Emirates", 784, "AE", "ARE", new TimeSpan(4, 0, 0), Currency.AED, 971, ".ae", "UAE"), true);
-    private static readonly Lazy<Country> omn = new(() => new Country("Оман", "Oman", 512, "OM", "OMN", new TimeSpan(4, 0, 0), Currency.OMR, 968, ".om", "OMA"), true);
-    private static readonly Lazy<Country> bvt = new(() => new Country("Остров Буве", "Bouvet Island", 074, "BV", "BVT", new TimeSpan(), 0, ".bv"), true);
-    private static readonly Lazy<Country> imn = new(() => new Country("Остров Мэн", "Isle of Man", 833, "IM", "IMN", new TimeSpan(), Currency.IMP, 0, ".im"), true);
-    private static readonly Lazy<Country> cok = new(() => new Country("Острова Кука", "Cook Islands", 184, "CK", "COK", new TimeSpan(-10, 0, 0), 0, ".ck", "COK"), true);
-    private static readonly Lazy<Country> nfk = new(() => new Country("Остров Норфолк", "Norfolk Island", 574, "NF", "NFK", new TimeSpan(11, 0, 0), 0, ".nf"), true);
-    private static readonly Lazy<Country> cxr = new(() => new Country("Остров Рождества (Австралия)", "Christmas Island", 162, "CX", "CXR", new TimeSpan(7, 0, 0), 0, ".cx"), true);
-    private static readonly Lazy<Country> pcn = new(() => new Country("Острова Питкэрн", "Pitcairn Islands", 612, "PN", "PCN", new TimeSpan(-8, 0, 0), 0, ".pn"), true);
-    private static readonly Lazy<Country> shn = new(() => new Country("Остров Святой Елены", "Saint Helena, Ascension and Tristan da Cunha", 654, "SH", "SHN", new TimeSpan(), Currency.SHP, 0, ".sh"), true);
-    private static readonly Lazy<Country> pak = new(() => new Country("Пакистан", "Pakistan", 586, "PK", "PAK", new TimeSpan(5, 0, 0), Currency.PKR, 92, ".pk", "PAK"), true);
-    private static readonly Lazy<Country> plw = new(() => new Country("Палау", "Palau", 585, "PW", "PLW", new TimeSpan(9, 0, 0), 680, ".pw", "PLW"), true);
-    private static readonly Lazy<Country> pse = new(() => new Country("Государство Палестина", "Palestine", 275, "PS", "PSE", new TimeSpan(2, 0, 0), 970, ".ps", "PLE"), true);
-    private static readonly Lazy<Country> pan = new(() => new Country("Панама", "Panama", 591, "PA", "PAN", new TimeSpan(-5, 0, 0), Currency.PAB, 507, ".pa", "PAN"), true);
-    private static readonly Lazy<Country> png = new(() => new Country("Папуа — Новая Гвинея", "Papua New Guinea", 598, "PG", "PNG", new TimeSpan(10, 0, 0), Currency.PGK, 675, ".pg", "PNG"), true);
-    private static readonly Lazy<Country> pry = new(() => new Country("Парагвай", "Paraguay", 600, "PY", "PRY", new TimeSpan(-4, 0, 0), Currency.PYG, 595, ".py", "PAR"), true);
-    private static readonly Lazy<Country> per = new(() => new Country("Перу", "Peru", 604, "PE", "PER", new TimeSpan(-5, 0, 0), Currency.PEN, 51, ".pe", "PER"), true);
-    private static readonly Lazy<Country> pol = new(() => new Country("Польша", "Poland", 616, "PL", "POL", new TimeSpan(1, 0, 0), Currency.PLN, 48, ".pl", "POL"), true);
-    private static readonly Lazy<Country> prt = new(() => new Country("Португалия", "Portugal", 620, "PT", "PRT", new TimeSpan(), 351, ".pt", "POR"), true);
-    private static readonly Lazy<Country> pri = new(() => new Country("Пуэрто-Рико", "Puerto Rico", 630, "PR", "PRI", new TimeSpan(-4, 0, 0), 0, ".pr", "PUR"), true);
-    private static readonly Lazy<Country> cog = new(() => new Country("Республика Конго", "Republic of the Congo", 178, "CG", "COG", new TimeSpan(1, 0, 0), 242, ".cg", "CGO"), true);
-    private static readonly Lazy<Country> kor = new(() => new Country("Республика Корея", "South Korea", 410, "KR", "KOR", new TimeSpan(9, 0, 0), Currency.KRW, 82, ".kr", "KOR"), true);
-    private static readonly Lazy<Country> reu = new(() => new Country("Реюньон", "Reunion", 638, "RE", "REU", new TimeSpan(4, 0, 0), 0, ".re"), true);
-    private static readonly Lazy<Country> rus = new(() => new Country("Россия", "Russia", 643, "RU", "RUS", new TimeSpan(3, 0, 0), Currency.RUB, 7, ".ru", "RUS"), true);
-    private static readonly Lazy<Country> rwa = new(() => new Country("Руанда", "Rwanda", 646, "RW", "RWA", new TimeSpan(2, 0, 0), Currency.RWF, 250, ".rw", "RWA"), true);
-    private static readonly Lazy<Country> rou = new(() => new Country("Румыния", "Romania", 642, "RO", "ROU", new TimeSpan(2, 0, 0), Currency.RON, 40, ".ro", "ROU"), true);
-    private static readonly Lazy<Country> slv = new(() => new Country("Сальвадор", "El Salvador", 222, "SV", "SLV", new TimeSpan(-6, 0, 0), Currency.SVC, 503, ".sv", "ESA"), true);
-    private static readonly Lazy<Country> wsm = new(() => new Country("Самоа", "Samoa", 882, "WS", "WSM", new TimeSpan(13, 0, 0), Currency.WST, 685, ".ws", "SAM"), true);
-    private static readonly Lazy<Country> smr = new(() => new Country("Сан-Марино", "San Marino", 674, "SM", "SMR", new TimeSpan(1, 0, 0), 378, ".sm", "SMR"), true);
-    private static readonly Lazy<Country> stp = new(() => new Country("Сан-Томе и Принсипи", "Sao Tome and Principe", 678, "ST", "STP", new TimeSpan(), Currency.STN, 239, ".st", "STP"), true);
-    private static readonly Lazy<Country> sau = new(() => new Country("Саудовская Аравия", "Saudi Arabia", 682, "SA", "SAU", new TimeSpan(3, 0, 0), Currency.SAR, 966, ".sa", "KSA"), true);
-    private static readonly Lazy<Country> swz = new(() => new Country("Эсватини", "Eswatini", 748, "SZ", "SWZ", new TimeSpan(2, 0, 0), Currency.SZL, 268, ".sz", "SWZ"), true);
-    private static readonly Lazy<Country> mnp = new(() => new Country("Северные Марианские Острова", "Northern Mariana Islands", 580, "MP", "MNP", new TimeSpan(10, 0, 0), 0, ".mp"), true);
-    private static readonly Lazy<Country> syc = new(() => new Country("Сейшельские Острова", "Seychelles", 690, "SC", "SYC", new TimeSpan(4, 0, 0), Currency.SCR, 248, ".sc", "SEY"), true);
-    private static readonly Lazy<Country> blm = new(() => new Country("Сен-Бартелеми (заморское сообщество)", "Saint Barthelemy", 652, "BL", "BLM", new TimeSpan(-4, 0, 0), 0, ".bl"), true);
-    private static readonly Lazy<Country> maf = new(() => new Country("Сен-Мартен (владение Франции)", "Saint Martin", 663, "MF", "MAF", new TimeSpan(-4, 0, 0), 0, ".mf"), true);
-    private static readonly Lazy<Country> spm = new(() => new Country("Сен-Пьер и Микелон", "Saint Pierre and Miquelon", 666, "PM", "SPM", new TimeSpan(-3, 0, 0), 0, ".pm"), true);
-    private static readonly Lazy<Country> sen = new(() => new Country("Сенегал", "Senegal", 686, "SN", "SEN", new TimeSpan(), 221, ".sn", "SEN"), true);
-    private static readonly Lazy<Country> vct = new(() => new Country("Сент-Винсент и Гренадины", "Saint Vincent and the Grenadines", 670, "VC", "VCT", new TimeSpan(-4, 0, 0), 1784, ".vc", "VIN"), true);
-    private static readonly Lazy<Country> kna = new(() => new Country("Сент-Китс и Невис", "Saint Kitts and Nevis", 659, "KN", "KNA", new TimeSpan(-4, 0, 0), 1869, ".kn", "SKN"), true);
-    private static readonly Lazy<Country> lca = new(() => new Country("Сент-Люсия", "Saint Lucia", 662, "LC", "LCA", new TimeSpan(-4, 0, 0), 1758, ".lc", "LCA"), true);
-    private static readonly Lazy<Country> srb = new(() => new Country("Сербия", "Serbia", 688, "RS", "SRB", new TimeSpan(1, 0, 0), Currency.RSD, 381, ".rs", "SRB"), true);
-    private static readonly Lazy<Country> sgp = new(() => new Country("Сингапур", "Singapore", 702, "SG", "SGP", new TimeSpan(8, 0, 0), Currency.SGD, 65, ".sg", "SGP"), true);
-    private static readonly Lazy<Country> sxm = new(() => new Country("Синт-Мартен", "Sint Maarten", 534, "SX", "SXM", new TimeSpan(-4, 0, 0), 0, ".sx"), true);
-    private static readonly Lazy<Country> syr = new(() => new Country("Сирия", "Syria", 760, "SY", "SYR", new TimeSpan(2, 0, 0), Currency.SYP, 963, ".sy", "SYR"), true);
-    private static readonly Lazy<Country> svk = new(() => new Country("Словакия", "Slovakia", 703, "SK", "SVK", new TimeSpan(1, 0, 0), 421, ".sk", "SVK"), true);
-    private static readonly Lazy<Country> svn = new(() => new Country("Словения", "Slovenia", 705, "SI", "SVN", new TimeSpan(1, 0, 0), 386, ".si", "SLO"), true);
-    private static readonly Lazy<Country> slb = new(() => new Country("Соломоновы Острова", "Solomon Islands", 090, "SB", "SLB", new TimeSpan(11, 0, 0), Currency.SBD, 677, ".sb", "SOL"), true);
-    private static readonly Lazy<Country> som = new(() => new Country("Сомали", "Somalia", 706, "SO", "SOM", new TimeSpan(3, 0, 0), Currency.SOS, 252, ".so", "SOM"), true);
-    private static readonly Lazy<Country> sdn = new(() => new Country("Судан", "Sudan", 729, "SD", "SDN", new TimeSpan(3, 0, 0), Currency.SDG, 249, ".sd", "SUD"), true);
-    private static readonly Lazy<Country> sur = new(() => new Country("Суринам", "Suriname", 740, "SR", "SUR", new TimeSpan(-3, 0, 0), Currency.SRD, 597, ".sr", "SUR"), true);
-    private static readonly Lazy<Country> usa = new(() => new Country("Соединённые Штаты Америки", "United States of America", 840, "US", "USA", new TimeSpan(-8, 0, 0), [Currency.USD, Currency.USN, Currency.USS], 1, ".us", "USA"), true);
-    private static readonly Lazy<Country> sle = new(() => new Country("Сьерра-Леоне", "Sierra Leone", 694, "SL", "SLE", new TimeSpan(), Currency.SLL, 232, ".sl", "SLE"), true);
-    private static readonly Lazy<Country> tjk = new(() => new Country("Таджикистан", "Tajikistan", 762, "TJ", "TJK", new TimeSpan(5, 0, 0), Currency.TJS, 992, ".tj", "TJK"), true);
-    private static readonly Lazy<Country> tha = new(() => new Country("Таиланд", "Thailand", 764, "TH", "THA", new TimeSpan(7, 0, 0), Currency.THB, 66, ".th", "THA"), true);
-    private static readonly Lazy<Country> tza = new(() => new Country("Танзания", "Tanzania", 834, "TZ", "TZA", new TimeSpan(3, 0, 0), Currency.TZS, 255, ".tz", "TAN"), true);
-    private static readonly Lazy<Country> tca = new(() => new Country("Теркс и Кайкос", "Turks and Caicos Islands", 796, "TC", "TCA", new TimeSpan(-5, 0, 0), 0, ".tc"), true);
-    private static readonly Lazy<Country> tgo = new(() => new Country("Того", "Togo", 768, "TG", "TGO", new TimeSpan(), 228, ".tg", "TOG"), true);
-    private static readonly Lazy<Country> tkl = new(() => new Country("Токелау", "Tokelau", 772, "TK", "TKL", new TimeSpan(13, 0, 0), 0, ".tk"), true);
-    private static readonly Lazy<Country> ton = new(() => new Country("Тонга", "Tonga", 776, "TO", "TON", new TimeSpan(13, 0, 0), Currency.TOP, 676, ".to", "TGA"), true);
-    private static readonly Lazy<Country> tto = new(() => new Country("Тринидад и Тобаго", "Trinidad and Tobago", 780, "TT", "TTO", new TimeSpan(-4, 0, 0), Currency.TTD, 1868, ".tt", "TTO"), true);
-    private static readonly Lazy<Country> tuv = new(() => new Country("Тувалу", "Tuvalu", 798, "TV", "TUV", new TimeSpan(12, 0, 0), 688, ".tv", "TUV"), true);
-    private static readonly Lazy<Country> tun = new(() => new Country("Тунис", "Tunisia", 788, "TN", "TUN", new TimeSpan(1, 0, 0), Currency.TND, 216, ".tn", "TUN"), true);
-    private static readonly Lazy<Country> tkm = new(() => new Country("Туркменистан", "Turkmenistan", 795, "TM", "TKM", new TimeSpan(5, 0, 0), Currency.TMT, 993, ".tm", "TKM"), true);
-    private static readonly Lazy<Country> tur = new(() => new Country("Турция", "Turkey", 792, "TR", "TUR", new TimeSpan(2, 0, 0), Currency.TRY, 90, ".tr", "TUR"), true);
-    private static readonly Lazy<Country> uga = new(() => new Country("Уганда", "Uganda", 800, "UG", "UGA", new TimeSpan(3, 0, 0), Currency.UGX, 256, ".ug", "UGA"), true);
-    private static readonly Lazy<Country> uzb = new(() => new Country("Узбекистан", "Uzbekistan", 860, "UZ", "UZB", new TimeSpan(5, 0, 0), Currency.UZS, 998, ".uz", "UZB"), true);
-    private static readonly Lazy<Country> ukr = new(() => new Country("Украина", "Ukraine", 804, "UA", "UKR", new TimeSpan(2, 0, 0), Currency.UAH, 380, ".ua", "UKR"), true);
-    private static readonly Lazy<Country> wlf = new(() => new Country("Уоллис и Футуна", "Wallis and Futuna", 876, "WF", "WLF", new TimeSpan(12, 0, 0), 0, ".wf"), true);
-    private static readonly Lazy<Country> ury = new(() => new Country("Уругвай", "Uruguay", 858, "UY", "URY", new TimeSpan(-3, 0, 0), [Currency.UYI, Currency.UYU], 598, ".uy", "URU"), true);
-    private static readonly Lazy<Country> fro = new(() => new Country("Фарерские острова", "Faroe Islands", 234, "FO", "FRO", new TimeSpan(), 0, ".fo"), true);
-    private static readonly Lazy<Country> fji = new(() => new Country("Фиджи", "Fiji", 242, "FJ", "FJI", new TimeSpan(12, 0, 0), Currency.FJD, 679, ".fj", "FIJ"), true);
-    private static readonly Lazy<Country> phl = new(() => new Country("Филиппины", "Philippines", 608, "PH", "PHL", new TimeSpan(8, 0, 0), Currency.PHP, 63, ".ph", "PHI"), true);
-    private static readonly Lazy<Country> fin = new(() => new Country("Финляндия", "Finland", 246, "FI", "FIN", new TimeSpan(2, 0, 0), 358, ".fi", "FIN"), true);
-    private static readonly Lazy<Country> flk = new(() => new Country("Фолклендские острова", "Falkland Islands", 238, "FK", "FLK", new TimeSpan(-3, 0, 0), Currency.FKP, 0, ".fk"), true);
-    private static readonly Lazy<Country> fra = new(() => new Country("Франция", "France", 250, "FR", "FRA", new TimeSpan(1, 0, 0), 33, ".fr", "FRA"), true);
-    private static readonly Lazy<Country> pyf = new(() => new Country("Французская Полинезия", "French Polynesia", 258, "PF", "PYF", new TimeSpan(-10, 0, 0), 0, ".pf"), true);
-    private static readonly Lazy<Country> atf = new(() => new Country("Французские Южные и Антарктические территории", "French Southern and Antarctic Lands", 260, "TF", "ATF", new TimeSpan(5, 0, 0), 0, ".tf"), true);
-    private static readonly Lazy<Country> hmd = new(() => new Country("Остров Херд и острова Макдональд", "Heard Island and McDonald Islands", 334, "HM", "HMD", new TimeSpan(4, 0, 0), 0, ".hm"), true);
-    private static readonly Lazy<Country> hrv = new(() => new Country("Хорватия", "Croatia", 191, "HR", "HRV", new TimeSpan(1, 0, 0), Currency.HRK, 385, ".hr", "CRO"), true);
-    private static readonly Lazy<Country> caf = new(() => new Country("Центральноафриканская Республика", "Central African Republic", 140, "CF", "CAF", new TimeSpan(1, 0, 0), 236, ".cf", "CAF"), true);
-    private static readonly Lazy<Country> tcd = new(() => new Country("Чад", "Chad", 148, "TD", "TCD", new TimeSpan(1, 0, 0), 235, ".td", "CHA"), true);
-    private static readonly Lazy<Country> mne = new(() => new Country("Черногория", "Montenegro", 499, "ME", "MNE", new TimeSpan(1, 0, 0), 382, ".me", "MNE"), true);
-    private static readonly Lazy<Country> cze = new(() => new Country("Чехия", "Czechia", 203, "CZ", "CZE", new TimeSpan(1, 0, 0), Currency.CZK, 420, ".cz", "CZE"), true);
-    private static readonly Lazy<Country> chl = new(() => new Country("Чили", "Chile", 152, "CL", "CHL", new TimeSpan(-3, 0, 0), [Currency.CLF, Currency.CLP], 56, ".cl", "CHI"), true);
-    private static readonly Lazy<Country> che = new(() => new Country("Швейцария", "Switzerland", 756, "CH", "CHE", new TimeSpan(1, 0, 0), [Currency.CHE, Currency.CHF, Currency.CHW], 41, ".ch", "SUI"), true);
-    private static readonly Lazy<Country> swe = new(() => new Country("Швеция", "Sweden", 752, "SE", "SWE", new TimeSpan(1, 0, 0), Currency.SEK, 46, ".se", "SWE"), true);
-    private static readonly Lazy<Country> sjm = new(() => new Country("Флаг Шпицбергена и Ян-Майена", "Svalbard", 744, "SJ", "SJM", new TimeSpan(1, 0, 0), 0, ".sj"), true);
-    private static readonly Lazy<Country> lka = new(() => new Country("Шри-Ланка", "Sri Lanka", 144, "LK", "LKA", new TimeSpan(5, 30, 0), Currency.LKR, 94, ".lk", "SRI"), true);
-    private static readonly Lazy<Country> ecu = new(() => new Country("Эквадор", "Ecuador", 218, "EC", "ECU", new TimeSpan(-5, 0, 0), 593, ".ec", "ECU"), true);
-    private static readonly Lazy<Country> gnq = new(() => new Country("Экваториальная Гвинея", "Equatorial Guinea", 226, "GQ", "GNQ", new TimeSpan(1, 0, 0), 240, ".gq", "GEQ"), true);
-    private static readonly Lazy<Country> eri = new(() => new Country("Эритрея", "Eritrea", 232, "ER", "ERI", new TimeSpan(3, 0, 0), Currency.ERN, 291, ".er", "ERI"), true);
-    private static readonly Lazy<Country> est = new(() => new Country("Эстония", "Estonia", 233, "EE", "EST", new TimeSpan(2, 0, 0), 372, ".ee", "EST"), true);
-    private static readonly Lazy<Country> eth = new(() => new Country("Эфиопия", "Ethiopia", 231, "ET", "ETH", new TimeSpan(3, 0, 0), Currency.ETB, 251, ".et", "ETH"), true);
-    private static readonly Lazy<Country> zaf = new(() => new Country("Южно-Африканская Республика", "South Africa", 710, "ZA", "ZAF", new TimeSpan(2, 0, 0), Currency.ZAR, 27, ".za", "RSA"), true);
-    private static readonly Lazy<Country> sgs = new(() => new Country("Южная Георгия и Южные Сандвичевы Острова", "South Georgia and South Sandwich Islands", 239, "GS", "SGS", new TimeSpan(-2, 0, 0), 0, ".gs"), true);
-    private static readonly Lazy<Country> ssd = new(() => new Country("Южный Судан", "South Sudan", 728, "SS", "SSD", new TimeSpan(3, 0, 0), Currency.SSP, 211, ".ss"), true);
-    private static readonly Lazy<Country> jam = new(() => new Country("Ямайка", "Jamaica", 388, "JM", "JAM", new TimeSpan(-5, 0, 0), Currency.JMD, 1876, ".jm", "JAM"), true);
-    private static readonly Lazy<Country> jpn = new(() => new Country("Япония", "Japan", 392, "JP", "JPN", new TimeSpan(9, 0, 0), Currency.JPY, 81, ".jp", "JPN"), true);
+    private static readonly Lazy<Country> aus = new(() => new Country("Австралия", "Australia", 036, "AU", "AUS", new TimeSpan(10, 0, 0), Currency.AUD, 61, ".au", "AUS"), isThreadSafe: true);
+    private static readonly Lazy<Country> aut = new(() => new Country("Австрия", "Austria", 040, "AT", "AUT", new TimeSpan(1, 0, 0), 43, ".at", "AUT"), isThreadSafe: true);
+    private static readonly Lazy<Country> aze = new(() => new Country("Азербайджан", "Azerbaijan", 031, "AZ", "AZE", new TimeSpan(4, 0, 0), Currency.AZN, 994, ".az", "AZE"), isThreadSafe: true);
+    private static readonly Lazy<Country> ala = new(() => new Country("Аландские острова", "Åland Islands", 248, "AX", "ALA", new TimeSpan(2, 0, 0), 0, ".ax"), isThreadSafe: true);
+    private static readonly Lazy<Country> alb = new(() => new Country("Албания", "Albania", 008, "AL", "ALB", new TimeSpan(1, 0, 0), Currency.ALL, 355, ".al", "ALB"), isThreadSafe: true);
+    private static readonly Lazy<Country> dza = new(() => new Country("Алжир", "Algeria", 012, "DZ", "DZA", new TimeSpan(1, 0, 0), Currency.DZD, 213, ".dz", "ALG"), isThreadSafe: true);
+    private static readonly Lazy<Country> vir = new(() => new Country("Виргинские Острова (США)", "Virgin Islands", 850, "VI", "VIR", new TimeSpan(-4, 0, 0), 0, ".vi", "ISV"), isThreadSafe: true);
+    private static readonly Lazy<Country> asm = new(() => new Country("Американское Самоа", "American Samoa", 016, "AS", "ASM", new TimeSpan(-11, 0, 0), 0, ".as", "ASA"), isThreadSafe: true);
+    private static readonly Lazy<Country> aia = new(() => new Country("Ангилья", "Anguilla", 660, "AI", "AIA", new TimeSpan(-4, 0, 0), 0, ".ai"), isThreadSafe: true);
+    private static readonly Lazy<Country> ago = new(() => new Country("Ангола", "Angola", 024, "AO", "AGO", new TimeSpan(1, 0, 0), Currency.AOA, 244, ".ao", "ANG"), isThreadSafe: true);
+    private static readonly Lazy<Country> and = new(() => new Country("Андорра", "Andorra", 020, "AD", "AND", new TimeSpan(1, 0, 0), 376, ".ad", "AND"), isThreadSafe: true);
+    private static readonly Lazy<Country> ata = new(() => new Country("Антарктика", "Antarctica", 010, "AQ", "ATA", new TimeSpan(-3, 0, 0), 0, ".aq"), isThreadSafe: true);
+    private static readonly Lazy<Country> atg = new(() => new Country("Антигуа и Барбуда", "Antigua and Barbuda", 028, "AG", "ATG", new TimeSpan(-4, 0, 0), 1268, ".ag", "ANT"), isThreadSafe: true);
+    private static readonly Lazy<Country> arg = new(() => new Country("Аргентина", "Argentina", 032, "AR", "ARG", new TimeSpan(-3, 0, 0), Currency.ARS, 54, ".ar", "ARG"), isThreadSafe: true);
+    private static readonly Lazy<Country> arm = new(() => new Country("Армения", "Armenia", 051, "AM", "ARM", new TimeSpan(4, 0, 0), Currency.AMD, 374, ".am", "ARM"), isThreadSafe: true);
+    private static readonly Lazy<Country> abw = new(() => new Country("Аруба", "Aruba", 533, "AW", "ABW", new TimeSpan(-4, 0, 0), Currency.AWG, 0, ".aw", "ARU"), isThreadSafe: true);
+    private static readonly Lazy<Country> afg = new(() => new Country("Афганистан", "Afghanistan", 004, "AF", "AFG", new TimeSpan(4, 30, 0), Currency.AFN, 93, ".af", "AFG"), isThreadSafe: true);
+    private static readonly Lazy<Country> bhs = new(() => new Country("Багамские Острова", "Bahamas", 044, "BS", "BHS", new TimeSpan(-5, 0, 0), Currency.BSD, 1242, ".bs", "BAH"), isThreadSafe: true);
+    private static readonly Lazy<Country> bgd = new(() => new Country("Бангладеш", "Bangladesh", 050, "BD", "BGD", new TimeSpan(6, 0, 0), Currency.BDT, 880, ".bd", "BAN"), isThreadSafe: true);
+    private static readonly Lazy<Country> brb = new(() => new Country("Барбадос", "Barbados", 052, "BB", "BRB", new TimeSpan(-4, 0, 0), Currency.BBD, 1246, ".bb", "BAR"), isThreadSafe: true);
+    private static readonly Lazy<Country> bhr = new(() => new Country("Бахрейн", "Bahrain", 048, "BH", "BHR", new TimeSpan(3, 0, 0), Currency.BHD, 973, ".bh", "BRN"), isThreadSafe: true);
+    private static readonly Lazy<Country> blz = new(() => new Country("Белиз", "Belize", 084, "BZ", "BLZ", new TimeSpan(-6, 0, 0), Currency.BZD, 501, ".bz", "BIZ"), isThreadSafe: true);
+    private static readonly Lazy<Country> blr = new(() => new Country("Белоруссия", "Belarus", 112, "BY", "BLR", new TimeSpan(3, 0, 0), Currency.BYN, 375, ".by", "BLR"), isThreadSafe: true);
+    private static readonly Lazy<Country> bel = new(() => new Country("Бельгия", "Belgium", 056, "BE", "BEL", new TimeSpan(1, 0, 0), 32, ".be", "BEL"), isThreadSafe: true);
+    private static readonly Lazy<Country> ben = new(() => new Country("Бенин", "Benin", 204, "BJ", "BEN", new TimeSpan(1, 0, 0), 229, ".bj", "BEN"), isThreadSafe: true);
+    private static readonly Lazy<Country> bmu = new(() => new Country("Бермудские Острова", "Bermuda", 060, "BM", "BMU", new TimeSpan(-4, 0, 0), Currency.BMD, 0, ".bm", "BER"), isThreadSafe: true);
+    private static readonly Lazy<Country> bgr = new(() => new Country("Болгария", "Bulgaria", 100, "BG", "BGR", new TimeSpan(2, 0, 0), Currency.BGN, 359, ".bg", "BUL"), isThreadSafe: true);
+    private static readonly Lazy<Country> bol = new(() => new Country("Боливия", "Bolivia", 068, "BO", "BOL", new TimeSpan(-4, 0, 0), [Currency.BOB, Currency.BOV], 591, ".bo", "BOL"), isThreadSafe: true);
+    private static readonly Lazy<Country> bes = new(() => new Country("Бонайре, Синт-Эстатиус и Саба", "Caribbean Netherlands", 535, "BQ", "BES", new TimeSpan(-4, 0, 0), 0, ".bq"), isThreadSafe: true);
+    private static readonly Lazy<Country> bih = new(() => new Country("Босния и Герцеговина", "Bosnia and Herzegovina", 070, "BA", "BIH", new TimeSpan(1, 0, 0), Currency.BAM, 387, ".ba", "BIH"), isThreadSafe: true);
+    private static readonly Lazy<Country> bwa = new(() => new Country("Ботсвана", "Botswana", 072, "BW", "BWA", new TimeSpan(2, 0, 0), Currency.BWP, 267, ".bw", "BOT"), isThreadSafe: true);
+    private static readonly Lazy<Country> bra = new(() => new Country("Бразилия", "Brazil", 076, "BR", "BRA", new TimeSpan(-3, 0, 0), Currency.BRL, 55, ".br", "BRA"), isThreadSafe: true);
+    private static readonly Lazy<Country> iot = new(() => new Country("Британская Территория в Индийском Океане", "British Indian Ocean Territory", 086, "IO", "IOT", new TimeSpan(6, 0, 0), 0, ".io"), isThreadSafe: true);
+    private static readonly Lazy<Country> vgb = new(() => new Country("Виргинские Острова (Великобритания)", "British Virgin Islands", 092, "VG", "VGB", new TimeSpan(-4, 0, 0), 0, ".vg", "IVB"), isThreadSafe: true);
+    private static readonly Lazy<Country> brn = new(() => new Country("Бруней", "Brunei", 096, "BN", "BRN", new TimeSpan(8, 0, 0), Currency.BND, 673, ".bn", "BRU"), isThreadSafe: true);
+    private static readonly Lazy<Country> bfa = new(() => new Country("Буркина-Фасо", "Burkina Faso", 854, "BF", "BFA", new TimeSpan(), 226, ".bf", "BUR"), isThreadSafe: true);
+    private static readonly Lazy<Country> bdi = new(() => new Country("Бурунди", "Burundi", 108, "BI", "BDI", new TimeSpan(2, 0, 0), Currency.BIF, 257, ".bi", "BDI"), isThreadSafe: true);
+    private static readonly Lazy<Country> btn = new(() => new Country("Бутан", "Bhutan", 064, "BT", "BTN", new TimeSpan(6, 0, 0), Currency.BTN, 975, ".bt", "BHU"), isThreadSafe: true);
+    private static readonly Lazy<Country> vut = new(() => new Country("Вануату", "Vanuatu", 548, "VU", "VUT", new TimeSpan(11, 0, 0), Currency.VUV, 678, ".vu", "VAN"), isThreadSafe: true);
+    private static readonly Lazy<Country> vat = new(() => new Country("Ватикан", "Vatican City", 336, "VA", "VAT", new TimeSpan(1, 0, 0), 379, ".va"), isThreadSafe: true);
+    private static readonly Lazy<Country> gbr = new(() => new Country("Великобритания", "United Kingdom", 826, "GB", "GBR", new TimeSpan(), Currency.GBP, 44, ".uk", "GBR"), isThreadSafe: true);
+    private static readonly Lazy<Country> hun = new(() => new Country("Венгрия", "Hungary", 348, "HU", "HUN", new TimeSpan(1, 0, 0), Currency.HUF, 36, ".hu", "HUN"), isThreadSafe: true);
+    private static readonly Lazy<Country> ven = new(() => new Country("Венесуэла", "Venezuela", 862, "VE", "VEN", new TimeSpan(-4, -30, 0), Currency.VEF, 58, ".ve", "VEN"), isThreadSafe: true);
+    private static readonly Lazy<Country> umi = new(() => new Country("Внешние малые острова США", "United States Minor Outlying Islands", 581, "UM", "UMI", new TimeSpan(-11, 0, 0), 0, ".us"), isThreadSafe: true);
+    private static readonly Lazy<Country> tls = new(() => new Country("Восточный Тимор", "East Timor", 626, "TL", "TLS", new TimeSpan(9, 0, 0), 670, ".tl", "TLS"), isThreadSafe: true);
+    private static readonly Lazy<Country> vnm = new(() => new Country("Вьетнам", "Vietnam", 704, "VN", "VNM", new TimeSpan(7, 0, 0), Currency.VND, 84, ".vn", "VIE"), isThreadSafe: true);
+    private static readonly Lazy<Country> gab = new(() => new Country("Габон", "Gabon", 266, "GA", "GAB", new TimeSpan(1, 0, 0), 241, ".ga", "GAB"), isThreadSafe: true);
+    private static readonly Lazy<Country> hti = new(() => new Country("Республика Гаити", "Haiti", 332, "HT", "HTI", new TimeSpan(-5, 0, 0), Currency.HTG, 509, ".ht", "HAI"), isThreadSafe: true);
+    private static readonly Lazy<Country> guy = new(() => new Country("Гайана", "Guyana", 328, "GY", "GUY", new TimeSpan(-4, 0, 0), Currency.GYD, 592, ".gy", "GUY"), isThreadSafe: true);
+    private static readonly Lazy<Country> gmb = new(() => new Country("Гамбия", "Gambia", 270, "GM", "GMB", new TimeSpan(), Currency.GMD, 220, ".gm", "GAM"), isThreadSafe: true);
+    private static readonly Lazy<Country> gha = new(() => new Country("Гана", "Ghana", 288, "GH", "GHA", new TimeSpan(), Currency.GHS, 233, ".gh", "GHA"), isThreadSafe: true);
+    private static readonly Lazy<Country> glp = new(() => new Country("Гваделупа", "Guadeloupe", 312, "GP", "GLP", new TimeSpan(-4, 0, 0), 0, ".gp"), isThreadSafe: true);
+    private static readonly Lazy<Country> gtm = new(() => new Country("Гватемала", "Guatemala", 320, "GT", "GTM", new TimeSpan(-6, 0, 0), Currency.GTQ, 502, ".gt", "GUA"), isThreadSafe: true);
+    private static readonly Lazy<Country> guf = new(() => new Country("Гвиана (департамент Франции)", "French Guiana", 254, "GF", "GUF", new TimeSpan(-3, 0, 0), 0, ".gf"), isThreadSafe: true);
+    private static readonly Lazy<Country> gin = new(() => new Country("Гвинея", "Guinea", 324, "GN", "GIN", new TimeSpan(), Currency.GNF, 224, ".gn", "GUI"), isThreadSafe: true);
+    private static readonly Lazy<Country> gnb = new(() => new Country("Гвинея-Бисау", "Guinea-Bissau", 624, "GW", "GNB", new TimeSpan(), 245, ".gw", "GBS"), isThreadSafe: true);
+    private static readonly Lazy<Country> deu = new(() => new Country("Германия", "Germany", 276, "DE", "DEU", new TimeSpan(1, 0, 0), 49, ".de", "GER"), isThreadSafe: true);
+    private static readonly Lazy<Country> ggy = new(() => new Country("Гернси (коронное владение)", "Guernsey", 831, "GG", "GGY", new TimeSpan(), Currency.GGP, 0, ".gg"), isThreadSafe: true);
+    private static readonly Lazy<Country> gib = new(() => new Country("Гибралтар", "Gibraltar", 292, "GI", "GIB", new TimeSpan(1, 0, 0), Currency.GIP, 0, ".gi"), isThreadSafe: true);
+    private static readonly Lazy<Country> hnd = new(() => new Country("Гондурас", "Honduras", 340, "HN", "HND", new TimeSpan(-6, 0, 0), Currency.HNL, 504, ".hn", "HON"), isThreadSafe: true);
+    private static readonly Lazy<Country> hkg = new(() => new Country("Гонконг", "Hong Kong", 344, "HK", "HKG", new TimeSpan(8, 0, 0), Currency.HKD, 0, ".hk", "HKG"), isThreadSafe: true);
+    private static readonly Lazy<Country> grd = new(() => new Country("Гренада", "Grenada", 308, "GD", "GRD", new TimeSpan(-4, 0, 0), 1473, ".gd", "GRN"), isThreadSafe: true);
+    private static readonly Lazy<Country> grl = new(() => new Country("Гренландия (административная единица)", "Greenland", 304, "GL", "GRL", new TimeSpan(-3, 0, 0), 0, ".gl"), isThreadSafe: true);
+    private static readonly Lazy<Country> grc = new(() => new Country("Греция", "Greece", 300, "GR", "GRC", new TimeSpan(2, 0, 0), 30, ".gr", "GRE"), isThreadSafe: true);
+    private static readonly Lazy<Country> geo = new(() => new Country("Грузия", "Georgia", 268, "GE", "GEO", new TimeSpan(4, 0, 0), Currency.GEL, 995, ".ge", "GEO"), isThreadSafe: true);
+    private static readonly Lazy<Country> gum = new(() => new Country("Гуам", "Guam", 316, "GU", "GUM", new TimeSpan(10, 0, 0), 0, ".gu", "GUM"), isThreadSafe: true);
+    private static readonly Lazy<Country> dnk = new(() => new Country("Дания", "Denmark", 208, "DK", "DNK", new TimeSpan(1, 0, 0), Currency.DKK, 45, ".dk", "DEN"), isThreadSafe: true);
+    private static readonly Lazy<Country> jey = new(() => new Country("Джерси (остров)", "Jersey", 832, "JE", "JEY", new TimeSpan(), Currency.JEP, 0, ".je"), isThreadSafe: true);
+    private static readonly Lazy<Country> dji = new(() => new Country("Джибути", "Djibouti", 262, "DJ", "DJI", new TimeSpan(3, 0, 0), Currency.DJF, 253, ".dj", "DJI"), isThreadSafe: true);
+    private static readonly Lazy<Country> dma = new(() => new Country("Доминика", "Dominica", 212, "DM", "DMA", new TimeSpan(-4, 0, 0), 1767, ".dm", "DMA"), isThreadSafe: true);
+    private static readonly Lazy<Country> dom = new(() => new Country("Доминиканская Республика", "Dominican Republic", 214, "DO", "DOM", new TimeSpan(-4, 0, 0), Currency.DOP, 1809, ".do", "DOM"), isThreadSafe: true);
+    private static readonly Lazy<Country> cod = new(() => new Country("Демократическая Республика Конго", "Democratic Republic of the Congo", 180, "CD", "COD", new TimeSpan(1, 0, 0), Currency.CDF, 243, ".cd", "COD"), isThreadSafe: true);
+    private static readonly Lazy<Country> egy = new(() => new Country("Египет", "Egypt", 818, "EG", "EGY", new TimeSpan(2, 0, 0), Currency.EGP, 20, ".eg", "EGY"), isThreadSafe: true);
+    private static readonly Lazy<Country> zmb = new(() => new Country("Замбия", "Zambia", 894, "ZM", "ZMB", new TimeSpan(2, 0, 0), Currency.ZMW, 260, ".zm", "ZAM"), isThreadSafe: true);
+    private static readonly Lazy<Country> esh = new(() => new Country("Сахарская Арабская Демократическая Республика", "Western Sahara", 732, "EH", "ESH", new TimeSpan(), 0, ".eh"), isThreadSafe: true);
+    private static readonly Lazy<Country> zwe = new(() => new Country("Зимбабве", "Zimbabwe", 716, "ZW", "ZWE", new TimeSpan(2, 0, 0), Currency.ZWL, 263, ".zw", "ZIM"), isThreadSafe: true);
+    private static readonly Lazy<Country> isr = new(() => new Country("Израиль", "Israel", 376, "IL", "ISR", new TimeSpan(2, 0, 0), Currency.ILS, 972, ".il", "ISR"), isThreadSafe: true);
+    private static readonly Lazy<Country> ind = new(() => new Country("Индия", "India", 356, "IN", "IND", new TimeSpan(5, 30, 0), Currency.INR, 91, ".in", "IND"), isThreadSafe: true);
+    private static readonly Lazy<Country> idn = new(() => new Country("Индонезия", "Indonesia", 360, "ID", "IDN", new TimeSpan(7, 0, 0), Currency.IDR, 62, ".id", "INA"), isThreadSafe: true);
+    private static readonly Lazy<Country> jor = new(() => new Country("Иордания", "Jordan", 400, "JO", "JOR", new TimeSpan(2, 0, 0), Currency.JOD, 962, ".jo", "JOR"), isThreadSafe: true);
+    private static readonly Lazy<Country> irq = new(() => new Country("Ирак", "Iraq", 368, "IQ", "IRQ", new TimeSpan(3, 0, 0), Currency.IQD, 964, ".iq", "IRQ"), isThreadSafe: true);
+    private static readonly Lazy<Country> irn = new(() => new Country("Иран", "Iran", 364, "IR", "IRN", new TimeSpan(3, 30, 0), Currency.IRR, 98, ".ir", "IRI"), isThreadSafe: true);
+    private static readonly Lazy<Country> irl = new(() => new Country("Ирландия", "Ireland", 372, "IE", "IRL", new TimeSpan(), 353, ".ie", "IRL"), isThreadSafe: true);
+    private static readonly Lazy<Country> isl = new(() => new Country("Исландия", "Iceland", 352, "IS", "ISL", new TimeSpan(), Currency.ISK, 354, ".is", "ISL"), isThreadSafe: true);
+    private static readonly Lazy<Country> esp = new(() => new Country("Испания", "Spain", 724, "ES", "ESP", new TimeSpan(1, 0, 0), 34, ".es", "ESP"), isThreadSafe: true);
+    private static readonly Lazy<Country> ita = new(() => new Country("Италия", "Italy", 380, "IT", "ITA", new TimeSpan(1, 0, 0), 39, ".it", "ITA"), isThreadSafe: true);
+    private static readonly Lazy<Country> yem = new(() => new Country("Йемен", "Yemen", 887, "YE", "YEM", new TimeSpan(3, 0, 0), Currency.YER, 967, ".ye", "YEM"), isThreadSafe: true);
+    private static readonly Lazy<Country> cpv = new(() => new Country("Кабо-Верде", "Cape Verde", 132, "CV", "CPV", new TimeSpan(-1, 0, 0), Currency.CVE, 238, ".cv", "CPV"), isThreadSafe: true);
+    private static readonly Lazy<Country> kaz = new(() => new Country("Казахстан", "Kazakhstan", 398, "KZ", "KAZ", new TimeSpan(6, 0, 0), Currency.KZT, 7, ".kz", "KAZ"), isThreadSafe: true);
+    private static readonly Lazy<Country> cym = new(() => new Country("Острова Кайман", "Cayman Islands", 136, "KY", "CYM", new TimeSpan(-5, 0, 0), Currency.KYD, 0, ".ky", "CAY"), isThreadSafe: true);
+    private static readonly Lazy<Country> khm = new(() => new Country("Камбоджа", "Cambodia", 116, "KH", "KHM", new TimeSpan(7, 0, 0), Currency.KHR, 855, ".kh", "CAM"), isThreadSafe: true);
+    private static readonly Lazy<Country> cmr = new(() => new Country("Камерун", "Cameroon", 120, "CM", "CMR", new TimeSpan(1, 0, 0), 237, ".cm", "CMR"), isThreadSafe: true);
+    private static readonly Lazy<Country> can = new(() => new Country("Канада", "Canada", 124, "CA", "CAN", new TimeSpan(-5, 0, 0), Currency.CAD, 1, ".ca", "CAN"), isThreadSafe: true);
+    private static readonly Lazy<Country> qat = new(() => new Country("Катар", "Qatar", 634, "QA", "QAT", new TimeSpan(3, 0, 0), Currency.QAR, 974, ".qa", "QAT"), isThreadSafe: true);
+    private static readonly Lazy<Country> ken = new(() => new Country("Кения", "Kenya", 404, "KE", "KEN", new TimeSpan(3, 0, 0), Currency.KES, 254, ".ke", "KEN"), isThreadSafe: true);
+    private static readonly Lazy<Country> cyp = new(() => new Country("Республика Кипр", "Cyprus", 196, "CY", "CYP", new TimeSpan(2, 0, 0), 357, ".cy", "CYP"), isThreadSafe: true);
+    private static readonly Lazy<Country> kgz = new(() => new Country("Кыргызстан", "Kyrgyzstan", 417, "KG", "KGZ", new TimeSpan(6, 0, 0), Currency.KGS, 996, ".kg", "KGZ"), isThreadSafe: true);
+    private static readonly Lazy<Country> kir = new(() => new Country("Кирибати", "Kiribati", 296, "KI", "KIR", new TimeSpan(12, 0, 0), 686, ".ki", "KIR"), isThreadSafe: true);
+    private static readonly Lazy<Country> twn = new(() => new Country("Китайская Республика (Тайвань)", "Taiwan", 158, "TW", "TWN", new TimeSpan(8, 0, 0), Currency.TWD, 0, ".tw", "TPE"), isThreadSafe: true);
+    private static readonly Lazy<Country> prk = new(() => new Country("Корейская Народно-Демократическая Республика", "North Korea", 408, "KP", "PRK", new TimeSpan(9, 0, 0), Currency.KPW, 850, ".kp", "PRK"), isThreadSafe: true);
+    private static readonly Lazy<Country> chn = new(() => new Country("Китай", "China", 156, "CN", "CHN", new TimeSpan(8, 0, 0), Currency.CNY, 86, ".cn", "CHN"), isThreadSafe: true);
+    private static readonly Lazy<Country> cck = new(() => new Country("Кокосовые острова", "Cocos (Keeling) Islands", 166, "CC", "CCK", new TimeSpan(6, 30, 0), 0, ".cc"), isThreadSafe: true);
+    private static readonly Lazy<Country> col = new(() => new Country("Колумбия", "Colombia", 170, "CO", "COL", new TimeSpan(-5, 0, 0), [Currency.COP, Currency.COU], 57, ".co", "COL"), isThreadSafe: true);
+    private static readonly Lazy<Country> com = new(() => new Country("Коморы", "Comoros", 174, "KM", "COM", new TimeSpan(3, 0, 0), Currency.KMF, 269, ".km", "COM"), isThreadSafe: true);
+    private static readonly Lazy<Country> cri = new(() => new Country("Коста-Рика", "Costa Rica", 188, "CR", "CRI", new TimeSpan(-6, 0, 0), Currency.CRC, 506, ".cr", "CRC"), isThreadSafe: true);
+    private static readonly Lazy<Country> civ = new(() => new Country("Кот-д’Ивуар", "Ivory Coast", 384, "CI", "CIV", new TimeSpan(), 225, ".ci", "CIV"), isThreadSafe: true);
+    private static readonly Lazy<Country> cub = new(() => new Country("Куба", "Cuba", 192, "CU", "CUB", new TimeSpan(-5, 0, 0), [Currency.CUC, Currency.CUP], 53, ".cu", "CUB"), isThreadSafe: true);
+    private static readonly Lazy<Country> kwt = new(() => new Country("Кувейт", "Kuwait", 414, "KW", "KWT", new TimeSpan(3, 0, 0), Currency.KWD, 965, ".kw", "KUW"), isThreadSafe: true);
+    private static readonly Lazy<Country> cuw = new(() => new Country("Кюрасао", "Curacao", 531, "CW", "CUW", new TimeSpan(-4, 0, 0), 0, ".cw"), isThreadSafe: true);
+    private static readonly Lazy<Country> lao = new(() => new Country("Лаос", "Laos", 418, "LA", "LAO", new TimeSpan(7, 0, 0), Currency.LAK, 856, ".la", "LAO"), isThreadSafe: true);
+    private static readonly Lazy<Country> lva = new(() => new Country("Латвия", "Latvia", 428, "LV", "LVA", new TimeSpan(2, 0, 0), 371, ".lv", "LAT"), isThreadSafe: true);
+    private static readonly Lazy<Country> lso = new(() => new Country("Лесото", "Lesotho", 426, "LS", "LSO", new TimeSpan(2, 0, 0), Currency.LSL, 266, ".ls", "LES"), isThreadSafe: true);
+    private static readonly Lazy<Country> lbr = new(() => new Country("Либерия", "Liberia", 430, "LR", "LBR", new TimeSpan(), Currency.LRD, 231, ".lr", "LBR"), isThreadSafe: true);
+    private static readonly Lazy<Country> lbn = new(() => new Country("Ливан", "Lebanon", 422, "LB", "LBN", new TimeSpan(2, 0, 0), Currency.LBP, 961, ".lb", "LBN"), isThreadSafe: true);
+    private static readonly Lazy<Country> lby = new(() => new Country("Ливия", "Libya", 434, "LY", "LBY", new TimeSpan(2, 0, 0), Currency.LYD, 218, ".ly", "LBA"), isThreadSafe: true);
+    private static readonly Lazy<Country> ltu = new(() => new Country("Литва", "Lithuania", 440, "LT", "LTU", new TimeSpan(2, 0, 0), Currency.LTL, 370, ".lt", "LTU"), isThreadSafe: true);
+    private static readonly Lazy<Country> lie = new(() => new Country("Лихтенштейн", "Liechtenstein", 438, "LI", "LIE", new TimeSpan(1, 0, 0), 423, ".li", "LIE"), isThreadSafe: true);
+    private static readonly Lazy<Country> lux = new(() => new Country("Люксембург", "Luxembourg", 442, "LU", "LUX", new TimeSpan(1, 0, 0), 352, ".lu", "LUX"), isThreadSafe: true);
+    private static readonly Lazy<Country> mus = new(() => new Country("Маврикий", "Mauritius", 480, "MU", "MUS", new TimeSpan(4, 0, 0), Currency.MUR, 230, ".mu", "MRI"), isThreadSafe: true);
+    private static readonly Lazy<Country> mrt = new(() => new Country("Мавритания", "Mauritania", 478, "MR", "MRT", new TimeSpan(), Currency.MRU, 222, ".mr", "MTN"), isThreadSafe: true);
+    private static readonly Lazy<Country> mdg = new(() => new Country("Мадагаскар", "Madagascar", 450, "MG", "MDG", new TimeSpan(3, 0, 0), Currency.MGA, 261, ".mg", "MAD"), isThreadSafe: true);
+    private static readonly Lazy<Country> myt = new(() => new Country("Майотта", "Mayotte", 175, "YT", "MYT", new TimeSpan(3, 0, 0), 0, ".yt"), isThreadSafe: true);
+    private static readonly Lazy<Country> mac = new(() => new Country("Макао", "Macao", 446, "MO", "MAC", new TimeSpan(8, 0, 0), Currency.MOP, 0, ".mo"), isThreadSafe: true);
+    private static readonly Lazy<Country> mkd = new(() => new Country("Северная Македония", "North Macedonia", 807, "MK", "MKD", new TimeSpan(1, 0, 0), Currency.MKD, 389, ".mk", "MKD"), isThreadSafe: true);
+    private static readonly Lazy<Country> mwi = new(() => new Country("Малави", "Malawi", 454, "MW", "MWI", new TimeSpan(2, 0, 0), Currency.MWK, 265, ".mw", "MAW"), isThreadSafe: true);
+    private static readonly Lazy<Country> mys = new(() => new Country("Малайзия", "Malaysia", 458, "MY", "MYS", new TimeSpan(8, 0, 0), Currency.MYR, 60, ".my", "MAS"), isThreadSafe: true);
+    private static readonly Lazy<Country> mli = new(() => new Country("Мали", "Mali", 466, "ML", "MLI", new TimeSpan(), 223, ".ml", "MLI"), isThreadSafe: true);
+    private static readonly Lazy<Country> mdv = new(() => new Country("Мальдивы", "Maldives", 462, "MV", "MDV", new TimeSpan(5, 0, 0), Currency.MVR, 960, ".mv", "MDV"), isThreadSafe: true);
+    private static readonly Lazy<Country> mlt = new(() => new Country("Мальта", "Malta", 470, "MT", "MLT", new TimeSpan(1, 0, 0), 356, ".mt", "MLT"), isThreadSafe: true);
+    private static readonly Lazy<Country> mar = new(() => new Country("Марокко", "Morocco", 504, "MA", "MAR", new TimeSpan(), Currency.MAD, 212, ".ma", "MAR"), isThreadSafe: true);
+    private static readonly Lazy<Country> mtq = new(() => new Country("Мартиника", "Martinique", 474, "MQ", "MTQ", new TimeSpan(-4, 0, 0), 0, ".mq"), isThreadSafe: true);
+    private static readonly Lazy<Country> mhl = new(() => new Country("Маршалловы Острова", "Marshall Islands", 584, "MH", "MHL", new TimeSpan(12, 0, 0), 692, ".mh", "MHL"), isThreadSafe: true);
+    private static readonly Lazy<Country> mex = new(() => new Country("Мексика", "Mexico", 484, "MX", "MEX", new TimeSpan(-6, 0, 0), [Currency.MXN, Currency.MXV], 52, ".mx", "MEX"), isThreadSafe: true);
+    private static readonly Lazy<Country> fsm = new(() => new Country("Федеративные Штаты Микронезии", "Federated States of Micronesia", 583, "FM", "FSM", new TimeSpan(10, 0, 0), 691, ".fm", "FSM"), isThreadSafe: true);
+    private static readonly Lazy<Country> moz = new(() => new Country("Мозамбик", "Mozambique", 508, "MZ", "MOZ", new TimeSpan(2, 0, 0), Currency.MZN, 258, ".mz", "MOZ"), isThreadSafe: true);
+    private static readonly Lazy<Country> mda = new(() => new Country("Молдавия", "Moldova", 498, "MD", "MDA", new TimeSpan(2, 0, 0), Currency.MDL, 373, ".md", "MDA"), isThreadSafe: true);
+    private static readonly Lazy<Country> mco = new(() => new Country("Монако", "Principality of Monaco", 492, "MC", "MCO", new TimeSpan(1, 0, 0), 377, ".mc", "MON"), isThreadSafe: true);
+    private static readonly Lazy<Country> mng = new(() => new Country("Монголия", "Mongolia", 496, "MN", "MNG", new TimeSpan(8, 0, 0), Currency.MNT, 976, ".mn", "MGL"), isThreadSafe: true);
+    private static readonly Lazy<Country> msr = new(() => new Country("Монтсеррат", "Montserrat", 500, "MS", "MSR", new TimeSpan(-4, 0, 0), 0, ".ms"), isThreadSafe: true);
+    private static readonly Lazy<Country> mmr = new(() => new Country("Мьянма", "Myanmar", 104, "MM", "MMR", new TimeSpan(6, 30, 0), Currency.MMK, 95, ".mm", "MYA"), isThreadSafe: true);
+    private static readonly Lazy<Country> nam = new(() => new Country("Намибия", "Namibia", 516, "NA", "NAM", new TimeSpan(1, 0, 0), Currency.NAD, 264, ".na", "NAM"), isThreadSafe: true);
+    private static readonly Lazy<Country> nru = new(() => new Country("Науру", "Nauru", 520, "NR", "NRU", new TimeSpan(12, 0, 0), 674, ".nr", "NRU"), isThreadSafe: true);
+    private static readonly Lazy<Country> npl = new(() => new Country("Непал", "Nepal", 524, "NP", "NPL", new TimeSpan(5, 45, 0), Currency.NPR, 977, ".np", "NEP"), isThreadSafe: true);
+    private static readonly Lazy<Country> ner = new(() => new Country("Нигер", "Niger", 562, "NE", "NER", new TimeSpan(1, 0, 0), 227, ".ne", "NIG"), isThreadSafe: true);
+    private static readonly Lazy<Country> nga = new(() => new Country("Нигерия", "Nigeria", 566, "NG", "NGA", new TimeSpan(1, 0, 0), Currency.NGN, 234, ".ng", "NGR"), isThreadSafe: true);
+    private static readonly Lazy<Country> nld = new(() => new Country("Нидерланды", "Netherlands", 528, "NL", "NLD", new TimeSpan(1, 0, 0), 31, ".nl", "NED"), isThreadSafe: true);
+    private static readonly Lazy<Country> nic = new(() => new Country("Никарагуа", "Nicaragua", 558, "NI", "NIC", new TimeSpan(-6, 0, 0), Currency.NIO, 505, ".ni", "NCA"), isThreadSafe: true);
+    private static readonly Lazy<Country> niu = new(() => new Country("Ниуэ", "Niue", 570, "NU", "NIU", new TimeSpan(-11, 0, 0), 0, ".nu"), isThreadSafe: true);
+    private static readonly Lazy<Country> nzl = new(() => new Country("Новая Зеландия", "New Zealand", 554, "NZ", "NZL", new TimeSpan(12, 0, 0), Currency.NZD, 64, ".nz", "NZL"), isThreadSafe: true);
+    private static readonly Lazy<Country> ncl = new(() => new Country("Новая Каледония", "New Caledonia", 540, "NC", "NCL", new TimeSpan(11, 0, 0), 0, ".nc"), isThreadSafe: true);
+    private static readonly Lazy<Country> nor = new(() => new Country("Норвегия", "Norway", 578, "NO", "NOR", new TimeSpan(1, 0, 0), Currency.NOK, 47, ".no", "NOR"), isThreadSafe: true);
+    private static readonly Lazy<Country> are = new(() => new Country("Объединённые Арабские Эмираты", "United Arab Emirates", 784, "AE", "ARE", new TimeSpan(4, 0, 0), Currency.AED, 971, ".ae", "UAE"), isThreadSafe: true);
+    private static readonly Lazy<Country> omn = new(() => new Country("Оман", "Oman", 512, "OM", "OMN", new TimeSpan(4, 0, 0), Currency.OMR, 968, ".om", "OMA"), isThreadSafe: true);
+    private static readonly Lazy<Country> bvt = new(() => new Country("Остров Буве", "Bouvet Island", 074, "BV", "BVT", new TimeSpan(), 0, ".bv"), isThreadSafe: true);
+    private static readonly Lazy<Country> imn = new(() => new Country("Остров Мэн", "Isle of Man", 833, "IM", "IMN", new TimeSpan(), Currency.IMP, 0, ".im"), isThreadSafe: true);
+    private static readonly Lazy<Country> cok = new(() => new Country("Острова Кука", "Cook Islands", 184, "CK", "COK", new TimeSpan(-10, 0, 0), 0, ".ck", "COK"), isThreadSafe: true);
+    private static readonly Lazy<Country> nfk = new(() => new Country("Остров Норфолк", "Norfolk Island", 574, "NF", "NFK", new TimeSpan(11, 0, 0), 0, ".nf"), isThreadSafe: true);
+    private static readonly Lazy<Country> cxr = new(() => new Country("Остров Рождества (Австралия)", "Christmas Island", 162, "CX", "CXR", new TimeSpan(7, 0, 0), 0, ".cx"), isThreadSafe: true);
+    private static readonly Lazy<Country> pcn = new(() => new Country("Острова Питкэрн", "Pitcairn Islands", 612, "PN", "PCN", new TimeSpan(-8, 0, 0), 0, ".pn"), isThreadSafe: true);
+    private static readonly Lazy<Country> shn = new(() => new Country("Остров Святой Елены", "Saint Helena, Ascension and Tristan da Cunha", 654, "SH", "SHN", new TimeSpan(), Currency.SHP, 0, ".sh"), isThreadSafe: true);
+    private static readonly Lazy<Country> pak = new(() => new Country("Пакистан", "Pakistan", 586, "PK", "PAK", new TimeSpan(5, 0, 0), Currency.PKR, 92, ".pk", "PAK"), isThreadSafe: true);
+    private static readonly Lazy<Country> plw = new(() => new Country("Палау", "Palau", 585, "PW", "PLW", new TimeSpan(9, 0, 0), 680, ".pw", "PLW"), isThreadSafe: true);
+    private static readonly Lazy<Country> pse = new(() => new Country("Государство Палестина", "Palestine", 275, "PS", "PSE", new TimeSpan(2, 0, 0), 970, ".ps", "PLE"), isThreadSafe: true);
+    private static readonly Lazy<Country> pan = new(() => new Country("Панама", "Panama", 591, "PA", "PAN", new TimeSpan(-5, 0, 0), Currency.PAB, 507, ".pa", "PAN"), isThreadSafe: true);
+    private static readonly Lazy<Country> png = new(() => new Country("Папуа — Новая Гвинея", "Papua New Guinea", 598, "PG", "PNG", new TimeSpan(10, 0, 0), Currency.PGK, 675, ".pg", "PNG"), isThreadSafe: true);
+    private static readonly Lazy<Country> pry = new(() => new Country("Парагвай", "Paraguay", 600, "PY", "PRY", new TimeSpan(-4, 0, 0), Currency.PYG, 595, ".py", "PAR"), isThreadSafe: true);
+    private static readonly Lazy<Country> per = new(() => new Country("Перу", "Peru", 604, "PE", "PER", new TimeSpan(-5, 0, 0), Currency.PEN, 51, ".pe", "PER"), isThreadSafe: true);
+    private static readonly Lazy<Country> pol = new(() => new Country("Польша", "Poland", 616, "PL", "POL", new TimeSpan(1, 0, 0), Currency.PLN, 48, ".pl", "POL"), isThreadSafe: true);
+    private static readonly Lazy<Country> prt = new(() => new Country("Португалия", "Portugal", 620, "PT", "PRT", new TimeSpan(), 351, ".pt", "POR"), isThreadSafe: true);
+    private static readonly Lazy<Country> pri = new(() => new Country("Пуэрто-Рико", "Puerto Rico", 630, "PR", "PRI", new TimeSpan(-4, 0, 0), 0, ".pr", "PUR"), isThreadSafe: true);
+    private static readonly Lazy<Country> cog = new(() => new Country("Республика Конго", "Republic of the Congo", 178, "CG", "COG", new TimeSpan(1, 0, 0), 242, ".cg", "CGO"), isThreadSafe: true);
+    private static readonly Lazy<Country> kor = new(() => new Country("Республика Корея", "South Korea", 410, "KR", "KOR", new TimeSpan(9, 0, 0), Currency.KRW, 82, ".kr", "KOR"), isThreadSafe: true);
+    private static readonly Lazy<Country> reu = new(() => new Country("Реюньон", "Reunion", 638, "RE", "REU", new TimeSpan(4, 0, 0), 0, ".re"), isThreadSafe: true);
+    private static readonly Lazy<Country> rus = new(() => new Country("Россия", "Russia", 643, "RU", "RUS", new TimeSpan(3, 0, 0), Currency.RUB, 7, ".ru", "RUS"), isThreadSafe: true);
+    private static readonly Lazy<Country> rwa = new(() => new Country("Руанда", "Rwanda", 646, "RW", "RWA", new TimeSpan(2, 0, 0), Currency.RWF, 250, ".rw", "RWA"), isThreadSafe: true);
+    private static readonly Lazy<Country> rou = new(() => new Country("Румыния", "Romania", 642, "RO", "ROU", new TimeSpan(2, 0, 0), Currency.RON, 40, ".ro", "ROU"), isThreadSafe: true);
+    private static readonly Lazy<Country> slv = new(() => new Country("Сальвадор", "El Salvador", 222, "SV", "SLV", new TimeSpan(-6, 0, 0), Currency.SVC, 503, ".sv", "ESA"), isThreadSafe: true);
+    private static readonly Lazy<Country> wsm = new(() => new Country("Самоа", "Samoa", 882, "WS", "WSM", new TimeSpan(13, 0, 0), Currency.WST, 685, ".ws", "SAM"), isThreadSafe: true);
+    private static readonly Lazy<Country> smr = new(() => new Country("Сан-Марино", "San Marino", 674, "SM", "SMR", new TimeSpan(1, 0, 0), 378, ".sm", "SMR"), isThreadSafe: true);
+    private static readonly Lazy<Country> stp = new(() => new Country("Сан-Томе и Принсипи", "Sao Tome and Principe", 678, "ST", "STP", new TimeSpan(), Currency.STN, 239, ".st", "STP"), isThreadSafe: true);
+    private static readonly Lazy<Country> sau = new(() => new Country("Саудовская Аравия", "Saudi Arabia", 682, "SA", "SAU", new TimeSpan(3, 0, 0), Currency.SAR, 966, ".sa", "KSA"), isThreadSafe: true);
+    private static readonly Lazy<Country> swz = new(() => new Country("Эсватини", "Eswatini", 748, "SZ", "SWZ", new TimeSpan(2, 0, 0), Currency.SZL, 268, ".sz", "SWZ"), isThreadSafe: true);
+    private static readonly Lazy<Country> mnp = new(() => new Country("Северные Марианские Острова", "Northern Mariana Islands", 580, "MP", "MNP", new TimeSpan(10, 0, 0), 0, ".mp"), isThreadSafe: true);
+    private static readonly Lazy<Country> syc = new(() => new Country("Сейшельские Острова", "Seychelles", 690, "SC", "SYC", new TimeSpan(4, 0, 0), Currency.SCR, 248, ".sc", "SEY"), isThreadSafe: true);
+    private static readonly Lazy<Country> blm = new(() => new Country("Сен-Бартелеми (заморское сообщество)", "Saint Barthelemy", 652, "BL", "BLM", new TimeSpan(-4, 0, 0), 0, ".bl"), isThreadSafe: true);
+    private static readonly Lazy<Country> maf = new(() => new Country("Сен-Мартен (владение Франции)", "Saint Martin", 663, "MF", "MAF", new TimeSpan(-4, 0, 0), 0, ".mf"), isThreadSafe: true);
+    private static readonly Lazy<Country> spm = new(() => new Country("Сен-Пьер и Микелон", "Saint Pierre and Miquelon", 666, "PM", "SPM", new TimeSpan(-3, 0, 0), 0, ".pm"), isThreadSafe: true);
+    private static readonly Lazy<Country> sen = new(() => new Country("Сенегал", "Senegal", 686, "SN", "SEN", new TimeSpan(), 221, ".sn", "SEN"), isThreadSafe: true);
+    private static readonly Lazy<Country> vct = new(() => new Country("Сент-Винсент и Гренадины", "Saint Vincent and the Grenadines", 670, "VC", "VCT", new TimeSpan(-4, 0, 0), 1784, ".vc", "VIN"), isThreadSafe: true);
+    private static readonly Lazy<Country> kna = new(() => new Country("Сент-Китс и Невис", "Saint Kitts and Nevis", 659, "KN", "KNA", new TimeSpan(-4, 0, 0), 1869, ".kn", "SKN"), isThreadSafe: true);
+    private static readonly Lazy<Country> lca = new(() => new Country("Сент-Люсия", "Saint Lucia", 662, "LC", "LCA", new TimeSpan(-4, 0, 0), 1758, ".lc", "LCA"), isThreadSafe: true);
+    private static readonly Lazy<Country> srb = new(() => new Country("Сербия", "Serbia", 688, "RS", "SRB", new TimeSpan(1, 0, 0), Currency.RSD, 381, ".rs", "SRB"), isThreadSafe: true);
+    private static readonly Lazy<Country> sgp = new(() => new Country("Сингапур", "Singapore", 702, "SG", "SGP", new TimeSpan(8, 0, 0), Currency.SGD, 65, ".sg", "SGP"), isThreadSafe: true);
+    private static readonly Lazy<Country> sxm = new(() => new Country("Синт-Мартен", "Sint Maarten", 534, "SX", "SXM", new TimeSpan(-4, 0, 0), 0, ".sx"), isThreadSafe: true);
+    private static readonly Lazy<Country> syr = new(() => new Country("Сирия", "Syria", 760, "SY", "SYR", new TimeSpan(2, 0, 0), Currency.SYP, 963, ".sy", "SYR"), isThreadSafe: true);
+    private static readonly Lazy<Country> svk = new(() => new Country("Словакия", "Slovakia", 703, "SK", "SVK", new TimeSpan(1, 0, 0), 421, ".sk", "SVK"), isThreadSafe: true);
+    private static readonly Lazy<Country> svn = new(() => new Country("Словения", "Slovenia", 705, "SI", "SVN", new TimeSpan(1, 0, 0), 386, ".si", "SLO"), isThreadSafe: true);
+    private static readonly Lazy<Country> slb = new(() => new Country("Соломоновы Острова", "Solomon Islands", 090, "SB", "SLB", new TimeSpan(11, 0, 0), Currency.SBD, 677, ".sb", "SOL"), isThreadSafe: true);
+    private static readonly Lazy<Country> som = new(() => new Country("Сомали", "Somalia", 706, "SO", "SOM", new TimeSpan(3, 0, 0), Currency.SOS, 252, ".so", "SOM"), isThreadSafe: true);
+    private static readonly Lazy<Country> sdn = new(() => new Country("Судан", "Sudan", 729, "SD", "SDN", new TimeSpan(3, 0, 0), Currency.SDG, 249, ".sd", "SUD"), isThreadSafe: true);
+    private static readonly Lazy<Country> sur = new(() => new Country("Суринам", "Suriname", 740, "SR", "SUR", new TimeSpan(-3, 0, 0), Currency.SRD, 597, ".sr", "SUR"), isThreadSafe: true);
+    private static readonly Lazy<Country> usa = new(() => new Country("Соединённые Штаты Америки", "United States of America", 840, "US", "USA", new TimeSpan(-8, 0, 0), [Currency.USD, Currency.USN, Currency.USS], 1, ".us", "USA"), isThreadSafe: true);
+    private static readonly Lazy<Country> sle = new(() => new Country("Сьерра-Леоне", "Sierra Leone", 694, "SL", "SLE", new TimeSpan(), Currency.SLL, 232, ".sl", "SLE"), isThreadSafe: true);
+    private static readonly Lazy<Country> tjk = new(() => new Country("Таджикистан", "Tajikistan", 762, "TJ", "TJK", new TimeSpan(5, 0, 0), Currency.TJS, 992, ".tj", "TJK"), isThreadSafe: true);
+    private static readonly Lazy<Country> tha = new(() => new Country("Таиланд", "Thailand", 764, "TH", "THA", new TimeSpan(7, 0, 0), Currency.THB, 66, ".th", "THA"), isThreadSafe: true);
+    private static readonly Lazy<Country> tza = new(() => new Country("Танзания", "Tanzania", 834, "TZ", "TZA", new TimeSpan(3, 0, 0), Currency.TZS, 255, ".tz", "TAN"), isThreadSafe: true);
+    private static readonly Lazy<Country> tca = new(() => new Country("Теркс и Кайкос", "Turks and Caicos Islands", 796, "TC", "TCA", new TimeSpan(-5, 0, 0), 0, ".tc"), isThreadSafe: true);
+    private static readonly Lazy<Country> tgo = new(() => new Country("Того", "Togo", 768, "TG", "TGO", new TimeSpan(), 228, ".tg", "TOG"), isThreadSafe: true);
+    private static readonly Lazy<Country> tkl = new(() => new Country("Токелау", "Tokelau", 772, "TK", "TKL", new TimeSpan(13, 0, 0), 0, ".tk"), isThreadSafe: true);
+    private static readonly Lazy<Country> ton = new(() => new Country("Тонга", "Tonga", 776, "TO", "TON", new TimeSpan(13, 0, 0), Currency.TOP, 676, ".to", "TGA"), isThreadSafe: true);
+    private static readonly Lazy<Country> tto = new(() => new Country("Тринидад и Тобаго", "Trinidad and Tobago", 780, "TT", "TTO", new TimeSpan(-4, 0, 0), Currency.TTD, 1868, ".tt", "TTO"), isThreadSafe: true);
+    private static readonly Lazy<Country> tuv = new(() => new Country("Тувалу", "Tuvalu", 798, "TV", "TUV", new TimeSpan(12, 0, 0), 688, ".tv", "TUV"), isThreadSafe: true);
+    private static readonly Lazy<Country> tun = new(() => new Country("Тунис", "Tunisia", 788, "TN", "TUN", new TimeSpan(1, 0, 0), Currency.TND, 216, ".tn", "TUN"), isThreadSafe: true);
+    private static readonly Lazy<Country> tkm = new(() => new Country("Туркменистан", "Turkmenistan", 795, "TM", "TKM", new TimeSpan(5, 0, 0), Currency.TMT, 993, ".tm", "TKM"), isThreadSafe: true);
+    private static readonly Lazy<Country> tur = new(() => new Country("Турция", "Turkey", 792, "TR", "TUR", new TimeSpan(2, 0, 0), Currency.TRY, 90, ".tr", "TUR"), isThreadSafe: true);
+    private static readonly Lazy<Country> uga = new(() => new Country("Уганда", "Uganda", 800, "UG", "UGA", new TimeSpan(3, 0, 0), Currency.UGX, 256, ".ug", "UGA"), isThreadSafe: true);
+    private static readonly Lazy<Country> uzb = new(() => new Country("Узбекистан", "Uzbekistan", 860, "UZ", "UZB", new TimeSpan(5, 0, 0), Currency.UZS, 998, ".uz", "UZB"), isThreadSafe: true);
+    private static readonly Lazy<Country> ukr = new(() => new Country("Украина", "Ukraine", 804, "UA", "UKR", new TimeSpan(2, 0, 0), Currency.UAH, 380, ".ua", "UKR"), isThreadSafe: true);
+    private static readonly Lazy<Country> wlf = new(() => new Country("Уоллис и Футуна", "Wallis and Futuna", 876, "WF", "WLF", new TimeSpan(12, 0, 0), 0, ".wf"), isThreadSafe: true);
+    private static readonly Lazy<Country> ury = new(() => new Country("Уругвай", "Uruguay", 858, "UY", "URY", new TimeSpan(-3, 0, 0), [Currency.UYI, Currency.UYU], 598, ".uy", "URU"), isThreadSafe: true);
+    private static readonly Lazy<Country> fro = new(() => new Country("Фарерские острова", "Faroe Islands", 234, "FO", "FRO", new TimeSpan(), 0, ".fo"), isThreadSafe: true);
+    private static readonly Lazy<Country> fji = new(() => new Country("Фиджи", "Fiji", 242, "FJ", "FJI", new TimeSpan(12, 0, 0), Currency.FJD, 679, ".fj", "FIJ"), isThreadSafe: true);
+    private static readonly Lazy<Country> phl = new(() => new Country("Филиппины", "Philippines", 608, "PH", "PHL", new TimeSpan(8, 0, 0), Currency.PHP, 63, ".ph", "PHI"), isThreadSafe: true);
+    private static readonly Lazy<Country> fin = new(() => new Country("Финляндия", "Finland", 246, "FI", "FIN", new TimeSpan(2, 0, 0), 358, ".fi", "FIN"), isThreadSafe: true);
+    private static readonly Lazy<Country> flk = new(() => new Country("Фолклендские острова", "Falkland Islands", 238, "FK", "FLK", new TimeSpan(-3, 0, 0), Currency.FKP, 0, ".fk"), isThreadSafe: true);
+    private static readonly Lazy<Country> fra = new(() => new Country("Франция", "France", 250, "FR", "FRA", new TimeSpan(1, 0, 0), 33, ".fr", "FRA"), isThreadSafe: true);
+    private static readonly Lazy<Country> pyf = new(() => new Country("Французская Полинезия", "French Polynesia", 258, "PF", "PYF", new TimeSpan(-10, 0, 0), 0, ".pf"), isThreadSafe: true);
+    private static readonly Lazy<Country> atf = new(() => new Country("Французские Южные и Антарктические территории", "French Southern and Antarctic Lands", 260, "TF", "ATF", new TimeSpan(5, 0, 0), 0, ".tf"), isThreadSafe: true);
+    private static readonly Lazy<Country> hmd = new(() => new Country("Остров Херд и острова Макдональд", "Heard Island and McDonald Islands", 334, "HM", "HMD", new TimeSpan(4, 0, 0), 0, ".hm"), isThreadSafe: true);
+    private static readonly Lazy<Country> hrv = new(() => new Country("Хорватия", "Croatia", 191, "HR", "HRV", new TimeSpan(1, 0, 0), Currency.HRK, 385, ".hr", "CRO"), isThreadSafe: true);
+    private static readonly Lazy<Country> caf = new(() => new Country("Центральноафриканская Республика", "Central African Republic", 140, "CF", "CAF", new TimeSpan(1, 0, 0), 236, ".cf", "CAF"), isThreadSafe: true);
+    private static readonly Lazy<Country> tcd = new(() => new Country("Чад", "Chad", 148, "TD", "TCD", new TimeSpan(1, 0, 0), 235, ".td", "CHA"), isThreadSafe: true);
+    private static readonly Lazy<Country> mne = new(() => new Country("Черногория", "Montenegro", 499, "ME", "MNE", new TimeSpan(1, 0, 0), 382, ".me", "MNE"), isThreadSafe: true);
+    private static readonly Lazy<Country> cze = new(() => new Country("Чехия", "Czechia", 203, "CZ", "CZE", new TimeSpan(1, 0, 0), Currency.CZK, 420, ".cz", "CZE"), isThreadSafe: true);
+    private static readonly Lazy<Country> chl = new(() => new Country("Чили", "Chile", 152, "CL", "CHL", new TimeSpan(-3, 0, 0), [Currency.CLF, Currency.CLP], 56, ".cl", "CHI"), isThreadSafe: true);
+    private static readonly Lazy<Country> che = new(() => new Country("Швейцария", "Switzerland", 756, "CH", "CHE", new TimeSpan(1, 0, 0), [Currency.CHE, Currency.CHF, Currency.CHW], 41, ".ch", "SUI"), isThreadSafe: true);
+    private static readonly Lazy<Country> swe = new(() => new Country("Швеция", "Sweden", 752, "SE", "SWE", new TimeSpan(1, 0, 0), Currency.SEK, 46, ".se", "SWE"), isThreadSafe: true);
+    private static readonly Lazy<Country> sjm = new(() => new Country("Флаг Шпицбергена и Ян-Майена", "Svalbard", 744, "SJ", "SJM", new TimeSpan(1, 0, 0), 0, ".sj"), isThreadSafe: true);
+    private static readonly Lazy<Country> lka = new(() => new Country("Шри-Ланка", "Sri Lanka", 144, "LK", "LKA", new TimeSpan(5, 30, 0), Currency.LKR, 94, ".lk", "SRI"), isThreadSafe: true);
+    private static readonly Lazy<Country> ecu = new(() => new Country("Эквадор", "Ecuador", 218, "EC", "ECU", new TimeSpan(-5, 0, 0), 593, ".ec", "ECU"), isThreadSafe: true);
+    private static readonly Lazy<Country> gnq = new(() => new Country("Экваториальная Гвинея", "Equatorial Guinea", 226, "GQ", "GNQ", new TimeSpan(1, 0, 0), 240, ".gq", "GEQ"), isThreadSafe: true);
+    private static readonly Lazy<Country> eri = new(() => new Country("Эритрея", "Eritrea", 232, "ER", "ERI", new TimeSpan(3, 0, 0), Currency.ERN, 291, ".er", "ERI"), isThreadSafe: true);
+    private static readonly Lazy<Country> est = new(() => new Country("Эстония", "Estonia", 233, "EE", "EST", new TimeSpan(2, 0, 0), 372, ".ee", "EST"), isThreadSafe: true);
+    private static readonly Lazy<Country> eth = new(() => new Country("Эфиопия", "Ethiopia", 231, "ET", "ETH", new TimeSpan(3, 0, 0), Currency.ETB, 251, ".et", "ETH"), isThreadSafe: true);
+    private static readonly Lazy<Country> zaf = new(() => new Country("Южно-Африканская Республика", "South Africa", 710, "ZA", "ZAF", new TimeSpan(2, 0, 0), Currency.ZAR, 27, ".za", "RSA"), isThreadSafe: true);
+    private static readonly Lazy<Country> sgs = new(() => new Country("Южная Георгия и Южные Сандвичевы Острова", "South Georgia and South Sandwich Islands", 239, "GS", "SGS", new TimeSpan(-2, 0, 0), 0, ".gs"), isThreadSafe: true);
+    private static readonly Lazy<Country> ssd = new(() => new Country("Южный Судан", "South Sudan", 728, "SS", "SSD", new TimeSpan(3, 0, 0), Currency.SSP, 211, ".ss"), isThreadSafe: true);
+    private static readonly Lazy<Country> jam = new(() => new Country("Ямайка", "Jamaica", 388, "JM", "JAM", new TimeSpan(-5, 0, 0), Currency.JMD, 1876, ".jm", "JAM"), isThreadSafe: true);
+    private static readonly Lazy<Country> jpn = new(() => new Country("Япония", "Japan", 392, "JP", "JPN", new TimeSpan(9, 0, 0), Currency.JPY, 81, ".jp", "JPN"), isThreadSafe: true);
 
     #endregion
 
@@ -2946,23 +3199,22 @@ public sealed partial class Country(
     /// </summary>
     /// <param name="obj">Объект для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
+    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public override bool Equals(object? obj)
     {
         if (obj is string str)
         {
-            if (str.Length is 2)
-                return str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == IsoCode2.GetHashCode(StringComparison.InvariantCultureIgnoreCase);
-            else if (str.Length is 3)
-                return str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == GetHashCode();
-            return false;
+            if (str.Length is 2) return str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == IsoCode2.GetHashCode(StringComparison.InvariantCultureIgnoreCase);
+            if (str.Length is 3) return str.GetHashCode(StringComparison.InvariantCultureIgnoreCase) == GetHashCode();
+
+            return default;
         }
 
         if (obj is ushort c) return c.GetHashCode() == Code.GetHashCode();
         if (obj is Country country) return country.GetHashCode() == GetHashCode();
 
-        return false;
+        return default;
     }
 
     /// <summary>
@@ -2970,7 +3222,7 @@ public sealed partial class Country(
     /// </summary>
     /// <param name="other">Экземпляр <see cref="Country"/> для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
+    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public bool Equals(Country? other) => Equals(other as object);
 
@@ -2992,7 +3244,7 @@ public sealed partial class Country(
     /// <param name="s">Символьный код страны.</param>
     /// <param name="provider">Параметры форматирования.</param>
     /// <param name="result">Экземпляр <see cref="Country"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse([NotNullWhen(true)] string? s, IFormatProvider? provider, [MaybeNullWhen(false)] out Country? result)
     {
         result = s?.Trim().ToUpperInvariant() switch
@@ -3507,7 +3759,7 @@ public sealed partial class Country(
     /// </summary>
     /// <param name="s">Символьный код страны.</param>
     /// <param name="result">Экземпляр <see cref="Country"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse([NotNullWhen(true)] string? s, [MaybeNullWhen(false)] out Country? result) => TryParse(s, default, out result);
 
     /// <summary>
@@ -3515,7 +3767,7 @@ public sealed partial class Country(
     /// </summary>
     /// <param name="code">Цифровой код страны.</param>
     /// <param name="country">Экземпляр <see cref="Country"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse(ushort code, [MaybeNullWhen(false)] out Country? country)
     {
         country = code switch
@@ -3777,7 +4029,7 @@ public sealed partial class Country(
     }
 
     /// <summary>
-    /// Возвращает экземпляр <see cref="Country"/> по его символьному коду. 
+    /// Возвращает экземпляр <see cref="Country"/> по его символьному коду.
     /// </summary>
     /// <param name="s">Символьный код страны.</param>
     /// <param name="provider">Параметры форматирования.</param>
@@ -3786,7 +4038,7 @@ public sealed partial class Country(
     public static Country Parse(string s, IFormatProvider? provider) => !TryParse(s, provider, out var result) || result is null ? throw new FormatException() : result;
 
     /// <summary>
-    /// Возвращает экземпляр <see cref="Country"/> по его символьному коду. 
+    /// Возвращает экземпляр <see cref="Country"/> по его символьному коду.
     /// </summary>
     /// <param name="s">Символьный код страны.</param>
     /// <returns>Экземпляр <see cref="Country"/>.</returns>
@@ -3794,7 +4046,7 @@ public sealed partial class Country(
     public static Country Parse(string s) => Parse(s, default);
 
     /// <summary>
-    /// Возвращает экземпляр <see cref="Currency"/> по его цифровому коду. 
+    /// Возвращает экземпляр <see cref="Currency"/> по его цифровому коду.
     /// </summary>
     /// <param name="code">Цифровой код страны.</param>
     /// <returns>Экземпляр <see cref="Country"/>.</returns>
@@ -3847,7 +4099,7 @@ public sealed partial class Country(
     /// <param name="country">Экземпляр <see cref="Country"/>.</param>
     /// <param name="str">Строка для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <c>false</c>.
+    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public static bool operator ==(Country? country, string? str) => (country is null && str is null) || (country is not null && str is not null && country.Equals(str));
 
@@ -3857,7 +4109,7 @@ public sealed partial class Country(
     /// <param name="country">Экземпляр <see cref="Country"/>.</param>
     /// <param name="str">Строка для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов не совпадают, иначе <c>false</c>.
+    /// <c>True</c>, если хеш-коды объектов не совпадают, иначе <see langword="false"/>.
     /// </returns>
     public static bool operator !=(Country? country, string? str) => !(country == str);
 }

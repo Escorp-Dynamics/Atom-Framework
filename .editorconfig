@@ -1,4 +1,10 @@
+root = true
+
 [*.{cs,csx}]
+charset = utf-8-bom
+insert_final_newline = false
+trim_trailing_whitespace = true
+
 build_property.TreatWarningsAsErrors = true
 build_property.EnforceCodeStyleInBuild = true
 
@@ -54,3 +60,44 @@ dotnet_diagnostic.IDE0010.severity = silent
 
 # IDE0061: Использовать тело блока для локальной функции
 csharp_style_expression_bodied_local_functions = when_on_single_line
+
+# MA0046: Use EventHandler<T> to declare events
+dotnet_diagnostic.MA0046.severity = none
+
+# S3264: Events should be invoked
+dotnet_diagnostic.S3264.severity = silent
+
+# S1694: An abstract class should have both abstract and concrete methods
+dotnet_diagnostic.S1694.severity = silent
+
+dotnet_diagnostic.S3776.severity = warning
+
+# RCS1214: Unnecessary interpolated string
+dotnet_diagnostic.RCS1214.severity = warning
+
+# S1121: Assignments should not be made from within sub-expressions
+dotnet_diagnostic.S1121.severity = suggestion
+
+# CA1711: Идентификаторы не должны иметь неправильных суффиксов
+dotnet_diagnostic.CA1711.severity = silent
+
+# S3267: Loops should be simplified with "LINQ" expressions
+dotnet_diagnostic.S3267.severity = silent
+
+# IDE0320: Сделать анонимную функцию статической
+dotnet_diagnostic.IDE0320.severity = warning
+
+# VSTHRD200: Use "Async" suffix for async methods
+dotnet_diagnostic.VSTHRD200.severity = none
+
+# RCS1047: Non-asynchronous method name should not end with 'Async'
+dotnet_diagnostic.RCS1047.severity = none
+
+# S1123: "Obsolete" attributes should include explanations
+dotnet_diagnostic.S1123.severity = suggestion
+
+# S1133: Deprecated code should be removed
+dotnet_diagnostic.S1133.severity = silent
+
+# MA0048: File name must match type name
+dotnet_diagnostic.MA0048.severity = suggestion

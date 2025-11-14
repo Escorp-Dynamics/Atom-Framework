@@ -6,9 +6,10 @@ namespace Atom.Distribution;
 /// <summary>
 /// Представляет информацию о процессе терминала.
 /// </summary>
-public readonly struct ProcessInfo : IEquatable<ProcessInfo>
+public readonly struct ProcessInfo : IEquatable<ProcessInfo>, IDisposable
 {
     private readonly Process process;
+    private readonly Terminal? terminal;
 
     /// <summary>
     /// Поток вывода.
@@ -35,13 +36,17 @@ public readonly struct ProcessInfo : IEquatable<ProcessInfo>
     /// </summary>
     public readonly bool IsSuccessExiting => ExitCode is 0;
 
-    internal ProcessInfo(Process process) => this.process = process;
+    internal ProcessInfo(Process process, Terminal terminal)
+    {
+        this.process = process;
+        this.terminal = terminal;
+    }
 
     /// <summary>
     /// Ожидает завершения процесса.
     /// </summary>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    /// <returns><c>True</c>, если процесс был закрыт успешно, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если процесс был закрыт успешно, иначе <see langword="false"/>.</returns>
     public readonly async ValueTask<bool> WaitForEndingAsync(CancellationToken cancellationToken)
     {
         await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
@@ -51,7 +56,7 @@ public readonly struct ProcessInfo : IEquatable<ProcessInfo>
     /// <summary>
     /// Ожидает завершения процесса.
     /// </summary>
-    /// <returns><c>True</c>, если процесс был закрыт успешно, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если процесс был закрыт успешно, иначе <see langword="false"/>.</returns>
     public readonly ValueTask<bool> WaitForEndingAsync() => WaitForEndingAsync(CancellationToken.None);
 
     /// <summary>
@@ -80,14 +85,14 @@ public readonly struct ProcessInfo : IEquatable<ProcessInfo>
     /// Сравнивает объект с текущим экземпляром.
     /// </summary>
     /// <param name="obj">Сравниваемый объект.</param>
-    /// <returns><c>True</c>, если экземпляры равны, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если экземпляры равны, иначе <see langword="false"/>.</returns>
     public override bool Equals([NotNullWhen(true)] object? obj) => obj is ProcessInfo info && Equals(info);
 
     /// <summary>
     /// Сравнивает объект с текущим экземпляром.
     /// </summary>
     /// <param name="other">Сравниваемый объект.</param>
-    /// <returns><c>True</c>, если экземпляры равны, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если экземпляры равны, иначе <see langword="false"/>.</returns>
     public bool Equals(ProcessInfo other) => process.Id == other.process.Id;
 
     /// <summary>
@@ -95,7 +100,7 @@ public readonly struct ProcessInfo : IEquatable<ProcessInfo>
     /// </summary>
     /// <param name="left">Экземпляр слева.</param>
     /// <param name="right">Экземпляр справа.</param>
-    /// <returns><c>True</c>, если экземпляры равны, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если экземпляры равны, иначе <see langword="false"/>.</returns>
     public static bool operator ==(ProcessInfo left, ProcessInfo right) => left.Equals(right);
 
     /// <summary>
@@ -103,6 +108,16 @@ public readonly struct ProcessInfo : IEquatable<ProcessInfo>
     /// </summary>
     /// <param name="left">Экземпляр слева.</param>
     /// <param name="right">Экземпляр справа.</param>
-    /// <returns><c>True</c>, если экземпляры не равны, иначе <c>false</c>.</returns>
+    /// <returns><c>True</c>, если экземпляры не равны, иначе <see langword="false"/>.</returns>
     public static bool operator !=(ProcessInfo left, ProcessInfo right) => !left.Equals(right);
+
+    /// <summary>
+    /// Освобождает ресурсы процесса.
+    /// </summary>
+    [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP007:Don't dispose injected", Justification = "Объект владеет процессом, созданным терминалом.")]
+    public readonly void Dispose()
+    {
+        if (terminal is null) return;
+        if (terminal.ReleaseProcess(process)) process.Dispose();
+    }
 }

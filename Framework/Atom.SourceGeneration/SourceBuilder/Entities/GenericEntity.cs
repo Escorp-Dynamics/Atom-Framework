@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Atom.Buffers;
 using Atom.Collections;
@@ -31,12 +32,14 @@ public class GenericEntity : Entity<GenericEntity>
     public override bool IsValid => !string.IsNullOrEmpty(Name);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected override void OnBuildingComment([NotNull] StringBuilder sb, string spaces)
     {
         // Method intentionally left empty.
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected override void OnBuildingAttributes([NotNull] StringBuilder sb, string spaces)
     {
         foreach (var attr in Attributes) sb.Append($"[{attr}]");
@@ -44,12 +47,14 @@ public class GenericEntity : Entity<GenericEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params IEnumerable<string> usings) => sb.Append(Name);
 
     /// <summary>
     /// Указывает, является ли инвариантным.
     /// </summary>
     /// <param name="value">Значение свойства.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual GenericEntity AsIn(bool value)
     {
         IsIn = value;
@@ -59,12 +64,14 @@ public class GenericEntity : Entity<GenericEntity>
     /// <summary>
     /// Указывает, является ли инвариантным.
     /// </summary>
-    public GenericEntity AsIn() => AsIn(true);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public GenericEntity AsIn() => AsIn(value: true);
 
     /// <summary>
     /// Указывает, является ли ковариантным.
     /// </summary>
     /// <param name="value">Значение свойства.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual GenericEntity AsOut(bool value)
     {
         IsOut = value;
@@ -74,12 +81,14 @@ public class GenericEntity : Entity<GenericEntity>
     /// <summary>
     /// Указывает, является ли ковариантным.
     /// </summary>
-    public GenericEntity AsOut() => AsOut(true);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public GenericEntity AsOut() => AsOut(value: true);
 
     /// <summary>
     /// Добавляет ограничители.
     /// </summary>
     /// <param name="limitations">Ограничители.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual GenericEntity WithLimitation([NotNull] params IEnumerable<string> limitations)
     {
         this.limitations.AddRange(limitations);
@@ -91,6 +100,7 @@ public class GenericEntity : Entity<GenericEntity>
     /// </summary>
     /// <param name="tabs">Число отступов.</param>
     /// <param name="release">Указывает, требуется ли высвобождать ресурсы после сборки.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual string? BuildLimitations(int tabs, bool release)
     {
         if (!IsValid || limitations.IsEmpty)
@@ -117,20 +127,24 @@ public class GenericEntity : Entity<GenericEntity>
     /// Строит ограничители шаблонного типа.
     /// </summary>
     /// <param name="tabs">Число отступов.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string? BuildLimitations(int tabs) => BuildLimitations(tabs, default);
 
     /// <summary>
     /// Строит ограничители шаблонного типа.
     /// </summary>
     /// <param name="release">Указывает, требуется ли высвобождать ресурсы после сборки.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string? BuildLimitations(bool release) => BuildLimitations(default, release);
 
     /// <summary>
     /// Строит ограничители шаблонного типа.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string? BuildLimitations() => BuildLimitations(default, default);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override GenericEntity WithName(string name)
     {
         Name = name;
@@ -138,6 +152,7 @@ public class GenericEntity : Entity<GenericEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override GenericEntity WithComment(string? comment)
     {
         Comment = comment;
@@ -145,6 +160,7 @@ public class GenericEntity : Entity<GenericEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override GenericEntity WithAttribute(params IEnumerable<string> attributes)
     {
         AddAttribute(attributes);
@@ -152,6 +168,7 @@ public class GenericEntity : Entity<GenericEntity>
     }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override void Release()
     {
         base.Release();
@@ -167,6 +184,7 @@ public class GenericEntity : Entity<GenericEntity>
     /// <summary>
     /// Создаёт новый экземпляр строителя шаблонных типов.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static GenericEntity Create() => ObjectPool<GenericEntity>.Shared.Rent();
 
     /// <summary>
@@ -174,5 +192,6 @@ public class GenericEntity : Entity<GenericEntity>
     /// </summary>
     /// <param name="name">Имя типа.</param>
     /// <param name="limitations">Ограничения типа.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static GenericEntity Create(string name, params IEnumerable<string> limitations) => Create().WithName(name).WithLimitation(limitations);
 }

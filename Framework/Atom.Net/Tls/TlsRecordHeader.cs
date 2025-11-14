@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Atom.Net.Tls;
 
@@ -13,6 +14,7 @@ namespace Atom.Net.Tls;
 /// <param name="ver"></param>
 /// <param name="len"></param>
 [method: MethodImpl(MethodImplOptions.AggressiveInlining)]
+[StructLayout(LayoutKind.Auto)]
 public readonly struct TlsRecordHeader(TlsContentType type, ushort ver, ushort len) : IEquatable<TlsRecordHeader>
 {
     /// <summary>

@@ -8,7 +8,7 @@ namespace Atom.Net.Proxies;
 /// Представляет конвертер сериализатора JSON для <see cref="Proxy"/>.
 /// </summary>
 /// <typeparam name="T">Тип прокси.</typeparam>
-public class ProxyJsonConverter<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T> : ExtendableJsonConverter<T> where T : Proxy, new()
+public class ProxyJsonConverter<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T> : ExtendableJsonConverter<T> where T : Proxy, new()
 {
     /// <inheritdoc/>
     protected override T? OnReading(ref Utf8JsonReader reader, JsonElement root, Type typeToConvert, JsonSerializerOptions options)
@@ -35,7 +35,7 @@ public class ProxyJsonConverter<[DynamicallyAccessedMembers(DynamicallyAccessedM
         {
             if (typeProperty.ValueKind is JsonValueKind.Number && typeProperty.TryGetInt32(out var number))
                 proxy.Type = (ProxyType)number;
-            else if (typeProperty.ValueKind is JsonValueKind.String && Enum.TryParse<ProxyType>(typeProperty.GetString(), true, out var type))
+            else if (typeProperty.ValueKind is JsonValueKind.String && Enum.TryParse<ProxyType>(typeProperty.GetString(), ignoreCase: true, out var type))
                 proxy.Type = type;
         }
 

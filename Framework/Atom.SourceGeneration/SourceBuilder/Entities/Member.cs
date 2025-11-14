@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Atom.SourceGeneration;
 
 /// <summary>
@@ -16,21 +18,27 @@ public abstract class Member<T> : Entity<T>, IMember<T> where T : IEntity
     public bool IsStatic { get; protected set; }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public abstract T WithAccessModifier(AccessModifier modifier);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public abstract T WithType(string type);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public T WithType<TType>(bool withNamespaces = true, bool withNullable = true, bool withGenericNullable = true) where TType : allows ref struct => WithType(typeof(TType).GetFriendlyName(withNamespaces, withNullable, withGenericNullable));
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public abstract T AsStatic(bool value);
 
     /// <inheritdoc/>
-    public T AsStatic() => AsStatic(true);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public T AsStatic() => AsStatic(value: true);
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override void Release()
     {
         base.Release();

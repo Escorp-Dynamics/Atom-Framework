@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Atom.Buffers;
@@ -11,23 +12,20 @@ namespace Atom.Debug.Logging;
 /// </summary>
 public class FileLogger : ConsoleLogger
 {
+    private readonly StreamWriter fileWriter;
+    private bool isWriterDisposed;
+
     /// <summary>
     /// Путь к файлу журнала.
     /// </summary>
-    public string Path { get; init; } = "logs/";
+    public string Path { get; init; }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="FileLogger"/>.
     /// </summary>
     /// <param name="path">Путь для хранения файла журнала событий.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public FileLogger(string path) : base()
-    {
-        Path = path;
-        IsDateEnabled = true;
-        IsStylingOutputEnabled = default;
-        Writer = CreateWriter();
-    }
+    public FileLogger(string path) : this(string.Empty, path) { }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="FileLogger"/>.
@@ -40,7 +38,9 @@ public class FileLogger : ConsoleLogger
         Path = path;
         IsDateEnabled = true;
         IsStylingOutputEnabled = default;
-        Writer = CreateWriter();
+
+        fileWriter = CreateWriter();
+        Writer = fileWriter;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -68,12 +68,12 @@ public class FileLogger : ConsoleLogger
     protected override void FormatDateTime([NotNull] StringBuilder sb, DateTime dt)
     {
         if (!IsDateEnabled && !IsTimeEnabled) return;
-        if (IsDateEnabled) sb.Append(dt.ToString(DateFormat));
+        if (IsDateEnabled) sb.Append(dt.ToString(DateFormat, CultureInfo.InvariantCulture));
 
         if (IsTimeEnabled)
         {
             if (IsDateEnabled) sb.Append(' ');
-            sb.Append(dt.ToString(TimeFormat));
+            sb.Append(dt.ToString(TimeFormat, CultureInfo.InvariantCulture));
         }
     }
 
@@ -103,6 +103,14 @@ public class FileLogger : ConsoleLogger
         LogLevel.Critical => "CRITICAL",
         _ => string.Empty,
     };
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !Interlocked.CompareExchange(ref isWriterDisposed, value: true, comparand: default)) fileWriter.Dispose();
+        base.Dispose(disposing);
+    }
 }
 
 /// <summary>

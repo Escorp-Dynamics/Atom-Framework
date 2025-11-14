@@ -1,4 +1,4 @@
-#pragma warning disable CA1816, CA2215
+#pragma warning disable CA1816, CA2215, S1133, S3881
 
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
@@ -153,7 +153,6 @@ public abstract class Stream : System.IO.Stream
     }
 
     /// <inheritdoc/>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public sealed override void CopyTo(System.IO.Stream destination, int bufferSize)
     {
         ArgumentNullException.ThrowIfNull(destination);
@@ -179,7 +178,6 @@ public abstract class Stream : System.IO.Stream
     }
 
     /// <inheritdoc/>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public sealed override async Task CopyToAsync([NotNull] System.IO.Stream destination, int bufferSize, CancellationToken cancellationToken)
     {
         var rented = ArrayPool<byte>.Shared.Rent(bufferSize);
@@ -203,11 +201,7 @@ public abstract class Stream : System.IO.Stream
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public sealed override void Close()
-    {
-        try { Dispose(true); }
-        finally { GC.SuppressFinalize(this); }
-    }
+    public sealed override void Close() => Dispose(disposing: true);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining), Obsolete("Метод является устаревшим")]
@@ -215,7 +209,7 @@ public abstract class Stream : System.IO.Stream
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected override void Dispose(bool disposing) { /* Не используется в текущей реализации */ }
+    protected override void Dispose(bool disposing) => base.Dispose(disposing);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -223,7 +217,7 @@ public abstract class Stream : System.IO.Stream
     {
         try
         {
-            Dispose(true);
+            Dispose(disposing: true);
         }
         finally
         {

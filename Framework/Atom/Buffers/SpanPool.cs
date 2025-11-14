@@ -1,4 +1,4 @@
-#pragma warning disable CA1000
+#pragma warning disable CA1000, MA0018
 
 using System.Buffers;
 
@@ -120,13 +120,13 @@ public class SpanPool<T> : IDisposable
     /// <param name="disposing">Значение, указывающее, вызывается ли метод из конструктора или из финализатора.</param>
     protected virtual void Dispose(bool disposing)
     {
-        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
+        if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
 
         if (disposing)
         {
             while (rentedCount is not -1)
             {
-                pool.Return(rented[rentedCount], true);
+                pool.Return(rented[rentedCount], clearArray: true);
                 Interlocked.Decrement(ref rentedCount);
             }
 

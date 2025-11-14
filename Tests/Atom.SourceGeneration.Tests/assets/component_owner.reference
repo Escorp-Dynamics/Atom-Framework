@@ -18,7 +18,7 @@ public partial class TestFactory : IComponentOwner<TestFactory>
 {
     readonly List<IComponent> components = [];
 
-    void OnComponentDetached(ComponentEventArgs args)
+    void OnComponentDetached(object? sender, ComponentEventArgs args)
     {
         if (args.Component is not null) components.Remove(args.Component);
     }

@@ -6,7 +6,7 @@ public interface ITest
 {
     int TestProperty1 { get; }
 
-    event Atom.AsyncEventHandler<Atom.FailedEventArgs?>? TestEvent;
+    event Atom.AsyncEventHandler<object?, Atom.FailedEventArgs?>? TestEvent;
 
     void TestMethod();
 }

@@ -41,11 +41,7 @@ public sealed class ScopeContext : IDisposable
     /// <summary>
     /// Высвобождает контекст.
     /// </summary>
-    public void Dispose()
-    {
-        Disposed?.Invoke(this, new ScopeContextEventArgs(this));
-        GC.SuppressFinalize(this);
-    }
+    public void Dispose() => Disposed?.Invoke(this, new ScopeContextEventArgs(this));
 
     /// <summary>
     /// Преобразует экземпляр в строковое представление.

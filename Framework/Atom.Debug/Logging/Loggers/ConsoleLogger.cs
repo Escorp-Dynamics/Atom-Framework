@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Atom.Buffers;
@@ -15,7 +16,7 @@ public class ConsoleLogger : Logger
     /// <summary>
     /// Поток записи.
     /// </summary>
-    public virtual TextWriter Writer
+    public TextWriter Writer
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Volatile.Read(ref field);
@@ -54,12 +55,12 @@ public class ConsoleLogger : Logger
     protected virtual void FormatDateTime([NotNull] StringBuilder sb, DateTime dt)
     {
         if (!IsDateEnabled && !IsTimeEnabled) return;
-        if (IsDateEnabled) sb.Append(dt.ToString(DateFormat));
+        if (IsDateEnabled) sb.Append(dt.ToString(DateFormat, CultureInfo.InvariantCulture));
 
         if (IsTimeEnabled)
         {
             if (IsDateEnabled) sb.Append(' ');
-            sb.Append(dt.ToString(TimeFormat));
+            sb.Append(dt.ToString(TimeFormat, CultureInfo.InvariantCulture));
         }
     }
 
@@ -107,14 +108,6 @@ public class ConsoleLogger : Logger
         if (string.IsNullOrEmpty(result)) return;
 
         Writer.WriteLine(result);
-    }
-
-    /// <inheritdoc/>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected override void Dispose(bool disposing)
-    {
-        base.Dispose(disposing);
-        Writer.Dispose();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

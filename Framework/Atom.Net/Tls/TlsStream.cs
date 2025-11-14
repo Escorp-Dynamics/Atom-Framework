@@ -190,8 +190,8 @@ public abstract class TlsStream([NotNull] NetworkStream stream, in TlsSettings s
         aeadWrite?.Dispose();
         aeadRead?.Dispose();
 
-        if (ivRead is not null) ArrayPool<byte>.Shared.Return(ivRead, true);
-        if (ivWrite is not null) ArrayPool<byte>.Shared.Return(ivWrite, true);
+        if (ivRead is not null) ArrayPool<byte>.Shared.Return(ivRead, clearArray: true);
+        if (ivWrite is not null) ArrayPool<byte>.Shared.Return(ivWrite, clearArray: true);
 
         GC.SuppressFinalize(this);
     }

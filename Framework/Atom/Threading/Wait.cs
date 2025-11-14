@@ -243,7 +243,7 @@ public sealed class Wait<T> : Wait, IDisposable
     /// <param name="signal">Связанный сигнал.</param>
     public Wait(Signal<T> signal) : this(signal, default) { }
 
-    private void OnSignaled(SignalEventArgs<T> args)
+    private void OnSignaled(object? sender, SignalEventArgs<T> args)
     {
         if (ReferenceEquals(args.State, state) || state?.Equals(args.State) is true || state is null || args.State is null) locker.Release();
     }
@@ -371,13 +371,11 @@ public sealed class Wait<T> : Wait, IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
+        if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
 
         signal.Sended -= OnSignaled;
 
         locker.Release();
         locker.Dispose();
-
-        GC.SuppressFinalize(this);
     }
 }

@@ -22,7 +22,7 @@ public abstract class LoggerProvider<TLogger> : ILoggerProvider where TLogger : 
     /// <param name="disposing">Указывает, требуется ли высвобождать управляемые ресурсы.</param>
     protected virtual void Dispose(bool disposing)
     {
-        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
+        if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
 
         if (disposing)
         {

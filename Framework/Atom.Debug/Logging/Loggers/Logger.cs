@@ -33,6 +33,7 @@ public abstract class Logger : ILogger, IDisposable
     private readonly Locker trigger = new(0);
     private readonly ConcurrentQueue<Func<ValueTask>> queue = [];
     private readonly CancellationTokenSource cts = new();
+    private readonly Task processingTask;
 
     private bool isDisposed;
 
@@ -44,32 +45,32 @@ public abstract class Logger : ILogger, IDisposable
     /// <summary>
     /// Определяет, будет ли выводиться название категории.
     /// </summary>
-    public virtual bool IsCategoryNameEnabled { get; set; }
+    public bool IsCategoryNameEnabled { get; set; }
 
     /// <summary>
     /// Определяет, будет ли выводиться дата события.
     /// </summary>
-    public virtual bool IsDateEnabled { get; set; }
+    public bool IsDateEnabled { get; set; }
 
     /// <summary>
     /// Определяет, будет ли выводиться время события.
     /// </summary>
-    public virtual bool IsTimeEnabled { get; set; }
+    public bool IsTimeEnabled { get; set; }
 
     /// <summary>
     /// Определяет, будет ли выводиться идентификатор события.
     /// </summary>
-    public virtual bool IsEventIdEnabled { get; set; }
+    public bool IsEventIdEnabled { get; set; }
 
     /// <summary>
     /// Определяет, будет ли поддерживаться форматирование цветов и стилей.
     /// </summary>
-    public virtual bool IsStylingEnabled { get; set; }
+    public bool IsStylingEnabled { get; set; }
 
     /// <summary>
     /// Определяет, будут ли выводиться отформатированные теги цветов и стилей.
     /// </summary>
-    public virtual bool IsStylingOutputEnabled { get; set; }
+    public bool IsStylingOutputEnabled { get; set; }
 
     /// <summary>
     /// Формат вывода даты.
@@ -95,28 +96,40 @@ public abstract class Logger : ILogger, IDisposable
     /// Инициализирует новый экземпляр <see cref="Logger"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected Logger() => Task.Factory.StartNew(ProcessLogs, cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Current);
+    protected Logger() => processingTask = StartProcessing();
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="Logger"/>.
     /// </summary>
     /// <param name="categoryName">Название категории.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected Logger(string categoryName) : this()
-    {
-        CategoryName = categoryName;
-        Task.Factory.StartNew(ProcessLogs, cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Current);
-    }
+    protected Logger(string categoryName) : this() => CategoryName = categoryName;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static Logger() => Factory.AddProvider(new ConsoleLoggerProvider());
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private async Task ProcessLogs()
+    private Task StartProcessing()
     {
-        while (!cts.Token.IsCancellationRequested)
+        var task = Task.Factory.StartNew(ProcessLogsAsync, cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Current).Unwrap();
+
+        _ = task.ContinueWith(
+            static t => _ = t.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        return task;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private async Task ProcessLogsAsync()
+    {
+        while (true)
         {
-            await trigger.WaitAsync(cts.Token).ConfigureAwait(false);
+            await trigger.WaitAsync().ConfigureAwait(false);
+
+            if (cts.IsCancellationRequested) return;
 
             if (!queue.TryDequeue(out var log)) continue;
 
@@ -154,12 +167,13 @@ public abstract class Logger : ILogger, IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected virtual void Dispose(bool disposing)
     {
-        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
+        if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
 
         if (!disposing) return;
 
         cts.Cancel();
         trigger.Release();
+        _ = processingTask.Status;
 
         cts.Dispose();
         trigger.Dispose();
@@ -230,7 +244,7 @@ public abstract class Logger : ILogger, IDisposable
     /// </summary>
     /// <param name="format">Формат вывода даты.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Logger WithDate(string format) => WithDate(true, format);
+    public Logger WithDate(string format) => WithDate(display: true, format);
 
     /// <summary>
     /// Включает вывод даты события в журнал.
@@ -269,7 +283,7 @@ public abstract class Logger : ILogger, IDisposable
     /// </summary>
     /// <param name="format">Формат вывода времени.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Logger WithTime(string format) => WithTime(true, format);
+    public Logger WithTime(string format) => WithTime(display: true, format);
 
     /// <summary>
     /// Включает вывод времени события в журнал.

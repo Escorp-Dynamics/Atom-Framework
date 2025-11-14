@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
@@ -29,5 +30,6 @@ public interface IAnalyzerSyntaxProvider
     /// Выполняет анализ кода.
     /// </summary>
     /// <param name="context">Контекст анализа.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     void Execute(SyntaxNodeAnalysisContext context);
 }

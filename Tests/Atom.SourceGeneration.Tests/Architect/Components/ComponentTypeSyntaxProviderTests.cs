@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.Testing;
 
 namespace Atom.Architect.Components.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class ComponentTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<ComponentTypeSyntaxProviderTests>(logger)
 {
     private static string? source;
@@ -37,7 +38,7 @@ public class ComponentTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<C
     }
 
     [TestCase(TestName = "Тест анализатора компонентов"), Benchmark]
-    public async Task AnalyzerTest()
+    public async Task AnalyzerTestAsync()
     {
         var test = new CSharpAnalyzerTest<ComponentSourceAnalyzer, DefaultVerifier>
         {
@@ -67,7 +68,7 @@ public class ComponentTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<C
     }
 
     [TestCase(TestName = "Тест генератора компонентов"), Benchmark]
-    public async Task GeneratorTest()
+    public async Task GeneratorTestAsync()
     {
         var test = new CSharpSourceGeneratorTest<ComponentSourceGenerator, DefaultVerifier>
         {

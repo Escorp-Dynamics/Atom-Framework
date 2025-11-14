@@ -6,5 +6,4 @@
 **/obj
 **/bin
 **/TestResults
-**/merge.sh
 **/*.pem

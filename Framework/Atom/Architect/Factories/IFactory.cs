@@ -14,13 +14,7 @@ public interface IFactory<T> : IFactory
     /// <summary>
     /// Получает элемент.
     /// </summary>
-    /// <param name="cancellationToken">Токен отмены задачи.</param>
-    ValueTask<T> GetAsync(CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Получает элемент.
-    /// </summary>
-    ValueTask<T> GetAsync() => GetAsync(CancellationToken.None);
+    T Get();
 
     /// <summary>
     /// Возвращает элемент.

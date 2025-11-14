@@ -84,7 +84,7 @@ public interface ITextAlgorithm
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
     /// <param name="comparison">Поведение сравнения строк.</param>
-    /// <returns><c>true</c>, если исходная строка содержит подстроку; в противном случае — <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если исходная строка содержит подстроку; в противном случае — <see langword="false"/>.</returns>
     bool Contains(ReadOnlySpan<char> source, ReadOnlySpan<char> target, StringComparison comparison);
 
     /// <summary>
@@ -92,7 +92,7 @@ public interface ITextAlgorithm
     /// </summary>
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
-    /// <returns><c>true</c>, если исходная строка содержит подстроку; в противном случае — <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если исходная строка содержит подстроку; в противном случае — <see langword="false"/>.</returns>
     bool Contains(ReadOnlySpan<char> source, ReadOnlySpan<char> target) => Contains(source, target, default);
 
     /// <summary>
@@ -101,7 +101,7 @@ public interface ITextAlgorithm
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
     /// <param name="comparison">Поведение сравнения строк.</param>
-    /// <returns><c>true</c>, если исходная строка содержит подстроку; в противном случае — <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если исходная строка содержит подстроку; в противном случае — <see langword="false"/>.</returns>
     bool Contains(string source, ReadOnlySpan<char> target, StringComparison comparison) => Contains(source.AsSpan(), target, comparison);
 
     /// <summary>
@@ -109,7 +109,7 @@ public interface ITextAlgorithm
     /// </summary>
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
-    /// <returns><c>true</c>, если исходная строка содержит подстроку; в противном случае — <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если исходная строка содержит подстроку; в противном случае — <see langword="false"/>.</returns>
     bool Contains(string source, ReadOnlySpan<char> target) => Contains(source, target, default);
 
     /// <summary>
@@ -118,7 +118,7 @@ public interface ITextAlgorithm
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
     /// <param name="comparison">Поведение сравнения строк.</param>
-    /// <returns><c>true</c>, если исходная строка содержит подстроку; в противном случае — <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если исходная строка содержит подстроку; в противном случае — <see langword="false"/>.</returns>
     bool Contains(ReadOnlySpan<char> source, string target, StringComparison comparison) => Contains(source, target.AsSpan(), comparison);
 
     /// <summary>
@@ -126,7 +126,7 @@ public interface ITextAlgorithm
     /// </summary>
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
-    /// <returns><c>true</c>, если исходная строка содержит подстроку; в противном случае — <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если исходная строка содержит подстроку; в противном случае — <see langword="false"/>.</returns>
     bool Contains(ReadOnlySpan<char> source, string target) => Contains(source, target, default);
 
     /// <summary>
@@ -135,7 +135,7 @@ public interface ITextAlgorithm
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
     /// <param name="comparison">Поведение сравнения строк.</param>
-    /// <returns><c>true</c>, если исходная строка содержит подстроку; в противном случае — <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если исходная строка содержит подстроку; в противном случае — <see langword="false"/>.</returns>
     bool Contains(string source, string target, StringComparison comparison) => Contains(source.AsSpan(), target.AsSpan(), comparison);
 
     /// <summary>
@@ -143,6 +143,6 @@ public interface ITextAlgorithm
     /// </summary>
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
-    /// <returns><c>true</c>, если исходная строка содержит подстроку; в противном случае — <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если исходная строка содержит подстроку; в противном случае — <see langword="false"/>.</returns>
     bool Contains(string source, string target) => Contains(source, target, default);
 }

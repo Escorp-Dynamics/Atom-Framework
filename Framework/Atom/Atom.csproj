@@ -1,35 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFramework>net9.0</TargetFramework>
-		<LangVersion>preview</LangVersion>
-		<ImplicitUsings>enable</ImplicitUsings>
-		<Nullable>enable</Nullable>
-		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-		<OptimizationPreference>speed</OptimizationPreference>
 		<AssemblyName>Escorp.Atom</AssemblyName>
-
-		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-		<AnalysisLevel>latest-all</AnalysisLevel>
-		<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
-		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-		<CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
-		<WarningLevel>9999</WarningLevel>
-		<AnalysisMode>AllEnabledByDefault</AnalysisMode>
-
-		<IsTrimmable>true</IsTrimmable>
-		<IsAotCompatible>true</IsAotCompatible>
-		<InvariantGlobalization>true</InvariantGlobalization>
-		<JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
-
-		<IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
-		<IlcOptimizationPreference>speed</IlcOptimizationPreference>
-
 		<NoWarn>CA1003;CA1031;CA1040;CA1711;CA1716</NoWarn>
 
-		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.8.7</Version>
+		<Version>0.9.2</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -54,7 +30,7 @@
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
 
-	<Target Name="PublishPackages" AfterTargets="Pack">
+	<Target Name="PublishPackages" AfterTargets="Pack" Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
 		<PropertyGroup>
 			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
 		</PropertyGroup>

@@ -58,7 +58,7 @@ public class MutableEventArgs : EventArgs, IPooled
     /// <summary>
     /// Сбрасывает таймер длительности события и увеличивает счётчик итераций.
     /// </summary>
-    public void Restart() => Restart(true);
+    public void Restart() => Restart(isIncrementIteration: true);
 
     /// <summary>
     /// Приостанавливает таймер длительности события.
@@ -71,7 +71,7 @@ public class MutableEventArgs : EventArgs, IPooled
     public void Resume() => timer.Start();
 
     /// <inheritdoc/>
-    public static T Rent<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>() where T : IPooled => ObjectPool<T>.Shared.Rent();
+    public static T Rent<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>() where T : IPooled => ObjectPool<T>.Shared.Rent();
 
     /// <summary>
     /// Арендует экземпляр аргументов события в пуле объектов.
@@ -79,5 +79,5 @@ public class MutableEventArgs : EventArgs, IPooled
     public static MutableEventArgs Rent() => Rent<MutableEventArgs>();
 
     /// <inheritdoc/>
-    public static void Return<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>(T value) where T : IPooled => ObjectPool<T>.Shared.Return(value, x => x.Reset());
+    public static void Return<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>(T value) where T : IPooled => ObjectPool<T>.Shared.Return(value, x => x.Reset());
 }

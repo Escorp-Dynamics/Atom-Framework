@@ -3,7 +3,7 @@ namespace Atom.Distribution;
 /// <summary>
 /// Представляет методы работы с менеджером пакетов дистрибутива.
 /// </summary>
-public class PackageManager
+public sealed class PackageManager
 {
     private readonly Distributive distribution;
 

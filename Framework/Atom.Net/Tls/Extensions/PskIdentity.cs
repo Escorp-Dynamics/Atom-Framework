@@ -1,10 +1,12 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Atom.Net.Tls.Extensions;
 
 /// <summary>
 /// Структура идентификатора PSK для TLS расширения pre_shared_key
 /// </summary>
+[StructLayout(LayoutKind.Auto)]
 public readonly struct PskIdentity : IEquatable<PskIdentity>
 {
     /// <summary>

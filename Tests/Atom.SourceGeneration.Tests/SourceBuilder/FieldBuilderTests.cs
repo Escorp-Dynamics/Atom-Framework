@@ -1,5 +1,6 @@
 namespace Atom.SourceGeneration.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class FieldBuilderTests(ILogger logger) : BenchmarkTests<FieldBuilderTests>(logger)
 {
     private static string? fieldReference;
@@ -42,7 +43,7 @@ public class FieldBuilderTests(ILogger logger) : BenchmarkTests<FieldBuilderTest
             .AsRef()
             .WithType<int>()
             .WithValue(5)
-            .Build(true);
+            .Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {
@@ -61,7 +62,7 @@ public class FieldBuilderTests(ILogger logger) : BenchmarkTests<FieldBuilderTest
             .AsConstant()
             .WithType<int>()
             .WithValue(5)
-            .Build(true);
+            .Build(release: true);
 
         if (!IsBenchmarkEnabled)
         {

@@ -1,0 +1,63 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<AssemblyName>Escorp.Atom.IO.Compression</AssemblyName>
+
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<PackageId>$(AssemblyName)</PackageId>
+		<Version>0.0.2</Version>
+		<Authors>Yuriy Yesin, Escorp Labs</Authors>
+		<Company>Escorp Dynamics</Company>
+		<Product>Escorp.$(AssemblyName)</Product>
+		<RepositoryUrl>https://gitflic.ru/project/escorp-lab/atom</RepositoryUrl>
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<PackageIcon>icon.png</PackageIcon>
+		<PackageTags>atom;framework;escorp;exomode;io;compression;zstd</PackageTags>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+	</PropertyGroup>
+
+	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
+		<ProjectReference Include="../Atom/Atom.csproj" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(Configuration)' == 'Release'">
+		<PackageReference Include="Escorp.Atom" Version="*" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="icon.png" PackagePath="\" Pack="true" />
+		<None Update="README.md" PackagePath="\" Pack="true" />
+	</ItemGroup>
+
+	<Target Name="PublishPackages" AfterTargets="Pack"
+		Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
+		<PropertyGroup>
+			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
+		</PropertyGroup>
+
+		<ItemGroup>
+			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" />
+			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg"
+				Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
+		</ItemGroup>
+
+		<Exec
+			Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;"
+			Condition="'%(PackageFiles.Identity)' != ''"
+			IgnoreExitCode="true">
+			<Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
+		</Exec>
+
+	</Target>
+
+</Project>

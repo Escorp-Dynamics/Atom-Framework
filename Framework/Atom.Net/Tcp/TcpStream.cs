@@ -79,7 +79,7 @@ public sealed partial class TcpStream : NetworkStream
     /// <param name="socket">Внешний сокет (может быть как не подключённым, так и уже подключённым).</param>
     /// <param name="settings">Параметры TCP.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TcpStream(Socket socket, in TcpSettings settings) : this(socket, settings, true) { }
+    public TcpStream(Socket socket, in TcpSettings settings) : this(socket, settings, ownsSocket: true) { }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="TcpStream"/>.
@@ -90,7 +90,7 @@ public sealed partial class TcpStream : NetworkStream
     /// Адресоспецифичные (например DSCP для IPv4) — после успешного Connect.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TcpStream(in TcpSettings settings) : this(CreateInitialSocket(settings.IsNagleDisabled), settings, true) => PreConfigureUnboundSocket();
+    public TcpStream(in TcpSettings settings) : this(CreateInitialSocket(settings.IsNagleDisabled), settings, ownsSocket: true) => PreConfigureUnboundSocket();
 
     /// <summary>
     /// Последовательный перебор адресов с пер-попыточным таймаутом.
@@ -121,70 +121,82 @@ public sealed partial class TcpStream : NetworkStream
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private async ValueTask ConnectAlternatingAsync(IPAddress[] addresses, int port, CancellationToken cancellationToken)
     {
-        CountFamilies(addresses, out var n6, out var n4); // разбивка по семействам
+        CountFamilies(addresses, out var n6, out var n4);
         var idx6 = ArrayPool<int>.Shared.Rent(n6);
         var idx4 = ArrayPool<int>.Shared.Rent(n4);
-
         try
         {
-            FillFamilyIndices(addresses, idx6, idx4, out var i6, out var i4); // индексы в порядке DNS
-
+            FillFamilyIndices(addresses, idx6, idx4, out var i6, out var i4);
             var initialDelay = Settings.HappyEyeballsDelay;
             if (initialDelay <= TimeSpan.Zero) initialDelay = TimeSpan.FromMilliseconds(200);
-
             var stepDelay = Settings.HappyEyeballsStepDelay;
             if (stepDelay <= TimeSpan.Zero) stepDelay = TimeSpan.FromMilliseconds(250);
-
-            var p6 = 0;
-            var p4 = 0;
-            var turnV6 = true;
-            var firstV4Delayed = false;
-
-            while (p6 < i6 || p4 < i4)
-            {
-                if (turnV6 && p6 < i6)
-                {
-                    if (await TryConnectOneAsync(addresses[idx6[p6++]], port, cancellationToken).ConfigureAwait(false)) return;
-
-                    turnV6 = false;
-
-                    if (!firstV4Delayed)
-                    {
-                        firstV4Delayed = true;
-                        await Task.Delay(initialDelay, cancellationToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        await Task.Delay(stepDelay, cancellationToken).ConfigureAwait(false);
-                    }
-                }
-                else if (!turnV6 && p4 < i4)
-                {
-                    if (await TryConnectOneAsync(addresses[idx4[p4++]], port, cancellationToken).ConfigureAwait(false)) return;
-                    turnV6 = true;
-                    await Task.Delay(stepDelay, cancellationToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    // Если одна очередь опустела — идём по оставшейся без задержек
-                    if (p6 < i6)
-                    {
-                        if (await TryConnectOneAsync(addresses[idx6[p6++]], port, cancellationToken).ConfigureAwait(false)) return;
-                    }
-                    else if (p4 < i4)
-                    {
-                        if (await TryConnectOneAsync(addresses[idx4[p4++]], port, cancellationToken).ConfigureAwait(false)) return;
-                    }
-                }
-            }
-
-            throw new SocketException((int)SocketError.HostUnreachable);
+            await RunAlternatingConnectLoop(addresses, idx6, idx4, i6, i4, port, cancellationToken, initialDelay, stepDelay).ConfigureAwait(false);
         }
         finally
         {
             ArrayPool<int>.Shared.Return(idx6);
             ArrayPool<int>.Shared.Return(idx4);
         }
+    }
+
+    /// <summary>
+    /// Основной цикл Happy Eyeballs: чередует попытки v6/v4 с задержками.
+    /// </summary>
+    private async ValueTask RunAlternatingConnectLoop(IPAddress[] addresses, int[] idx6, int[] idx4, int i6, int i4, int port, CancellationToken cancellationToken, TimeSpan initialDelay, TimeSpan stepDelay)
+    {
+        var p6 = 0;
+        var p4 = 0;
+        var turnV6 = true;
+        var firstV4Delayed = false;
+        while (p6 < i6 || p4 < i4)
+        {
+            if (turnV6 && p6 < i6)
+            {
+                if (await TryConnectOneAsync(addresses[idx6[p6++]], port, cancellationToken).ConfigureAwait(false)) return;
+                turnV6 = false;
+                if (!firstV4Delayed)
+                {
+                    firstV4Delayed = true;
+                    await Task.Delay(initialDelay, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await Task.Delay(stepDelay, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            else if (!turnV6 && p4 < i4)
+            {
+                if (await TryConnectOneAsync(addresses[idx4[p4++]], port, cancellationToken).ConfigureAwait(false)) return;
+                turnV6 = true;
+                await Task.Delay(stepDelay, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                (p6, p4) = await RunFinalFamilyConnect(addresses, idx6, idx4, p6, i6, p4, i4, port, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        throw new SocketException((int)SocketError.HostUnreachable);
+    }
+
+    /// <summary>
+    /// Финальный проход по оставшейся очереди адресов одного семейства.
+    /// </summary>
+    private async ValueTask<(int, int)> RunFinalFamilyConnect(IPAddress[] addresses, int[] idx6, int[] idx4, int p6, int i6, int p4, int i4, int port, CancellationToken cancellationToken)
+    {
+        if (p6 < i6)
+        {
+            if (await TryConnectOneAsync(addresses[idx6[p6]], port, cancellationToken).ConfigureAwait(false))
+                return (p6 + 1, p4);
+            return (p6 + 1, p4);
+        }
+        if (p4 < i4)
+        {
+            if (await TryConnectOneAsync(addresses[idx4[p4]], port, cancellationToken).ConfigureAwait(false))
+                return (p6, p4 + 1);
+            return (p6, p4 + 1);
+        }
+        return (p6, p4);
     }
 
     /// <summary>
@@ -304,7 +316,7 @@ public sealed partial class TcpStream : NetworkStream
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void TryEnableKeepAlive()
     {
-        try { Socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true); } catch { /* страховка */ }
+        try { Socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, optionValue: true); } catch { /* страховка */ }
 
         if (Settings.KeepAlivePingDelay == Timeout.InfiniteTimeSpan) return;
 
@@ -334,7 +346,7 @@ public sealed partial class TcpStream : NetworkStream
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void TryDisableKeepAlive()
     {
-        try { Socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, false); } catch { /* страховка */ }
+        try { Socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, optionValue: false); } catch { /* страховка */ }
     }
 
     /// <summary>

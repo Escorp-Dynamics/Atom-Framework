@@ -31,7 +31,7 @@ public abstract class SyntaxProvider<TSymbol, TSyntaxNode>(IncrementalGeneratorI
         "Генератор вызвал исключение {0}: {1}",
         "Usage",
         DiagnosticSeverity.Error,
-        true
+isEnabledByDefault: true
     );
 
     /// <summary>
@@ -135,7 +135,7 @@ public abstract class SyntaxProvider<TSymbol, TSyntaxNode>(IncrementalGeneratorI
     {
         try
         {
-            var members = new Dictionary<string, List<ISyntaxProviderInfo<TSymbol, TSyntaxNode>>>();
+            var members = new Dictionary<string, List<ISyntaxProviderInfo<TSymbol, TSyntaxNode>>>(StringComparer.Ordinal);
 
             foreach (var target in sources)
             {
@@ -159,13 +159,15 @@ public abstract class SyntaxProvider<TSymbol, TSyntaxNode>(IncrementalGeneratorI
         }
         catch (Exception ex)
         {
-            ReportExceptionDiagnostic(context, ex, e => CreateExceptionDiagnostic(e, null));
+            ReportExceptionDiagnostic(context, ex, e => CreateExceptionDiagnostic(e, location: null));
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Diagnostic CreateExceptionDiagnostic(Exception exception, Location? location)
         => Diagnostic.Create(UnhandledException, location, exception?.GetType(), exception?.Message);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ReportExceptionDiagnostic(SourceProductionContext context, Exception exception, Func<Exception, Diagnostic> diagnosticFactory)
     {
         var diagnostic = diagnosticFactory(exception);
@@ -180,8 +182,8 @@ public abstract class SyntaxProvider<TSymbol, TSyntaxNode>(IncrementalGeneratorI
     /// </summary>
     /// <param name="context">Контекст генератора.</param>
     /// <param name="variable"></param>
-    /// <param name="cancellationToken"></param>
     /// <param name="symbol"></param>
+    /// <param name="cancellationToken"></param>
     /// <returns></returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected static bool TryGetSymbol(GeneratorSyntaxContext context, SyntaxNode variable, out ISymbol? symbol, CancellationToken cancellationToken)
@@ -210,7 +212,7 @@ public abstract class SyntaxProvider<TSymbol, TSyntaxNode>(IncrementalGeneratorI
         foreach (var syntaxTree in compilation.SyntaxTrees)
         {
             var root = syntaxTree.GetRoot();
-            if (root.DescendantNodes().Any(node => node is MethodDeclarationSyntax method && method.Identifier.Text == memberName)) return true;
+            if (root.DescendantNodes().Any(node => node is MethodDeclarationSyntax method && string.Equals(method.Identifier.Text, memberName, StringComparison.Ordinal))) return true;
         }
 
         return default;

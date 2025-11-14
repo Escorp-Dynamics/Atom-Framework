@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Atom.Buffers;
@@ -92,7 +93,7 @@ internal static class UnixStyleFormatter
             if (color == backgrounds.Peek())
             {
                 backgrounds.Pop();
-                if (!removeFormatting) outText.Append(backgrounds.Peek().AsString(true));
+                if (!removeFormatting) outText.Append(backgrounds.Peek().AsString(isBackground: true));
             }
             else
             {
@@ -102,7 +103,7 @@ internal static class UnixStyleFormatter
         else
         {
             backgrounds.Push(color);
-            if (!removeFormatting) outText.Append(color.AsString(true));
+            if (!removeFormatting) outText.Append(color.AsString(isBackground: true));
         }
     }
 
@@ -111,7 +112,7 @@ internal static class UnixStyleFormatter
     {
         if (isClosing)
         {
-            if (!removeFormatting) outText.Append(style.AsString(true));
+            if (!removeFormatting) outText.Append(style.AsString(isEnding: true));
         }
         else
         {
@@ -122,7 +123,7 @@ internal static class UnixStyleFormatter
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void AppendDefaultFormatting(ref StringBuilder outText, StringBuilder parsedData, bool isClosing)
     {
-        if (parsedData.Length > 0) outText.Append($"[{(isClosing ? '/' : null)}{parsedData}]");
+        if (parsedData.Length > 0) outText.Append(CultureInfo.InvariantCulture, $"[{(isClosing ? '/' : null)}{parsedData}]");
     }
 
     public static string? Format(string? source, bool removeFormatting)

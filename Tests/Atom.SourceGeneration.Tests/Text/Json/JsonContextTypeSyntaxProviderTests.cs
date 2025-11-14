@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis.Testing;
 
 namespace Atom.Text.Json.Tests;
 
+[Parallelizable(ParallelScope.All)]
 public class JsonContextTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<JsonContextTypeSyntaxProviderTests>(logger)
 {
     private static string? source;
@@ -39,7 +40,7 @@ public class JsonContextTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests
     }
 
     [TestCase(TestName = "Тест анализатора контекстов сериализации"), Benchmark]
-    public async Task AnalyzerTest()
+    public async Task AnalyzerTestAsync()
     {
         var test = new CSharpAnalyzerTest<JsonContextSourceAnalyzer, DefaultVerifier>
         {
@@ -69,7 +70,7 @@ public class JsonContextTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests
     }
 
     [TestCase(TestName = "Тест генератора контекстов сериализации"), Benchmark]
-    public async Task GeneratorTest()
+    public async Task GeneratorTestAsync()
     {
         var test = new CSharpSourceGeneratorTest<JsonContextSourceGenerator, DefaultVerifier>
         {

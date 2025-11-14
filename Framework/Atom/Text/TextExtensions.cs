@@ -89,7 +89,8 @@ public static class TextExtensions
     /// <param name="target">Подстрока поиска.</param>
     /// <param name="algorithm">Алгоритм поиска.</param>
     /// <returns>Число найденных вхождений подстроки.</returns>
-    public static int CountOf(this string source, string target, SubstringSearchAlgorithm algorithm) => source.CountOf(target, default, algorithm);
+    public static int CountOf(this string source, string target, SubstringSearchAlgorithm algorithm)
+        => source.CountOf(target, StringComparison.Ordinal, algorithm);
 
     /// <summary>
     /// Возвращает число найденных вхождений подстроки.
@@ -97,7 +98,8 @@ public static class TextExtensions
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
     /// <returns>Число найденных вхождений подстроки.</returns>
-    public static int CountOf(this string source, string target) => source.CountOf(target, SubstringSearchAlgorithm.RabinKarp);
+    public static int CountOf(this string source, string target)
+        => source.CountOf(target, StringComparison.Ordinal, SubstringSearchAlgorithm.RabinKarp);
 
     /// <summary>
     /// Возвращает число найденных символов.
@@ -129,7 +131,8 @@ public static class TextExtensions
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Искомый символ.</param>
     /// <returns>Число найденных символов.</returns>
-    public static int CountOf(this string source, char target) => source.CountOf(target, default);
+    public static int CountOf(this string source, char target)
+        => source.CountOf(target, StringComparison.Ordinal);
 
     /// <summary>
     /// Проверяет, содержит ли строка source подстроку target, используя алгоритм поиска, определенный в algorithm.
@@ -138,7 +141,7 @@ public static class TextExtensions
     /// <param name="target">Подстрока поиска.</param>
     /// <param name="comparison">Поведение сравнения строк.</param>
     /// <param name="algorithm">Алгоритм поиска.</param>
-    /// <returns><c>true</c>, если строка source содержит подстроку target; иначе, <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если строка source содержит подстроку target; иначе, <see langword="false"/>.</returns>
     public static bool Contains(this string source, string target, StringComparison comparison, [NotNull] ITextAlgorithm algorithm)
         => algorithm.Contains(source, target, comparison);
 
@@ -148,9 +151,9 @@ public static class TextExtensions
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
     /// <param name="algorithm">Алгоритм поиска.</param>
-    /// <returns><c>true</c>, если строка source содержит подстроку target; иначе, <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если строка source содержит подстроку target; иначе, <see langword="false"/>.</returns>
     public static bool Contains(this string source, string target, ITextAlgorithm algorithm)
-        => source.Contains(target, default, algorithm);
+        => source.Contains(target, StringComparison.Ordinal, algorithm);
 
     /// <summary>
     /// Проверяет, содержит ли строка source подстроку target, используя алгоритм поиска, определенный в algorithm.
@@ -158,7 +161,7 @@ public static class TextExtensions
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
     /// <param name="comparison">Поведение сравнения строк.</param>
-    /// <returns><c>true</c>, если строка source содержит подстроку target; иначе, <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если строка source содержит подстроку target; иначе, <see langword="false"/>.</returns>
     public static bool Contains<TAlgorithm>(this string source, string target, StringComparison comparison)
         where TAlgorithm : ITextAlgorithm, new()
     {
@@ -171,7 +174,7 @@ public static class TextExtensions
     /// </summary>
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
-    /// <returns><c>true</c>, если строка source содержит подстроку target; иначе, <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если строка source содержит подстроку target; иначе, <see langword="false"/>.</returns>
     public static bool Contains<TAlgorithm>(this string source, string target)
         where TAlgorithm : ITextAlgorithm, new()
         => source.Contains<TAlgorithm>(target, default);
@@ -183,7 +186,7 @@ public static class TextExtensions
     /// <param name="target">Подстрока поиска.</param>
     /// <param name="comparison">Поведение сравнения строк.</param>
     /// <param name="algorithm">Алгоритм поиска.</param>
-    /// <returns><c>true</c>, если строка source содержит подстроку target; иначе, <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если строка source содержит подстроку target; иначе, <see langword="false"/>.</returns>
     public static bool Contains(this string source, string target, StringComparison comparison, SubstringSearchAlgorithm algorithm) => algorithm switch
     {
         SubstringSearchAlgorithm.RabinKarp => source.Contains<RabinKarpAlgorithm>(target, comparison),
@@ -200,7 +203,7 @@ public static class TextExtensions
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
     /// <param name="comparison">Поведение сравнения строк.</param>
-    /// <returns><c>true</c>, если строка source содержит подстроку target; иначе, <c>false</c>.</returns>
+    /// <returns><see langword="true"/>, если строка source содержит подстроку target; иначе, <see langword="false"/>.</returns>
     public static bool Contains(this string source, string target, StringComparison comparison) => source.Contains<KmpAlgorithm>(target, comparison);
 
     /// <summary>
@@ -209,16 +212,18 @@ public static class TextExtensions
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
     /// <param name="algorithm">Алгоритм поиска.</param>
-    /// <returns><c>true</c>, если строка source содержит подстроку target; иначе, <c>false</c>.</returns>
-    public static bool Contains(this string source, string target, SubstringSearchAlgorithm algorithm) => source.Contains(target, default, algorithm);
+    /// <returns><see langword="true"/>, если строка source содержит подстроку target; иначе, <see langword="false"/>.</returns>
+    public static bool Contains(this string source, string target, SubstringSearchAlgorithm algorithm)
+        => source.Contains(target, StringComparison.Ordinal, algorithm);
 
     /// <summary>
     /// Проверяет, содержит ли строка source подстроку target, используя алгоритм поиска, определенный в algorithm.
     /// </summary>
     /// <param name="source">Исходная строка.</param>
     /// <param name="target">Подстрока поиска.</param>
-    /// <returns><c>true</c>, если строка source содержит подстроку target; иначе, <c>false</c>.</returns>
-    public static bool Contains(this string source, string target) => source.Contains(target, SubstringSearchAlgorithm.KMP);
+    /// <returns><see langword="true"/>, если строка source содержит подстроку target; иначе, <see langword="false"/>.</returns>
+    public static bool Contains(this string source, string target)
+        => source.Contains(target, StringComparison.Ordinal, SubstringSearchAlgorithm.KMP);
 
     /// <summary>
     /// Форматирует исходную строку в итоговый формат стилей UNIX.

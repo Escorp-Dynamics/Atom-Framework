@@ -1,6 +1,5 @@
-#pragma warning disable RS1025, RS1026
-
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace Atom.SourceGeneration;
@@ -20,5 +19,11 @@ public abstract class SourceAnalyzer<TAnalyzerProvider> : SourceAnalyzer where T
     /// Инициализирует анализатор.
     /// </summary>
     /// <param name="context">Контекст диагностики.</param>
-    public override void Initialize([NotNull] AnalysisContext context) => context.UseProvider(new TAnalyzerProvider());
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public override void Initialize([NotNull] AnalysisContext context)
+    {
+        context.EnableConcurrentExecution();
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.Analyze | GeneratedCodeAnalysisFlags.ReportDiagnostics);
+        context.UseProvider(new TAnalyzerProvider());
+    }
 }

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
@@ -20,5 +21,6 @@ public abstract class AnalyzerSyntaxProvider : IAnalyzerSyntaxProvider
     public abstract DiagnosticDescriptor Rule { get; }
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public abstract void Execute(SyntaxNodeAnalysisContext context);
 }

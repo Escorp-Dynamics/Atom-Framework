@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Atom.Net.Tls;
 
@@ -13,6 +14,7 @@ namespace Atom.Net.Tls;
 /// <param name="ca"></param>
 /// <param name="sa"></param>
 [method: MethodImpl(MethodImplOptions.AggressiveInlining)]
+[StructLayout(LayoutKind.Auto)]
 public readonly struct Tls13TrafficSecrets(ReadOnlyMemory<byte> ch, ReadOnlyMemory<byte> sh, ReadOnlyMemory<byte> ca, ReadOnlyMemory<byte> sa) : IEquatable<Tls13TrafficSecrets>
 {
     /// <summary>

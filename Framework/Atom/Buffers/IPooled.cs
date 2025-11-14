@@ -16,12 +16,12 @@ public interface IPooled
     /// Арендует экземпляр в пуле объектов.
     /// </summary>
     /// <typeparam name="T">Тип экземпляра.</typeparam>
-    static abstract T Rent<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>() where T : IPooled;
+    static abstract T Rent<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>() where T : IPooled;
 
     /// <summary>
     /// Возвращает экземпляр в пул объектов.
     /// </summary>
     /// <param name="value">Экземпляр.</param>
     /// <typeparam name="T">Тип экземпляра.</typeparam>
-    static abstract void Return<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor | DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>(T value) where T : IPooled;
+    static abstract void Return<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>(T value) where T : IPooled;
 }

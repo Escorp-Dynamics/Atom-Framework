@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Attributes;
+#if DEBUG
 using BenchmarkDotNet.Configs;
+#endif
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Order;
@@ -17,9 +19,9 @@ namespace Atom.Testing;
 /// Инициализирует новый экземпляр <see cref="BenchmarkTests{T}"/>.
 /// </remarks>
 /// <param name="logger">Журнал событий для бенчмарка.</param>
-[SimpleJob(RuntimeMoniker.Net90, baseline: true)]
-[SimpleJob(RuntimeMoniker.NativeAot90)]
-[TestFixture, MemoryDiagnoser, ThreadingDiagnoser, ExceptionDiagnoser/*, DisassemblyDiagnoser*/]
+[SimpleJob(RuntimeMoniker.Net90, id: "Net90", baseline: true)]
+[SimpleJob(RuntimeMoniker.NativeAot90, id: "NativeAot90")]
+[TestFixture, MemoryDiagnoser, ThreadingDiagnoser, ExceptionDiagnoser]
 [Orderer(SummaryOrderPolicy.FastestToSlowest)]
 [RankColumn]
 #if DEBUG
@@ -41,24 +43,29 @@ public abstract class BenchmarkTests<T>(ILogger logger) : IBenchmarkTests where 
 
     /// <inheritdoc/>
     [GlobalSetup]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void GlobalSetUp() => IsBenchmarkEnabled = true;
 
     /// <inheritdoc/>
     [OneTimeSetUp]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void OneTimeSetUp() { }
 
     /// <inheritdoc/>
     [TearDown]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void GlobalTearDown() { }
 
     /// <inheritdoc/>
     [OneTimeTearDown]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void OneTimeTearDown() { }
 
     /// <summary>
     /// Запускает замеры производительности.
     /// </summary>
     [TestCase(TestName = "Замеры производительности")]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void RunBenchmarks()
     {
         if (!IsBenchmarkEnabled) return;

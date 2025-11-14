@@ -47,13 +47,13 @@ public class PropertyMutatorMember : Entity<PropertyMutatorMember>
         var access = AccessModifier.AsString(ParentAccessModifier);
         if (!string.IsNullOrEmpty(access)) access += ' ';
 
-        sb.Append($"{spaces}{access}{Name}");
+        sb.Append(spaces).Append(access).Append(Name);
 
         if (!string.IsNullOrEmpty(Code))
         {
             sb.Append(' ');
 
-            if (Code.CountOf(';') is 1)
+            if (Code.CountOf(';', StringComparison.Ordinal) is 1)
             {
                 sb.AppendLine($"=> {Code}");
             }
@@ -124,7 +124,7 @@ public class PropertyMutatorMember : Entity<PropertyMutatorMember>
     /// <summary>
     /// Указывает, должен ли быть мутатор инициализируемым.
     /// </summary>
-    public PropertyMutatorMember AsInit() => AsInit(true);
+    public PropertyMutatorMember AsInit() => AsInit(value: true);
 
     /// <inheritdoc/>
     public override void Release()

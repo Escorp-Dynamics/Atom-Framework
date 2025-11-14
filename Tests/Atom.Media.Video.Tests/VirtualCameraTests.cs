@@ -19,11 +19,11 @@ public class VirtualCameraTests(ILogger logger) : BenchmarkTests<VirtualCameraTe
     }
 
     [TestCase(TestName = "Тест захвата виртуальной камеры (локальный)"), Benchmark(Baseline = true)]
-    public async Task CaptureTest()
+    public async Task CaptureTestAsync()
     {
         await using var camera = new VirtualCamera() { IsMuted = true };
 
-        await camera.StartCaptureAsync(Path.GetFullPath("/home/exomode/Загрузки/KACI MEHDI_20241230_220031.mjpeg"), true);
+        await camera.StartCaptureAsync(Path.GetFullPath("/home/exomode/Загрузки/KACI MEHDI_20241230_220031.mjpeg"), isLooped: true);
 
         await camera.WaitForCaptureAsync();
 
@@ -35,7 +35,7 @@ public class VirtualCameraTests(ILogger logger) : BenchmarkTests<VirtualCameraTe
     }
 
     [TestCase(TestName = "Тест зацикленного захвата виртуальной камеры (локальный)"), Benchmark]
-    public async Task LoopedCaptureTest()
+    public async Task LoopedCaptureTestAsync()
     {
         await using var camera = new VirtualCamera()
         {
@@ -43,12 +43,12 @@ public class VirtualCameraTests(ILogger logger) : BenchmarkTests<VirtualCameraTe
             IsMuted = true,
         };
 
-        await camera.StartCaptureAsync("https://test.com/files/idenfy/732edeefb03fcf9b4ecf6bbe5cce8065.jpg", true);
+        await camera.StartCaptureAsync("https://test.com/files/idenfy/732edeefb03fcf9b4ecf6bbe5cce8065.jpg", isLooped: true);
 
         await Task.Delay(TimeSpan.FromSeconds(10));
         await camera.StopCaptureAsync();
 
-        await camera.StartCaptureAsync(Path.GetFullPath($"/home/exomode/1.mp4"), true);
+        await camera.StartCaptureAsync(Path.GetFullPath($"/home/exomode/1.mp4"), isLooped: true);
         await Task.Delay(TimeSpan.FromSeconds(3));
 
         camera.Filters = [
@@ -70,17 +70,17 @@ public class VirtualCameraTests(ILogger logger) : BenchmarkTests<VirtualCameraTe
     }
 
     [TestCase(TestName = "Тест захвата виртуальной камеры (удалённый)"), Benchmark]
-    public async Task RemoteCaptureTest()
+    public async Task RemoteCaptureTestAsync()
     {
         await using var camera = await VirtualCamera.CreateAsync();
 
-        await camera.StartCaptureAsync(Path.GetFullPath("assets/dummy.jpg"), true);
+        await camera.StartCaptureAsync(Path.GetFullPath("assets/dummy.jpg"), isLooped: true);
         await Task.Delay(TimeSpan.FromSeconds(15));
 
-        await camera.StartCaptureAsync(new Uri("https://test.com/files/idenfy/b0bcdac1daf0c0ddfe09cac8304d4c89.jpg"), true, new TransposeFilter());
+        await camera.StartCaptureAsync(new Uri("https://test.com/files/idenfy/b0bcdac1daf0c0ddfe09cac8304d4c89.jpg"), isLooped: true, new TransposeFilter());
         await Task.Delay(TimeSpan.FromSeconds(15));
 
-        await camera.StartCaptureAsync(new Uri("https://test.com/files/idenfy/4dc14363b64f04b4142cc158f521fdb0.mp4"), true, new TransposeFilter());
+        await camera.StartCaptureAsync(new Uri("https://test.com/files/idenfy/4dc14363b64f04b4142cc158f521fdb0.mp4"), isLooped: true, new TransposeFilter());
         await Task.Delay(TimeSpan.FromSeconds(10));
 
         await camera.ResetAsync();
@@ -92,13 +92,13 @@ public class VirtualCameraTests(ILogger logger) : BenchmarkTests<VirtualCameraTe
     }
 
     [TestCase(TestName = "Тест захвата c нескольких виртуальных камер"), Benchmark]
-    public async Task MultiCaptureTest()
+    public async Task MultiCaptureTestAsync()
     {
         await using var camera1 = new VirtualCamera() { IsMuted = true };
-        await camera1.StartCaptureAsync("https://test.com/files/idenfy/732edeefb03fcf9b4ecf6bbe5cce8065.jpg", true);
+        await camera1.StartCaptureAsync("https://test.com/files/idenfy/732edeefb03fcf9b4ecf6bbe5cce8065.jpg", isLooped: true);
 
         await using var camera2 = new VirtualCamera() { IsMuted = true };
-        await camera2.StartCaptureAsync(Path.GetFullPath($"/home/exomode/1.mp4"), true);
+        await camera2.StartCaptureAsync(Path.GetFullPath($"/home/exomode/1.mp4"), isLooped: true);
 
         await Task.Delay(TimeSpan.FromMinutes(1));
         if (!IsBenchmarkEnabled) Assert.Pass();

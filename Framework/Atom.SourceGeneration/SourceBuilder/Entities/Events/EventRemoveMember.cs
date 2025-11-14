@@ -48,7 +48,7 @@ public class EventRemoveMember : Entity<EventRemoveMember>
         {
             sb.Append(' ');
 
-            if (Code.CountOf(';') is 1)
+            if (Code.CountOf(';', StringComparison.Ordinal) is 1)
             {
                 sb.AppendLine($"=> {Code}");
             }

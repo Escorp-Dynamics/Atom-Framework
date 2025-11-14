@@ -1,3 +1,5 @@
+#pragma warning disable IDISP005
+
 using System.Collections.Concurrent;
 using Atom.Architect.Factories;
 using Microsoft.Extensions.Logging;
@@ -18,7 +20,7 @@ public class LoggerFactory : IFactory, ILoggerFactory
     /// <param name="disposing">Указывает, требуется ли высвобождать управляемые ресурсы.</param>
     protected virtual void Dispose(bool disposing)
     {
-        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
+        if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
 
         if (disposing)
         {

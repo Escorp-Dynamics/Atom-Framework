@@ -130,26 +130,26 @@ public sealed class RateLimiter : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private async ValueTask CallInternal(Action callback)
+    private async ValueTask CallInternalAsync(Action callback)
     {
         if (await WaitAsync(cts.Token).ConfigureAwait(false)) callback();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private async ValueTask CallInternal(Func<ValueTask> callback)
+    private async ValueTask CallInternalAsync(Func<ValueTask> callback)
     {
         if (await WaitAsync(cts.Token).ConfigureAwait(false)) await callback().ConfigureAwait(false);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private async ValueTask<TResult> CallInternal<TResult>(Func<TResult> callback)
+    private async ValueTask<TResult> CallInternalAsync<TResult>(Func<TResult> callback)
     {
         if (await WaitAsync(cts.Token).ConfigureAwait(false)) return callback();
         return default!;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private async ValueTask<TResult> CallInternal<TResult>(Func<ValueTask<TResult>> callback)
+    private async ValueTask<TResult> CallInternalAsync<TResult>(Func<ValueTask<TResult>> callback)
     {
         if (await WaitAsync(cts.Token).ConfigureAwait(false)) return await callback().ConfigureAwait(false);
         return default!;
@@ -161,7 +161,7 @@ public sealed class RateLimiter : IDisposable
     /// <param name="callback">Синхронный делегат для выполнения.</param>
     /// <returns>Задача, завершающаяся после выполнения операции.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask Call([NotNull] Action callback) => CallInternal(callback);
+    public ValueTask CallAsync([NotNull] Action callback) => CallInternalAsync(callback);
 
     /// <summary>
     /// Выполняет асинхронную операцию с учётом ограничений частоты.
@@ -169,7 +169,7 @@ public sealed class RateLimiter : IDisposable
     /// <param name="callback">Асинхронный делегат без возвращаемого значения.</param>
     /// <returns>Задача, завершающаяся после выполнения операции.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask Call([NotNull] Func<ValueTask> callback) => CallInternal(callback);
+    public ValueTask CallAsync([NotNull] Func<ValueTask> callback) => CallInternalAsync(callback);
 
     /// <summary>
     /// Выполняет синхронную операцию с возвратом результата.
@@ -178,7 +178,7 @@ public sealed class RateLimiter : IDisposable
     /// <param name="callback">Синхронный делегат с возвратом значения.</param>
     /// <returns>Задача с результатом выполнения операции.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<TResult> Call<TResult>([NotNull] Func<TResult> callback) => CallInternal(callback);
+    public ValueTask<TResult> CallAsync<TResult>([NotNull] Func<TResult> callback) => CallInternalAsync(callback);
 
     /// <summary>
     /// Выполняет асинхронную операцию с возвратом результата.
@@ -187,7 +187,7 @@ public sealed class RateLimiter : IDisposable
     /// <param name="callback">Асинхронный делегат с возвратом значения.</param>
     /// <returns>Задача с результатом выполнения операции.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<TResult> Call<TResult>([NotNull] Func<ValueTask<TResult>> callback) => CallInternal(callback);
+    public ValueTask<TResult> CallAsync<TResult>([NotNull] Func<ValueTask<TResult>> callback) => CallInternalAsync(callback);
 
     /// <summary>
     /// Сбрасывает все ожидания.
@@ -203,12 +203,10 @@ public sealed class RateLimiter : IDisposable
     /// </remarks>
     public void Dispose()
     {
-        if (Interlocked.CompareExchange(ref isDisposed, true, default)) return;
+        if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
 
         cts.Dispose();
         ArrayPool<long>.Shared.Return(timestamps);
-
-        GC.SuppressFinalize(this);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -59,6 +59,10 @@ internal abstract class HttpsConnection : IHttpsConnection
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public abstract void Dispose();
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public abstract ValueTask DisposeAsync();
 
     /// <inheritdoc/>
