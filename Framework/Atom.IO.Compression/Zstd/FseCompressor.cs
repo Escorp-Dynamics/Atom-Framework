@@ -64,7 +64,7 @@ internal readonly ref struct FseCompressor
     /// и обновляет состояние с использованием таблиц.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public readonly bool TryEncodeSymbol(ref uint nPlusState /*N+state*/, int symbol, ref LittleEndianBitWriter bw)
+    public readonly bool TryEncodeSymbol(ref uint nPlusState /*N+state*/, int symbol, ref BitWriter bw)
     {
         // nbBitsOut = (N_plus_state + deltaNbBits) >> 16
         var t = _symTT[symbol];

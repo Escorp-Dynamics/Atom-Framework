@@ -5,7 +5,7 @@
 		<NoWarn>CA1003;CA1708</NoWarn>
 
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.3.7</Version>
+		<Version>0.3.9</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -16,6 +16,10 @@
 		<PackageTags>atom;framework;escorp;exomode;system;threading;log;debug;extension;web</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
+
+	<ItemGroup>
+		<Compile Remove="Analytics/Geolocations/**" />
+	</ItemGroup>
 
 	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
@@ -44,7 +48,8 @@
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
 
-	<Target Name="PublishPackages" AfterTargets="Pack" Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
+	<Target Name="PublishPackages" AfterTargets="Pack"
+		Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
 		<PropertyGroup>
 			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
 		</PropertyGroup>

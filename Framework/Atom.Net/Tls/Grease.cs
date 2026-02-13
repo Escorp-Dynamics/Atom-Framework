@@ -67,7 +67,7 @@ public static class Grease
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ushort Pick(byte scope)
     {
-        if (depth is 0) throw new InvalidOperationException("Grease.Enter(random) не вызван для текущего потока.");
+        if (depth is 0) throw new InvalidOperationException("Grease.Enter(random) не вызван для текущего потока");
 
         // Индекс 0..15 — детерминированно, но различается по scope,
         // чтобы домены имели разные значения внутри одного CH.

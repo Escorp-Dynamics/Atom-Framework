@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Text;
+using Atom.Text;
 
 namespace Atom.Net.Https.Headers;
 
@@ -143,61 +143,61 @@ public readonly struct UserAgent : IParsable<UserAgent>, IEquatable<UserAgent>
     /// <inheritdoc/>
     public override string ToString()
     {
-        var builder = new StringBuilder(128);
+        var builder = new ValueStringBuilder(128);
 
-        void AppendSeparator()
+        void AppendSeparator(ref ValueStringBuilder sb)
         {
-            if (builder.Length > 0) builder.Append(' ');
+            if (sb.Length > 0) sb.Append(' ');
         }
 
-        void AppendVersioned(in Versioned versioned)
+        void AppendVersioned(ref ValueStringBuilder sb, in Versioned versioned)
         {
             var name = versioned.Name;
             if (string.IsNullOrEmpty(name)) return;
 
-            AppendSeparator();
-            builder.Append(name);
-            builder.Append('/');
-            builder.Append(versioned.Version);
+            AppendSeparator(ref sb);
+            sb.Append(name);
+            sb.Append('/');
+            sb.Append(versioned.Version);
         }
 
-        void AppendToken(string? token)
+        void AppendToken(ref ValueStringBuilder sb, string? token)
         {
             if (string.IsNullOrEmpty(token)) return;
 
-            AppendSeparator();
-            builder.Append(token);
+            AppendSeparator(ref sb);
+            sb.Append(token);
         }
 
-        AppendVersioned(LegacyToken);
+        AppendVersioned(ref builder, LegacyToken);
 
         var os = OperatingSystem.ToString();
 
         if (!string.IsNullOrEmpty(os))
         {
-            AppendSeparator();
+            AppendSeparator(ref builder);
             builder.Append('(');
             builder.Append(os);
             builder.Append(')');
         }
 
-        AppendToken(RenderingEngine);
+        AppendToken(ref builder, RenderingEngine);
 
         if (!string.IsNullOrEmpty(Compatibility))
         {
-            AppendSeparator();
+            AppendSeparator(ref builder);
             builder.Append('(');
             builder.Append(Compatibility);
             builder.Append(')');
         }
 
-        AppendVersioned(PrimaryClient);
+        AppendVersioned(ref builder, PrimaryClient);
 
         if (ClientChain is not null)
         {
             foreach (var client in ClientChain)
             {
-                AppendVersioned(client);
+                AppendVersioned(ref builder, client);
             }
         }
 
@@ -205,11 +205,14 @@ public readonly struct UserAgent : IParsable<UserAgent>, IEquatable<UserAgent>
         {
             foreach (var token in Tokens)
             {
-                AppendToken(token);
+                AppendToken(ref builder, token);
             }
         }
 
-        return builder.ToString();
+        var result = builder.ToString();
+        builder.Dispose();
+
+        return result;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

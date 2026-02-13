@@ -12,5 +12,8 @@ public class WebBrowserSettings
     /// </summary>
     public IWebProxy? Proxy { get; set; }
 
-    public WebWindowSettings WindowSettings { get; set; }
+    /// <summary>
+    /// Настройки окна браузера.
+    /// </summary>
+    public WebWindowSettings? WindowSettings { get; set; }
 }

@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Atom.IO.Compression.Huffman;
 using Atom.IO.Compression.Zstd;
 
 namespace Atom.IO.Compression;
@@ -413,7 +414,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
             Span<byte> c = stackalloc byte[4];
             if (!ReadExact(c)) throw new InvalidDataException("Truncated checksum");
             var got = BinaryPrimitives.ReadUInt32LittleEndian(c);
-            var exp = (uint)hash.Digest();
+            var exp = unchecked((uint)hash.Digest());
             if (got != exp) throw new InvalidDataException("Content checksum mismatch");
         }
 
@@ -582,7 +583,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private HuffmanDecodeTable BuildHuffmanTable(
+    private HuffmanTable BuildHuffmanTable(
         ReadOnlySpan<byte> payload,
         int literalType,
         ref ZstdDecoderWorkspace.HuffmanTableBlock huffmanBlock,
@@ -601,7 +602,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private HuffmanDecodeTable BuildHuffmanTableFromPayload(
+    private HuffmanTable BuildHuffmanTableFromPayload(
         ReadOnlySpan<byte> payload,
         ref ZstdDecoderWorkspace.HuffmanTableBlock huffmanBlock,
         out ReadOnlySpan<byte> streams)
@@ -612,7 +613,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
             var weightsSize = headerByte;
             if (payload.Length < 1 + weightsSize) throw new InvalidDataException("Truncated FSE-compressed weights");
             var weights = payload.Slice(1, weightsSize);
-            var table = HuffmanDecoder.BuildFromFseWeights(weights, ref huffmanBlock, out var consumedBytes);
+            var table = ZstdWeightsParser.ParseFseWeights(weights, ref huffmanBlock, out var consumedBytes);
             if (consumedBytes != weightsSize) throw new InvalidDataException("Huffman weights size mismatch");
             StoreHuffmanTable();
             streams = payload[(1 + weightsSize)..];
@@ -624,7 +625,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
             var bytesNeeded = (numberOfWeights + 1) / 2;
             if (payload.Length < 1 + bytesNeeded) throw new InvalidDataException("Truncated direct weights");
             var weights = payload.Slice(1, bytesNeeded);
-            var result = HuffmanDecoder.BuildFromDirectWeights(weights, numberOfWeights, ref huffmanBlock);
+            var result = ZstdWeightsParser.ParseDirectWeights(weights, numberOfWeights, ref huffmanBlock);
             StoreHuffmanTable();
             streams = payload[(1 + bytesNeeded)..];
             return result;
@@ -632,11 +633,11 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void DecodeHuffmanStreams(ReadOnlySpan<byte> streams, bool isFourStreams, Span<byte> destination, int regeneratedSize, in HuffmanDecodeTable table)
+    private static void DecodeHuffmanStreams(ReadOnlySpan<byte> streams, bool isFourStreams, Span<byte> destination, int regeneratedSize, in HuffmanTable table)
     {
         if (!isFourStreams)
         {
-            HuffmanDecoder.DecodeSingleStream(streams, destination, in table);
+            HuffmanDecoder.DecodeReverseStreamExact(streams, destination, in table);
             return;
         }
 
@@ -653,10 +654,10 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         var off4 = off3 + s3;
         if (off4 + s4 != streams.Length) throw new InvalidDataException("Huffman streams size mismatch");
         var written = 0;
-        written += HuffmanDecoder.DecodeStream(streams.Slice(off1, s1), destination[written..], in table);
-        written += HuffmanDecoder.DecodeStream(streams.Slice(off2, s2), destination[written..], in table);
-        written += HuffmanDecoder.DecodeStream(streams.Slice(off3, s3), destination[written..], in table);
-        written += HuffmanDecoder.DecodeStream(streams.Slice(off4, s4), destination[written..], in table);
+        written += HuffmanDecoder.DecodeReverseStream(streams.Slice(off1, s1), destination[written..], in table);
+        written += HuffmanDecoder.DecodeReverseStream(streams.Slice(off2, s2), destination[written..], in table);
+        written += HuffmanDecoder.DecodeReverseStream(streams.Slice(off3, s3), destination[written..], in table);
+        written += HuffmanDecoder.DecodeReverseStream(streams.Slice(off4, s4), destination[written..], in table);
         if (written != regeneratedSize) throw new InvalidDataException("Huffman regenerated size mismatch");
     }
 
@@ -753,7 +754,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         public byte LlRleSymbol { get; } = llRle;
         public byte OfRleSymbol { get; } = ofRle;
         public byte MlRleSymbol { get; } = mlRle;
-        public LittleEndianReverseBitReader BitReader;
+        public ReverseBitReader BitReader;
     }
 
     [StructLayout(LayoutKind.Auto)]
@@ -851,7 +852,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         int ofLog,
         int mlLog)
     {
-        var reader = new LittleEndianReverseBitReader(header.Bitstream);
+        var reader = new ReverseBitReader(header.Bitstream);
         if (!reader.TrySkipPadding()) throw new InvalidDataException("Bitstream underflow while skipping padding");
 
         if (useFseLL && !reader.TryReadBits(llLog, out decoders.StateLL))
@@ -955,7 +956,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     private SequenceCommand DecodeSequence(
         ref SequenceDecoders decoders,
         in SequenceHeader header,
-        ref LittleEndianReverseBitReader bitReader,
+        ref ReverseBitReader bitReader,
         int sequenceIndex)
     {
         var llCode = decoders.UseFseLL ? decoders.DecLL.PeekSymbol(decoders.StateLL) : header.LlRle;
@@ -979,7 +980,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static uint ReadOptionalBits(
-        ref LittleEndianReverseBitReader bitReader,
+        ref ReverseBitReader bitReader,
         int bitCount,
         string context,
         int sequenceIndex,
@@ -1041,7 +1042,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void UpdateDecoderStates(ref SequenceDecoders decoders, ref LittleEndianReverseBitReader br, int sequenceIndex)
+    private static void UpdateDecoderStates(ref SequenceDecoders decoders, ref ReverseBitReader br, int sequenceIndex)
     {
         if (decoders.UseFseLL)
         {
@@ -1344,7 +1345,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     private void StoreHuffmanTable() => hasHuffTable = true;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool TryGetHuffmanTable(out HuffmanDecodeTable table)
+    private bool TryGetHuffmanTable(out HuffmanTable table)
     {
         if (!hasHuffTable || !workspace.HuffmanTable.HasTable) { table = default; return false; }
         table = workspace.HuffmanTable.ToTable();
@@ -1495,7 +1496,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int ParseFseTable(ReadOnlySpan<byte> src, int maxSymbol, out int tableLog, out int lastSym, Span<short> norm)
     {
-        var reader = new ForwardBitReader(src);
+        var reader = new BitReader(src, lsbFirst: true);
         tableLog = (int)reader.ReadBits(4) + 5;
         var remaining = 1 << tableLog;
         var symbol = 0;
@@ -1518,7 +1519,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static uint ReadNormalizedCode(ref ForwardBitReader reader, int remaining)
+    private static uint ReadNormalizedCode(ref BitReader reader, int remaining)
     {
         var range = remaining + 1;
         var bits = FloorLog2(range);
@@ -1534,7 +1535,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool TryHandleSpecialNormalizedValue(
-        ref ForwardBitReader reader,
+        ref BitReader reader,
         uint value,
         Span<short> norm,
         ref int symbol,
@@ -1558,7 +1559,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int ReadZeroRun(ref ForwardBitReader reader)
+    private static int ReadZeroRun(ref BitReader reader)
     {
         var run = 0;
         while (true)
@@ -1661,7 +1662,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
                 throw new InvalidDataException("Truncated dict Huffman weights");
             }
 
-            _ = HuffmanDecoder.BuildFromFseWeights(src.Slice(position, weightsSize), ref huffmanBlock, out var consumed);
+            _ = ZstdWeightsParser.ParseFseWeights(src.Slice(position, weightsSize), ref huffmanBlock, out var consumed);
             if (consumed != weightsSize)
             {
                 throw new InvalidDataException("Dict Huffman weights size mismatch");
@@ -1678,7 +1679,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
             throw new InvalidDataException("Truncated dict direct weights");
         }
 
-        _ = HuffmanDecoder.BuildFromDirectWeights(src.Slice(position, bytesNeeded), weightCount, ref huffmanBlock);
+        _ = ZstdWeightsParser.ParseDirectWeights(src.Slice(position, bytesNeeded), weightCount, ref huffmanBlock);
         StoreHuffmanTable();
         return position + bytesNeeded;
     }

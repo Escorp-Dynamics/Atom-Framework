@@ -23,7 +23,7 @@ internal static class ZstdSeqEncoder
     public static int WriteSequences(ReadOnlySpan<ZstdSeq> seqs, Span<byte> dst)
     {
         var bitstreamOffset = PrepareHeader(seqs.Length, dst);
-        scoped var bw = new LittleEndianBitWriter(dst[bitstreamOffset..]);
+        scoped var bw = new BitWriter(dst[bitstreamOffset..], lsbFirst: true);
 
         Span<ushort> llStateTable = stackalloc ushort[1 << ZstdLengthsTables.LL_AccuracyLog];
         Span<FseSymbolTransform> llTT = stackalloc FseSymbolTransform[36];
@@ -54,7 +54,7 @@ internal static class ZstdSeqEncoder
         ReadOnlySpan<short> ofNorm, int ofLog)
     {
         var bitstreamOffset = PrepareHeader(seqs.Length, dst);
-        scoped var bw = new LittleEndianBitWriter(dst[bitstreamOffset..]);
+        scoped var bw = new BitWriter(dst[bitstreamOffset..], lsbFirst: true);
 
         var actualLlLog = ResolveAccuracyLog(llNorm, llLog, ZstdLengthsTables.LL_AccuracyLog);
         var actualMlLog = ResolveAccuracyLog(mlNorm, mlLog, ZstdLengthsTables.ML_AccuracyLog);
@@ -115,7 +115,7 @@ internal static class ZstdSeqEncoder
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool TryEncodeSequences(
         ReadOnlySpan<ZstdSeq> seqs,
-        ref LittleEndianBitWriter bw,
+        ref BitWriter bw,
         ref SequenceFseContext ll,
         ref SequenceFseContext ml,
         ref SequenceFseContext ofCtx)
@@ -131,7 +131,7 @@ internal static class ZstdSeqEncoder
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool EncodeSingleSequence(
         in ZstdSeq seq,
-        ref LittleEndianBitWriter bw,
+        ref BitWriter bw,
         ref SequenceFseContext ll,
         ref SequenceFseContext ml,
         ref SequenceFseContext ofCtx)
@@ -152,7 +152,7 @@ internal static class ZstdSeqEncoder
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool TryWriteInitialStates(ref LittleEndianBitWriter bw, SequenceFseContext ll, SequenceFseContext ml, SequenceFseContext ofCtx)
+    private static bool TryWriteInitialStates(ref BitWriter bw, SequenceFseContext ll, SequenceFseContext ml, SequenceFseContext ofCtx)
     {
         var mlMask = (1u << ml.AccuracyLog) - 1u;
         var ofMask = (1u << ofCtx.AccuracyLog) - 1u;
@@ -166,9 +166,9 @@ internal static class ZstdSeqEncoder
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int FinalizeBitstream(int bitstreamOffset, ref LittleEndianBitWriter bw)
+    private static int FinalizeBitstream(int bitstreamOffset, ref BitWriter bw)
     {
-        if (!bw.TryFinishWithOnePadding()) return -1;
+        if (!bw.TryFinishWithPadding()) return -1;
         return bitstreamOffset + bw.BytesWritten;
     }
 

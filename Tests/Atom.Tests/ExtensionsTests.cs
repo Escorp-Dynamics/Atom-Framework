@@ -3,6 +3,8 @@ namespace Atom.Tests;
 [TestFixture]
 public class ExtensionsTests(ILogger logger) : BenchmarkTests<ExtensionsTests>(logger)
 {
+    public ExtensionsTests() : this(ConsoleLogger.Unicode) { }
+
     [TestCase(TestName = "Тест получения дружественных имён типов"), Benchmark(Baseline = true)]
     public void GetFriendlyNameTest()
     {

@@ -29,10 +29,7 @@ public sealed class WebWindowSettings
     /// </summary>
     public bool AsIncognito { get; init; }
 
-    private WebWindowSettings(WebBrowserSettings settings)
-    {
-        Proxy = settings.Proxy;
-    }
+    private WebWindowSettings(WebBrowserSettings settings) => Proxy = settings.Proxy;
 
     /// <summary>
     /// Преобразует <see cref="WebBrowserSettings"/> в <see cref="WebWindowSettings"/>.

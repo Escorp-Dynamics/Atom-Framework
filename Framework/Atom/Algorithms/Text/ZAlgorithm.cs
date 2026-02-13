@@ -1,4 +1,4 @@
-using Atom.Buffers;
+using System.Buffers;
 
 namespace Atom.Algorithms.Text;
 
@@ -13,9 +13,9 @@ public class ZAlgorithm : TextAlgorithm
     /// <param name="combined">Объединённая строка.</param>
     /// <param name="comparison">Поведение сравнения строк.</param>
     /// <returns>Z-массив для объединенной строки.</returns>
-    protected virtual unsafe ReadOnlySpan<int> BuildZArray(ReadOnlySpan<char> combined, StringComparison comparison)
+    protected virtual unsafe int[] BuildZArray(ReadOnlySpan<char> combined, StringComparison comparison)
     {
-        var zArray = SpanPool<int>.Shared.Rent(combined.Length);
+        var zArray = ArrayPool<int>.Shared.Rent(combined.Length);
 
         var n = combined.Length;
         var l = 0;
@@ -79,7 +79,8 @@ public class ZAlgorithm : TextAlgorithm
         if (target.Length is 0 || source.Length < target.Length) return default;
 
         var combinedLength = source.Length + target.Length + 1;
-        var combined = SpanPool<char>.Shared.Rent(combinedLength);
+        var tmp = ArrayPool<char>.Shared.Rent(combinedLength);
+        var combined = tmp.AsSpan(0, combinedLength);
 
         target.CopyTo(combined);
         combined[target.Length] = char.MinValue;
@@ -93,8 +94,8 @@ public class ZAlgorithm : TextAlgorithm
             if (zArray[i] == target.Length) ++count;
         }
 
-        SpanPool<int>.Shared.Return(zArray);
-        SpanPool<char>.Shared.Return(combined);
+        ArrayPool<int>.Shared.Return(zArray);
+        ArrayPool<char>.Shared.Return(tmp);
 
         return count;
     }
@@ -105,7 +106,8 @@ public class ZAlgorithm : TextAlgorithm
         if (target.Length is 0 || source.Length < target.Length) return default;
 
         var combinedLength = source.Length + target.Length + 1;
-        var combined = SpanPool<char>.Shared.Rent(combinedLength);
+        var tmp = ArrayPool<char>.Shared.Rent(combinedLength);
+        var combined = tmp.AsSpan(0, combinedLength);
 
         target.CopyTo(combined);
         combined[target.Length] = char.MinValue;
@@ -123,8 +125,8 @@ public class ZAlgorithm : TextAlgorithm
             }
         }
 
-        SpanPool<int>.Shared.Return(zArray);
-        SpanPool<char>.Shared.Return(combined);
+        ArrayPool<int>.Shared.Return(zArray);
+        ArrayPool<char>.Shared.Return(tmp);
 
         return isFound;
     }

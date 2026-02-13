@@ -245,6 +245,7 @@ public sealed class Wait<T> : Wait, IDisposable
 
     private void OnSignaled(object? sender, SignalEventArgs<T> args)
     {
+        if (Volatile.Read(ref isDisposed)) return;
         if (ReferenceEquals(args.State, state) || state?.Equals(args.State) is true || state is null || args.State is null) locker.Release();
     }
 
@@ -257,9 +258,19 @@ public sealed class Wait<T> : Wait, IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public async ValueTask LockUntilAsync([NotNull] Func<bool> condition, int timeout, CancellationToken cancellationToken)
     {
+        var timer = timeout != Timeout.Infinite ? Stopwatch.StartNew() : null;
+
         while (!Volatile.Read(ref isDisposed) && !condition())
         {
-            await locker.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (timer is not null && timer.ElapsedMilliseconds >= timeout) return;
+
+            var remainingTimeout = timer is not null
+                ? Math.Max(0, timeout - (int)timer.ElapsedMilliseconds)
+                : timeout;
+
+            await locker.WaitAsync(remainingTimeout, cancellationToken).ConfigureAwait(false);
             await Task.Yield();
         }
     }
@@ -316,9 +327,19 @@ public sealed class Wait<T> : Wait, IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public async ValueTask LockUntilAsync([NotNull] Func<ValueTask<bool>> condition, int timeout, CancellationToken cancellationToken)
     {
+        var timer = timeout != Timeout.Infinite ? Stopwatch.StartNew() : null;
+
         while (!Volatile.Read(ref isDisposed) && !await condition().ConfigureAwait(false))
         {
-            await locker.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (timer is not null && timer.ElapsedMilliseconds >= timeout) return;
+
+            var remainingTimeout = timer is not null
+                ? Math.Max(0, timeout - (int)timer.ElapsedMilliseconds)
+                : timeout;
+
+            await locker.WaitAsync(remainingTimeout, cancellationToken).ConfigureAwait(false);
             await Task.Yield();
         }
     }

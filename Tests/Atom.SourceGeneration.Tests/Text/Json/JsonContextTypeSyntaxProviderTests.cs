@@ -1,5 +1,6 @@
 using System.IO.Pipelines;
 using System.Text.Json.Serialization;
+using Atom.SourceGeneration.Tests;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Testing;
 using Microsoft.CodeAnalysis.Testing;
@@ -46,7 +47,7 @@ public class JsonContextTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests
         {
             TestState =
             {
-                ReferenceAssemblies = ReferenceAssemblies.Net.Net90,
+                ReferenceAssemblies = TestReferenceAssemblies.Net10_0,
                 Sources = { source! },
                 AdditionalReferences =
                 {
@@ -76,7 +77,7 @@ public class JsonContextTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests
         {
             TestState =
             {
-                ReferenceAssemblies = ReferenceAssemblies.Net.Net90,
+                ReferenceAssemblies = TestReferenceAssemblies.Net10_0,
                 Sources = { source! },
                 GeneratedSources = {
                     (typeof(JsonContextSourceGenerator), "Proxy.Json.g.cs", reference!),

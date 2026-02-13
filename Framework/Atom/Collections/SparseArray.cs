@@ -17,7 +17,7 @@ public class SparseArray<T> : IEnumerable<T>
     private readonly T[] values;
     private readonly int[] indexes;
 
-    private volatile int currentIndex = -1;
+    private int currentIndex = -1;
     private static readonly ArrayPool<int> indexPool = ArrayPool<int>.Create();
 
     /// <summary>
@@ -45,12 +45,12 @@ public class SparseArray<T> : IEnumerable<T>
     /// <summary>
     /// Текущий индекс.
     /// </summary>
-    public int CurrentIndex => currentIndex;
+    public int CurrentIndex => Volatile.Read(ref Unsafe.AsRef(in currentIndex));
 
     /// <summary>
     /// Определяет, является ли массив пустым.
     /// </summary>
-    public bool IsEmpty => currentIndex is -1;
+    public bool IsEmpty => CurrentIndex is -1;
 
     /// <summary>
     /// Определяет, были ли ресурсы высвобождены.
@@ -82,14 +82,43 @@ public class SparseArray<T> : IEnumerable<T>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int FindAvailableIndex(ReadOnlySpan<int> currentIndexes)
+    private unsafe bool ContainsIndex(int snapshot, int index)
     {
-        for (var i = 0; i < values.Length; ++i)
+        if (snapshot < 0) return false;
+
+        var currentIndexes = indexes.AsSpan(0, snapshot + 1);
+        fixed (int* ptr = currentIndexes)
         {
-            if (!IsIndexUsed(currentIndexes, i)) return i;
+            for (var p = ptr; p < ptr + currentIndexes.Length; ++p)
+            {
+                if (Volatile.Read(ref *p) == index) return true;
+            }
         }
 
-        return currentIndexes[^1] + 1;
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool TryAddIndex(int index, out int slot)
+    {
+        var current = Volatile.Read(ref currentIndex);
+        var newSlot = current + 1;
+
+        if (newSlot >= indexes.Length)
+        {
+            slot = -1;
+            return false;
+        }
+
+        if (Interlocked.CompareExchange(ref currentIndex, newSlot, current) == current)
+        {
+            Volatile.Write(ref indexes[newSlot], index);
+            slot = newSlot;
+            return true;
+        }
+
+        slot = -1;
+        return false;
     }
 
     /// <summary>
@@ -97,66 +126,82 @@ public class SparseArray<T> : IEnumerable<T>
     /// </summary>
     /// <param name="index">Индекс элемента.</param>
     /// <param name="value">Значение элемента.</param>
-    public unsafe void AddOrUpdate(int index, T value)
+    public void AddOrUpdate(int index, T value)
     {
         ValidateIndex(index);
-        var needUpdateIndex = true;
-
-        if (currentIndex >= 0)
-        {
-            var currentIndexes = GetIndexes();
-
-            fixed (int* ptr = currentIndexes)
-            {
-                for (var p = ptr; p < ptr + currentIndexes.Length; ++p)
-                {
-                    if (*p == index)
-                    {
-                        needUpdateIndex = false;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (needUpdateIndex)
-        {
-            var count = Interlocked.Increment(ref currentIndex);
-            indexes[count] = index;
-        }
-
         values[index] = value;
+
+        if (ContainsIndex(Volatile.Read(ref currentIndex), index)) return;
+
+        var spinWait = new SpinWait();
+        while (true)
+        {
+            if (TryAddIndex(index, out _)) return;
+
+            spinWait.SpinOnce();
+
+            if (ContainsIndex(Volatile.Read(ref currentIndex), index)) return;
+        }
     }
 
     /// <summary>
     /// Добавляет значения в конец массива.
     /// </summary>
     /// <param name="values">Добавляемые значения.</param>
-    public unsafe void AddRange([NotNull] params IEnumerable<T> values)
+    public void AddRange([NotNull] params IEnumerable<T> values)
     {
-        foreach (var value in values)
-        {
-            var currentIndexes = GetIndexes();
-            var idx = Interlocked.Increment(ref currentIndex);
-            var index = FindAvailableIndex(currentIndexes);
-
-            indexes[idx] = index;
-            this.values[index] = value;
-        }
+        foreach (var value in values) Add(value);
     }
 
     /// <summary>
     /// Добавляет значение в конец массива.
     /// </summary>
     /// <param name="value">Значение массива.</param>
+    public void Add(T value)
+    {
+        if (IsReleased) throw new InvalidOperationException("Ресурсы были высвобождены");
+
+        var spinWait = new SpinWait();
+        while (true)
+        {
+            var current = Volatile.Read(ref currentIndex);
+            var newIdx = current + 1;
+
+            if (newIdx >= indexes.Length || newIdx >= values.Length)
+                throw new InvalidOperationException("Массив переполнен");
+
+            var valueIndex = FindAvailableValueIndex(current);
+
+            if (Interlocked.CompareExchange(ref currentIndex, newIdx, current) == current)
+            {
+                this.values[valueIndex] = value;
+                Volatile.Write(ref indexes[newIdx], valueIndex);
+                return;
+            }
+
+            spinWait.SpinOnce();
+        }
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Add(T value) => AddRange(value);
+    private int FindAvailableValueIndex(int current)
+    {
+        if (current < 0) return 0;
+
+        var currentIndexes = indexes.AsSpan(0, current + 1);
+        for (var i = 0; i < values.Length; ++i)
+        {
+            if (!IsIndexUsed(currentIndexes, i)) return i;
+        }
+
+        return current + 1;
+    }
 
     /// <summary>
     /// Возвращает все установленные индексы.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ReadOnlySpan<int> GetIndexes() => indexes.AsSpan(0, currentIndex + 1);
+    public ReadOnlySpan<int> GetIndexes() => indexes.AsSpan(0, CurrentIndex + 1);
 
     /// <summary>
     /// Сбрасывает позицию индексов в начало.
@@ -190,8 +235,9 @@ public class SparseArray<T> : IEnumerable<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public IEnumerator<T> GetEnumerator()
     {
-        if (currentIndex < 0) yield break;
-        for (var i = 0; i <= currentIndex; ++i) yield return values[indexes[i]];
+        var idx = CurrentIndex;
+        if (idx < 0) yield break;
+        for (var i = 0; i <= idx; ++i) yield return values[indexes[i]];
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -1,4 +1,5 @@
 {
+  "python.terminal.activateEnvironment": false,
   "cSpell.words": [
     "автодекомпрессия",
     "Адресоспецифичная",
@@ -262,6 +263,7 @@
     "bfcache",
     "Bidi",
     "blen",
+    "Browsable",
     "buffersink",
     "buffersrc",
     "Cdecl",
@@ -287,6 +289,7 @@
     "Datagram",
     "Datagrams",
     "datareporting",
+    "Demuxer",
     "Dgram",
     "Diagnoser",
     "Diffie",
@@ -339,6 +342,7 @@
     "Meziantou",
     "MJPEG",
     "mstone",
+    "Muxer",
     "Nagle",
     "NATIVEAOT",
     "NETFRAMEWORK",

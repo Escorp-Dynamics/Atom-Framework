@@ -19,8 +19,8 @@ namespace Atom.Testing;
 /// Инициализирует новый экземпляр <see cref="BenchmarkTests{T}"/>.
 /// </remarks>
 /// <param name="logger">Журнал событий для бенчмарка.</param>
-[SimpleJob(RuntimeMoniker.Net90, id: "Net90", baseline: true)]
-[SimpleJob(RuntimeMoniker.NativeAot90, id: "NativeAot90")]
+[SimpleJob(RuntimeMoniker.Net10_0, id: "Net10_0", baseline: true)]
+[SimpleJob(RuntimeMoniker.NativeAot10_0, id: "NativeAot10_0")]
 [TestFixture, MemoryDiagnoser, ThreadingDiagnoser, ExceptionDiagnoser]
 [Orderer(SummaryOrderPolicy.FastestToSlowest)]
 [RankColumn]

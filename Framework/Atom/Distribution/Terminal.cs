@@ -141,7 +141,7 @@ public sealed class Terminal : IDisposable
         return RemoveProcess(process);
     }
 
-    [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP007:Don't dispose injected", Justification = "Терминал владеет и освобождает процессы, которые создаёт.")]
+    [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP007:Don't dispose injected", Justification = "Терминал владеет и освобождает процессы, которые создаёт")]
     private void UnregisterProcess(Process process, bool dispose)
     {
         if (dispose || ReleaseProcess(process)) process.Dispose();
@@ -150,7 +150,7 @@ public sealed class Terminal : IDisposable
     /// <summary>
     /// Освобождает все активные процессы терминала.
     /// </summary>
-    [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP007:Don't dispose injected", Justification = "Терминал создает и владеет экземплярами процессов.")]
+    [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP007:Don't dispose injected", Justification = "Терминал создает и владеет экземплярами процессов")]
     public void Dispose()
     {
         foreach (var process in Interlocked.Exchange(ref runningProcesses, []))

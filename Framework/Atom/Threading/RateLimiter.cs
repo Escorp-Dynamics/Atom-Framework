@@ -18,7 +18,6 @@ public sealed class RateLimiter : IDisposable
     private bool isDisposed;
 
     private static readonly long ticksPerSecond = Stopwatch.Frequency;
-    private static readonly long ticksPerMillisecond = ticksPerSecond / 1000;
 
     /// <summary>
     /// Максимальное количество операций, разрешённых за интервал <see cref="Rate"/>.
@@ -55,11 +54,11 @@ public sealed class RateLimiter : IDisposable
     /// Возникает при попытке установить неположительное значение.
     /// </exception>
     /// <remarks>
-    /// Хранится с точностью до тика (100 наносекунд).
+    /// Хранится с точностью до тика Stopwatch.
     /// </remarks>
     public TimeSpan Rate
     {
-        get => TimeSpan.FromMilliseconds((double)(rateTicks * ticksPerMillisecond) / ticksPerSecond);
+        get => TimeSpan.FromSeconds((double)rateTicks / ticksPerSecond);
 
         set
         {

@@ -1,8 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Text;
 using Atom.Architect.Builders;
 using Atom.Buffers;
+using Atom.Text;
 
 namespace Atom.Net.Https;
 
@@ -22,36 +22,36 @@ public partial class UrlBuilder : IBuilder<Uri, UrlBuilder>
     private bool isEndingSlashEnabled;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AppendQueryParameters(StringBuilder sb)
+    private void AppendQueryParameters(ref ValueStringBuilder sb)
     {
         if (parameters.Count is 0) return;
 
         sb.Append('?');
         var isFirstParam = true;
 
-        foreach (var kv in parameters) AppendKeyValuePairs(sb, kv, ref isFirstParam);
+        foreach (var kv in parameters) AppendKeyValuePairs(ref sb, kv, ref isFirstParam);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AppendTrailingSlashIfNeeded(StringBuilder sb)
+    private void AppendTrailingSlashIfNeeded(ref ValueStringBuilder sb)
     {
         if (Volatile.Read(ref isEndingSlashEnabled)) sb.Append('/');
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AppendPaths(StringBuilder sb)
+    private void AppendPaths(ref ValueStringBuilder sb)
     {
         foreach (var path in paths) sb.Append('/').Append(path);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AppendPortIfNeeded(StringBuilder sb)
+    private void AppendPortIfNeeded(ref ValueStringBuilder sb)
     {
         if (port > 0) sb.Append(':').Append(port);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void BuildSchemeAndHost(StringBuilder sb) => sb.Append(Volatile.Read(ref scheme))
+    private void BuildSchemeAndHost(ref ValueStringBuilder sb) => sb.Append(Volatile.Read(ref scheme))
         .Append("://")
         .Append(Volatile.Read(ref host));
 
@@ -143,16 +143,16 @@ public partial class UrlBuilder : IBuilder<Uri, UrlBuilder>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual Uri Build()
     {
-        var sb = ObjectPool<StringBuilder>.Shared.Rent();
+        var sb = new ValueStringBuilder();
 
-        BuildSchemeAndHost(sb);
-        AppendPortIfNeeded(sb);
-        AppendPaths(sb);
-        AppendTrailingSlashIfNeeded(sb);
-        AppendQueryParameters(sb);
+        BuildSchemeAndHost(ref sb);
+        AppendPortIfNeeded(ref sb);
+        AppendPaths(ref sb);
+        AppendTrailingSlashIfNeeded(ref sb);
+        AppendQueryParameters(ref sb);
 
         var url = sb.ToString();
-        ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
+        sb.Dispose();
 
         return new Uri(url);
     }
@@ -171,7 +171,7 @@ public partial class UrlBuilder : IBuilder<Uri, UrlBuilder>
     static IBuilder IBuilder.Create() => Create();
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void AppendParam(StringBuilder sb, string key, string? value, ref bool isFirstParam, bool isMulti = false)
+    private static void AppendParam(ref ValueStringBuilder sb, string key, string? value, ref bool isFirstParam, bool isMulti = false)
     {
         if (!isFirstParam) sb.Append('&');
 
@@ -184,18 +184,18 @@ public partial class UrlBuilder : IBuilder<Uri, UrlBuilder>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void AppendKeyValuePairs(StringBuilder sb, KeyValuePair<string, List<string>> kv, ref bool isFirstParam)
+    private static void AppendKeyValuePairs(ref ValueStringBuilder sb, KeyValuePair<string, List<string>> kv, ref bool isFirstParam)
     {
         var key = kv.Key;
         var values = kv.Value;
 
         if (values.Count is 0)
         {
-            AppendParam(sb, key, default, ref isFirstParam);
+            AppendParam(ref sb, key, default, ref isFirstParam);
             return;
         }
 
-        foreach (var value in values) AppendParam(sb, key, value, ref isFirstParam, isMulti: values.Count > 1);
+        foreach (var value in values) AppendParam(ref sb, key, value, ref isFirstParam, isMulti: values.Count > 1);
     }
 
     /// <summary>

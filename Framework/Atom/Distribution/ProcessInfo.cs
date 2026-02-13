@@ -114,7 +114,7 @@ public readonly struct ProcessInfo : IEquatable<ProcessInfo>, IDisposable
     /// <summary>
     /// Освобождает ресурсы процесса.
     /// </summary>
-    [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP007:Don't dispose injected", Justification = "Объект владеет процессом, созданным терминалом.")]
+    [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP007:Don't dispose injected", Justification = "Объект владеет процессом, созданным терминалом")]
     public readonly void Dispose()
     {
         if (terminal is null) return;

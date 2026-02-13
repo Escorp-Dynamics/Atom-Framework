@@ -1,3 +1,4 @@
+using Atom.SourceGeneration.Tests;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Testing;
 using Microsoft.CodeAnalysis.Testing;
@@ -5,12 +6,12 @@ using Microsoft.CodeAnalysis.Testing;
 namespace Atom.Buffers.Tests;
 
 [Parallelizable(ParallelScope.All)]
-public class PooledTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<PooledTypeSyntaxProviderTests>(logger)
+public class PooledMethodSyntaxProviderTests(ILogger logger) : BenchmarkTests<PooledMethodSyntaxProviderTests>(logger)
 {
     private static string? source;
     private static string? reference;
 
-    public PooledTypeSyntaxProviderTests() : this(ConsoleLogger.Unicode) { }
+    public PooledMethodSyntaxProviderTests() : this(ConsoleLogger.Unicode) { }
 
     private static void Settings()
     {
@@ -40,7 +41,7 @@ public class PooledTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<Pool
         {
             TestState =
             {
-                ReferenceAssemblies = ReferenceAssemblies.Net.Net90,
+                ReferenceAssemblies = TestReferenceAssemblies.Net10_0,
                 Sources = { source! },
                 AdditionalReferences =
                 {
@@ -65,7 +66,7 @@ public class PooledTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<Pool
         {
             TestState =
             {
-                ReferenceAssemblies = ReferenceAssemblies.Net.Net90,
+                ReferenceAssemblies = TestReferenceAssemblies.Net10_0,
                 Sources = { source! },
                 GeneratedSources = { (typeof(PooledSourceGenerator), "Test.Pooled.g.cs", reference!) },
                 AdditionalReferences =

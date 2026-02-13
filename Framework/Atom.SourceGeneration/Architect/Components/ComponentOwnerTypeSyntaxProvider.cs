@@ -75,10 +75,10 @@ public class ComponentOwnerTypeSyntaxProvider : TypeSyntaxProvider
     {
         yield return MethodMember.Create("OnComponentDetached", AccessModifier.Private)
             .WithArgument(MethodArgumentMember.Create("sender")
-                .WithComment("Источник события."))
+                .WithComment("Источник события"))
             .WithArgument(MethodArgumentMember.Create("args")
                 .WithType<ComponentEventArgs>(withNullable: default)
-                .WithComment("Новый владелец компонента."))
+                .WithComment("Новый владелец компонента"))
             .WithCode("if (args.Component is not null) components.Remove(args.Component)");
 
         yield return MethodMember.Create("Has", AccessModifier.Public)

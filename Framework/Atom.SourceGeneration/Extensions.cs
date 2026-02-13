@@ -178,7 +178,7 @@ public static class Extensions
         var namedArg = attribute.NamedArguments
             .FirstOrDefault(arg => name.Equals(arg.Key, StringComparison.InvariantCultureIgnoreCase)).Value;
 
-        return !namedArg.IsNull ? constructorArg.Value : default;
+        return !namedArg.IsNull ? namedArg.Value : default;
     }
 
     /// <summary>

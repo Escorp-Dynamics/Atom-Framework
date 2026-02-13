@@ -1,8 +1,7 @@
-using System.Globalization;
 using System.Runtime.CompilerServices;
-using System.Text;
 using Atom.Buffers;
 using Atom.Collections;
+using Atom.Text;
 
 namespace Atom.SourceGeneration;
 
@@ -80,7 +79,7 @@ public class SourceBuilder : ISourceBuilder
             return default;
         }
 
-        var sb = ObjectPool<StringBuilder>.Shared.Rent();
+        using var sb = new ValueStringBuilder();
 
         sb.AppendLine("#nullable enable");
 
@@ -93,11 +92,11 @@ public class SourceBuilder : ISourceBuilder
 
         if (Usings.Any())
         {
-            foreach (var ns in usings) sb.AppendLine(CultureInfo.InvariantCulture, $"using {ns};");
+            foreach (var ns in usings) sb.AppendLine($"using {ns};");
             sb.AppendLine();
         }
 
-        if (!string.IsNullOrEmpty(Namespace)) sb.AppendLine(CultureInfo.InvariantCulture, $"namespace {Namespace};").AppendLine();
+        if (!string.IsNullOrEmpty(Namespace)) sb.AppendLine($"namespace {Namespace};").AppendLine();
 
         var tmp = ObjectPool<List<string>>.Shared.Rent();
         tmp.AddRange(usings);
@@ -116,7 +115,6 @@ public class SourceBuilder : ISourceBuilder
         }
 
         var result = sb.ToString().Trim();
-        ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
         if (release) Release();
 
         return result;

@@ -531,7 +531,7 @@ internal sealed class ZstdEncoder : IDisposable
         System.Diagnostics.Debug.Assert((uint)outCount <= (uint)buffer.Length);
         if (outCount > 0 && outCount + data.Length > buffer.Length)
         {
-            throw new InvalidOperationException("Insufficient space for coalesced write. Call EnsureAsyncCapacityAsync before writing spans.");
+            throw new InvalidOperationException("Insufficient space for coalesced write. Call EnsureAsyncCapacityAsync before writing spans");
         }
 
         if (outCount == 0 && data.Length > buffer.Length)
@@ -787,7 +787,7 @@ internal sealed class ZstdEncoder : IDisposable
         {
             var h = hash.Digest();
             Span<byte> c = stackalloc byte[4];
-            BinaryPrimitives.WriteUInt32LittleEndian(c, (uint)h); // LE
+            BinaryPrimitives.WriteUInt32LittleEndian(c, unchecked((uint)h)); // LE, берём младшие 32 бита
             WriteCoalesced(c);
         }
 
@@ -1434,7 +1434,7 @@ internal sealed class ZstdEncoder : IDisposable
             throw new ArgumentException("Destination span too small for FSE norm", nameof(destination));
         }
 
-        var reader = new ForwardBitReader(src);
+        var reader = new BitReader(src, lsbFirst: true);
         tableLog = (int)reader.ReadBits(4) + 5;
         var remaining = 1 << tableLog;
         var symbol = 0;
@@ -1457,7 +1457,7 @@ internal sealed class ZstdEncoder : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static uint ReadNormalizedCode(ref ForwardBitReader reader, int remaining)
+    private static uint ReadNormalizedCode(ref BitReader reader, int remaining)
     {
         var range = remaining + 1;
         var bits = FloorLog2(range);
@@ -1473,7 +1473,7 @@ internal sealed class ZstdEncoder : IDisposable
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool TryHandleNormalizedSpecialValue(
-        ref ForwardBitReader reader,
+        ref BitReader reader,
         uint value,
         Span<short> destination,
         ref int symbol,
@@ -1497,7 +1497,7 @@ internal sealed class ZstdEncoder : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int ReadZeroRun(ref ForwardBitReader reader)
+    private static int ReadZeroRun(ref BitReader reader)
     {
         var run = 0;
         while (true)
@@ -1706,7 +1706,7 @@ internal sealed class ZstdEncoder : IDisposable
         out int tableLog,
         out int headerBytes)
     {
-        var reader = new ForwardBitReader(src);
+        var reader = new BitReader(src, lsbFirst: true);
         tableLog = (int)reader.ReadBits(4) + 5;
         var remaining = 1 << tableLog;
         var symbol = 0;
@@ -1755,7 +1755,7 @@ internal sealed class ZstdEncoder : IDisposable
         Span<ushort> baseArr = stackalloc ushort[tableSize];
         var decoder = FseDecoder.Build(norm, tableLog, symbols, nb, baseArr);
 
-        var reader = new ForwardBitReader(body);
+        var reader = new BitReader(body, lsbFirst: true);
         var state1 = reader.ReadBits(tableLog);
         var state2 = reader.ReadBits(tableLog);
 
@@ -1925,7 +1925,7 @@ internal sealed class ZstdEncoder : IDisposable
     private static int TryEncodeSingleStream(ReadOnlySpan<byte> literals, Span<byte> destination, ReadOnlySpan<uint> codes, ReadOnlySpan<byte> lens)
     {
         if (destination.Length < 3) return 0;
-        var writer = new LittleEndianBitWriter(destination[3..]);
+        var writer = new BitWriter(destination[3..], lsbFirst: true);
         for (var i = literals.Length - 1; i >= 0; i--)
         {
             var symbol = literals[i];
@@ -1933,7 +1933,7 @@ internal sealed class ZstdEncoder : IDisposable
             if (!writer.TryWriteBits(codes[symbol], lens[symbol])) return 0;
         }
 
-        if (!writer.TryFinishWithOnePadding()) return 0;
+        if (!writer.TryFinishWithPadding()) return 0;
         var payloadSize = writer.BytesWritten;
         if (payloadSize > 1023) return 0;
 
@@ -2197,14 +2197,14 @@ internal sealed class ZstdEncoder : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int EncodeHuffStream(ReadOnlySpan<byte> src, Span<byte> dst, ReadOnlySpan<uint> codes, ReadOnlySpan<byte> lens)
     {
-        var writer = new LittleEndianBitWriter(dst);
+        var writer = new BitWriter(dst, lsbFirst: true);
         for (var i = src.Length - 1; i >= 0; i--)
         {
             var s = src[i];
             if (s >= lens.Length || lens[s] == 0) return 0;
             if (!writer.TryWriteBits(codes[s], lens[s])) return 0;
         }
-        if (!writer.TryFinishWithOnePadding()) return 0;
+        if (!writer.TryFinishWithPadding()) return 0;
         return writer.BytesWritten;
     }
 
@@ -2277,7 +2277,7 @@ internal sealed class ZstdEncoder : IDisposable
         var decML = FseDecoder.FromTables(ZstdLengthsTables.ML_AccuracyLog,
             ZstdPredef.MLSym, ZstdPredef.MLNb, ZstdPredef.MLBase);
 
-        var reader = new LittleEndianReverseBitReader(bitstream);
+        var reader = new ReverseBitReader(bitstream);
         if (!reader.TrySkipPadding()) return false;
 
         if (!reader.TryReadBits(ZstdLengthsTables.LL_AccuracyLog, out var stateLL)) return false;
@@ -2319,7 +2319,7 @@ internal sealed class ZstdEncoder : IDisposable
             rep3 = 8;
         }
 
-        public bool TryProcessSequence(ZstdSeq sequence, ref LittleEndianReverseBitReader reader)
+        public bool TryProcessSequence(ZstdSeq sequence, ref ReverseBitReader reader)
         {
             var llCode = decLL.PeekSymbol(stateLL);
             var mlCode = decML.PeekSymbol(stateML);
@@ -2344,7 +2344,7 @@ internal sealed class ZstdEncoder : IDisposable
             return MatchesSequenceDescriptor(sequence, offset, repKind);
         }
 
-        private static bool TryUpdateState(FseDecoder decoder, ref uint state, ref LittleEndianReverseBitReader reader)
+        private static bool TryUpdateState(FseDecoder decoder, ref uint state, ref ReverseBitReader reader)
         {
             var nbBits = decoder.PeekNbBits(state);
             if (nbBits != 0)
@@ -2445,7 +2445,7 @@ internal sealed class ZstdEncoder : IDisposable
             }
         }
 
-        private static bool TryReadExtraBits(int count, ref LittleEndianReverseBitReader reader, out uint value)
+        private static bool TryReadExtraBits(int count, ref ReverseBitReader reader, out uint value)
         {
             if (count <= 0)
             {

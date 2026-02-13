@@ -1,8 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Text;
 using Atom.Buffers;
 using Atom.Collections;
+using Atom.Text;
 
 namespace Atom.SourceGeneration;
 
@@ -29,7 +29,7 @@ public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
     public override bool IsValid => !string.IsNullOrEmpty(Name) && values.CurrentIndex >= 0;
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, params IEnumerable<string> usings)
+    protected override void OnBuildingDeclaration(ref ValueStringBuilder sb, [NotNull] string spaces, params IEnumerable<string> usings)
     {
         var type = string.IsNullOrEmpty(Type) || Type is "int" or "Int32" ? string.Empty : $" : {Type}";
 

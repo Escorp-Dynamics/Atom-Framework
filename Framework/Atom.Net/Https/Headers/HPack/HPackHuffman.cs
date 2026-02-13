@@ -194,12 +194,12 @@ internal static class HPackHuffman
             consumed++;
             node = (bit == 0) ? nodes[node].Left : nodes[node].Right;
             if (node is 0)
-                throw new InvalidOperationException("HPACK Huffman: недопустимая последовательность бит (пустая ветка).");
+                throw new InvalidOperationException("HPACK Huffman: недопустимая последовательность бит (пустая ветка)");
             var sym = nodes[node].Symbol;
             if (sym >= 0)
             {
                 if (sym is 256)
-                    throw new InvalidOperationException("HPACK Huffman: недопустимый EOS в середине потока.");
+                    throw new InvalidOperationException("HPACK Huffman: недопустимый EOS в середине потока");
                 if (outPos == outBuf.Length)
                     outBuf = EnsureScratch(outBuf.Length << 1);
                 outBuf[outPos++] = (byte)sym;
@@ -215,12 +215,12 @@ internal static class HPackHuffman
     /// </summary>
     private static void ValidateDecodeFinalState(int node, int nBits, uint acc)
     {
-        if (node is not 1) throw new InvalidOperationException("HPACK Huffman: незавершённый код символа в конце потока.");
+        if (node is not 1) throw new InvalidOperationException("HPACK Huffman: незавершённый код символа в конце потока");
         if (nBits > 0)
         {
             var mask = (uint)((1 << nBits) - 1);
             var tail = acc & mask;
-            if (tail != mask) throw new InvalidOperationException("HPACK Huffman: некорректный паддинг (ожидались единицы).");
+            if (tail != mask) throw new InvalidOperationException("HPACK Huffman: некорректный паддинг (ожидались единицы)");
         }
     }
 
@@ -234,13 +234,13 @@ internal static class HPackHuffman
 
         // Базовая валидация таблиц (чтобы случайно не поехать MSB/len)
         if (Codes.Length is not 257 || Lengths.Length is not 257)
-            throw new InvalidOperationException("HPACK Huffman: ожидаются 257 кодов и 257 длин (0..255 + EOS).");
+            throw new InvalidOperationException("HPACK Huffman: ожидаются 257 кодов и 257 длин (0..255 + EOS)");
 
         // Проверим максимумы длин
         for (var i = 0; i < 257; i++)
         {
-            if (Lengths[i] is 0) throw new InvalidOperationException("HPACK Huffman: длина кода не задана (см. TODO-таблицу).");
-            if (Lengths[i] > MaxCodeBits) throw new InvalidOperationException("HPACK Huffman: недопустимая длина кода > 30.");
+            if (Lengths[i] is 0) throw new InvalidOperationException("HPACK Huffman: длина кода не задана (см. TODO-таблицу)");
+            if (Lengths[i] > MaxCodeBits) throw new InvalidOperationException("HPACK Huffman: недопустимая длина кода > 30");
         }
 
         BuildDecoder();
@@ -309,8 +309,8 @@ internal static class HPackHuffman
                 return next + 1;
             }
             if (localNodes[n.Left].Symbol is not -1)
-                throw new InvalidOperationException("HPACK Huffman: конфликт кодов (терминал слева).");
-            throw new InvalidOperationException("HPACK Huffman: код пересекается с существующим префиксом.");
+                throw new InvalidOperationException("HPACK Huffman: конфликт кодов (терминал слева)");
+            throw new InvalidOperationException("HPACK Huffman: код пересекается с существующим префиксом");
         }
         if (n.Right is 0)
         {
@@ -319,8 +319,8 @@ internal static class HPackHuffman
             return next + 1;
         }
         if (localNodes[n.Right].Symbol is not -1)
-            throw new InvalidOperationException("HPACK Huffman: конфликт кодов (терминал справа).");
-        throw new InvalidOperationException("HPACK Huffman: код пересекается с существующим префиксом.");
+            throw new InvalidOperationException("HPACK Huffman: конфликт кодов (терминал справа)");
+        throw new InvalidOperationException("HPACK Huffman: код пересекается с существующим префиксом");
     }
 
     /// <summary>

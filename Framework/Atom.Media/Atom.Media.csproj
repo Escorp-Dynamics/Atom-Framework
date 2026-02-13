@@ -2,9 +2,11 @@
 
 	<PropertyGroup>
 		<AssemblyName>Escorp.Atom.Media</AssemblyName>
+		<!-- Отключаем проверку переполнения — кодеки используют много арифметики с переполнением -->
+		<CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
 
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.1.5</Version>
+		<Version>0.2.0</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -34,6 +36,19 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<Using Include="Atom.Hardware" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="Atom.Media.Tests" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- Логирование и метрики для диагностики кодеков -->
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="*" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<None Update="icon.png" PackagePath="\" Pack="true" />
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
@@ -52,8 +67,7 @@
 
 		<Exec
 			Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;"
-			Condition="'%(PackageFiles.Identity)' != ''"
-			IgnoreExitCode="true">
+			Condition="'%(PackageFiles.Identity)' != ''" IgnoreExitCode="true">
 			<Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
 		</Exec>
 

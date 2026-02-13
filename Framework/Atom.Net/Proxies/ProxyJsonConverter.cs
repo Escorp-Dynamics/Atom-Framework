@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Atom.Buffers;
 
 namespace Atom.Net.Proxies;
 
@@ -20,7 +21,7 @@ public class ProxyJsonConverter<[DynamicallyAccessedMembers(DynamicallyAccessedM
 
         if (!root.TryGetProperty("port", out var portProperty) || !portProperty.TryGetInt32(out var port)) return default;
 
-        var proxy = Proxy.Rent<T>();
+        var proxy = ObjectPool<T>.Shared.Rent();
 
         proxy.Host = host;
         proxy.Port = port;

@@ -5,7 +5,7 @@
 		<NoWarn>CA1003;CA1028;CA1031;CA1711;ERP022</NoWarn>
 
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.0.3</Version>
+		<Version>0.0.5</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -16,6 +16,36 @@
 		<PackageTags>atom;framework;escorp;exomode;networking;http</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
+
+	<!-- Временно отключаем незаконченные модули -->
+	<ItemGroup>
+		<Compile Remove="NetworkStream.cs" />
+		<Compile Remove="Https/Connections/**" />
+		<Compile Remove="Https/Headers/**" />
+		<Compile Remove="Https/Http11Settings.cs" />
+		<Compile Remove="Https/Http2Settings.cs" />
+		<Compile Remove="Https/Http3Settings.cs" />
+		<Compile Remove="Https/HttpsClientHandler.cs" />
+		<Compile Remove="Https/HttpsContent.cs" />
+		<Compile Remove="Https/HttpsExtensions.cs" />
+		<Compile Remove="Https/HttpsRequestBuilder.cs" />
+		<Compile Remove="Https/HttpsRequestMessage.cs" />
+		<Compile Remove="Https/IUserAgentAdapter.cs" />
+		<Compile Remove="Https/Ja3.cs" />
+		<Compile Remove="Https/JitterSettings.cs" />
+		<Compile Remove="Https/RequestKind.cs" />
+		<Compile Remove="Https/StreamPriority.cs" />
+		<Compile Remove="Https/Traffic.cs" />
+		<Compile Remove="Https/UrlBuilder.cs" />
+		<Compile Remove="Https/UserAgentAdapter.cs" />
+		<Compile Remove="Proxies/IProxyValidator.cs" />
+		<Compile Remove="Proxies/ProxyValidator.cs" />
+		<Compile Remove="Proxies/ProxyResponseMessage.cs" />
+		<Compile Remove="Quic/**" />
+		<Compile Remove="Tcp/**" />
+		<Compile Remove="Tls/**" />
+		<Compile Remove="Udp/**" />
+	</ItemGroup>
 
 	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
@@ -43,7 +73,8 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="*" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="*" PrivateAssets="all"
+			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -51,17 +82,21 @@
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
 
-	<Target Name="PublishPackages" AfterTargets="Pack" Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
+	<Target Name="PublishPackages" AfterTargets="Pack"
+		Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
 		<PropertyGroup>
 			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
 		</PropertyGroup>
 
 		<ItemGroup>
 			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" />
-			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg" Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
+			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg"
+				Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
 		</ItemGroup>
 
-		<Exec Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;" Condition="'%(PackageFiles.Identity)' != ''" IgnoreExitCode="true">
+		<Exec
+			Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;"
+			Condition="'%(PackageFiles.Identity)' != ''" IgnoreExitCode="true">
 			<Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
 		</Exec>
 

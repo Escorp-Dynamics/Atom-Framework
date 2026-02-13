@@ -1,9 +1,15 @@
+#pragma warning disable MA0182
+
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using Atom.IO.Compression.Huffman;
 
 namespace Atom.IO.Compression.Zstd;
 
-internal static class HuffmanDecoder
+/// <summary>
+/// Zstd-специфичная логика конвертации weights в code lengths.
+/// </summary>
+internal static class ZstdHuffmanHelper
 {
     private const int MaxSymbolCount = 256;
     private const int MaxFseLog = 6;
@@ -12,67 +18,10 @@ internal static class HuffmanDecoder
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int FloorLog2(int v) => 31 - BitOperations.LeadingZeroCount((uint)v);
 
-    // Build decode table from a list of weights (for symbols 0..last, last weight deduced outside)
-    // weightsNB: number_of_bits per symbol (0 -> absent)
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void BuildDecodeTable(ReadOnlySpan<byte> weightsNB, int maxBits, Span<byte> symbols, Span<byte> nbBits)
-    {
-        var tableSize = 1 << maxBits;
-        var symbolTable = symbols[..tableSize];
-        var nbTable = nbBits[..tableSize];
-
-        // count per length
-        Span<int> blCount = stackalloc int[maxBits + 1];
-        for (var s = 0; s < weightsNB.Length; s++)
-        {
-            var l = weightsNB[s];
-            if (l != 0) blCount[l]++;
-        }
-
-        // canonical codes
-        Span<int> nextCode = stackalloc int[maxBits + 1];
-        var code = 0;
-        for (var bits = 1; bits <= maxBits; bits++)
-        {
-            code = (code + blCount[bits - 1]) << 1;
-            nextCode[bits] = code;
-        }
-
-        // init table with default (consume full tableLog to fail early)
-        for (var i = 0; i < tableSize; i++) { symbolTable[i] = 0; nbTable[i] = (byte)maxBits; }
-
-        // fill table: for each symbol with length l, assign reversed code and replicate across table
-        for (var sym = 0; sym < weightsNB.Length; sym++)
-        {
-            var l = weightsNB[sym];
-            if (l == 0) continue;
-            var c = nextCode[l]++;
-            // reverse lowest l bits (LSB-first codes)
-            var rev = ReverseBits(c, l);
-            var stride = 1 << l;
-            for (var idx = rev; idx < tableSize; idx += stride)
-            {
-                symbolTable[idx] = (byte)sym;
-                nbTable[idx] = l;
-            }
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int ReverseBits(int v, int n)
-    {
-        // reverse n LSB of v
-        v = ((v & 0x5555) << 1) | ((v >> 1) & 0x5555);
-        v = ((v & 0x3333) << 2) | ((v >> 2) & 0x3333);
-        v = ((v & 0x0F0F) << 4) | ((v >> 4) & 0x0F0F);
-        v = ((v & 0x00FF) << 8) | ((v >> 8) & 0x00FF);
-        return v >> (16 - n);
-    }
-
     // Build from direct 4-bit weights array (headerByte >= 128 path)
     // weights4bit: each byte encodes two weights: hi4 then lo4; numberOfWeights = headerByte - 127.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static HuffmanDecodeTable BuildFromDirectWeights(ReadOnlySpan<byte> weights4bit, int numberOfWeights, ref ZstdDecoderWorkspace.HuffmanTableBlock table)
+    public static HuffmanTable BuildFromDirectWeights(ReadOnlySpan<byte> weights4bit, int numberOfWeights, ref ZstdDecoderWorkspace.HuffmanTableBlock table)
     {
         // Extract weights for symbols 0..(numberOfWeights-1)
         Span<byte> weights = stackalloc byte[MaxSymbolCount + 1];
@@ -113,56 +62,16 @@ internal static class HuffmanDecoder
         }
 
         table.GetWorkspace(out var symWorkspace, out var nbWorkspace);
-        BuildDecodeTable(nbSpan, maxBits, symWorkspace, nbWorkspace);
+        HuffmanTreeBuilder.BuildDecodeTable(nbSpan, symWorkspace, nbWorkspace, maxBits);
         table.Commit(maxBits);
         return table.ToTable();
-    }
-
-    // Decode reverse LE bitstream using table until stream is entirely consumed.
-    // Writes up to dst.Length symbols and returns decoded count.
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static int DecodeStream(ReadOnlySpan<byte> stream, Span<byte> dst, in HuffmanDecodeTable table)
-    {
-        var outPos = 0;
-        var index = stream.Length - 1;
-        uint bitContainer = 0;
-        var bitCount = 0;
-        var mask = (1 << table.TableLog) - 1;
-        var symbols = table.Symbols;
-        var nbBits = table.NbBits;
-
-        FillBitContainer(ref index, stream, ref bitContainer, ref bitCount);
-        if (!SkipPadding(ref index, stream, ref bitContainer, ref bitCount))
-            throw new InvalidDataException("Huffman padding marker not found");
-
-        while (TryEnsureBits(table.TableLog, ref index, stream, ref bitContainer, ref bitCount))
-        {
-            if (outPos >= dst.Length) throw new InvalidDataException("Huffman destination too small");
-            var idx = (int)(bitContainer & (uint)mask);
-            var nb = nbBits[idx];
-            var sym = symbols[idx];
-            bitContainer >>= nb;
-            bitCount -= nb;
-            dst[outPos++] = sym;
-        }
-
-        if (bitCount != 0) throw new InvalidDataException("Huffman bitstream not fully consumed");
-        return outPos;
-    }
-
-    // Decode expecting exact count (single-stream case)
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void DecodeSingleStream(ReadOnlySpan<byte> stream, Span<byte> dst, in HuffmanDecodeTable table)
-    {
-        var n = DecodeStream(stream, dst, in table);
-        if (n != dst.Length) throw new InvalidDataException("Huffman regenerated size mismatch");
     }
 
     // Build from FSE-compressed weights (headerByte < 128 path)
     // Format: [FSE header (NCount)] + [bitstream with 2 interleaved states]
     // Returns table and sets consumed to full bytes consumed (should equal compressed size from headerByte at call site).
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static HuffmanDecodeTable BuildFromFseWeights(ReadOnlySpan<byte> src, ref ZstdDecoderWorkspace.HuffmanTableBlock table, out int consumed)
+    public static HuffmanTable BuildFromFseWeights(ReadOnlySpan<byte> src, ref ZstdDecoderWorkspace.HuffmanTableBlock table, out int consumed)
     {
         Span<short> norm = stackalloc short[16];
         var headerBytes = ParseFseHeader(src, norm, out var tableLog, out var lastSym);
@@ -185,7 +94,7 @@ internal static class HuffmanDecoder
         var maxBits = ConvertWeightsToBitCounts(weights, ref nbLength, nbSpan);
 
         table.GetWorkspace(out var symWorkspace, out var nbWorkspace);
-        BuildDecodeTable(nbSpan[..nbLength], maxBits, symWorkspace, nbWorkspace);
+        HuffmanTreeBuilder.BuildDecodeTable(nbSpan[..nbLength], symWorkspace, nbWorkspace, maxBits);
 
         consumed = headerBytes + bodyConsumed;
         table.Commit(maxBits);
@@ -195,7 +104,7 @@ internal static class HuffmanDecoder
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int ParseFseHeader(ReadOnlySpan<byte> source, Span<short> norm, out int tableLog, out int lastSymbol)
     {
-        var reader = new ForwardBitReader(source);
+        var reader = new BitReader(source, lsbFirst: true);
         tableLog = (int)reader.ReadBits(4) + 5;
         var remaining = 1 << tableLog;
         var symbol = 0;
@@ -214,7 +123,7 @@ internal static class HuffmanDecoder
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool TryReadNormalizedCount(
-        ref ForwardBitReader reader,
+        ref BitReader reader,
         ref int remaining,
         ref int symbol,
         Span<short> norm)
@@ -263,7 +172,7 @@ internal static class HuffmanDecoder
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int DecodeWeights(ReadOnlySpan<byte> body, ref FseDecoder decoder, int tableLog, Span<byte> weights, out int weightCount)
     {
-        var reader = new ForwardBitReader(body);
+        var reader = new BitReader(body, lsbFirst: true);
         var state1 = reader.ReadBits(tableLog);
         var state2 = reader.ReadBits(tableLog);
         weightCount = 0;
@@ -286,7 +195,7 @@ internal static class HuffmanDecoder
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool TryDecodeWeight(
         ref FseDecoder decoder,
-        ref ForwardBitReader reader,
+        ref BitReader reader,
         ref uint state,
         Span<byte> weights,
         ref int weightCount)
@@ -331,44 +240,5 @@ internal static class HuffmanDecoder
         }
 
         return maxBits;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void FillBitContainer(ref int index, ReadOnlySpan<byte> source, ref uint container, ref int bitCount)
-    {
-        if (index < 0) return;
-        container |= (uint)source[index] << bitCount;
-        bitCount += 8;
-        index--;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool SkipPadding(ref int index, ReadOnlySpan<byte> source, ref uint container, ref int bitCount)
-    {
-        while (true)
-        {
-            if (bitCount == 0)
-            {
-                if (index < 0) return false;
-                FillBitContainer(ref index, source, ref container, ref bitCount);
-                continue;
-            }
-
-            var bit = container & 1u;
-            container >>= 1;
-            bitCount--;
-            if (bit == 1u) return true;
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool TryEnsureBits(int requiredBits, ref int index, ReadOnlySpan<byte> source, ref uint container, ref int bitCount)
-    {
-        while (bitCount < requiredBits)
-        {
-            if (index < 0) return false;
-            FillBitContainer(ref index, source, ref container, ref bitCount);
-        }
-        return true;
     }
 }

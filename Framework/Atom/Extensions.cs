@@ -1,8 +1,7 @@
 ﻿using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Text;
-using Atom.Buffers;
+using Atom.Text;
 
 namespace Atom;
 
@@ -107,7 +106,7 @@ public static class Extensions
         name = index > 0 ? name[..index] : name;
 
         var genericArgs = type.GetGenericArguments();
-        var sb = ObjectPool<StringBuilder>.Shared.Rent();
+        using var sb = new ValueStringBuilder();
 
         if (name is not "System.Nullable" and not "Nullable")
         {
@@ -123,10 +122,7 @@ public static class Extensions
 
         if (name is not "System.Nullable" and not "Nullable") sb.Append('>');
 
-        var result = sb.ToString();
-        ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
-
-        return result;
+        return sb.ToString();
     }
 
     private static string SimplifyTypeName(string name)
@@ -257,6 +253,105 @@ public static class Extensions
     public static bool TryGetColor(this string name, out ConsoleColor color) => colorMap.TryGetValue(name, out color);
 
     /// <summary>
+    /// Парсит консольный цвет из <see cref="ReadOnlySpan{T}"/> без аллокаций.
+    /// </summary>
+    /// <param name="name">Строковое представление цвета.</param>
+    /// <param name="color">Консольный цвет.</param>
+    /// <returns><c>True</c>, если операция была удачной, иначе <see langword="false"/>.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool TryGetColor(this ReadOnlySpan<char> name, out ConsoleColor color)
+    {
+        color = default;
+        if (name.IsEmpty) return false;
+
+        return name.Length switch
+        {
+            1 => TryGetColorShort(name[0], out color),
+            2 => TryGetColorTwoChar(name, out color),
+            3 => TryGetColorThreeChar(name, out color),
+            _ => TryGetColorLong(name, out color),
+        };
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryGetColorShort(char c, out ConsoleColor color)
+    {
+        color = char.ToUpperInvariant(c) switch
+        {
+            'R' => ConsoleColor.Red,
+            'G' => ConsoleColor.Green,
+            'Y' => ConsoleColor.Yellow,
+            'M' => ConsoleColor.Magenta,
+            'C' => ConsoleColor.Cyan,
+            'B' => ConsoleColor.Blue,
+            'W' => ConsoleColor.White,
+            _ => (ConsoleColor)(-1),
+        };
+        return (int)color >= 0;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryGetColorTwoChar(ReadOnlySpan<char> name, out ConsoleColor color)
+    {
+        var c0 = char.ToUpperInvariant(name[0]);
+        var c1 = char.ToUpperInvariant(name[1]);
+
+        color = (c0, c1) switch
+        {
+            ('D', 'R') => ConsoleColor.DarkRed,
+            ('D', 'G') => ConsoleColor.DarkGreen,
+            ('D', 'Y') => ConsoleColor.DarkYellow,
+            ('D', 'M') => ConsoleColor.DarkMagenta,
+            ('D', 'C') => ConsoleColor.DarkCyan,
+            ('D', 'B') => ConsoleColor.DarkBlue,
+            ('G', 'R') => ConsoleColor.Gray,
+            ('B', 'L') => ConsoleColor.Black,
+            _ => (ConsoleColor)(-1),
+        };
+        return (int)color >= 0;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryGetColorThreeChar(ReadOnlySpan<char> name, out ConsoleColor color)
+    {
+        if (name.Equals("DGR", StringComparison.OrdinalIgnoreCase)) { color = ConsoleColor.DarkGray; return true; }
+        if (name.Equals("RED", StringComparison.OrdinalIgnoreCase)) { color = ConsoleColor.Red; return true; }
+        color = default;
+        return false;
+    }
+
+    private static bool TryGetColorLong(ReadOnlySpan<char> name, out ConsoleColor color)
+    {
+        color = default;
+        return name.Length switch
+        {
+            4 when name.Equals("BLUE", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.Blue),
+            4 when name.Equals("CYAN", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.Cyan),
+            4 when name.Equals("GRAY", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.Gray),
+            5 when name.Equals("GREEN", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.Green),
+            5 when name.Equals("WHITE", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.White),
+            5 when name.Equals("BLACK", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.Black),
+            6 when name.Equals("YELLOW", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.Yellow),
+            7 when name.Equals("MAGENTA", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.Magenta),
+            7 when name.Equals("DARKRED", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.DarkRed),
+            8 when name.Equals("DARKBLUE", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.DarkBlue),
+            8 when name.Equals("DARKCYAN", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.DarkCyan),
+            8 when name.Equals("DARKGRAY", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.DarkGray),
+            9 when name.Equals("DARKGREEN", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.DarkGreen),
+            10 when name.Equals("DARKYELLOW", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.DarkYellow),
+            11 when name.Equals("DARKMAGENTA", StringComparison.OrdinalIgnoreCase) => SetColor(out color, ConsoleColor.DarkMagenta),
+            _ => false,
+        };
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        static bool SetColor(out ConsoleColor c, ConsoleColor value)
+        {
+            c = value;
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Преобразует <see cref="ConsoleColor"/> в строковое представление консольного цвета.
     /// </summary>
     /// <param name="color">Консольный цвет.</param>
@@ -384,6 +479,39 @@ public static class Extensions
         };
 
         return style is not null;
+    }
+
+    /// <summary>
+    /// Парсит консольный стиль из <see cref="ReadOnlySpan{T}"/> без аллокаций.
+    /// </summary>
+    /// <param name="name">Строковое представление стиля.</param>
+    /// <param name="style">Консольный стиль.</param>
+    /// <returns><c>True</c>, если операция была удачной, иначе <see langword="false"/>.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool TryGetStyle(this ReadOnlySpan<char> name, out ConsoleStyle style)
+    {
+        style = default;
+        if (name.IsEmpty) return false;
+
+        if (name.Length is 2)
+        {
+            var c0 = char.ToUpperInvariant(name[0]);
+            var c1 = char.ToUpperInvariant(name[1]);
+            style = (c0, c1) switch
+            {
+                ('S', 'B') => ConsoleStyle.Bold,
+                ('S', 'U') => ConsoleStyle.Underline,
+                ('S', 'R') => ConsoleStyle.Reverse,
+                _ => default,
+            };
+            return style is not default(ConsoleStyle);
+        }
+
+        if (name.Equals("BOLD", StringComparison.OrdinalIgnoreCase)) { style = ConsoleStyle.Bold; return true; }
+        if (name.Equals("UNDERLINE", StringComparison.OrdinalIgnoreCase)) { style = ConsoleStyle.Underline; return true; }
+        if (name.Equals("REVERSE", StringComparison.OrdinalIgnoreCase)) { style = ConsoleStyle.Reverse; return true; }
+
+        return false;
     }
 
     /// <summary>

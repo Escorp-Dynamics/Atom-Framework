@@ -35,18 +35,21 @@ internal struct XxHash64
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ProcessChunk(ReadOnlySpan<byte> chunk)
     {
-        unsafe
+        unchecked
         {
-            fixed (byte* p = &chunk.GetPinnableReference())
+            unsafe
             {
-                var p0 = Unsafe.ReadUnaligned<ulong>(p + 0);
-                var p1 = Unsafe.ReadUnaligned<ulong>(p + 8);
-                var p2 = Unsafe.ReadUnaligned<ulong>(p + 16);
-                var p3 = Unsafe.ReadUnaligned<ulong>(p + 24);
-                v1 = Round(v1, p0);
-                v2 = Round(v2, p1);
-                v3 = Round(v3, p2);
-                v4 = Round(v4, p3);
+                fixed (byte* p = &chunk.GetPinnableReference())
+                {
+                    var p0 = Unsafe.ReadUnaligned<ulong>(p + 0);
+                    var p1 = Unsafe.ReadUnaligned<ulong>(p + 8);
+                    var p2 = Unsafe.ReadUnaligned<ulong>(p + 16);
+                    var p3 = Unsafe.ReadUnaligned<ulong>(p + 24);
+                    v1 = Round(v1, p0);
+                    v2 = Round(v2, p1);
+                    v3 = Round(v3, p2);
+                    v4 = Round(v4, p3);
+                }
             }
         }
     }
@@ -68,7 +71,7 @@ internal struct XxHash64
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public unsafe void Update(ReadOnlySpan<byte> data)
     {
-        totalLen += (ulong)data.Length;
+        unchecked { totalLen += (ulong)data.Length; }
         var index = 0;
 
         if (memSize + data.Length < 32)
@@ -109,7 +112,7 @@ internal struct XxHash64
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public unsafe ulong Digest()
+    public ulong Digest()
     {
         unchecked
         {
@@ -128,63 +131,78 @@ internal struct XxHash64
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ulong MergeRound(ulong acc, ulong val)
     {
-        acc ^= Round(0, val);
-        acc = unchecked((acc * Prime1) + Prime4);
-        return acc;
+        unchecked
+        {
+            acc ^= Round(0, val);
+            acc = (acc * Prime1) + Prime4;
+            return acc;
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private readonly ulong MixState()
     {
-        var result = RotateLeft(v1, 1) + RotateLeft(v2, 7) + RotateLeft(v3, 12) + RotateLeft(v4, 18);
-        result = MergeRound(result, v1);
-        result = MergeRound(result, v2);
-        result = MergeRound(result, v3);
-        result = MergeRound(result, v4);
-        return result;
+        unchecked
+        {
+            var result = RotateLeft(v1, 1) + RotateLeft(v2, 7) + RotateLeft(v3, 12) + RotateLeft(v4, 18);
+            result = MergeRound(result, v1);
+            result = MergeRound(result, v2);
+            result = MergeRound(result, v3);
+            result = MergeRound(result, v4);
+            return result;
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private unsafe void ProcessRemaining(ref ulong hash, ref int index)
     {
-        while (index + 8 <= memSize)
+        unchecked
         {
-            ConsumeEight(ref hash, ref index);
-        }
+            while (index + 8 <= memSize)
+            {
+                ConsumeEight(ref hash, ref index);
+            }
 
-        if (index + 4 <= memSize)
-        {
-            hash ^= UnsafeReadUInt32(index) * Prime1;
-            hash = (RotateLeft(hash, 23) * Prime2) + Prime3;
-            index += 4;
-        }
+            if (index + 4 <= memSize)
+            {
+                hash ^= UnsafeReadUInt32(index) * Prime1;
+                hash = (RotateLeft(hash, 23) * Prime2) + Prime3;
+                index += 4;
+            }
 
-        while (index < memSize)
-        {
-            hash ^= memory[index] * Prime5;
-            hash = RotateLeft(hash, 11) * Prime1;
-            index++;
+            while (index < memSize)
+            {
+                hash ^= memory[index] * Prime5;
+                hash = RotateLeft(hash, 11) * Prime1;
+                index++;
+            }
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private unsafe void ConsumeEight(ref ulong hash, ref int index)
+    private void ConsumeEight(ref ulong hash, ref int index)
     {
-        var lane = UnsafeReadUInt64(index);
-        hash ^= Round(0, lane);
-        hash = (RotateLeft(hash, 27) * Prime1) + Prime4;
-        index += 8;
+        unchecked
+        {
+            var lane = UnsafeReadUInt64(index);
+            hash ^= Round(0, lane);
+            hash = (RotateLeft(hash, 27) * Prime1) + Prime4;
+            index += 8;
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ulong Avalanche(ulong value)
     {
-        value ^= value >> 33;
-        value *= Prime2;
-        value ^= value >> 29;
-        value *= Prime3;
-        value ^= value >> 32;
-        return value;
+        unchecked
+        {
+            value ^= value >> 33;
+            value *= Prime2;
+            value ^= value >> 29;
+            value *= Prime3;
+            value ^= value >> 32;
+            return value;
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

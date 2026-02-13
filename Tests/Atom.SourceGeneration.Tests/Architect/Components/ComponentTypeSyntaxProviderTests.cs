@@ -1,3 +1,4 @@
+using Atom.SourceGeneration.Tests;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Testing;
 using Microsoft.CodeAnalysis.Testing;
@@ -44,7 +45,7 @@ public class ComponentTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<C
         {
             TestState =
             {
-                ReferenceAssemblies = ReferenceAssemblies.Net.Net90,
+                ReferenceAssemblies = TestReferenceAssemblies.Net10_0,
                 Sources = { source! },
                 AdditionalReferences =
                 {
@@ -74,7 +75,7 @@ public class ComponentTypeSyntaxProviderTests(ILogger logger) : BenchmarkTests<C
         {
             TestState =
             {
-                ReferenceAssemblies = ReferenceAssemblies.Net.Net90,
+                ReferenceAssemblies = TestReferenceAssemblies.Net10_0,
                 Sources = { source! },
                 GeneratedSources = {
                     (typeof(ComponentSourceGenerator), "Component1.Component.g.cs", reference1!),

@@ -25,14 +25,6 @@ public static class CollectionsExtensions
     }
 
     /// <summary>
-    /// Преобразует диапазон в разреженный массив.
-    /// </summary>
-    /// <typeparam name="T">Тип элементов.</typeparam>
-    /// <param name="span">Исходный диапазон.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static SparseSpan<T> AsSparse<T>(this Span<T> span) where T : unmanaged => span;
-
-    /// <summary>
     /// Преобразует массив в разреженный массив.
     /// </summary>
     /// <typeparam name="T">Тип элементов.</typeparam>

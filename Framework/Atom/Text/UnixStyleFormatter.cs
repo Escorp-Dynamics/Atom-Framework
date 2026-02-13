@@ -1,70 +1,188 @@
-using System.Globalization;
+#pragma warning disable IDISP001, IDISP003, IDISP008, CA2213
 using System.Runtime.CompilerServices;
-using System.Text;
 using Atom.Buffers;
 
 namespace Atom.Text;
 
 internal static class UnixStyleFormatter
 {
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void HandleOpeningBracket(ref bool isParsing, ref StringBuilder outText, ref StringBuilder parsedData, bool removeFormatting)
+    public static string? Format(string? source, bool removeFormatting)
     {
+        if (string.IsNullOrEmpty(source)) return source;
+
+        var outText = new ValueStringBuilder(source.Length * 2);
+        var parsedData = new ValueStringBuilder(32);
+        var foregrounds = ObjectPool<Stack<ConsoleColor>>.Shared.Rent();
+        var backgrounds = ObjectPool<Stack<ConsoleColor>>.Shared.Rent();
+
+        foregrounds.Push(Console.ForegroundColor);
+        backgrounds.Push(Console.BackgroundColor);
+
+        ParseSource(source, ref outText, ref parsedData, ref foregrounds, ref backgrounds, removeFormatting);
+        var result = FinalizeOutput(ref outText, removeFormatting);
+
+        ObjectPool<Stack<ConsoleColor>>.Shared.Return(backgrounds, static x => x.Clear());
+        ObjectPool<Stack<ConsoleColor>>.Shared.Return(foregrounds, static x => x.Clear());
+        outText.Dispose();
+        parsedData.Dispose();
+
+        return result;
+    }
+
+    public static string? Format(string? source) => Format(source, default);
+
+    private static void ParseSource(
+        string source,
+        ref ValueStringBuilder outText,
+        ref ValueStringBuilder parsedData,
+        ref Stack<ConsoleColor> foregrounds,
+        ref Stack<ConsoleColor> backgrounds,
+        bool removeFormatting)
+    {
+        var isParsing = false;
+        var isClosing = false;
+        var textStart = 0;
+
+        for (var i = 0; i < source.Length; ++i)
+        {
+            var c = source[i];
+            textStart = ProcessChar(c, i, source, ref outText, ref parsedData, ref foregrounds, ref backgrounds,
+                                    ref isParsing, ref isClosing, textStart, removeFormatting);
+        }
+
+        // Если парсинг тега не завершён (нет закрывающей ']') — выводим как есть
         if (isParsing)
         {
+            // Содержимое после '[' уже в parsedData, поэтому не добавляем textStart..end
+            outText.Append('[');
+            if (isClosing) outText.Append('/');
+            outText.Append(parsedData.AsSpan());
+        }
+        else if (textStart < source.Length)
+        {
+            // Обычный текст после последнего обработанного тега
+            outText.Append(source.AsSpan(textStart, source.Length - textStart));
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int ProcessChar(
+        char c, int i, string source,
+        ref ValueStringBuilder outText, ref ValueStringBuilder parsedData,
+        ref Stack<ConsoleColor> foregrounds, ref Stack<ConsoleColor> backgrounds,
+        ref bool isParsing, ref bool isClosing, int textStart, bool removeFormatting)
+    {
+        return c switch
+        {
+            '[' => HandleOpenBracket(i, source, ref outText, ref parsedData, ref isParsing, ref isClosing, textStart),
+            ']' when isParsing => HandleCloseBracket(i, ref outText, ref parsedData, ref foregrounds, ref backgrounds, ref isParsing, ref isClosing, removeFormatting),
+            _ when isParsing => HandleParseChar(c, ref parsedData, ref isClosing, textStart),
+            _ => textStart,
+        };
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int HandleOpenBracket(
+        int i, string source, ref ValueStringBuilder outText, ref ValueStringBuilder parsedData,
+        ref bool isParsing, ref bool isClosing, int textStart)
+    {
+        if (!isParsing && i > textStart)
+            outText.Append(source.AsSpan(textStart, i - textStart));
+
+        // Если уже парсим тег и встретили '[' — выводим незавершённый тег как текст
+        if (isParsing)
+        {
+            outText.Append('[');
+            if (isClosing) outText.Append('/');
+            outText.Append(parsedData.AsSpan());
             parsedData.Clear();
-            if (!removeFormatting) outText.Append('[');
+            isClosing = false;
         }
 
         isParsing = true;
+        return i + 1;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void HandleClosingBracket(ref bool isParsing, ref bool isClosing, ref StringBuilder outText, ref StringBuilder parsedData, ref Stack<ConsoleColor> foregrounds, ref Stack<ConsoleColor> backgrounds, bool removeFormatting)
+    private static int HandleCloseBracket(
+        int i, ref ValueStringBuilder outText, ref ValueStringBuilder parsedData,
+        ref Stack<ConsoleColor> foregrounds, ref Stack<ConsoleColor> backgrounds,
+        ref bool isParsing, ref bool isClosing, bool removeFormatting)
     {
-        if (parsedData.Length > 0)
-        {
-            var tmp = parsedData.ToString().Split(':', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-            if (tmp.Length > 0) HandleColorOrStyle(ref outText, ref parsedData, ref foregrounds, ref backgrounds, tmp, isClosing, removeFormatting);
-        }
-
+        ProcessTag(ref outText, ref parsedData, ref foregrounds, ref backgrounds, isClosing, removeFormatting);
         isParsing = false;
         isClosing = false;
         parsedData.Clear();
+        return i + 1;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void HandleParsingCharacter(ref bool isClosing, ref StringBuilder parsedData, string source, int i)
+    private static int HandleParseChar(char c, ref ValueStringBuilder parsedData, ref bool isClosing, int textStart)
     {
-        if (source[i] is '/' && source[i - 1] is '[')
-            isClosing = true;
-        else
-            parsedData.Append(source[i]);
+        if (c is '/' && parsedData.Length is 0) isClosing = true;
+        else parsedData.Append(c);
+        return textStart;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void HandleColorOrStyle(ref StringBuilder outText, ref StringBuilder parsedData, ref Stack<ConsoleColor> foregrounds, ref Stack<ConsoleColor> backgrounds, string[] tmp, bool isClosing, bool removeFormatting)
+    private static string FinalizeOutput(ref ValueStringBuilder outText, bool removeFormatting)
     {
-        if (tmp[0].TryGetColor(out var color))
-        {
-            HandleForegroundColor(ref outText, ref foregrounds, color, isClosing, parsedData, removeFormatting);
+        if (removeFormatting) return outText.ToString();
 
-            if (tmp.Length is 2 && tmp[1].TryGetColor(out color))
-                HandleBackgroundColor(ref outText, ref backgrounds, color, isClosing, parsedData, removeFormatting);
-        }
-        else if (tmp[0].TryGetStyle(out var style) && style.HasValue)
+        outText.Insert(0, "\x1b[0m");
+        outText.Append("\x1b[0m");
+        return outText.ToString();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ProcessTag(
+        ref ValueStringBuilder outText,
+        ref ValueStringBuilder parsedData,
+        ref Stack<ConsoleColor> foregrounds,
+        ref Stack<ConsoleColor> backgrounds,
+        bool isClosing,
+        bool removeFormatting)
+    {
+        // Пустой тег [] или [/] — выводим как есть
+        if (parsedData.Length is 0)
         {
-            HandleStyle(ref outText, style.Value, isClosing, removeFormatting);
+            outText.Append(isClosing ? "[/]" : "[]");
+            return;
+        }
+
+        var data = parsedData.AsSpan();
+        var colonIdx = data.IndexOf(':');
+
+        var first = colonIdx >= 0 ? data[..colonIdx].Trim() : data.Trim();
+        var second = colonIdx >= 0 ? data[(colonIdx + 1)..].Trim() : [];
+
+        // Тег только с пробелами [ ] — выводим как есть
+        if (first.IsEmpty)
+        {
+            AppendUnrecognizedTag(ref outText, data, isClosing);
+            return;
+        }
+
+        if (first.TryGetColor(out var color))
+        {
+            HandleForegroundColor(ref outText, ref foregrounds, color, isClosing, data, removeFormatting);
+            if (!second.IsEmpty && second.TryGetColor(out var bgColor))
+                HandleBackgroundColor(ref outText, ref backgrounds, bgColor, isClosing, data, removeFormatting);
+        }
+        else if (first.TryGetStyle(out var style) && style is not default(ConsoleStyle))
+        {
+            HandleStyle(ref outText, style, isClosing, removeFormatting);
         }
         else
         {
-            AppendDefaultFormatting(ref outText, parsedData, isClosing);
+            AppendUnrecognizedTag(ref outText, data, isClosing);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void HandleForegroundColor(ref StringBuilder outText, ref Stack<ConsoleColor> foregrounds, ConsoleColor color, bool isClosing, StringBuilder parsedData, bool removeFormatting)
+    private static void HandleForegroundColor(
+        ref ValueStringBuilder outText, ref Stack<ConsoleColor> foregrounds,
+        ConsoleColor color, bool isClosing, ReadOnlySpan<char> data, bool removeFormatting)
     {
         if (isClosing)
         {
@@ -73,9 +191,9 @@ internal static class UnixStyleFormatter
                 foregrounds.Pop();
                 if (!removeFormatting) outText.Append(foregrounds.Peek().AsString());
             }
-            else
+            else if (!removeFormatting)
             {
-                if (!removeFormatting) outText.Append($"[/{parsedData}]");
+                AppendClosingTag(ref outText, data);
             }
         }
         else
@@ -86,7 +204,9 @@ internal static class UnixStyleFormatter
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void HandleBackgroundColor(ref StringBuilder outText, ref Stack<ConsoleColor> backgrounds, ConsoleColor color, bool isClosing, StringBuilder parsedData, bool removeFormatting)
+    private static void HandleBackgroundColor(
+        ref ValueStringBuilder outText, ref Stack<ConsoleColor> backgrounds,
+        ConsoleColor color, bool isClosing, ReadOnlySpan<char> data, bool removeFormatting)
     {
         if (isClosing)
         {
@@ -95,9 +215,9 @@ internal static class UnixStyleFormatter
                 backgrounds.Pop();
                 if (!removeFormatting) outText.Append(backgrounds.Peek().AsString(isBackground: true));
             }
-            else
+            else if (!removeFormatting)
             {
-                if (!removeFormatting) outText.Append($"[/{parsedData}]");
+                AppendClosingTag(ref outText, data);
             }
         }
         else
@@ -108,62 +228,25 @@ internal static class UnixStyleFormatter
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void HandleStyle(ref StringBuilder outText, ConsoleStyle style, bool isClosing, bool removeFormatting)
+    private static void HandleStyle(ref ValueStringBuilder outText, ConsoleStyle style, bool isClosing, bool removeFormatting)
     {
-        if (isClosing)
-        {
-            if (!removeFormatting) outText.Append(style.AsString(isEnding: true));
-        }
-        else
-        {
-            if (!removeFormatting) outText.Append(style.AsString());
-        }
+        if (!removeFormatting) outText.Append(style.AsString(isEnding: isClosing));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void AppendDefaultFormatting(ref StringBuilder outText, StringBuilder parsedData, bool isClosing)
+    private static void AppendUnrecognizedTag(ref ValueStringBuilder outText, ReadOnlySpan<char> data, bool isClosing)
     {
-        if (parsedData.Length > 0) outText.Append(CultureInfo.InvariantCulture, $"[{(isClosing ? '/' : null)}{parsedData}]");
+        outText.Append('[');
+        if (isClosing) outText.Append('/');
+        outText.Append(data);
+        outText.Append(']');
     }
 
-    public static string? Format(string? source, bool removeFormatting)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void AppendClosingTag(ref ValueStringBuilder outText, ReadOnlySpan<char> data)
     {
-        if (string.IsNullOrEmpty(source)) return source;
-
-        var outText = ObjectPool<StringBuilder>.Shared.Rent();
-        var parsedData = ObjectPool<StringBuilder>.Shared.Rent();
-
-        var foregrounds = ObjectPool<Stack<ConsoleColor>>.Shared.Rent();
-        var backgrounds = ObjectPool<Stack<ConsoleColor>>.Shared.Rent();
-
-        foregrounds.Push(Console.ForegroundColor);
-        backgrounds.Push(Console.BackgroundColor);
-
-        var isParsing = false;
-        var isClosing = false;
-
-        for (var i = 0; i < source.Length; ++i)
-        {
-            if (source[i] is '[')
-                HandleOpeningBracket(ref isParsing, ref outText, ref parsedData, removeFormatting);
-            else if (source[i] is ']' && isParsing)
-                HandleClosingBracket(ref isParsing, ref isClosing, ref outText, ref parsedData, ref foregrounds, ref backgrounds, removeFormatting);
-            else if (isParsing)
-                HandleParsingCharacter(ref isClosing, ref parsedData, source, i);
-            else
-                outText.Append(source[i]);
-        }
-
-        var outputText = removeFormatting ? outText.ToString() : $"\x1b[0m{outText}\x1b[0m";
-
-        ObjectPool<Stack<ConsoleColor>>.Shared.Return(backgrounds, x => x.Clear());
-        ObjectPool<Stack<ConsoleColor>>.Shared.Return(foregrounds, x => x.Clear());
-
-        ObjectPool<StringBuilder>.Shared.Return(parsedData, x => x.Clear());
-        ObjectPool<StringBuilder>.Shared.Return(outText, x => x.Clear());
-
-        return outputText;
+        outText.Append("[/");
+        outText.Append(data);
+        outText.Append(']');
     }
-
-    public static string? Format(string? source) => Format(source, default);
 }

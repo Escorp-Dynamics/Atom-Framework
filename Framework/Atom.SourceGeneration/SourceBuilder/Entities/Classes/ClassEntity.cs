@@ -1,8 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Text;
 using Atom.Buffers;
 using Atom.Collections;
+using Atom.Text;
 
 namespace Atom.SourceGeneration;
 
@@ -65,7 +65,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     public override bool IsValid => !string.IsNullOrEmpty(Name);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AppendGenerics(StringBuilder sb)
+    private void AppendGenerics(ref ValueStringBuilder sb)
     {
         if (generics.IsEmpty) return;
 
@@ -83,7 +83,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AppendParents(StringBuilder sb, params IEnumerable<string> usings)
+    private void AppendParents(ref ValueStringBuilder sb, params IEnumerable<string> usings)
     {
         if (parents.IsEmpty) return;
 
@@ -99,7 +99,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AppendGenericsLimitations(StringBuilder sb)
+    private void AppendGenericsLimitations(ref ValueStringBuilder sb)
     {
         if (generics.IsEmpty) return;
 
@@ -112,7 +112,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AppendEntities(StringBuilder sb, string spaces, params IEnumerable<string> usings)
+    private void AppendEntities(ref ValueStringBuilder sb, string spaces, params IEnumerable<string> usings)
     {
         if (!HasEntities)
         {
@@ -123,18 +123,18 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
         sb.AppendLine($"\n{spaces}{{");
         var tabs = (spaces.Length / 4) + 1;
 
-        AppendMembers(sb, tabs, fields, usings);
-        AppendMembers(sb, tabs, properties, usings);
-        AppendMembers(sb, tabs, events, usings);
-        AppendMembers(sb, tabs, methods, usings);
-        AppendMembers(sb, tabs, others, usings);
+        AppendMembers(ref sb, tabs, fields, usings);
+        AppendMembers(ref sb, tabs, properties, usings);
+        AppendMembers(ref sb, tabs, events, usings);
+        AppendMembers(ref sb, tabs, methods, usings);
+        AppendMembers(ref sb, tabs, others, usings);
 
         if (sb[^1] is '\n') sb.Remove(sb.Length - 1, 1);
         sb.AppendLine($"{spaces}}}");
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, params IEnumerable<string> usings)
+    protected override void OnBuildingDeclaration(ref ValueStringBuilder sb, [NotNull] string spaces, params IEnumerable<string> usings)
     {
         var access = AccessModifier.AsString();
         if (!string.IsNullOrEmpty(access)) access += ' ';
@@ -144,10 +144,10 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
         if (IsPartial) sb.Append("partial ");
         sb.Append($"class {Name}");
 
-        AppendGenerics(sb);
-        AppendParents(sb, usings);
-        AppendGenericsLimitations(sb);
-        AppendEntities(sb, spaces, usings);
+        AppendGenerics(ref sb);
+        AppendParents(ref sb, usings);
+        AppendGenericsLimitations(ref sb);
+        AppendEntities(ref sb, spaces, usings);
     }
 
     /// <inheritdoc/>
@@ -357,7 +357,7 @@ public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void AppendMembers<TMember>(StringBuilder sb, int tabs, IEnumerable<TMember> members, params IEnumerable<string> usings) where TMember : IEntity
+    private static void AppendMembers<TMember>(ref ValueStringBuilder sb, int tabs, IEnumerable<TMember> members, params IEnumerable<string> usings) where TMember : IEntity
     {
         foreach (var member in members)
         {

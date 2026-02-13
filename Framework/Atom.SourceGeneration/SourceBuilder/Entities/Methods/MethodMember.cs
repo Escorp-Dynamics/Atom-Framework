@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Text;
 using Atom.Buffers;
 using Atom.Collections;
 using Atom.Text;
@@ -58,7 +57,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     /// <inheritdoc/>
     public override bool IsValid => !string.IsNullOrEmpty(Name);
 
-    private void AppendModifiers(StringBuilder sb, string spaces)
+    private void AppendModifiers(ref ValueStringBuilder sb, string spaces)
     {
         var access = AccessModifier.AsString();
         if (!string.IsNullOrEmpty(access)) access += ' ';
@@ -86,7 +85,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
         if (IsAsync) sb.Append("async ");
     }
 
-    private void AppendGenerics(StringBuilder sb)
+    private void AppendGenerics(ref ValueStringBuilder sb)
     {
         if (generics.IsEmpty) return;
 
@@ -103,7 +102,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
         sb.Append('>');
     }
 
-    private void AppendArguments(StringBuilder sb, params IEnumerable<string> usings)
+    private void AppendArguments(ref ValueStringBuilder sb, params IEnumerable<string> usings)
     {
         if (arguments.IsEmpty) return;
 
@@ -117,7 +116,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
         sb.Remove(sb.Length - 2, 2);
     }
 
-    private void AppendGenericsLimitations(StringBuilder sb)
+    private void AppendGenericsLimitations(ref ValueStringBuilder sb)
     {
         if (generics.IsEmpty) return;
 
@@ -129,17 +128,17 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
         }
     }
 
-    private void AppendSignature(StringBuilder sb, params IEnumerable<string> usings)
+    private void AppendSignature(ref ValueStringBuilder sb, params IEnumerable<string> usings)
     {
         sb.Append($"{Type.GetTypeName(usings)} {Name}");
-        AppendGenerics(sb);
+        AppendGenerics(ref sb);
         sb.Append('(');
-        AppendArguments(sb, usings);
+        AppendArguments(ref sb, usings);
         sb.Append(')');
-        AppendGenericsLimitations(sb);
+        AppendGenericsLimitations(ref sb);
     }
 
-    private void AppendBody(StringBuilder sb, string spaces)
+    private void AppendBody(ref ValueStringBuilder sb, string spaces)
     {
         if (Code.StartsWith("return", StringComparison.Ordinal))
         {
@@ -169,7 +168,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingComment([NotNull] StringBuilder sb, string spaces)
+    protected override void OnBuildingComment(ref ValueStringBuilder sb, string spaces)
     {
         if (string.IsNullOrEmpty(Comment)) return;
 
@@ -197,10 +196,10 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params IEnumerable<string> usings)
+    protected override void OnBuildingDeclaration(ref ValueStringBuilder sb, string spaces, params IEnumerable<string> usings)
     {
-        AppendModifiers(sb, spaces);
-        AppendSignature(sb, usings);
+        AppendModifiers(ref sb, spaces);
+        AppendSignature(ref sb, usings);
 
         if (IsAbstract)
         {
@@ -218,7 +217,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
             return;
         }
 
-        AppendBody(sb, spaces);
+        AppendBody(ref sb, spaces);
     }
 
     /// <inheritdoc/>

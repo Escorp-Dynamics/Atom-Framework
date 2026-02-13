@@ -8,6 +8,7 @@ namespace Atom.Threading;
 public sealed class Locker : IDisposable
 {
     private readonly SemaphoreSlim locker;
+    private bool isDisposed;
 
     /// <summary>
     /// Количество оставшихся потоков, которые могут войти в ожидание.
@@ -205,7 +206,18 @@ public sealed class Locker : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Release(int releaseCount)
     {
-        locker.Release(releaseCount);
+        if (Volatile.Read(ref isDisposed)) return;
+
+        try
+        {
+            locker.Release(releaseCount);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Гонка между проверкой isDisposed и вызовом Release — игнорируем
+            return;
+        }
+
         OnReleased(releaseCount);
     }
 
@@ -219,7 +231,11 @@ public sealed class Locker : IDisposable
     /// Высвобождает ресурсы.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Dispose() => locker.Dispose();
+    public void Dispose()
+    {
+        Volatile.Write(ref isDisposed, value: true);
+        locker.Dispose();
+    }
 
     /// <summary>
     /// Преобразует текущий экземпляр в строковое представление.

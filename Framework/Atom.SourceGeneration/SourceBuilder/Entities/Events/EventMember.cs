@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Text;
 using Atom.Buffers;
+using Atom.Text;
 
 namespace Atom.SourceGeneration;
 
@@ -36,7 +36,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     /// <inheritdoc/>
     public override bool IsValid => !string.IsNullOrEmpty(Name) && (Adder is not null || Remover is not null) && !string.IsNullOrEmpty(Type);
 
-    private void AppendAccessModifiers(StringBuilder sb, string spaces)
+    private void AppendAccessModifiers(ref ValueStringBuilder sb, string spaces)
     {
         var access = AccessModifier.AsString();
         if (!string.IsNullOrEmpty(access)) access += ' ';
@@ -57,7 +57,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
         if (IsReadOnly) sb.Append("readonly ");
     }
 
-    private void AppendEventHandlers(StringBuilder sb, string spaces)
+    private void AppendEventHandlers(ref ValueStringBuilder sb, string spaces)
     {
         var tabs = (spaces.Length / 4) + 1;
 
@@ -76,7 +76,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
             if (isSimpleAdder)
                 sb.AppendLine(adder!.Trim()[3..]);
             else
-                AppendEventHandlersBlock(sb, spaces, adder, remover, isAuto);
+                AppendEventHandlersBlock(ref sb, spaces, adder, remover, isAuto);
         }
         else
         {
@@ -85,7 +85,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingComment([NotNull] StringBuilder sb, string spaces)
+    protected override void OnBuildingComment(ref ValueStringBuilder sb, string spaces)
     {
         var comment = Comment;
         var valueComment = Remover?.Comment;
@@ -115,11 +115,11 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, [NotNull] params IEnumerable<string> usings)
+    protected override void OnBuildingDeclaration(ref ValueStringBuilder sb, [NotNull] string spaces, [NotNull] params IEnumerable<string> usings)
     {
-        AppendAccessModifiers(sb, spaces);
+        AppendAccessModifiers(ref sb, spaces);
         sb.Append($"event {Type.GetTypeName(usings)} {Name}");
-        AppendEventHandlers(sb, spaces);
+        AppendEventHandlers(ref sb, spaces);
     }
 
     /// <inheritdoc/>
@@ -286,28 +286,28 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
         });
     }
 
-    private static void AppendEventHandlersBlock(StringBuilder sb, string spaces, string? adder, string? remover, bool isAuto)
+    private static void AppendEventHandlersBlock(ref ValueStringBuilder sb, string spaces, string? adder, string? remover, bool isAuto)
     {
-        AppendBlockStart(sb, spaces, isAuto);
-        AppendAccessor(sb, adder, isAuto);
-        AppendRemover(sb, remover, adder, isAuto);
-        AppendBlockEnd(sb, spaces, isAuto);
+        AppendBlockStart(ref sb, spaces, isAuto);
+        AppendAccessor(ref sb, adder, isAuto);
+        AppendRemover(ref sb, remover, adder, isAuto);
+        AppendBlockEnd(ref sb, spaces, isAuto);
     }
 
-    private static void AppendBlockStart(StringBuilder sb, string spaces, bool isAuto)
+    private static void AppendBlockStart(ref ValueStringBuilder sb, string spaces, bool isAuto)
     {
         if (isAuto) sb.Append(" {");
         else sb.AppendLine($"\n{spaces}{{");
     }
 
-    private static void AppendAccessor(StringBuilder sb, string? accessor, bool isAuto)
+    private static void AppendAccessor(ref ValueStringBuilder sb, string? accessor, bool isAuto)
     {
         if (string.IsNullOrEmpty(accessor)) return;
         var trimmed = accessor.TrimStart();
         sb.Append(isAuto ? $" {trimmed}" : accessor);
     }
 
-    private static void AppendRemover(StringBuilder sb, string? remover, string? adder, bool isAuto)
+    private static void AppendRemover(ref ValueStringBuilder sb, string? remover, string? adder, bool isAuto)
     {
         if (string.IsNullOrEmpty(remover)) return;
         var trimmed = remover.TrimStart();
@@ -327,7 +327,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
            && adder.TrimStart().StartsWith("add =>", StringComparison.Ordinal)
            && !removerText.StartsWith("remove =>", StringComparison.Ordinal);
 
-    private static void AppendBlockEnd(StringBuilder sb, string spaces, bool isAuto)
+    private static void AppendBlockEnd(ref ValueStringBuilder sb, string spaces, bool isAuto)
     {
         if (isAuto) sb.AppendLine(" }");
         else sb.AppendLine($"{spaces}}}");

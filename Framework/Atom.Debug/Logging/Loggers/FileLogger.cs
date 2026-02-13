@@ -1,8 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
-using System.Text;
-using Atom.Buffers;
+using Atom.Text;
 using Microsoft.Extensions.Logging;
 
 namespace Atom.Debug.Logging;
@@ -65,7 +64,7 @@ public class FileLogger : ConsoleLogger
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected override void FormatDateTime([NotNull] StringBuilder sb, DateTime dt)
+    protected override void FormatDateTime(ref ValueStringBuilder sb, DateTime dt)
     {
         if (!IsDateEnabled && !IsTimeEnabled) return;
         if (IsDateEnabled) sb.Append(dt.ToString(DateFormat, CultureInfo.InvariantCulture));
@@ -81,16 +80,13 @@ public class FileLogger : ConsoleLogger
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected override string? CreateMessage<TState>([NotNull] LoggerEventArgs<TState> args)
     {
-        var sb = ObjectPool<StringBuilder>.Shared.Rent();
+        using var sb = new ValueStringBuilder();
         var msg = base.CreateMessage(args);
         var prefix = GetPrefixByLevel(args.Level);
 
         sb.Append(prefix.PadLeft(8)).Append(' ').Append(msg);
 
-        var result = sb.ToString();
-        ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
-
-        return result;
+        return sb.ToString();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

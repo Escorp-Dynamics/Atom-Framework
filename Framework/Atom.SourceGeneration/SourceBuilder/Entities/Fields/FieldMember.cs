@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Text;
 using Atom.Buffers;
+using Atom.Text;
 
 namespace Atom.SourceGeneration;
 
@@ -28,7 +28,7 @@ public class FieldMember : Member<FieldMember>, IFieldMember<FieldMember>
     public override bool IsValid => !string.IsNullOrEmpty(Name) && !string.IsNullOrEmpty(Type);
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, [NotNull] params IEnumerable<string> usings)
+    protected override void OnBuildingDeclaration(ref ValueStringBuilder sb, string spaces, [NotNull] params IEnumerable<string> usings)
     {
         var access = AccessModifier.AsString();
         if (!string.IsNullOrEmpty(access)) access += ' ';

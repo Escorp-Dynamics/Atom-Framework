@@ -1,8 +1,6 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Text;
+using Atom.Text;
 
 namespace Atom.Net.Https.Headers;
 
@@ -70,7 +68,7 @@ public readonly struct OsInfo() : IParsable<OsInfo>, IEquatable<OsInfo>
         if (!hasPlatform && !hasVersion && !(hasArchitecture && placement is ArchitectureTokenPlacement.Prefix or ArchitectureTokenPlacement.Suffix))
             return string.Empty;
 
-        var builder = new StringBuilder(Platform.Length + Version.Length + Architecture.Length + 2);
+        using var builder = new ValueStringBuilder(Platform.Length + Version.Length + Architecture.Length + 2);
 
         if (placement is ArchitectureTokenPlacement.Prefix && hasArchitecture)
         {
@@ -112,7 +110,9 @@ public readonly struct OsInfo() : IParsable<OsInfo>, IEquatable<OsInfo>
 
         if (Architecture.Equals("Intel", StringComparison.OrdinalIgnoreCase)
             || Architecture.Equals("PPC", StringComparison.OrdinalIgnoreCase))
+        {
             return ArchitectureTokenPlacement.Prefix;
+        }
 
         if (Security.Length is 0 && Device.Length is 0 && !Platform.Equals("Windows NT", StringComparison.OrdinalIgnoreCase))
             return ArchitectureTokenPlacement.Suffix;
@@ -174,23 +174,26 @@ public readonly struct OsInfo() : IParsable<OsInfo>, IEquatable<OsInfo>
             + (string.IsNullOrEmpty(Locale) ? 0 : Locale.Length)
             + (placement is ArchitectureTokenPlacement.Separate && !string.IsNullOrEmpty(Architecture) ? Architecture.Length : 0);
 
-        var builder = new StringBuilder(Math.Max(estimatedLength + 10, 16));
+        var builder = new ValueStringBuilder(Math.Max(estimatedLength + 10, 16));
 
-        void AppendToken(string? token)
+        static void AppendToken(ref ValueStringBuilder sb, string? token)
         {
             if (string.IsNullOrEmpty(token)) return;
-            if (builder.Length > 0) builder.Append("; ");
-            builder.Append(token);
+            if (sb.Length > 0) sb.Append("; ");
+            sb.Append(token);
         }
 
-        if (IsDeviceFirst) AppendToken(Device);
-        AppendToken(platformToken);
-        if (!IsDeviceFirst) AppendToken(Device);
-        AppendToken(Security);
-        if (placement is ArchitectureTokenPlacement.Separate) AppendToken(Architecture);
-        AppendToken(Locale);
+        if (IsDeviceFirst) AppendToken(ref builder, Device);
+        AppendToken(ref builder, platformToken);
+        if (!IsDeviceFirst) AppendToken(ref builder, Device);
+        AppendToken(ref builder, Security);
+        if (placement is ArchitectureTokenPlacement.Separate) AppendToken(ref builder, Architecture);
+        AppendToken(ref builder, Locale);
 
-        return builder.ToString();
+        var result = builder.ToString();
+        builder.Dispose();
+
+        return result;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -300,7 +303,7 @@ file ref struct Parser
             Architecture = architecture,
             ArchitecturePlacement = architecturePlacement,
             IsDeviceFirst = deviceIndex >= 0 && (platformIndex < 0 || deviceIndex < platformIndex),
-            Tokens = tokens.ToArray(),
+            Tokens = [.. tokens],
         };
 
         return tokens.Count > 0;
@@ -493,7 +496,7 @@ file ref struct Parser
         }
 
         platform = token;
-        version = ReadOnlySpan<char>.Empty;
+        version = [];
         return false;
     }
 
@@ -548,7 +551,7 @@ file ref struct Parser
         if (TrySetArchitectureFromToken(trimmed, ref architecture, ref architectureSet))
         {
             if (placement is ArchitectureTokenPlacement.Auto) placement = ArchitectureTokenPlacement.Separate;
-            return ReadOnlySpan<char>.Empty;
+            return [];
         }
 
         return trimmed;
@@ -560,7 +563,7 @@ file ref struct Parser
         if (token.StartsWith("Intel".AsSpan(), StringComparison.OrdinalIgnoreCase)) return token[..5];
         if (token.StartsWith("PPC".AsSpan(), StringComparison.OrdinalIgnoreCase)) return token[..3];
         if (token.StartsWith("ARM".AsSpan(), StringComparison.OrdinalIgnoreCase)) return token[..3];
-        return ReadOnlySpan<char>.Empty;
+        return [];
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -592,7 +595,9 @@ file ref struct Parser
             || token.Equals("armv7l".AsSpan(), StringComparison.OrdinalIgnoreCase)
             || token.Equals("armv8l".AsSpan(), StringComparison.OrdinalIgnoreCase)
             || token.Equals("ia64".AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
             return true;
+        }
 
         if (token.IndexOf("x86_64".AsSpan(), StringComparison.OrdinalIgnoreCase) >= 0) return true;
         if (token.IndexOf("arm64".AsSpan(), StringComparison.OrdinalIgnoreCase) >= 0) return true;
@@ -658,6 +663,6 @@ file ref struct Parser
         while (start <= end && char.IsWhiteSpace(value[start])) start++;
         while (end >= start && char.IsWhiteSpace(value[end])) end--;
 
-        return start <= end ? value[start..(end + 1)] : ReadOnlySpan<char>.Empty;
+        return start <= end ? value[start..(end + 1)] : [];
     }
 }

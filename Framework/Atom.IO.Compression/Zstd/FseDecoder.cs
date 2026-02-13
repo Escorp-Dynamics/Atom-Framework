@@ -64,7 +64,7 @@ internal readonly ref struct FseDecoder
     public void UpdateState(ref uint state, uint addBits) => state = _newStateBase[(int)state] + addBits;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public byte DecodeSymbol(ref uint state, ref LittleEndianReverseBitReader br)
+    public byte DecodeSymbol(ref uint state, ref ReverseBitReader br)
     {
         var idx = (int)state;
         var sym = _symbols[idx];

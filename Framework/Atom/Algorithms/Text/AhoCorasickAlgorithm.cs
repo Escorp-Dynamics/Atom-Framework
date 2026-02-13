@@ -51,16 +51,17 @@ public class AhoCorasickAlgorithm : TextAlgorithm
             for (var i = 0; i < source.Length; ++i)
             {
                 var c = Extensions.GetUpperChar(sourcePtr[i], comparison);
-                while (current is not null && current.Children[c] is null) current = current.Fail;
+                while (current != root && current.Children[c] is null) current = current.Fail ?? root;
 
-                if (current is null)
+                current = current.Children[c] ?? root;
+
+                // Проверяем текущий узел и все fail-узлы для перекрывающихся вхождений
+                var temp = current;
+                while (temp != root)
                 {
-                    current = root;
-                    continue;
+                    if (temp.OutputCount > 0) count += temp.OutputCount;
+                    temp = temp.Fail ?? root;
                 }
-
-                current = current.Children[c];
-                if (current.OutputCount > 0) count += current.OutputCount;
             }
         }
 
@@ -82,21 +83,23 @@ public class AhoCorasickAlgorithm : TextAlgorithm
             for (var i = 0; i < source.Length; ++i)
             {
                 var c = Extensions.GetUpperChar(sourcePtr[i], comparison);
-                while (current is not null && current.Children[c] is null) current = current.Fail;
+                while (current != root && current.Children[c] is null) current = current.Fail ?? root;
 
-                if (current is null)
+                current = current.Children[c] ?? root;
+
+                // Проверяем текущий узел и все fail-узлы
+                var temp = current;
+                while (temp != root)
                 {
-                    current = root;
-                    continue;
+                    if (temp.OutputCount > 0)
+                    {
+                        isFound = true;
+                        break;
+                    }
+                    temp = temp.Fail ?? root;
                 }
 
-                current = current.Children[c];
-
-                if (current.OutputCount > 0)
-                {
-                    isFound = true;
-                    break;
-                }
+                if (isFound) break;
             }
         }
 
@@ -158,10 +161,10 @@ public class AhoCorasickAlgorithm : TextAlgorithm
 
                 child.Fail = fail?.Children[idx] ?? root;
 
-                if (fail is not null)
+                // Добавляем OutputCount от fail-узла к текущему (для перекрывающихся вхождений)
+                if (child.Fail != root && child.Fail != child)
                 {
-                    child.OutputRef = fail.OutputRef ?? fail.Output;
-                    child.OutputCount = fail.OutputCount;
+                    child.OutputCount += child.Fail.OutputCount;
                 }
             }
         }

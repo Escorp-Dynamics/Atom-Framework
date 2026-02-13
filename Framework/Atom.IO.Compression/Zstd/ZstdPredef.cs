@@ -1,3 +1,5 @@
+#pragma warning disable MA0182
+
 namespace Atom.IO.Compression.Zstd;
 
 /// <summary>

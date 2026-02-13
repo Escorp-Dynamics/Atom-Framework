@@ -1,4 +1,4 @@
-using Atom.Buffers;
+using System.Buffers;
 
 namespace Atom.Algorithms.Text;
 
@@ -14,10 +14,10 @@ public class BoyerMooreAlgorithm : TextAlgorithm
     /// <param name="target">Вхождение подстроки.</param>
     /// <param name="comparison">Поведение сравнения строк.</param>
     /// <returns>Таблица плохих символов для алгоритма Бойера-Мура.</returns>
-    protected virtual unsafe ReadOnlySpan<int> BuildBadCharShift(ReadOnlySpan<char> target, StringComparison comparison)
+    protected virtual unsafe int[] BuildBadCharShift(ReadOnlySpan<char> target, StringComparison comparison)
     {
-        var badCharShift = SpanPool<int>.Shared.Rent(ushort.MaxValue + 1);
-        badCharShift.Fill(-1);
+        var badCharShift = ArrayPool<int>.Shared.Rent(ushort.MaxValue + 1);
+        Array.Fill(badCharShift, -1);
 
         fixed (char* targetPtr = target)
         {
@@ -76,15 +76,15 @@ public class BoyerMooreAlgorithm : TextAlgorithm
                 if (j < 0)
                 {
                     ++count;
-                    shift += (shift + target.Length < source.Length) ? target.Length - badCharShift[sourcePtr[shift + target.Length]] : 1;
+                    shift += (shift + target.Length < source.Length) ? target.Length - badCharShift[Extensions.GetUpperChar(sourcePtr[shift + target.Length], comparison)] : 1;
                     continue;
                 }
 
-                shift += Math.Max(1, j - badCharShift[sourcePtr[shift + j]]);
+                shift += Math.Max(1, j - badCharShift[Extensions.GetUpperChar(sourcePtr[shift + j], comparison)]);
             }
         }
 
-        SpanPool<int>.Shared.Return(badCharShift);
+        ArrayPool<int>.Shared.Return(badCharShift);
         return count;
     }
 
@@ -111,11 +111,11 @@ public class BoyerMooreAlgorithm : TextAlgorithm
                     break;
                 }
 
-                shift += Math.Max(1, j - badCharShift[sourcePtr[shift + j]]);
+                shift += Math.Max(1, j - badCharShift[Extensions.GetUpperChar(sourcePtr[shift + j], comparison)]);
             }
         }
 
-        SpanPool<int>.Shared.Return(badCharShift);
+        ArrayPool<int>.Shared.Return(badCharShift);
         return isFound;
     }
 }

@@ -68,10 +68,12 @@ public unsafe class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMe
     /// Арендует объект из пула.
     /// </summary>
     /// <returns>Арендованный объект.</returns>
+    /// <exception cref="ObjectDisposedException">Пул был освобождён.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual T Rent(Func<T> itemFactory)
     {
         ArgumentNullException.ThrowIfNull(itemFactory);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed), this);
 
         var buffer = threadBuffer.Value;
         var count = threadIndex.Value;
@@ -124,9 +126,12 @@ public unsafe class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMe
     /// Возвращает объект в пул.
     /// </summary>
     /// <param name="item">Возвращаемый объект.</param>
+    /// <exception cref="ObjectDisposedException">Пул был освобождён.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void Return(T item)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed), this);
+
         var buffer = threadBuffer.Value;
         var count = threadIndex.Value;
 

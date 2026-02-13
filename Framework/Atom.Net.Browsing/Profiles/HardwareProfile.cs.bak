@@ -1,0 +1,11 @@
+﻿#pragma warning disable S1135
+
+namespace Atom.Net.Browsing.Profiles;
+
+/// <summary>
+/// Профиль аппаратного обеспечения для эмуляции браузера.
+/// </summary>
+public static class HardwareProfile
+{
+    // TODO: Добавить свойства профиля оборудования (GPU, CPU, RAM, разрешение экрана и т.д.)
+}

@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Atom.IO.Compression.Huffman;
 
 #pragma warning disable CA2213
 
@@ -168,10 +169,10 @@ internal sealed unsafe class ZstdDecoderWorkspace : IDisposable
             TableLog = 0;
         }
 
-        public readonly HuffmanDecodeTable ToTable()
+        public readonly HuffmanTable ToTable()
         {
             if (!HasTable) throw new InvalidOperationException("Huffman table is not initialized");
-            return new HuffmanDecodeTable(TableLog, symbolsPtr, nbBitsPtr);
+            return new HuffmanTable(TableLog, symbolsPtr, nbBitsPtr);
         }
     }
 

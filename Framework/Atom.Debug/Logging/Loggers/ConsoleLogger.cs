@@ -1,8 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
-using System.Text;
-using Atom.Buffers;
 using Atom.Text;
 using Microsoft.Extensions.Logging;
 
@@ -49,10 +47,10 @@ public class ConsoleLogger : Logger
     /// <summary>
     /// Форматирует время и дату события.
     /// </summary>
-    /// <param name="sb">Ссылка на <see cref="StringBuilder"/>.</param>
+    /// <param name="sb">Ссылка на <see cref="ValueStringBuilder"/>.</param>
     /// <param name="dt">Время и дата события.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected virtual void FormatDateTime([NotNull] StringBuilder sb, DateTime dt)
+    protected virtual void FormatDateTime(ref ValueStringBuilder sb, DateTime dt)
     {
         if (!IsDateEnabled && !IsTimeEnabled) return;
         if (IsDateEnabled) sb.Append(dt.ToString(DateFormat, CultureInfo.InvariantCulture));
@@ -72,11 +70,11 @@ public class ConsoleLogger : Logger
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected virtual string? CreateMessage<TState>([NotNull] LoggerEventArgs<TState> args)
     {
-        var sb = ObjectPool<StringBuilder>.Shared.Rent();
+        var sb = new ValueStringBuilder();
         var color = GetColorByLevel(args.Level);
 
         if (IsStylingEnabled) sb.Append('[').Append(color).Append(']');
-        FormatDateTime(sb, args.DateTime);
+        FormatDateTime(ref sb, args.DateTime);
         if (Console.IsOutputRedirected) sb.Append(' ').Append(GetPrefixByLevel(args.Level));
 
         if (IsCategoryNameEnabled && !string.IsNullOrEmpty(CategoryName)) sb.Append(' ').Append(CategoryName);
@@ -90,7 +88,7 @@ public class ConsoleLogger : Logger
         if (IsStylingEnabled) sb.Append("[/").Append(color).Append(']');
 
         message = sb.ToString();
-        ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
+        sb.Dispose();
 
         if (IsStylingEnabled) message = message.ToUnixStyleFormat(!IsStylingOutputEnabled || Console.IsOutputRedirected);
 

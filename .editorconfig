@@ -101,3 +101,6 @@ dotnet_diagnostic.S1133.severity = silent
 
 # MA0048: File name must match type name
 dotnet_diagnostic.MA0048.severity = suggestion
+
+# Default severity for analyzer diagnostics with category 'IDisposableAnalyzers.Correctness'
+dotnet_analyzer_diagnostic.category-IDisposableAnalyzers.Correctness.severity = suggestion

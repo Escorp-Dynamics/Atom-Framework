@@ -57,7 +57,7 @@ public class KeyShare
                 // Игнор — упадём ниже с NotSupportedException
             }
 
-            throw new NotSupportedException("X25519 недоступен на текущей платформе .NET/OS.");
+            throw new NotSupportedException("X25519 недоступен на текущей платформе .NET/OS");
         }
     }
 

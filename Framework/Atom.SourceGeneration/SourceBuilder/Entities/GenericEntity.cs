@@ -1,8 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Text;
 using Atom.Buffers;
 using Atom.Collections;
+using Atom.Text;
 
 namespace Atom.SourceGeneration;
 
@@ -33,14 +33,14 @@ public class GenericEntity : Entity<GenericEntity>
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected override void OnBuildingComment([NotNull] StringBuilder sb, string spaces)
+    protected override void OnBuildingComment(ref ValueStringBuilder sb, string spaces)
     {
         // Method intentionally left empty.
     }
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected override void OnBuildingAttributes([NotNull] StringBuilder sb, string spaces)
+    protected override void OnBuildingAttributes(ref ValueStringBuilder sb, string spaces)
     {
         foreach (var attr in Attributes) sb.Append($"[{attr}]");
         if (sb.Length > 0) sb.Append(' ');
@@ -48,7 +48,7 @@ public class GenericEntity : Entity<GenericEntity>
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params IEnumerable<string> usings) => sb.Append(Name);
+    protected override void OnBuildingDeclaration(ref ValueStringBuilder sb, string spaces, params IEnumerable<string> usings) => sb.Append(Name);
 
     /// <summary>
     /// Указывает, является ли инвариантным.
@@ -110,14 +110,13 @@ public class GenericEntity : Entity<GenericEntity>
         }
 
         var spaces = GetSpaces(tabs);
-        var sb = ObjectPool<StringBuilder>.Shared.Rent();
+        using var sb = new ValueStringBuilder();
 
         sb.Append($"{spaces}where {Name} : ");
         foreach (var limitation in limitations) sb.Append($"{limitation}, ");
         sb.Remove(sb.Length - 2, 2);
 
         var result = sb.ToString();
-        ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
         if (release) Release();
 
         return result;

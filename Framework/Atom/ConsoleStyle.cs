@@ -6,6 +6,10 @@ namespace Atom;
 public enum ConsoleStyle
 {
     /// <summary>
+    /// Отсутствует.
+    /// </summary>
+    None,
+    /// <summary>
     /// Жирный.
     /// </summary>
     Bold,

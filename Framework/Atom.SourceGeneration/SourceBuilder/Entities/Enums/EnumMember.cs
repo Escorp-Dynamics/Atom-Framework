@@ -1,7 +1,6 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
-using System.Text;
 using Atom.Buffers;
+using Atom.Text;
 
 namespace Atom.SourceGeneration;
 
@@ -19,12 +18,12 @@ public class EnumMember : Entity<EnumMember>
     public override bool IsValid => !string.IsNullOrEmpty(Name);
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params IEnumerable<string> usings)
+    protected override void OnBuildingDeclaration(ref ValueStringBuilder sb, string spaces, params IEnumerable<string> usings)
     {
         if (Value < 0)
             sb.AppendLine($"{spaces}{Name},");
         else
-            sb.AppendLine(CultureInfo.InvariantCulture, $"{spaces}{Name} = {Value},");
+            sb.AppendLine($"{spaces}{Name} = {Value.ToString(CultureInfo.InvariantCulture)},");
     }
 
     /// <inheritdoc/>

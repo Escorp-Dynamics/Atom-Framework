@@ -1,5 +1,4 @@
-using System.Text;
-using Atom.Buffers;
+using Atom.Text;
 
 namespace Atom.Debug.Logging;
 
@@ -50,7 +49,7 @@ public sealed class ScopeContext : IDisposable
 
     private static string ToString(ScopeContext ctx)
     {
-        var sb = ObjectPool<StringBuilder>.Shared.Rent();
+        using var sb = new ValueStringBuilder();
         var current = ctx;
 
         while (current is not null)
@@ -69,9 +68,6 @@ public sealed class ScopeContext : IDisposable
             current = current.Parent;
         }
 
-        var result = sb.ToString();
-        ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
-
-        return result;
+        return sb.ToString();
     }
 }

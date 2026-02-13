@@ -1,37 +1,34 @@
-#pragma warning disable CA5398
+#pragma warning disable CA1054, CA2000, CA2234, S4136, VSTHRD002
 
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Runtime.CompilerServices;
-using System.Security.Authentication;
+using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
-using Atom.Collections;
-using Atom.Net.Https.Headers;
-using Atom.Net.Https.Http;
-using Atom.Net.Tcp;
-using Atom.Net.Tls;
-using Atom.Net.Tls.Extensions;
+using Atom.Net.Proxies;
 
 namespace Atom.Net.Https;
 
 /// <summary>
 /// Представляет средство обмена HTTPS-запросами и ответами с сервером.
+/// В отличие от <see cref="HttpClient"/>, не выбрасывает исключения при ошибках —
+/// информация об ошибке сохраняется в <see cref="HttpsResponseMessage.Exception"/>.
 /// </summary>
-public class HttpsClient : HttpClient
+public class HttpsClient : IDisposable
 {
     /// <summary>
     /// User-Agent клиента по умолчанию.
     /// </summary>
-    public const string DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36 Edg/137.0.0.0";
+    public const string DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-    private volatile HttpsClientHandler handler;
+    private readonly HttpClient client;
+    private readonly HttpClientHandler handler;
     private readonly bool disposeHandler;
-
-    private Traffic traffic;
+    private bool isDisposed;
 
     /// <summary>
-    /// Возвращает или задает контейнер файлов cookie, используемый для хранения файлов cookie сервера обработчиком.
+    /// Возвращает или задаёт контейнер файлов cookie.
     /// </summary>
     public CookieContainer Cookies
     {
@@ -43,7 +40,7 @@ public class HttpsClient : HttpClient
     }
 
     /// <summary>
-    /// Возвращает или задает сведения о прокси-сервере, используемые обработчиком.
+    /// Возвращает или задаёт сведения о прокси-сервере.
     /// </summary>
     public IWebProxy? Proxy
     {
@@ -53,147 +50,59 @@ public class HttpsClient : HttpClient
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         set
         {
-            if (!handler.isFirstRequestSended)
-                handler.Proxy = value;
-            else
-                ResetHandler(value);
+            handler.Proxy = value;
+            handler.UseProxy = value is not null;
         }
     }
 
     /// <summary>
-    /// Возвращает или задает User-Agent клиента.
+    /// Возвращает или задаёт базовый адрес.
     /// </summary>
-    public string UserAgent
+    public Uri? BaseAddress
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get;
+        get => client.BaseAddress;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        set
-        {
-            if (string.IsNullOrEmpty(value)) value = DefaultUserAgent;
-            field = value;
-
-            ResetHandler();
-        }
-    } = DefaultUserAgent;
+        set => client.BaseAddress = value;
+    }
 
     /// <summary>
-    /// Возвращает или задаёт адаптер для UserAgent.
+    /// Возвращает или задаёт таймаут запроса.
     /// </summary>
-    public IUserAgentAdapter? UserAgentAdapter { get; set; } = new UserAgentAdapter();
-
-    /// <summary>
-    /// Общий трафик по всем запросам.
-    /// </summary>
-    public Traffic Traffic => traffic;
-
-    /// <summary>
-    /// Клиент, мимикрирующий под Google Chrome.
-    /// </summary>
-    public static HttpsClient Chrome => new(new HttpsClientHandler
+    public TimeSpan Timeout
     {
-        Http2 = new Http2Settings
-        {
-            HeadersFormattingPolicy = HeadersFormattingPolicy.Chrome,
-            Tls = new TlsSettings
-            {
-                CipherSuites = [
-                    CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-                    CipherSuite.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-                    CipherSuite.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
-                    CipherSuite.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
-                    CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-                    CipherSuite.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-                ],
-                Extensions = [
-                    TlsExtension.Grease,
-                    TlsExtension.ServerName,
-                    TlsExtension.ExtendedMasterSecret,
-                    TlsExtension.RenegotiationInfo,
-                    new SupportedGroupsTlsExtension
-                    {
-                        Groups = [
-                            NamedGroup.X25519,
-                            NamedGroup.Secp256r1,
-                            NamedGroup.Secp384r1,
-                        ],
-                    },
-                    TlsExtension.EcPointFormats,
-                    new SignatureAlgorithmsTlsExtension
-                    {
-                        Algorithms = [
-                            SignatureAlgorithm.EcdsaSecp256r1Sha256,
-                            SignatureAlgorithm.RsaPssRsaeSha256,
-                            SignatureAlgorithm.RsaPkcs1Sha256,
-                            SignatureAlgorithm.EcdsaSecp384r1Sha384,
-                            SignatureAlgorithm.RsaPssRsaeSha384,
-                            SignatureAlgorithm.RsaPkcs1Sha384,
-                            SignatureAlgorithm.RsaPssRsaeSha512,
-                            SignatureAlgorithm.RsaPkcs1Sha512,
-                            SignatureAlgorithm.RsaPkcs1Sha1,
-                            SignatureAlgorithm.EcdsaSha1,
-                        ],
-                    },
-                    TlsExtension.StatusRequest,
-                    TlsExtension.SignedCertificateTimestamp,    // TODO: Не хватает реализации расширения SignedCertificateTimestampTlsExtension.
-                    TlsExtension.SessionTicket,
-                    new AlpnTlsExtension
-                    {
-                        Protocols = [
-                            AlpnTlsExtension.H2,
-                            AlpnTlsExtension.Http11,
-                        ],
-                    },
-                    new SupportedVersionsTlsExtension
-                    {
-                        Versions = [SslProtocols.Tls13, SslProtocols.Tls12],
-                    },
-                    new KeyShareTlsExtension
-                    {
-                        Entries = [
-                            KeyShare.X25519,
-                        ]
-                    },
-                    new PskKeyExchangeModesTlsExtension
-                    {
-                        Modes = [PskKeyExchangeMode.PskDheKe, PskKeyExchangeMode.PskOnly],
-                    },
-                    new PaddingTlsExtension { Length = 0 },
-                ],
-            },
-            Tcp = new TcpSettings
-            {
-                ReceiveBufferSize = 256 * 1024,
-                SendBufferSize = 256 * 1024,
-            },
-        },
-        ClientHelloValidator = ClientHelloValidator.Chrome,
-    });
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => client.Timeout;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        set => client.Timeout = value;
+    }
 
     /// <summary>
-    /// Клиент, мимикрирующий под Microsoft Edge.
+    /// Возвращает заголовки запроса по умолчанию.
     /// </summary>
-    public static HttpsClient Edge => new(new HttpsClientHandler
+    public System.Net.Http.Headers.HttpRequestHeaders DefaultRequestHeaders
     {
-        // TODO: Заполнить для Edge.
-    });
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => client.DefaultRequestHeaders;
+    }
 
     /// <summary>
-    /// Клиент, мимикрирующий под Mozilla Firefox.
+    /// Инициализирует новый экземпляр <see cref="HttpsClient"/>.
     /// </summary>
-    public static HttpsClient Firefox => new(new HttpsClientHandler
-    {
-        // TODO: Заполнить для Firefox.
-    });
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public HttpsClient() : this(new HttpClientHandler(), disposeHandler: true) { }
 
     /// <summary>
-    /// Клиент, мимикрирующий под Apple Safari.
+    /// Инициализирует новый экземпляр <see cref="HttpsClient"/>.
     /// </summary>
-    public static HttpsClient Safari => new(new HttpsClientHandler
+    /// <param name="proxy">Прокси-сервер.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public HttpsClient(Proxy? proxy) : this()
     {
-        // TODO: Заполнить для Safari.
-    });
+        if (proxy is not null) Proxy = proxy;
+    }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="HttpsClient"/>.
@@ -201,196 +110,316 @@ public class HttpsClient : HttpClient
     /// <param name="handler">Обработчик запросов.</param>
     /// <param name="disposeHandler">Указывает, будут ли ресурсы обработчика высвобождены вместе с клиентом.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public HttpsClient(HttpsClientHandler handler, bool disposeHandler)
+    public HttpsClient(HttpClientHandler handler, bool disposeHandler = true)
     {
         this.handler = handler;
         this.disposeHandler = disposeHandler;
+        client = new HttpClient(handler, disposeHandler: false);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd(DefaultUserAgent);
     }
 
-    /// <summary>
-    /// Инициализирует новый экземпляр <see cref="HttpsClient"/>.
-    /// </summary>
-    /// <param name="handler">Обработчик запросов.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public HttpsClient(HttpsClientHandler handler) => this.handler = handler;
+    #region Send Methods
 
     /// <summary>
-    /// Инициализирует новый экземпляр <see cref="HttpsClient"/>.
+    /// Отправляет HTTP-запрос.
     /// </summary>
+    /// <param name="request">Данные запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns>Ответ сервера. Исключения не выбрасываются — информация об ошибке в <see cref="HttpsResponseMessage.Exception"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public HttpsClient() : this(new HttpsClientHandler()) { }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ResetHandler(IWebProxy? proxy = default)
-    {
-#pragma warning disable CA2000
-        var handler = UserAgentAdapter?.CreateHandler(UserAgent) ?? new HttpsClientHandler();
-#pragma warning restore CA2000
-
-        handler.ActivityHeadersPropagator = this.handler.ActivityHeadersPropagator;
-        handler.AllowAutoRedirect = this.handler.AllowAutoRedirect;
-        handler.AutomaticDecompression = this.handler.AutomaticDecompression;
-        handler.CheckCertificateRevocationList = this.handler.CheckCertificateRevocationList;
-        handler.ClientCertificateOptions = this.handler.ClientCertificateOptions;
-        handler.ConnectCallback = this.handler.ConnectCallback;
-        handler.ConnectTimeout = this.handler.ConnectTimeout;
-        handler.CookieContainer = this.handler.CookieContainer;
-        handler.Credentials = this.handler.Credentials;
-        handler.DefaultProxyCredentials = this.handler.DefaultProxyCredentials;
-        handler.Expect100ContinueTimeout = this.handler.Expect100ContinueTimeout;
-        handler.MaxAutomaticRedirections = this.handler.MaxAutomaticRedirections;
-        handler.MaxConnectionsPerServer = this.handler.MaxConnectionsPerServer;
-        handler.MaxRequestContentBufferSize = this.handler.MaxRequestContentBufferSize;
-        handler.MaxResponseDrainSize = this.handler.MaxResponseDrainSize;
-        handler.MaxResponseHeadersLength = this.handler.MaxResponseHeadersLength;
-        handler.MeterFactory = this.handler.MeterFactory;
-        handler.PlaintextStreamFilter = this.handler.PlaintextStreamFilter;
-        handler.PooledConnectionIdleTimeout = this.handler.PooledConnectionIdleTimeout;
-        handler.PooledConnectionLifetime = this.handler.PooledConnectionLifetime;
-        handler.PreAuthenticate = this.handler.PreAuthenticate;
-        handler.Http11 = this.handler.Http11;
-        handler.Http2 = this.handler.Http2;
-        handler.Http3 = this.handler.Http3;
-        handler.Proxy = proxy ?? this.handler.Proxy;
-        handler.RequestHeaderEncodingSelector = this.handler.RequestHeaderEncodingSelector;
-        handler.ResponseDrainTimeout = this.handler.ResponseDrainTimeout;
-        handler.ResponseHeaderEncodingSelector = this.handler.ResponseHeaderEncodingSelector;
-        handler.ServerCertificateCustomValidationCallback = this.handler.ServerCertificateCustomValidationCallback;
-        handler.SslOptions = this.handler.SslOptions;
-        handler.SslProtocols = this.handler.SslProtocols;
-        handler.UseCookies = this.handler.UseCookies;
-        handler.UseDefaultCredentials = this.handler.UseDefaultCredentials;
-        handler.UseProxy = this.handler.UseProxy;
-
-        handler.ClientCertificates.Clear();
-        handler.ClientCertificates.AddRange(this.handler.ClientCertificates);
-
-        handler.Properties.Clear();
-        handler.Properties.AddRange(this.handler.Properties);
-
-        var oldHandler = this.handler;
-        this.handler = handler;
-
-        if (!Interlocked.CompareExchange(ref oldHandler.isReadyForDisposing, value: true, comparand: false) && oldHandler.activeRequests is 0)
-            oldHandler.Dispose();
-    }
-
-    /// <inheritdoc/>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public new virtual async Task<HttpsResponseMessage> SendAsync([NotNull] HttpRequestMessage request, CancellationToken cancellationToken)
+    public virtual async Task<HttpsResponseMessage> SendAsync([NotNull] HttpRequestMessage request, CancellationToken cancellationToken = default)
     {
         var timer = Stopwatch.StartNew();
-        var currentHandler = handler;
 
         try
         {
-            var response = await currentHandler.SendInternalAsync(request, cancellationToken).ConfigureAwait(false);
-            traffic.Add(response.Traffic);
-            return response;
+            var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            return new HttpsResponseMessage(response, timer.Elapsed, exception: null);
         }
         catch (Exception ex)
         {
-            using var response = new HttpResponseMessage() { RequestMessage = request };
-            return new HttpsResponseMessage(response, timer.Elapsed, ex);
-        }
-        finally
-        {
-            if (currentHandler.isReadyForDisposing && currentHandler.activeRequests is 0) currentHandler.Dispose();
+            return HttpsResponseMessage.FromException(request, timer.Elapsed, ex);
         }
     }
 
-    /// <inheritdoc/>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Task<HttpsResponseMessage> SendAsync([NotNull] HttpsRequestBuilder request, CancellationToken cancellationToken)
-        => SendAsync(request.Build(), cancellationToken);
-
-    /// <inheritdoc/>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Task<HttpsResponseMessage> SendAsync(HttpsRequestBuilder request) => SendAsync(request, CancellationToken.None);
-
     /// <summary>
-    /// Осуществляет запрос с десериализацией JSON.
+    /// Отправляет HTTP-запрос.
     /// </summary>
     /// <param name="request">Данные запроса.</param>
-    /// <param name="jsonTypeInfo">Метаданные типа ответа.</param>
+    /// <param name="completionOption">Опция завершения запроса.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    /// <typeparam name="T">Тип ответа.</typeparam>
-    public virtual async Task<HttpsResponseMessage<T>> SendAsync<T>(HttpRequestMessage request, JsonTypeInfo<T> jsonTypeInfo, CancellationToken cancellationToken)
+    /// <returns>Ответ сервера. Исключения не выбрасываются — информация об ошибке в <see cref="HttpsResponseMessage.Exception"/>.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public virtual async Task<HttpsResponseMessage> SendAsync([NotNull] HttpRequestMessage request, HttpCompletionOption completionOption, CancellationToken cancellationToken = default)
     {
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
-        if (!response.IsCompleted) return new HttpsResponseMessage<T>(response, default, default);
-
-        T? data = default;
-        if (response.Content.Headers.ContentLength is 0) return new HttpsResponseMessage<T>(response, data, default);
+        var timer = Stopwatch.StartNew();
 
         try
         {
-            data = await response.Content.AsJsonAsync(jsonTypeInfo).ConfigureAwait(false);
+            var response = await client.SendAsync(request, completionOption, cancellationToken).ConfigureAwait(false);
+            return new HttpsResponseMessage(response, timer.Elapsed, exception: null);
         }
         catch (Exception ex)
         {
-            return new HttpsResponseMessage<T>(response, data, ex);
+            return HttpsResponseMessage.FromException(request, timer.Elapsed, ex);
         }
-
-        return new HttpsResponseMessage<T>(response, data, default);
     }
 
     /// <summary>
-    /// Осуществляет запрос с десериализацией JSON.
+    /// Отправляет HTTP-запрос синхронно.
     /// </summary>
     /// <param name="request">Данные запроса.</param>
-    /// <param name="jsonTypeInfo">Метаданные типа ответа.</param>
-    /// <typeparam name="T">Тип ответа.</typeparam>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    /// <returns>Ответ сервера. Исключения не выбрасываются — информация об ошибке в <see cref="HttpsResponseMessage.Exception"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Task<HttpsResponseMessage<T>> SendAsync<T>(HttpRequestMessage request, JsonTypeInfo<T> jsonTypeInfo)
-        => SendAsync(request, jsonTypeInfo, CancellationToken.None);
+    public virtual HttpsResponseMessage Send([NotNull] HttpRequestMessage request, CancellationToken cancellationToken = default)
+        => SendAsync(request, cancellationToken).GetAwaiter().GetResult();
+
+    #endregion
+
+    #region GET Methods
 
     /// <summary>
-    /// Осуществляет запрос и возвращает данные ответа JSON, десериализованные в коллекцию объектов.
+    /// Отправляет GET-запрос.
+    /// </summary>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Task<HttpsResponseMessage> GetAsync([NotNull] string requestUri, CancellationToken cancellationToken = default)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Get, requestUri), cancellationToken);
+
+    /// <summary>
+    /// Отправляет GET-запрос.
+    /// </summary>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Task<HttpsResponseMessage> GetAsync([NotNull] Uri requestUri, CancellationToken cancellationToken = default)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Get, requestUri), cancellationToken);
+
+    /// <summary>
+    /// Отправляет GET-запрос и возвращает тело ответа как строку.
+    /// </summary>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    public async Task<string> GetStringAsync([NotNull] string requestUri, CancellationToken cancellationToken = default)
+    {
+        using var response = await GetAsync(requestUri, cancellationToken).ConfigureAwait(false);
+        return response.IsCompleted ? await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false) : string.Empty;
+    }
+
+    /// <summary>
+    /// Отправляет GET-запрос и возвращает тело ответа как байты.
+    /// </summary>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    public async Task<byte[]> GetByteArrayAsync([NotNull] string requestUri, CancellationToken cancellationToken = default)
+    {
+        using var response = await GetAsync(requestUri, cancellationToken).ConfigureAwait(false);
+        return response.IsCompleted ? await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false) : [];
+    }
+
+    /// <summary>
+    /// Отправляет GET-запрос и возвращает тело ответа как поток.
+    /// </summary>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    public async Task<Stream> GetStreamAsync([NotNull] string requestUri, CancellationToken cancellationToken = default)
+    {
+        var response = await GetAsync(requestUri, cancellationToken).ConfigureAwait(false);
+        return response.IsCompleted ? await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false) : Stream.Null;
+    }
+
+    #endregion
+
+    #region POST Methods
+
+    /// <summary>
+    /// Отправляет POST-запрос.
+    /// </summary>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="content">Содержимое запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Task<HttpsResponseMessage> PostAsync([NotNull] string requestUri, HttpContent? content, CancellationToken cancellationToken = default)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Post, requestUri) { Content = content }, cancellationToken);
+
+    /// <summary>
+    /// Отправляет POST-запрос.
+    /// </summary>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="content">Содержимое запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Task<HttpsResponseMessage> PostAsync([NotNull] Uri requestUri, HttpContent? content, CancellationToken cancellationToken = default)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Post, requestUri) { Content = content }, cancellationToken);
+
+    #endregion
+
+    #region PUT Methods
+
+    /// <summary>
+    /// Отправляет PUT-запрос.
+    /// </summary>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="content">Содержимое запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Task<HttpsResponseMessage> PutAsync([NotNull] string requestUri, HttpContent? content, CancellationToken cancellationToken = default)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Put, requestUri) { Content = content }, cancellationToken);
+
+    /// <summary>
+    /// Отправляет PUT-запрос.
+    /// </summary>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="content">Содержимое запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Task<HttpsResponseMessage> PutAsync([NotNull] Uri requestUri, HttpContent? content, CancellationToken cancellationToken = default)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Put, requestUri) { Content = content }, cancellationToken);
+
+    #endregion
+
+    #region PATCH Methods
+
+    /// <summary>
+    /// Отправляет PATCH-запрос.
+    /// </summary>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="content">Содержимое запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Task<HttpsResponseMessage> PatchAsync([NotNull] string requestUri, HttpContent? content, CancellationToken cancellationToken = default)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Patch, requestUri) { Content = content }, cancellationToken);
+
+    /// <summary>
+    /// Отправляет PATCH-запрос.
+    /// </summary>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="content">Содержимое запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Task<HttpsResponseMessage> PatchAsync([NotNull] Uri requestUri, HttpContent? content, CancellationToken cancellationToken = default)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Patch, requestUri) { Content = content }, cancellationToken);
+
+    #endregion
+
+    #region DELETE Methods
+
+    /// <summary>
+    /// Отправляет DELETE-запрос.
+    /// </summary>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Task<HttpsResponseMessage> DeleteAsync([NotNull] string requestUri, CancellationToken cancellationToken = default)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Delete, requestUri), cancellationToken);
+
+    /// <summary>
+    /// Отправляет DELETE-запрос.
+    /// </summary>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Task<HttpsResponseMessage> DeleteAsync([NotNull] Uri requestUri, CancellationToken cancellationToken = default)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Delete, requestUri), cancellationToken);
+
+    #endregion
+
+    #region JSON Methods
+
+    /// <summary>
+    /// Отправляет запрос с десериализацией JSON-ответа.
     /// </summary>
     /// <typeparam name="T">Тип данных ответа.</typeparam>
-    /// <param name="request">Параметры запроса.</param>
-    /// <param name="responseTypeInfo">Метаданные типа ответа.</param>
+    /// <param name="request">Данные запроса.</param>
+    /// <param name="jsonTypeInfo">Метаданные типа для сериализации.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    /// <returns>Данные ответа JSON, десериализованные в коллекцию объектов.</returns>
-    public virtual async IAsyncEnumerable<T?> SendAsyncEnumerableAsync<T>(HttpRequestMessage request, JsonTypeInfo<T> responseTypeInfo, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public virtual async Task<HttpsResponseMessage<T>> SendAsync<T>([NotNull] HttpRequestMessage request, JsonTypeInfo<T> jsonTypeInfo, CancellationToken cancellationToken = default)
     {
         using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
-        if (response.Content.Headers.ContentLength is 0) yield break;
 
-        var enumerable = response.Content.AsJsonAsyncEnumerableAsync(responseTypeInfo, cancellationToken).ConfigureAwait(false);
-        var iterator = enumerable.GetAsyncEnumerator();
+        if (!response.IsCompleted)
+            return new HttpsResponseMessage<T>(response, data: default, exception: null);
 
-        await using (iterator)
+        if (response.Content.Headers.ContentLength is 0)
+            return new HttpsResponseMessage<T>(response, data: default, exception: null);
+
+        try
         {
-            while (await iterator.MoveNextAsync())
-                yield return iterator.Current;
+            var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var data = await JsonSerializer.DeserializeAsync(stream, jsonTypeInfo, cancellationToken).ConfigureAwait(false);
+            return new HttpsResponseMessage<T>(response, data, exception: null);
+        }
+        catch (Exception ex)
+        {
+            return new HttpsResponseMessage<T>(response, data: default, ex);
         }
     }
 
     /// <summary>
-    /// Осуществляет запрос и возвращает данные ответа JSON, десериализованные в коллекцию объектов.
+    /// Отправляет GET-запрос с десериализацией JSON-ответа.
     /// </summary>
+    /// <typeparam name="T">Тип данных ответа.</typeparam>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="jsonTypeInfo">Метаданные типа для сериализации.</param>
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Task<HttpsResponseMessage<T>> GetFromJsonAsync<T>([NotNull] string requestUri, JsonTypeInfo<T> jsonTypeInfo, CancellationToken cancellationToken = default)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Get, requestUri), jsonTypeInfo, cancellationToken);
+
+    /// <summary>
+    /// Отправляет POST-запрос с JSON-телом и десериализацией JSON-ответа.
+    /// </summary>
+    /// <typeparam name="TRequest">Тип данных запроса.</typeparam>
     /// <typeparam name="TResponse">Тип данных ответа.</typeparam>
-    /// <param name="request">Параметры запроса.</param>
+    /// <param name="requestUri">URI запроса.</param>
+    /// <param name="value">Данные для отправки.</param>
+    /// <param name="requestTypeInfo">Метаданные типа запроса.</param>
     /// <param name="responseTypeInfo">Метаданные типа ответа.</param>
-    /// <returns>Данные ответа JSON, десериализованные в коллекцию объектов.</returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public IAsyncEnumerable<TResponse?> SendAsyncEnumerableAsync<TResponse>(HttpRequestMessage request, JsonTypeInfo<TResponse> responseTypeInfo) => SendAsyncEnumerableAsync(request, responseTypeInfo, CancellationToken.None);
-
-    /// <inheritdoc/>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public new virtual HttpsResponseMessage Send(HttpRequestMessage request, CancellationToken cancellationToken) => SendAsync(request, cancellationToken).GetAwaiter().GetResult();
-
-    /// <inheritdoc/>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public HttpsResponseMessage Send([NotNull] HttpsRequestBuilder request, CancellationToken cancellationToken) => Send(request.Build(), cancellationToken);
-
-    /// <inheritdoc/>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected override void Dispose(bool disposing)
+    /// <param name="cancellationToken">Токен отмены задачи.</param>
+    public Task<HttpsResponseMessage<TResponse>> PostAsJsonAsync<TRequest, TResponse>(
+        [NotNull] string requestUri,
+        TRequest value,
+        JsonTypeInfo<TRequest> requestTypeInfo,
+        JsonTypeInfo<TResponse> responseTypeInfo,
+        CancellationToken cancellationToken = default)
     {
-        if (disposing && disposeHandler) handler.Dispose();
-        base.Dispose(disposing);
+        var json = JsonSerializer.Serialize(value, requestTypeInfo);
+        var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        var request = new HttpRequestMessage(HttpMethod.Post, requestUri) { Content = content };
+        return SendAsync(request, responseTypeInfo, cancellationToken);
     }
+
+    #endregion
+
+    #region IDisposable
+
+    /// <summary>
+    /// Освобождает ресурсы.
+    /// </summary>
+    public void Dispose()
+    {
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Освобождает ресурсы.
+    /// </summary>
+    /// <param name="disposing">Указывает, освобождаются ли управляемые ресурсы.</param>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (isDisposed) return;
+
+        if (disposing)
+        {
+            client.Dispose();
+            if (disposeHandler) handler.Dispose();
+        }
+
+        isDisposed = true;
+    }
+
+    #endregion
 }

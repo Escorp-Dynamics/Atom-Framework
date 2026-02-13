@@ -41,7 +41,7 @@ public class LoggerFactory : IFactory, ILoggerFactory
     /// <param name="categoryName">Название категории.</param>
     public virtual ILogger CreateLogger(string categoryName)
     {
-        if (loggerProviders.IsEmpty) throw new InvalidOperationException("Не добавлено ни одного провайдера журналов событий.");
+        if (loggerProviders.IsEmpty) throw new InvalidOperationException("Не добавлено ни одного провайдера журналов событий");
 
         if (loggerProviders.Count is 1) return loggerProviders.First().CreateLogger(categoryName);
 
@@ -57,7 +57,7 @@ public class LoggerFactory : IFactory, ILoggerFactory
     /// <param name="path">Путь к файлу журнала.</param>
     public ILogger CreateLogger(string categoryName, string path)
     {
-        if (loggerProviders.IsEmpty) throw new InvalidOperationException("Не добавлено ни одного провайдера журналов событий.");
+        if (loggerProviders.IsEmpty) throw new InvalidOperationException("Не добавлено ни одного провайдера журналов событий");
 
         if (loggerProviders.Count is 1)
         {

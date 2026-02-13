@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Text;
 using Atom.Buffers;
 using Atom.Collections;
+using Atom.Text;
 
 namespace Atom.SourceGeneration;
 
@@ -18,7 +18,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
     private readonly SparseArray<IEntity> others = new(128);
     private bool HasMembers() => !(properties.IsEmpty && events.IsEmpty && methods.IsEmpty && others.IsEmpty);
 
-    private static void AppendMembers<TMember>(StringBuilder sb, int tabs, IEnumerable<TMember> members, params IEnumerable<string> usings)
+    private static void AppendMembers<TMember>(ref ValueStringBuilder sb, int tabs, IEnumerable<TMember> members, params IEnumerable<string> usings)
         where TMember : IEntity
     {
         foreach (var member in members)
@@ -58,7 +58,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
     /// <inheritdoc/>
     public override bool IsValid => !string.IsNullOrEmpty(Name);
 
-    private void AppendGenerics(StringBuilder sb)
+    private void AppendGenerics(ref ValueStringBuilder sb)
     {
         if (generics.IsEmpty) return;
 
@@ -75,7 +75,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
         sb.Append('>');
     }
 
-    private void AppendParents(StringBuilder sb, params IEnumerable<string> usings)
+    private void AppendParents(ref ValueStringBuilder sb, params IEnumerable<string> usings)
     {
         if (parents.IsEmpty) return;
 
@@ -90,7 +90,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
         sb.Remove(sb.Length - 2, 2);
     }
 
-    private void AppendGenericsLimitations(StringBuilder sb)
+    private void AppendGenericsLimitations(ref ValueStringBuilder sb)
     {
         if (generics.IsEmpty) return;
 
@@ -103,7 +103,7 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, params IEnumerable<string> usings)
+    protected override void OnBuildingDeclaration(ref ValueStringBuilder sb, [NotNull] string spaces, params IEnumerable<string> usings)
     {
         var access = AccessModifier.AsString();
         if (!string.IsNullOrEmpty(access)) access += ' ';
@@ -112,9 +112,9 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
         if (IsPartial) sb.Append("partial ");
         sb.Append($"interface {Name}");
 
-        AppendGenerics(sb);
-        AppendParents(sb, usings);
-        AppendGenericsLimitations(sb);
+        AppendGenerics(ref sb);
+        AppendParents(ref sb, usings);
+        AppendGenericsLimitations(ref sb);
 
         if (!HasMembers())
         {
@@ -125,10 +125,10 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
         sb.AppendLine($"\n{spaces}{{");
         var tabs = (spaces.Length / 4) + 1;
 
-        AppendMembers(sb, tabs, properties, usings);
-        AppendMembers(sb, tabs, events, usings);
-        AppendMembers(sb, tabs, methods, usings);
-        AppendMembers(sb, tabs, others, usings);
+        AppendMembers(ref sb, tabs, properties, usings);
+        AppendMembers(ref sb, tabs, events, usings);
+        AppendMembers(ref sb, tabs, methods, usings);
+        AppendMembers(ref sb, tabs, others, usings);
 
         if (sb[^1] is '\n') sb.Remove(sb.Length - 1, 1);
         sb.AppendLine($"{spaces}}}");

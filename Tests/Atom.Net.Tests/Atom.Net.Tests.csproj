@@ -14,7 +14,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="assets/tls/firefox.navigation.linux.desktop.json" />
+    <None Include="assets/tls/firefox.navigation.linux.desktop.json"
+      CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

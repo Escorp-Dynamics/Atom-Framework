@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Text;
 using Atom.Buffers;
+using Atom.Text;
 
 namespace Atom.SourceGeneration;
 
@@ -48,20 +48,20 @@ public class MethodArgumentMember : Entity<MethodArgumentMember>
     public override bool IsValid => !string.IsNullOrEmpty(Name) && !string.IsNullOrEmpty(Type);
 
     /// <inheritdoc/>
-    protected override void OnBuildingComment([NotNull] StringBuilder sb, string spaces)
+    protected override void OnBuildingComment(ref ValueStringBuilder sb, string spaces)
     {
         // Method intentionally left empty.
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingAttributes([NotNull] StringBuilder sb, string spaces)
+    protected override void OnBuildingAttributes(ref ValueStringBuilder sb, string spaces)
     {
         foreach (var attr in Attributes) sb.Append($"[{attr}]");
         if (sb.Length > 0) sb.Append(' ');
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, [NotNull] params IEnumerable<string> usings)
+    protected override void OnBuildingDeclaration(ref ValueStringBuilder sb, string spaces, [NotNull] params IEnumerable<string> usings)
     {
         if (IsIn)
             sb.Append("in ");

@@ -56,7 +56,8 @@
     <None Update="README.md" PackagePath="\" Pack="true" />
   </ItemGroup>
 
-  <Target Name="PublishPackages" AfterTargets="Pack" Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
+  <Target Name="PublishPackages" AfterTargets="Pack"
+    Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
     <PropertyGroup>
       <PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
     </PropertyGroup>

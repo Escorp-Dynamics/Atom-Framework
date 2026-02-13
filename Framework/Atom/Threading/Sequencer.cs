@@ -1,11 +1,10 @@
-﻿#pragma warning disable CS0649
+﻿#pragma warning disable CS0649, MA0051
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Atom.Buffers;
-using Atom.Collections;
 
 namespace Atom.Threading;
 
@@ -16,12 +15,18 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 {
     private sealed class TaskState
     {
+        /// <summary>
+        /// ExecutionContext, захваченный при добавлении задачи.
+        /// Используется для передачи контекста логирования (ILogger scopes) и других
+        /// ambient-данных из потока, добавившего задачу, в поток таймера.
+        /// </summary>
         public ExecutionContext? Context;
         public SequenceMode OriginalMode;
         public SequenceMode Mode;
         public long Counter;
         public bool IsPaused;
         public bool IsCustomCondition;
+        public bool IsScheduled; // Флаг для оптимизации EnqueueOnce - O(1) вместо O(n)
         public long MinInterval;
         public long LastExecutionTime;
     }
@@ -188,9 +193,12 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
 
         if (Volatile.Read(ref state.IsPaused)) return default;
 
-        // используйте StopwatchTicks (см. ниже в рекомендациях)
         if (minInterval is not 0 && (NowTicks() - lastExecutionTime) < minInterval) return default;
 
+        // Восстанавливаем ExecutionContext, захваченный при добавлении задачи.
+        // Это необходимо для корректной работы логирования (ILogger scopes) и других
+        // контекстно-зависимых механизмов — без этого данные из scope логера внешнего
+        // потока не будут доступны в потоке таймера.
         if (state.Context is not null) ExecutionContext.Restore(state.Context);
 
         if (Sequence.On(this, args => { args.Task = task; args.Mode = state.Mode; }))
@@ -206,7 +214,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void UpdateTimer()
     {
-        if (tasks.IsEmpty)
+        if (tasks.IsEmpty || !Volatile.Read(ref isRunning))
         {
             timer.Change(Timeout.Infinite, Timeout.Infinite);
             return;
@@ -225,16 +233,26 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
         // Снимок «сколько максимум попыток сделать за тик»
         var maxProbe = Math.Max(1, tasks.Count); // ConcurrentDictionary.Count O(1)
 
+
         for (var i = 0; i < maxProbe; i++)
         {
-            if (!sequence.TryDequeue(out var task)) break;
+            if (!sequence.TryDequeue(out var task))
+            {
+                break;
+            }
             if (!tasks.TryGetValue(task, out var taskState)) continue;
+
+
+            // Сбрасываем флаг IsScheduled - задача извлечена из очереди
+            Interlocked.Exchange(ref taskState.IsScheduled, value: false);
 
             // возвращаем true, только если реально запустили
             if (ProcessTask(task, taskState))
-                break; // не исполнилась — к хвосту и пробуем следующую
+                break;
 
-            sequence.EnqueueOnce(task); // не исполнилась — к хвосту и пробуем следующую
+            // Задача не выполнилась (пауза или не прошёл minInterval) — возвращаем в очередь
+            Interlocked.Exchange(ref taskState.IsScheduled, value: true);
+            sequence.Enqueue(task);
         }
 
         UpdateTimer();
@@ -259,7 +277,11 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     private async Task ExecuteAsync(Func<ValueTask> task)
     {
         if (!tasks.TryGetValue(task, out var state)) return;
-        if (state.Mode is SequenceMode.Loop) UpdateLoopMode(task, state);
+
+        var modeAtStart = state.Mode;
+
+        // Loop режим: сразу планируем следующее выполнение (не ждём завершения)
+        if (modeAtStart is SequenceMode.Loop) UpdateLoopMode(task, state);
 
         Interlocked.Increment(ref inFlight);
 
@@ -276,29 +298,57 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
             Interlocked.Decrement(ref inFlight);
         }
 
-        if (!tasks.TryGetValue(task, out state)) return;
+        if (!tasks.TryGetValue(task, out state))
+        {
+            return;
+        }
+
 
         if (state.Mode is SequenceMode.Once)
         {
             Remove(task);
         }
-        else if (state.Mode is SequenceMode.Loop)
+        else if (modeAtStart is SequenceMode.Loop)
         {
-            UpdateLoopMode(task, state);
+            // Режим был Loop при старте — уже обработали через UpdateLoopMode в начале
+            // Но если режим изменился на LoopWithWaiting во время выполнения, нужно перепланировать
+            if (state.Mode is SequenceMode.LoopWithWaiting)
+            {
+                Interlocked.Exchange(ref state.LastExecutionTime, NowTicks());
+                ScheduleTask(task, state.Mode);
+            }
         }
         else
         {
-            Interlocked.Exchange(ref state.LastExecutionTime, NowTicks());
-            ScheduleTask(task, state.Mode);
+            // Режим был LoopWithWaiting при старте — планируем после завершения
+            // Если режим изменился на Loop, используем UpdateLoopMode
+            if (state.Mode is SequenceMode.Loop)
+            {
+                UpdateLoopMode(task, state);
+            }
+            else
+            {
+                Interlocked.Exchange(ref state.LastExecutionTime, NowTicks());
+                ScheduleTask(task, state.Mode);
+            }
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ScheduleTask(Func<ValueTask> task, SequenceMode mode, bool update = true)
     {
-        if (!tasks.ContainsKey(task)) return;
+        if (!tasks.TryGetValue(task, out var state))
+        {
+            return;
+        }
 
-        sequence.EnqueueOnce(task);
+        // Атомарно проверяем и устанавливаем флаг IsScheduled - O(1) вместо O(n) Contains
+        if (Interlocked.CompareExchange(ref state.IsScheduled, value: true, comparand: false))
+        {
+            return; // Уже в очереди
+        }
+
+        sequence.Enqueue(task);
         if (update) Updated.On(this, args => { args.Task = task; args.Mode = mode; });
     }
 
@@ -311,20 +361,20 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Add(Func<ValueTask> task, SequenceMode mode, TimeSpan minInterval)
     {
-        if (tasks.ContainsKey(task)) return;
-
         var isEmpty = tasks.IsEmpty;
 
-        if (!tasks.TryAdd(task, new TaskState { Context = ExecutionContext.Capture(), OriginalMode = mode, Mode = mode, MinInterval = minInterval.Ticks, LastExecutionTime = NowTicks() - minInterval.Ticks }))
+        // TryAdd атомарно проверяет наличие и добавляет
+        // Если задача уже существует - просто выходим (это не ошибка)
+        if (!tasks.TryAdd(task, new TaskState
         {
-            Failed.On(this, args =>
-            {
-                args.Task = task;
-                args.Mode = mode;
-                args.Exception = new InvalidOperationException("Не удалось добавить задачу");
-            });
-
-            return;
+            Context = ExecutionContext.Capture(),
+            OriginalMode = mode,
+            Mode = mode,
+            MinInterval = minInterval.Ticks,
+            LastExecutionTime = NowTicks() - minInterval.Ticks,
+        }))
+        {
+            return;  // Задача уже существует - это нормальная ситуация
         }
 
         Interlocked.Increment(ref activeTasks);  // новая задача активна
@@ -460,29 +510,23 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     {
         foreach (var task in tasks)
         {
-            if (!this.tasks.ContainsKey(task)) continue;
+            // Атомарно пытаемся удалить задачу
+            // Если задача уже удалена или не существует - это нормальная ситуация при параллельном доступе
+            if (!this.tasks.TryRemove(task, out var state)) continue;
 
-            if (this.tasks.TryRemove(task, out var state))
+            if (!Volatile.Read(ref state.IsPaused)) Interlocked.Decrement(ref activeTasks);
+
+            // Сбрасываем флаги для чистоты (на случай повторного добавления с тем же делегатом)
+            state.IsCustomCondition = default;
+            Interlocked.Exchange(ref state.IsScheduled, value: false);
+
+            signal.Send(task);
+
+            if (Removed.On(this, args => { args.Task = task; args.Mode = state.Mode; }) && this.tasks.IsEmpty)
             {
-                if (!Volatile.Read(ref state.IsPaused)) Interlocked.Decrement(ref activeTasks);
-
-                state.IsCustomCondition = default;
-                signal.Send(task);
-
-                if (Removed.On(this, args => { args.Task = task; args.Mode = state.Mode; }) && this.tasks.IsEmpty)
-                {
-                    timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-                    sequence.Clear();
-                }
-
-                continue;
+                timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+                sequence.Clear();
             }
-
-            Failed.On(this, args =>
-            {
-                args.Task = task;
-                args.Exception = new InvalidOperationException("Не удалось удалить задачу");
-            });
         }
     }
 
@@ -515,22 +559,29 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Resume([NotNull] params IEnumerable<Func<ValueTask>> tasks)
     {
-        var needStart = false;
+        var anyResumed = false;
 
         foreach (var task in tasks)
         {
             if (!this.tasks.TryGetValue(task, out var state)) continue;
             if (!Interlocked.CompareExchange(ref state.IsPaused, value: false, comparand: true)) continue;
 
-            signal.Send(task);
+            anyResumed = true;
 
-            // если до инкремента было 0, то это первый активный
-            if (Interlocked.Increment(ref activeTasks) is 1) needStart = true;
+            // Добавляем задачу обратно в очередь выполнения
+            // Это критично для режима LoopWithWaiting, где задача извлекается из очереди
+            // после выполнения и добавляется обратно только после завершения
+            ScheduleTask(task, state.Mode);
+
+            signal.Send(task);
+            Interlocked.Increment(ref activeTasks);
 
             Resumed.On(this, args => { args.Task = task; args.Mode = state.Mode; });
         }
 
-        if (needStart) UpdateTimer(); // уважает MergedRepetitions
+        // Всегда перезапускаем таймер если хотя бы одна задача снята с паузы
+        // Таймер мог быть остановлен в Pause когда activeTasks стал 0
+        if (anyResumed) UpdateTimer();
     }
 
     /// <summary>
@@ -604,11 +655,27 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     public void Stop(bool isClearPool)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed), this);
+        StopInternal(isClearPool);
+    }
 
-        if (!Interlocked.CompareExchange(ref isRunning, default, Volatile.Read(ref isRunning))) return;
-        if (!timer.Change(Timeout.Infinite, Timeout.Infinite)) Interlocked.Exchange(ref isRunning, value: true);
+    /// <summary>
+    /// Останавливает выполнение задач в секвенции, очищая пул.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Stop() => Stop(isClearPool: true);
 
-        if (Volatile.Read(ref isRunning)) return;
+    /// <summary>
+    /// Внутренняя логика остановки без проверки isDisposed.
+    /// Используется из Dispose() и публичного Stop().
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void StopInternal(bool isClearPool)
+    {
+        // Атомарно пытаемся перевести isRunning из true в false
+        if (!Interlocked.CompareExchange(ref isRunning, value: false, comparand: true)) return;
+
+        // Останавливаем таймер
+        timer.Change(Timeout.Infinite, Timeout.Infinite);
 
         if (isClearPool)
         {
@@ -621,23 +688,26 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Останавливает выполнение задач в секвенции, очищая пул.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Stop() => Stop(isClearPool: true);
-
-    /// <summary>
     /// Асинхронно ожидает, пока таймер не будет выключен.
     /// </summary>
     /// <param name="task">Делегат, наличие которого ожидается.</param>
     /// <param name="timeout">Таймаут ожидания.</param>
     /// <param name="cancellationToken">Токен отмены для отслеживания запросов на отмену.</param>
-    /// <returns>True, если секвенсор был остановлен на глобальном уровне, иначе false.</returns>
+    /// <returns>True, если секвенсор был остановлен на глобальном уровне, false если задача была удалена.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public async ValueTask<bool> WaitAsync(Func<ValueTask> task, TimeSpan timeout, CancellationToken cancellationToken)
     {
-        using (var awaiter = new Wait<Func<ValueTask>>(signal, task)) await awaiter.LockUntilAsync(() => !Volatile.Read(ref isRunning) || Volatile.Read(ref isDisposed) || !tasks.ContainsKey(task), timeout, cancellationToken).ConfigureAwait(false);
+        using (var awaiter = new Wait<Func<ValueTask>>(signal, task))
+        {
+            await awaiter.LockUntilAsync(() =>
+                !Volatile.Read(ref isRunning) ||
+                Volatile.Read(ref isDisposed) ||
+                !tasks.ContainsKey(task), timeout, cancellationToken).ConfigureAwait(false);
+        }
 
+        // Если задачи больше нет в словаре — она была удалена → возвращаем false
+        // Если задача есть, но секвенсор остановлен — возвращаем true
+        if (!tasks.ContainsKey(task)) return false;
         return !Volatile.Read(ref isRunning);
     }
 
@@ -746,19 +816,19 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     {
         if (!tasks.TryGetValue(task, out var state)) return !Volatile.Read(ref isRunning);
         state.IsCustomCondition = true;
-        var isCondition = false;
+        var isConditionMet = false;
 
         using (var awaiter = new Wait<Func<ValueTask>>(signal, task))
         {
             await awaiter.LockUntilAsync(() =>
             {
-                isCondition = !condition();
-                if (isCondition) Remove(task);
-                return !Volatile.Read(ref isRunning) || !tasks.ContainsKey(task) || Volatile.Read(ref isDisposed) || isCondition;
+                isConditionMet = condition();
+                if (isConditionMet) Remove(task);
+                return !Volatile.Read(ref isRunning) || !tasks.ContainsKey(task) || Volatile.Read(ref isDisposed) || isConditionMet;
             }, timeout, cancellationToken).ConfigureAwait(false);
         }
 
-        return !Volatile.Read(ref isRunning) || isCondition;
+        return !Volatile.Read(ref isRunning) || isConditionMet;
     }
 
     /// <summary>
@@ -896,8 +966,13 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     {
         if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
 
-        Stop();
-        Wait.Until(() => Volatile.Read(ref inFlight) is 0);
+        StopInternal(isClearPool: false);
+
+        // Ожидаем завершения in-flight задач с разумным таймаутом.
+        // Используем 10 * Interval или минимум 1 секунду, чтобы дать задачам время завершиться,
+        // но не блокировать бесконечно в случае thread starvation.
+        var timeout = Math.Max((int)Interval.TotalMilliseconds * 10, 1000);
+        Wait.Until(() => Volatile.Read(ref inFlight) is 0, timeout);
 
         timer.Dispose();
 
@@ -912,7 +987,7 @@ public sealed class Sequencer : IDisposable, IAsyncDisposable
     {
         if (Interlocked.CompareExchange(ref isDisposed, value: true, default)) return;
 
-        Stop();
+        StopInternal(isClearPool: false);
         await Wait.UntilAsync(() => Volatile.Read(ref inFlight) is 0).ConfigureAwait(false);
 
         await timer.DisposeAsync().ConfigureAwait(false);

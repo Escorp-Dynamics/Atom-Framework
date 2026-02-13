@@ -1,0 +1,81 @@
+#pragma warning disable CA1024
+
+namespace Atom.Media;
+
+/// <summary>
+/// Фабрика для создания demuxer/muxer.
+/// </summary>
+public static class ContainerFactory
+{
+    private static readonly Dictionary<string, Func<IDemuxer>> demuxerFactories = [];
+    private static readonly Dictionary<string, Func<IMuxer>> muxerFactories = [];
+
+    /// <summary>
+    /// Регистрирует demuxer для формата.
+    /// </summary>
+    public static void RegisterDemuxer(string formatName, Func<IDemuxer> factory)
+    {
+        ArgumentNullException.ThrowIfNull(formatName);
+        demuxerFactories[formatName.ToLowerInvariant()] = factory;
+    }
+
+    /// <summary>
+    /// Регистрирует muxer для формата.
+    /// </summary>
+    public static void RegisterMuxer(string formatName, Func<IMuxer> factory)
+    {
+        ArgumentNullException.ThrowIfNull(formatName);
+        muxerFactories[formatName.ToLowerInvariant()] = factory;
+    }
+
+    /// <summary>
+    /// Создаёт demuxer для формата.
+    /// </summary>
+    public static IDemuxer? CreateDemuxer(string formatName)
+    {
+        ArgumentNullException.ThrowIfNull(formatName);
+        return demuxerFactories.TryGetValue(formatName.ToLowerInvariant(), out var factory) ? factory() : null;
+    }
+
+    /// <summary>
+    /// Создаёт muxer для формата.
+    /// </summary>
+    public static IMuxer? CreateMuxer(string formatName)
+    {
+        ArgumentNullException.ThrowIfNull(formatName);
+        return muxerFactories.TryGetValue(formatName.ToLowerInvariant(), out var factory) ? factory() : null;
+    }
+
+    /// <summary>
+    /// Определяет формат по расширению файла.
+    /// </summary>
+    public static string? GetFormatFromExtension(string extension)
+    {
+        ArgumentNullException.ThrowIfNull(extension);
+        return extension.ToLowerInvariant() switch
+        {
+            ".mp4" or ".m4v" or ".m4a" => "mp4",
+            ".webm" => "webm",
+            ".mkv" => "matroska",
+            ".avi" => "avi",
+            ".mov" => "mov",
+            ".ts" or ".m2ts" => "mpegts",
+            ".flv" => "flv",
+            ".ogg" or ".ogv" or ".oga" => "ogg",
+            ".wav" => "wav",
+            ".mp3" => "mp3",
+            ".flac" => "flac",
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Возвращает зарегистрированные форматы demuxer.
+    /// </summary>
+    public static IEnumerable<string> GetRegisteredDemuxers() => demuxerFactories.Keys;
+
+    /// <summary>
+    /// Возвращает зарегистрированные форматы muxer.
+    /// </summary>
+    public static IEnumerable<string> GetRegisteredMuxers() => muxerFactories.Keys;
+}

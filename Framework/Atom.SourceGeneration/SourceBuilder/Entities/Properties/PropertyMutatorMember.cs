@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Text;
 using Atom.Buffers;
 using Atom.Text;
 
@@ -36,13 +35,13 @@ public class PropertyMutatorMember : Entity<PropertyMutatorMember>
     public PropertyMutatorMember() => Name = "set";
 
     /// <inheritdoc/>
-    protected override void OnBuildingComment([NotNull] StringBuilder sb, string spaces)
+    protected override void OnBuildingComment(ref ValueStringBuilder sb, string spaces)
     {
         // Method intentionally left empty.
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params IEnumerable<string> usings)
+    protected override void OnBuildingDeclaration(ref ValueStringBuilder sb, string spaces, params IEnumerable<string> usings)
     {
         var access = AccessModifier.AsString(ParentAccessModifier);
         if (!string.IsNullOrEmpty(access)) access += ' ';

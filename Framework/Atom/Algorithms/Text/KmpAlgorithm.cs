@@ -1,4 +1,4 @@
-using Atom.Buffers;
+using System.Buffers;
 
 namespace Atom.Algorithms.Text;
 
@@ -14,9 +14,9 @@ public class KmpAlgorithm : TextAlgorithm
     /// <param name="target">Входная подстрока.</param>
     /// <param name="comparison">Параметр сравнения строк.</param>
     /// <returns>Массив длинных совпадающих префиксов и суффиксов (LPS) для подстроки.</returns>
-    protected virtual unsafe ReadOnlySpan<int> BuildPrefixFunction(ReadOnlySpan<char> target, StringComparison comparison)
+    protected virtual unsafe int[] BuildPrefixFunction(ReadOnlySpan<char> target, StringComparison comparison)
     {
-        var prefixFunction = SpanPool<int>.Shared.Rent(target.Length);
+        var prefixFunction = ArrayPool<int>.Shared.Rent(target.Length);
 
         var length = 0;
         var i = 1;
@@ -114,7 +114,7 @@ public class KmpAlgorithm : TextAlgorithm
             }
         }
 
-        SpanPool<int>.Shared.Return(prefixFunction);
+        ArrayPool<int>.Shared.Return(prefixFunction);
         return count;
     }
 
@@ -158,7 +158,7 @@ public class KmpAlgorithm : TextAlgorithm
             }
         }
 
-        SpanPool<int>.Shared.Return(prefixFunction);
+        ArrayPool<int>.Shared.Return(prefixFunction);
         return isFound;
     }
 }

@@ -1,8 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Text;
-using Atom.Buffers;
 using Atom.Collections;
+using Atom.Text;
 
 namespace Atom.SourceGeneration;
 
@@ -44,7 +43,7 @@ public abstract class Entity : IEntity
     /// <param name="sb">Сборщик строки.</param>
     /// <param name="spaces">Отступ.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected virtual void OnBuildingComment([NotNull] StringBuilder sb, string spaces)
+    protected virtual void OnBuildingComment(ref ValueStringBuilder sb, string spaces)
     {
         if (string.IsNullOrEmpty(Comment)) return;
 
@@ -65,7 +64,7 @@ public abstract class Entity : IEntity
     /// <param name="sb">Сборщик строки.</param>
     /// <param name="spaces">Отступ.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected virtual void OnBuildingAttributes([NotNull] StringBuilder sb, string spaces)
+    protected virtual void OnBuildingAttributes(ref ValueStringBuilder sb, string spaces)
     {
         foreach (var attr in Attributes) sb.AppendLine($"{spaces}[{attr}]");
     }
@@ -76,7 +75,7 @@ public abstract class Entity : IEntity
     /// <param name="sb">Сборщик строки.</param>
     /// <param name="spaces">Отступ.</param>
     /// <param name="usings">Используемые пространства имён.</param>
-    protected abstract void OnBuildingDeclaration([NotNull] StringBuilder sb, string spaces, params IEnumerable<string> usings);
+    protected abstract void OnBuildingDeclaration(ref ValueStringBuilder sb, string spaces, params IEnumerable<string> usings);
 
     /// <inheritdoc/>
     public virtual string? Build(int tabs, bool release, params IEnumerable<string> usings)
@@ -88,14 +87,14 @@ public abstract class Entity : IEntity
         }
 
         var spaces = GetSpaces(tabs);
-        var sb = ObjectPool<StringBuilder>.Shared.Rent();
+        var sb = new ValueStringBuilder();
 
-        OnBuildingComment(sb, spaces);
-        OnBuildingAttributes(sb, spaces);
-        OnBuildingDeclaration(sb, spaces, usings);
+        OnBuildingComment(ref sb, spaces);
+        OnBuildingAttributes(ref sb, spaces);
+        OnBuildingDeclaration(ref sb, spaces, usings);
 
         var result = sb.ToString();
-        ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
+        sb.Dispose();
         if (release) Release();
 
         return result;

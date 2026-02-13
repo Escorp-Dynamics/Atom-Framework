@@ -1,3 +1,4 @@
+using Atom.SourceGeneration.Tests;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Testing;
 using Microsoft.CodeAnalysis.Testing;
@@ -40,7 +41,7 @@ public class ReactiveFieldSyntaxProviderTests(ILogger logger) : BenchmarkTests<R
         {
             TestState =
             {
-                ReferenceAssemblies = ReferenceAssemblies.Net.Net90,
+                ReferenceAssemblies = TestReferenceAssemblies.Net10_0,
                 Sources = { source! },
                 AdditionalReferences =
                 {
@@ -75,7 +76,7 @@ public class ReactiveFieldSyntaxProviderTests(ILogger logger) : BenchmarkTests<R
         {
             TestState =
             {
-                ReferenceAssemblies = ReferenceAssemblies.Net.Net90,
+                ReferenceAssemblies = TestReferenceAssemblies.Net10_0,
                 Sources = { source! },
                 GeneratedSources = { (typeof(ReactivelySourceGenerator), "VirtualCamera.Reactively.g.cs", reference!) },
                 AdditionalReferences =

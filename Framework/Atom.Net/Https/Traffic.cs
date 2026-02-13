@@ -1,8 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text;
-using Atom.Buffers;
+using Atom.Text;
 
 namespace Atom.Net.Https;
 
@@ -103,7 +102,7 @@ public struct Traffic : IEquatable<Traffic>
 
         if (input is 0 && output is 0) return string.Empty;
 
-        var sb = ObjectPool<StringBuilder>.Shared.Rent();
+        using var sb = new ValueStringBuilder();
 
         if (input > 0) sb.Append("↑ ").Append(Format(input));
 
@@ -113,10 +112,7 @@ public struct Traffic : IEquatable<Traffic>
             sb.Append("↓ ").Append(Format(output));
         }
 
-        var result = sb.ToString();
-        ObjectPool<StringBuilder>.Shared.Return(sb, x => x.Clear());
-
-        return result;
+        return sb.ToString();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

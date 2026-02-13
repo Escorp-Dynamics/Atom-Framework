@@ -170,6 +170,274 @@ public class ZstdStreamTests(ILogger logger) : BenchmarkTests<ZstdStreamTests>(l
         Assert.That(plain, Is.EqualTo(payload), "Skippable blocks handling failed");
     }
 
+    /// <summary>
+    /// Тест асинхронного API для записи и чтения.
+    /// </summary>
+    [Test]
+    public async Task AsyncWriteReadTest()
+    {
+        var data = DataFactory.GenerateText(65536);
+
+        using var compressed = new MemoryStream();
+        await using (var zstd = new ZstdStream(compressed, compressionLevel: 3, leaveOpen: true))
+        {
+            await zstd.WriteAsync(data);
+            await zstd.FlushAsync();
+        }
+
+        compressed.Position = 0;
+
+        using var decompressed = new MemoryStream();
+        await using (var zstd = new ZstdStream(compressed, System.IO.Compression.CompressionMode.Decompress, leaveOpen: true))
+        {
+            var buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = await zstd.ReadAsync(buffer)) > 0)
+            {
+                await decompressed.WriteAsync(buffer.AsMemory(0, bytesRead));
+            }
+        }
+
+        Assert.That(decompressed.ToArray(), Is.EqualTo(data), "Async roundtrip failed");
+    }
+
+    /// <summary>
+    /// Тест Content Checksum: проверяем, что включённый checksum записывается и проверяется.
+    /// </summary>
+    [Test]
+    public void ContentChecksumEnabledTest()
+    {
+        var data = DataFactory.GenerateRandom(32768);
+
+        using var compressed = new MemoryStream();
+        using (var zstd = new ZstdStream(compressed, compressionLevel: 3, leaveOpen: true)
+        {
+            IsContentChecksumEnabled = true
+        })
+        {
+            zstd.Write(data);
+        }
+
+        var compressedBytes = compressed.ToArray();
+
+        // Zstd frame с checksum должен быть как минимум +4 байта (xxHash64 low 4 LE)
+        Assert.That(compressedBytes.Length, Is.GreaterThan(4 + 3), "Frame too small for checksum");
+
+        // Проверяем, что распаковка работает
+        compressed.Position = 0;
+        using var decompressed = new MemoryStream();
+        using (var zstd = new ZstdStream(compressed, System.IO.Compression.CompressionMode.Decompress, leaveOpen: true))
+        {
+            var buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = zstd.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                decompressed.Write(buffer, 0, bytesRead);
+            }
+        }
+
+        Assert.That(decompressed.ToArray(), Is.EqualTo(data), "Checksum roundtrip failed");
+    }
+
+    /// <summary>
+    /// Тест различных уровней сжатия от 0 до 9.
+    /// </summary>
+    [TestCase(0)]
+    [TestCase(1)]
+    [TestCase(3)]
+    [TestCase(6)]
+    [TestCase(9)]
+    public void CompressionLevelTest(int level)
+    {
+        var data = DataFactory.GenerateText(16384);
+
+        using var compressed = new MemoryStream();
+        using (var zstd = new ZstdStream(compressed, compressionLevel: level, leaveOpen: true))
+        {
+            zstd.Write(data);
+        }
+
+        compressed.Position = 0;
+
+        using var decompressed = new MemoryStream();
+        using (var zstd = new ZstdStream(compressed, System.IO.Compression.CompressionMode.Decompress, leaveOpen: true))
+        {
+            var buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = zstd.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                decompressed.Write(buffer, 0, bytesRead);
+            }
+        }
+
+        Assert.That(decompressed.ToArray(), Is.EqualTo(data), $"Level {level} roundtrip failed");
+    }
+
+    /// <summary>
+    /// Тест пустых данных.
+    /// </summary>
+    [Test]
+    public void EmptyDataTest()
+    {
+        var data = Array.Empty<byte>();
+
+        using var compressed = new MemoryStream();
+        using (var zstd = new ZstdStream(compressed, compressionLevel: 3, leaveOpen: true))
+        {
+            zstd.Write(data);
+        }
+
+        compressed.Position = 0;
+
+        using var decompressed = new MemoryStream();
+        using (var zstd = new ZstdStream(compressed, System.IO.Compression.CompressionMode.Decompress, leaveOpen: true))
+        {
+            var buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = zstd.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                decompressed.Write(buffer, 0, bytesRead);
+            }
+        }
+
+        Assert.That(decompressed.ToArray(), Is.EqualTo(data), "Empty data roundtrip failed");
+    }
+
+    /// <summary>
+    /// Тест однобайтовых данных.
+    /// </summary>
+    [Test]
+    public void SingleByteTest()
+    {
+        var data = "B"u8.ToArray();
+
+        using var compressed = new MemoryStream();
+        using (var zstd = new ZstdStream(compressed, compressionLevel: 3, leaveOpen: true))
+        {
+            zstd.Write(data);
+        }
+
+        compressed.Position = 0;
+
+        using var decompressed = new MemoryStream();
+        using (var zstd = new ZstdStream(compressed, System.IO.Compression.CompressionMode.Decompress, leaveOpen: true))
+        {
+            var buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = zstd.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                decompressed.Write(buffer, 0, bytesRead);
+            }
+        }
+
+        Assert.That(decompressed.ToArray(), Is.EqualTo(data), "Single byte roundtrip failed");
+    }
+
+    /// <summary>
+    /// Тест данных, полностью состоящих из одного байта (RLE-оптимизация).
+    /// </summary>
+    [Test]
+    public void RleBlockTest()
+    {
+        var data = new byte[65536];
+        Array.Fill(data, (byte)0xAB);
+
+        using var compressed = new MemoryStream();
+        using (var zstd = new ZstdStream(compressed, compressionLevel: 3, leaveOpen: true))
+        {
+            zstd.Write(data);
+        }
+
+        // RLE-блок должен быть очень компактным
+        Assert.That(compressed.Length, Is.LessThan(100), "RLE compression not effective");
+
+        compressed.Position = 0;
+
+        using var decompressed = new MemoryStream();
+        using (var zstd = new ZstdStream(compressed, System.IO.Compression.CompressionMode.Decompress, leaveOpen: true))
+        {
+            var buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = zstd.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                decompressed.Write(buffer, 0, bytesRead);
+            }
+        }
+
+        Assert.That(decompressed.ToArray(), Is.EqualTo(data), "RLE roundtrip failed");
+    }
+
+    /// <summary>
+    /// Тест свойств потока CanRead/CanWrite в разных режимах.
+    /// </summary>
+    [Test]
+    public void StreamPropertiesTest()
+    {
+        using var ms = new MemoryStream();
+
+        using (var compress = new ZstdStream(ms, compressionLevel: 3, leaveOpen: true))
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(compress.CanWrite, Is.True, "Compress stream should be writable");
+                Assert.That(compress.CanRead, Is.False, "Compress stream should not be readable");
+                Assert.That(compress.CanSeek, Is.False, "Zstd stream should not be seekable");
+            });
+        }
+
+        ms.Position = 0;
+        // Запишем минимальный валидный frame
+        ms.SetLength(0);
+        using (var zstd = new ZstdStream(ms, compressionLevel: 0, leaveOpen: true))
+        {
+            zstd.Write([]);
+        }
+
+        ms.Position = 0;
+
+        using var decompress = new ZstdStream(ms, System.IO.Compression.CompressionMode.Decompress, leaveOpen: true);
+        Assert.Multiple(() =>
+        {
+            Assert.That(decompress.CanRead, Is.True, "Decompress stream should be readable");
+            Assert.That(decompress.CanWrite, Is.False, "Decompress stream should not be writable");
+            Assert.That(decompress.CanSeek, Is.False, "Zstd stream should not be seekable");
+        });
+    }
+
+    /// <summary>
+    /// Тест размера окна - проверяем, что большие данные корректно обрабатываются.
+    /// </summary>
+    [Test]
+    public void WindowSizeTest()
+    {
+        // Данные больше размера блока (128KB) для проверки межблочной истории
+        var data = DataFactory.GenerateText(512 * 1024);
+
+        using var compressed = new MemoryStream();
+        using (var zstd = new ZstdStream(compressed, compressionLevel: 3, leaveOpen: true)
+        {
+            WindowSize = 4 * 1024 * 1024 // 4 МБ окно
+        })
+        {
+            zstd.Write(data);
+        }
+
+        compressed.Position = 0;
+
+        using var decompressed = new MemoryStream();
+        using (var zstd = new ZstdStream(compressed, System.IO.Compression.CompressionMode.Decompress, leaveOpen: true))
+        {
+            var buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = zstd.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                decompressed.Write(buffer, 0, bytesRead);
+            }
+        }
+
+        Assert.That(decompressed.ToArray(), Is.EqualTo(data), "Large data roundtrip failed");
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static IEnumerable<TestCaseData> GetTestData(string testName, bool ioChunksEnabled = true)
     {

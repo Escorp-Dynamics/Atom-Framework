@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Text;
 using Atom.Buffers;
+using Atom.Text;
 
 namespace Atom.SourceGeneration;
 
@@ -48,7 +48,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     /// <inheritdoc/>
     public override bool IsValid => !string.IsNullOrEmpty(Name) && (Getter is not null || Setter is not null) && !string.IsNullOrEmpty(Type);
 
-    private void AppendModifiers(StringBuilder sb, string spaces)
+    private void AppendModifiers(ref ValueStringBuilder sb, string spaces)
     {
         var access = AccessModifier.AsString();
         if (!string.IsNullOrEmpty(access)) access += ' ';
@@ -75,7 +75,7 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
         if (IsReadOnly) sb.Append("readonly ");
     }
 
-    private void AppendAccessors(StringBuilder sb, string spaces)
+    private void AppendAccessors(ref ValueStringBuilder sb, string spaces)
     {
         var tabs = (spaces.Length / 4) + 1;
 
@@ -85,12 +85,12 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
 
         if (IsSimpleGetter(getter, setter))
         {
-            AppendSimpleGetter(sb, getter!);
+            AppendSimpleGetter(ref sb, getter!);
             return;
         }
 
         var isAuto = IsAutoImplemented(getter, setter);
-        AppendAccessorBody(sb, spaces, getter, setter, isAuto);
+        AppendAccessorBody(ref sb, spaces, getter, setter, isAuto);
     }
 
     private void PrepareAccessors()
@@ -106,36 +106,36 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
            && !string.IsNullOrEmpty(getter)
            && getter.Trim().StartsWith("get =>", StringComparison.Ordinal);
 
-    private void AppendAccessorBody(StringBuilder sb, string spaces, string? getter, string? setter, bool isAuto)
+    private void AppendAccessorBody(ref ValueStringBuilder sb, string spaces, string? getter, string? setter, bool isAuto)
     {
-        AppendBodyStart(sb, spaces, isAuto);
-        AppendAccessor(sb, getter, isAuto);
-        AppendSetter(sb, getter, setter, isAuto);
-        AppendBodyEnd(sb, spaces, isAuto);
-        AppendInitializer(sb);
+        AppendBodyStart(ref sb, spaces, isAuto);
+        AppendAccessor(ref sb, getter, isAuto);
+        AppendSetter(ref sb, getter, setter, isAuto);
+        AppendBodyEnd(ref sb, spaces, isAuto);
+        AppendInitializer(ref sb);
     }
 
     private static bool IsAutoImplemented(string? getter, string? setter)
         => (!string.IsNullOrEmpty(getter) && getter.EndsWith("get;", StringComparison.Ordinal))
            || (!string.IsNullOrEmpty(setter) && (setter.EndsWith("set;", StringComparison.Ordinal) || setter.EndsWith("init;", StringComparison.Ordinal)));
 
-    private static void AppendSimpleGetter(StringBuilder sb, string getter)
+    private static void AppendSimpleGetter(ref ValueStringBuilder sb, string getter)
         => sb.AppendLine(getter.Trim()[3..]);
 
-    private static void AppendBodyStart(StringBuilder sb, string spaces, bool isAuto)
+    private static void AppendBodyStart(ref ValueStringBuilder sb, string spaces, bool isAuto)
     {
         if (isAuto) sb.Append(" {");
         else sb.AppendLine($"\n{spaces}{{");
     }
 
-    private static void AppendAccessor(StringBuilder sb, string? accessor, bool isAuto)
+    private static void AppendAccessor(ref ValueStringBuilder sb, string? accessor, bool isAuto)
     {
         if (string.IsNullOrEmpty(accessor)) return;
         var trimmed = accessor.TrimStart();
         sb.Append(isAuto ? $" {trimmed}" : accessor);
     }
 
-    private static void AppendSetter(StringBuilder sb, string? getter, string? setter, bool isAuto)
+    private static void AppendSetter(ref ValueStringBuilder sb, string? getter, string? setter, bool isAuto)
     {
         if (string.IsNullOrEmpty(setter)) return;
         var trimmed = setter.TrimStart();
@@ -154,20 +154,20 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
            && getter.TrimStart().StartsWith("get =>", StringComparison.Ordinal)
            && !setterText.StartsWith("set =>", StringComparison.Ordinal);
 
-    private static void AppendBodyEnd(StringBuilder sb, string spaces, bool isAuto)
+    private static void AppendBodyEnd(ref ValueStringBuilder sb, string spaces, bool isAuto)
     {
         if (isAuto) sb.Append(" }");
         else sb.Append($"{spaces}}}");
     }
 
-    private void AppendInitializer(StringBuilder sb)
+    private void AppendInitializer(ref ValueStringBuilder sb)
     {
         if (!string.IsNullOrEmpty(InitialValue)) sb.Append($" = {InitialValue};");
         sb.AppendLine();
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingComment([NotNull] StringBuilder sb, string spaces)
+    protected override void OnBuildingComment(ref ValueStringBuilder sb, string spaces)
     {
         var comment = Comment;
         var valueComment = Setter?.Comment;
@@ -197,11 +197,11 @@ public class PropertyMember : Member<PropertyMember>, IPropertyMember<PropertyMe
     }
 
     /// <inheritdoc/>
-    protected override void OnBuildingDeclaration([NotNull] StringBuilder sb, [NotNull] string spaces, [NotNull] params IEnumerable<string> usings)
+    protected override void OnBuildingDeclaration(ref ValueStringBuilder sb, [NotNull] string spaces, [NotNull] params IEnumerable<string> usings)
     {
-        AppendModifiers(sb, spaces);
+        AppendModifiers(ref sb, spaces);
         sb.Append($"{Type.GetTypeName(usings)} {Name}");
-        AppendAccessors(sb, spaces);
+        AppendAccessors(ref sb, spaces);
     }
 
     /// <inheritdoc/>
