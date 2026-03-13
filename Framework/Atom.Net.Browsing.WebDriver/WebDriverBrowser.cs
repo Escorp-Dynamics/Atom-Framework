@@ -159,25 +159,21 @@ public sealed class WebDriverBrowser : IWebBrowser
             var localExtensionPath = CopyExtensionWithConfig(extensionPath, tempDir, bridgeServer.Port, settings.Secret ?? string.Empty);
             var discoveryUrl = $"http://127.0.0.1:{bridgeServer.Port.ToString(CultureInfo.InvariantCulture)}/";
 
-            var args = IsFirefoxBrowser(browserPath)
+            var isFirefox = IsFirefoxBrowser(browserPath);
+            if (isFirefox)
+                PatchManifestForFirefox(localExtensionPath);
+
+            var args = isFirefox
                 ? SetupFirefoxProfile(tempDir, localExtensionPath, discoveryUrl, arguments)
                 : SetupProfile(tempDir, localExtensionPath, discoveryUrl, arguments);
 
-            process = new Process
+            process = Process.Start(new ProcessStartInfo(browserPath, args)
             {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = browserPath,
-                    Arguments = args,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                },
-            };
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
 
-            process.Start();
-
-            var browser = new WebDriverBrowser(bridgeServer, settings, process, tempDir);
-            return browser;
+            return new WebDriverBrowser(bridgeServer, settings, process!, tempDir);
         }
         catch
         {
@@ -307,6 +303,9 @@ public sealed class WebDriverBrowser : IWebBrowser
 
         var extraArgs = BuildContextArguments(settings);
         var isFirefox = IsFirefoxBrowser(browserPath);
+
+        if (isFirefox)
+            PatchManifestForFirefox(localExtensionPath);
 
         var args = isFirefox
             ? SetupFirefoxProfile(tempDir, localExtensionPath, discoveryUrl, extraArgs)
@@ -1228,6 +1227,57 @@ public sealed class WebDriverBrowser : IWebBrowser
         // Формат tabId: "windowId:tabIndex" или просто "tabId" (для единственного окна).
         var separatorIndex = tabId.IndexOf(':', StringComparison.Ordinal);
         return separatorIndex >= 0 ? tabId[..separatorIndex] : "default";
+    }
+
+    /// <summary>
+    /// Модифицирует manifest.json скопированного расширения для совместимости с Firefox:
+    /// добавляет <c>browser_specific_settings.gecko</c>, убирает <c>persistent</c>,
+    /// удаляет content_script для shadow-intercept-loader и <c>web_accessible_resources</c>.
+    /// </summary>
+    private static void PatchManifestForFirefox(string extensionDir)
+    {
+        var manifestPath = Path.Combine(extensionDir, "manifest.json");
+        var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
+
+        // 1. Добавляем gecko-настройки (ID + минимальная версия).
+        manifest["browser_specific_settings"] = new JsonObject
+        {
+            ["gecko"] = new JsonObject
+            {
+                ["id"] = "atom-webdriver@escorpdynamics.com",
+                ["strict_min_version"] = "109.0",
+            },
+        };
+
+        // 2. Убираем persistent из background (Firefox не поддерживает).
+        if (manifest["background"] is JsonObject bg)
+            bg.Remove("persistent");
+
+        // 3. Удаляем content_script для shadow-intercept-loader.js.
+        if (manifest["content_scripts"] is JsonArray contentScripts)
+        {
+            for (var i = contentScripts.Count - 1; i >= 0; i--)
+            {
+                var js = contentScripts[i]?["js"]?.AsArray();
+                if (js is not null && js.Any(j => string.Equals(j?.GetValue<string>(), "shadow-intercept-loader.js", StringComparison.Ordinal)))
+                {
+                    contentScripts.RemoveAt(i);
+                    break;
+                }
+            }
+        }
+
+        // 4. Убираем web_accessible_resources (не нужны без shadow-intercept-loader).
+        manifest.Remove("web_accessible_resources");
+
+        // 5. Записываем обратно.
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        File.WriteAllText(manifestPath, manifest.ToJsonString(options));
+
+        // 6. Удаляем файл shadow-intercept-loader.js (Firefox его не использует).
+        var loaderPath = Path.Combine(extensionDir, "shadow-intercept-loader.js");
+        if (File.Exists(loaderPath))
+            File.Delete(loaderPath);
     }
 
     private static bool IsFirefoxBrowser(string browserPath)

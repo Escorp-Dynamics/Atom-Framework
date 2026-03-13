@@ -17,16 +17,11 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
     public WebDriverTests() : this(ConsoleLogger.Unicode) { }
 
     /// <summary>
-    /// Путь к папке Chrome-расширения коннектора.
+    /// Путь к папке расширения коннектора (единый для всех браузеров).
+    /// Firefox-специфичные изменения manifest.json применяются в рантайме.
     /// </summary>
-    private static string ChromeExtensionPath => Path.GetFullPath(
+    private static string ExtensionPath => Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "Extension"));
-
-    /// <summary>
-    /// Путь к папке Firefox-расширения коннектора.
-    /// </summary>
-    private static string FirefoxExtensionPath => Path.GetFullPath(
-        Path.Combine(AppContext.BaseDirectory, "Extension.Firefox"));
 
     // ─── Обнаружение установленных браузеров ─────────────────────
 
@@ -115,7 +110,7 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
     [TestCaseSource(nameof(AvailableBrowsers))]
     public async Task BrowserLaunchAndConnectTest(string name, string browserPath, bool isFirefox)
     {
-        var extensionPath = isFirefox ? FirefoxExtensionPath : ChromeExtensionPath;
+        var extensionPath = ExtensionPath;
         Assert.That(File.Exists(browserPath), Is.True, $"Браузер {name} не найден: {browserPath}");
         Assert.That(Directory.Exists(extensionPath), Is.True, $"Расширение не найдено: {extensionPath}");
 
@@ -1330,9 +1325,9 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
         }
 
         Assert.That(browserPath, Is.Not.Null, "Chromium-браузер не найден.");
-        Assert.That(Directory.Exists(ChromeExtensionPath), Is.True, "Расширение не найдено.");
+        Assert.That(Directory.Exists(ExtensionPath), Is.True, "Расширение не найдено.");
 
-        return (browserPath!, ChromeExtensionPath);
+        return (browserPath!, ExtensionPath);
     }
 
     // ─── Кросс-браузерные тесты ────────────────────────────────
@@ -1378,16 +1373,9 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
         }
 
         /// <summary>
-        /// Возвращает путь к расширению для данного браузера.
-        /// Firefox использует Extension.Firefox (MV2), остальные — Extension (MV3).
+        /// Возвращает путь к расширению (единый для всех браузеров).
         /// </summary>
-        private static string GetExtensionPath(string browserPath)
-        {
-            var name = Path.GetFileNameWithoutExtension(browserPath);
-            return name.Contains("firefox", StringComparison.OrdinalIgnoreCase)
-                ? FirefoxExtensionPath
-                : ChromeExtensionPath;
-        }
+        private static string GetExtensionPath(string browserPath) => ExtensionPath;
 
         [TestCaseSource(nameof(BrowserCases)), NonParallelizable]
         public async Task FullPipeline(string browserPath)

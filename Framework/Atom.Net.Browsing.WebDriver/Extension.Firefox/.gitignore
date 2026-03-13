@@ -1,4 +1,0 @@
-# JS-файлы генерируются из Extension/ при сборке (MSBuild target SyncFirefoxExtensionScripts).
-# Source of truth: Extension/content.js и Extension/background.js.
-content.js
-background.js
