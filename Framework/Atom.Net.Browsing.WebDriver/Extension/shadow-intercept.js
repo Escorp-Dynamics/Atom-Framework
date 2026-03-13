@@ -7,8 +7,8 @@
  *   - console.* → window.__consoleLogs
  *   - EventTarget.prototype.addEventListener → window.__eventListeners + Proxy-обёртка isTrusted
  *
- * Авто-клик: установить window.__spoofTrusted = true перед dispatchEvent,
- * чтобы синтетические события выглядели как isTrusted=true для обработчиков.
+ * Авто-клик Turnstile: при обнаружении click-обработчика на INPUT внутри
+ * challenges.cloudflare.com мгновенно включается spoofing и симулируется клик.
  */
 (() => {
     "use strict";
@@ -74,6 +74,86 @@
         "touchstart", "touchend", "touchmove",
     ]);
 
+    // ─── Turnstile auto-click ───────────────────────────────────
+
+    let autoClickScheduled = false;
+
+    function scheduleTurnstileAutoClick() {
+        if (autoClickScheduled) return;
+        if (location.hostname !== "challenges.cloudflare.com") return;
+        autoClickScheduled = true;
+
+        // Ждём один микротик — дать CF зарегистрировать остальные обработчики.
+        Promise.resolve().then(() => {
+            window.__spoofTrusted = true;
+
+            const targets = window.__clickTargets || [];
+            const target =
+                targets.find((e) => e.tagName === "INPUT") ||
+                targets.find((e) => e.tagName === "DIV") ||
+                targets[0];
+
+            if (!target) return;
+
+            let cx = 25,
+                cy = 30;
+            try {
+                const rect = target.getBoundingClientRect();
+                if (rect.width > 0) {
+                    cx = rect.x + rect.width / 2;
+                    cy = rect.y + rect.height / 2;
+                }
+            } catch {}
+
+            // Симуляция движения мыши к цели.
+            for (let i = 1; i <= 5; i++) {
+                document.dispatchEvent(
+                    new MouseEvent("mousemove", {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window,
+                        clientX: (cx * i) / 5 + (Math.random() * 3 - 1.5),
+                        clientY: (cy * i) / 5 + (Math.random() * 3 - 1.5),
+                    }),
+                );
+            }
+
+            target.dispatchEvent(
+                new MouseEvent("mouseenter", {
+                    bubbles: false,
+                    cancelable: false,
+                    view: window,
+                    clientX: cx,
+                    clientY: cy,
+                }),
+            );
+            target.dispatchEvent(
+                new MouseEvent("mousemove", {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    clientX: cx,
+                    clientY: cy,
+                }),
+            );
+
+            for (const evType of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+                target.dispatchEvent(
+                    new MouseEvent(evType, {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window,
+                        clientX: cx,
+                        clientY: cy,
+                        button: 0,
+                    }),
+                );
+            }
+        });
+    }
+
+    // ─── addEventListener override ──────────────────────────────
+
     EventTarget.prototype.addEventListener = function (type, listener, options) {
         // Логирование.
         if (window.__eventListeners.length < maxListeners) {
@@ -96,6 +176,11 @@
         // Сохраняем ссылки на элементы с click-обработчиками.
         if (type === "click" && this instanceof Element) {
             window.__clickTargets.push(this);
+
+            // Авто-клик: INPUT с click-обработчиком в CF iframe → мгновенный клик.
+            if (this.tagName === "INPUT") {
+                scheduleTurnstileAutoClick();
+            }
         }
 
         // Proxy-обёртка: при window.__spoofTrusted === true синтетические

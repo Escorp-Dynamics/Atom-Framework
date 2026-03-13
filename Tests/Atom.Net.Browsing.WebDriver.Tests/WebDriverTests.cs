@@ -3208,8 +3208,7 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             var tab = await browser.OpenIsolatedTabAsync();
 
             // Тестовый ключ 3x — принудительный интерактивный challenge.
-            // shadow-intercept.js (MAIN world, document_start) перехватывает addEventListener
-            // и оборачивает обработчики Proxy для подмены isTrusted=true.
+            // shadow-intercept.js авто-кликает мгновенно при регистрации CF обработчиков.
             const string turnstileHtml = """
                 <!DOCTYPE html>
                 <html>
@@ -3226,80 +3225,8 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             var targetUrl = new Uri($"http://127.0.0.1:{browser.BridgePort}/blank?ts=1");
             await tab.NavigateAsync(targetUrl, new NavigationSettings { Body = turnstileHtml });
 
-            // Ждём появления click-таргетов в CF iframe (polling вместо фиксированной задержки).
-            using var readyCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            while (!readyCts.IsCancellationRequested)
-            {
-                var ready = await tab.ExecuteInAllFramesAsync("""
-                    (() => {
-                        if (location.hostname !== 'challenges.cloudflare.com') return null;
-                        return (window.__clickTargets || []).length;
-                    })()
-                    """);
-
-                if (ready is System.Text.Json.JsonElement readyArr && readyArr.ValueKind == System.Text.Json.JsonValueKind.Array)
-                {
-                    foreach (var f in readyArr.EnumerateArray())
-                    {
-                        if (f.ValueKind == System.Text.Json.JsonValueKind.Number && f.GetInt32() > 0)
-                            goto clickTargetsReady;
-                    }
-                }
-
-                await Task.Delay(200, readyCts.Token);
-            }
-
-            clickTargetsReady:
-
-            // Авто-клик через Proxy-спуфинг isTrusted в CF iframe.
-            // shadow-intercept.js сохраняет элементы с click-обработчиками в __clickTargets.
-            await tab.ExecuteInAllFramesAsync("""
-                (() => {
-                    if (location.hostname !== 'challenges.cloudflare.com') return null;
-
-                    window.__spoofTrusted = true;
-
-                    const targets = window.__clickTargets || [];
-                    const target = targets.find(e => e.tagName === 'INPUT')
-                                || targets.find(e => e.tagName === 'DIV')
-                                || targets[0];
-
-                    if (!target) return null;
-
-                    let cx = 25, cy = 30;
-                    try {
-                        const rect = target.getBoundingClientRect();
-                        if (rect.width > 0) { cx = rect.x + rect.width / 2; cy = rect.y + rect.height / 2; }
-                    } catch {}
-
-                    for (let i = 1; i <= 5; i++) {
-                        document.dispatchEvent(new MouseEvent('mousemove', {
-                            bubbles: true, cancelable: true, view: window,
-                            clientX: cx * i / 5 + Math.random() * 3 - 1.5,
-                            clientY: cy * i / 5 + Math.random() * 3 - 1.5
-                        }));
-                    }
-
-                    target.dispatchEvent(new MouseEvent('mouseenter', {
-                        bubbles: false, cancelable: false, view: window, clientX: cx, clientY: cy
-                    }));
-                    target.dispatchEvent(new MouseEvent('mousemove', {
-                        bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy
-                    }));
-
-                    for (const evType of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-                        target.dispatchEvent(new MouseEvent(evType, {
-                            bubbles: true, cancelable: true, view: window,
-                            clientX: cx, clientY: cy, button: 0
-                        }));
-                    }
-
-                    return target.tagName;
-                })()
-                """);
-
-            // Ожидаем токен — CF должен выдать его после прохождения challenge.
-            using var tokenCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            // shadow-intercept.js сам кликает — просто ждём токен.
+            using var tokenCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             string? turnstileToken = null;
 
             while (!tokenCts.IsCancellationRequested)
