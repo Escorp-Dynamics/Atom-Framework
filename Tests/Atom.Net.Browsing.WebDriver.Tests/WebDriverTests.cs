@@ -3226,8 +3226,30 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             var targetUrl = new Uri($"http://127.0.0.1:{browser.BridgePort}/blank?ts=1");
             await tab.NavigateAsync(targetUrl, new NavigationSettings { Body = turnstileHtml });
 
-            // Ждём инициализацию виджета + CF скриптов внутри iframe.
-            await Task.Delay(3000);
+            // Ждём появления click-таргетов в CF iframe (polling вместо фиксированной задержки).
+            using var readyCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (!readyCts.IsCancellationRequested)
+            {
+                var ready = await tab.ExecuteInAllFramesAsync("""
+                    (() => {
+                        if (location.hostname !== 'challenges.cloudflare.com') return null;
+                        return (window.__clickTargets || []).length;
+                    })()
+                    """);
+
+                if (ready is System.Text.Json.JsonElement readyArr && readyArr.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    foreach (var f in readyArr.EnumerateArray())
+                    {
+                        if (f.ValueKind == System.Text.Json.JsonValueKind.Number && f.GetInt32() > 0)
+                            goto clickTargetsReady;
+                    }
+                }
+
+                await Task.Delay(200, readyCts.Token);
+            }
+
+            clickTargetsReady:
 
             // Авто-клик через Proxy-спуфинг isTrusted в CF iframe.
             // shadow-intercept.js сохраняет элементы с click-обработчиками в __clickTargets.
