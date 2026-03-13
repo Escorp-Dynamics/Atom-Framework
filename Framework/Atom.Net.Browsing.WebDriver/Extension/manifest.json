@@ -1,0 +1,50 @@
+{
+    "manifest_version": 2,
+    "name": "Atom WebDriver Connector",
+    "version": "1.0.0",
+    "description": "Мост между Atom.Net.Browsing.WebDriver и браузером. Обеспечивает изолированное управление вкладками через WebSocket.",
+    "permissions": [
+        "tabs",
+        "cookies",
+        "proxy",
+        "webRequest",
+        "webRequestBlocking",
+        "<all_urls>"
+    ],
+    "background": {
+        "scripts": [
+            "background.js"
+        ],
+        "persistent": true
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "run_at": "document_start",
+            "all_frames": false
+        },
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "shadow-intercept-loader.js"
+            ],
+            "run_at": "document_start",
+            "all_frames": true
+        }
+    ],
+    "web_accessible_resources": [
+        "shadow-intercept.js"
+    ],
+    "icons": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+    }
+}

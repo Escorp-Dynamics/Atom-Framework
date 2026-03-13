@@ -2,6 +2,7 @@
 
 	<PropertyGroup>
 		<AssemblyName>Escorp.Atom.Net.Browsing.WebDriver</AssemblyName>
+		<NoWarn>CA1003;CA1031</NoWarn>
 
 		<PackageId>$(AssemblyName)</PackageId>
 		<Version>0.0.1</Version>
@@ -12,7 +13,8 @@
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<PackageIcon>icon.png</PackageIcon>
-		<PackageTags>atom;framework;escorp;exomode;browsing;browser;web;driver;chromium;chrome;firefox;opera;edge;brave;vivaldi</PackageTags>
+		<PackageTags>
+			atom;framework;escorp;exomode;browsing;browser;web;driver;chromium;chrome;firefox;opera;edge;brave;vivaldi</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
@@ -38,7 +40,8 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="*" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="*" PrivateAssets="all"
+			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -46,17 +49,37 @@
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
 
-	<Target Name="PublishPackages" AfterTargets="Pack" Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
+	<ItemGroup>
+		<Content Include="Extension\**\*" CopyToOutputDirectory="PreserveNewest"
+			PackagePath="contentFiles\any\any\Extension" />
+		<Content Include="Extension.Firefox\**\*" CopyToOutputDirectory="PreserveNewest"
+			PackagePath="contentFiles\any\any\Extension.Firefox" />
+	</ItemGroup>
+
+	<!-- Единый JS-код расширения: Extension/ — source of truth.
+	     При сборке копируем content.js, background.js и shadow-intercept.js в Extension.Firefox/,
+	     чтобы не дублировать код вручную. -->
+	<Target Name="SyncFirefoxExtensionScripts" BeforeTargets="BeforeBuild">
+		<Copy
+			SourceFiles="Extension\content.js;Extension\background.js;Extension\shadow-intercept.js"
+			DestinationFolder="Extension.Firefox" SkipUnchangedFiles="true" />
+	</Target>
+
+	<Target Name="PublishPackages" AfterTargets="Pack"
+		Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
 		<PropertyGroup>
 			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
 		</PropertyGroup>
 
 		<ItemGroup>
 			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" />
-			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg" Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
+			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg"
+				Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
 		</ItemGroup>
 
-		<Exec Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;" Condition="'%(PackageFiles.Identity)' != ''" IgnoreExitCode="true">
+		<Exec
+			Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;"
+			Condition="'%(PackageFiles.Identity)' != ''" IgnoreExitCode="true">
 			<Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
 		</Exec>
 
