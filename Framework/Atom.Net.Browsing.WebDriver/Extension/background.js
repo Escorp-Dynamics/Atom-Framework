@@ -56,6 +56,12 @@ const tabContexts = new Map();
 /** @type {Map<string, Array<{name: string, value: string, domain: string, path: string, secure: boolean, httpOnly: boolean}>>} Виртуальные cookie-хранилища по contextId. */
 const virtualCookies = new Map();
 
+/** @type {Set<number>} Вкладки с включённым перехватом запросов. */
+const interceptEnabled = new Set();
+
+/** @type {Map<string, Object<string, string>>} requestId → заголовки для модификации (передаются из sync XHR ответа в onBeforeSendHeaders). */
+const pendingHeaderOverrides = new Map();
+
 
 // ─── Утилита: выполнение кода в MAIN world ────────────────────
 
@@ -472,6 +478,16 @@ function handleBridgeMessage(tabId, raw) {
         case "ExecuteScriptInFrames":
             handleExecuteScriptInFrames(tabId, message);
             return;
+        case "InterceptRequest": {
+            const enabled = message.payload?.enabled;
+            if (enabled) {
+                interceptEnabled.add(tabId);
+            } else {
+                interceptEnabled.delete(tabId);
+            }
+            sendResponse(tabId, message.id, "Ok", { enabled: !!enabled });
+            return;
+        }
         case "DebugPortStatus": {
             const queue = commandQueues.get(tabId);
             sendResponse(tabId, message.id, "Ok", {
@@ -1364,6 +1380,45 @@ if (browser.declarativeNetRequest?.updateSessionRules && browser.webRequest?.onH
     );
 }
 
+// Firefox MV2: блокирующий перехват запросов через sync XHR к BridgeServer.
+if (browser.webRequest?.onBeforeRequest) {
+    browser.webRequest.onBeforeRequest.addListener(
+        (details) => {
+            if (!interceptEnabled.has(details.tabId)) return {};
+            if (bridgeConfig && details.url.startsWith(`http://${bridgeConfig.host}:${bridgeConfig.port}/`)) return {};
+
+            const requestId = crypto.randomUUID().replaceAll("-", "");
+            try {
+                const xhr = new XMLHttpRequest();
+                xhr.open("POST", `http://${bridgeConfig.host}:${bridgeConfig.port}/intercept`, false);
+                xhr.setRequestHeader("Content-Type", "application/json");
+                xhr.send(JSON.stringify({
+                    requestId,
+                    url: details.url,
+                    method: details.method,
+                    type: details.type,
+                    tabId: String(details.tabId),
+                }));
+
+                if (xhr.status !== 200) return {};
+                const response = JSON.parse(xhr.responseText);
+
+                if (response.action === "abort") return { cancel: true };
+                if (response.action === "fulfill") return { redirectUrl: response.url };
+                if (response.action === "continue") {
+                    if (response.headers) {
+                        pendingHeaderOverrides.set(String(details.requestId), response.headers);
+                    }
+                    if (response.url) return { redirectUrl: response.url };
+                }
+            } catch { /* bridge unavailable — pass through */ }
+            return {};
+        },
+        { urls: ["<all_urls>"] },
+        ["blocking"],
+    );
+}
+
 // Firefox MV2: глобальный listener для подмены User-Agent и инъекции Cookie.
 if (browser.webRequest?.onBeforeSendHeaders) {
     browser.webRequest.onBeforeSendHeaders.addListener(
@@ -1408,6 +1463,21 @@ if (browser.webRequest?.onBeforeSendHeaders) {
                     }
                     modified = true;
                 }
+            }
+
+            // Применяем header overrides от перехватчика запросов.
+            const overrides = pendingHeaderOverrides.get(String(details.requestId));
+            if (overrides) {
+                pendingHeaderOverrides.delete(String(details.requestId));
+                for (const [name, value] of Object.entries(overrides)) {
+                    const existing = details.requestHeaders.find(h => h.name.toLowerCase() === name.toLowerCase());
+                    if (existing) {
+                        existing.value = value;
+                    } else {
+                        details.requestHeaders.push({ name, value });
+                    }
+                }
+                modified = true;
             }
 
             return modified ? { requestHeaders: details.requestHeaders } : {};

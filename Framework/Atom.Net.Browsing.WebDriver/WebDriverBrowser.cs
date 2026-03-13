@@ -86,6 +86,7 @@ public sealed class WebDriverBrowser : IWebBrowser
 
         bridge.TabConnected += OnTabConnected;
         bridge.TabDisconnected += OnTabDisconnected;
+        bridge.RequestIntercepted += OnRequestIntercepted;
     }
 
     private WebDriverBrowser(BridgeServer bridgeServer, BridgeSettings settings, Process? browserProcess, string? userDataDir = null)
@@ -97,6 +98,7 @@ public sealed class WebDriverBrowser : IWebBrowser
 
         bridge.TabConnected += OnTabConnected;
         bridge.TabDisconnected += OnTabDisconnected;
+        bridge.RequestIntercepted += OnRequestIntercepted;
     }
 
     /// <summary>
@@ -1203,6 +1205,15 @@ public sealed class WebDriverBrowser : IWebBrowser
         }
     }
 
+    private async ValueTask OnRequestIntercepted(BridgeServer sender, InterceptedRequestEventArgs e)
+    {
+        var page = GetPage(e.TabId);
+        if (page is not null)
+            await page.OnRequestInterceptedAsync(e).ConfigureAwait(false);
+        else
+            e.SetDefaultIfPending();
+    }
+
     private async ValueTask OnTabDisconnected(BridgeServer sender, TabDisconnectedEventArgs e)
     {
         var windowId = ExtractWindowId(e.TabId);
@@ -1614,6 +1625,7 @@ public sealed class WebDriverBrowser : IWebBrowser
 
         bridge.TabConnected -= OnTabConnected;
         bridge.TabDisconnected -= OnTabDisconnected;
+        bridge.RequestIntercepted -= OnRequestIntercepted;
 
         foreach (var context in contexts)
             await context.DisposeAsync().ConfigureAwait(false);

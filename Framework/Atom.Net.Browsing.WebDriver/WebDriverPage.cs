@@ -39,6 +39,14 @@ public sealed class WebDriverPage : IWebPage
     public event AsyncEventHandler<WebDriverPage, TabChannelEventArgs>? EventReceived;
 
     /// <summary>
+    /// Происходит при перехвате сетевого запроса из этой вкладки.
+    /// Обработчик ДОЛЖЕН вызвать <see cref="InterceptedRequestEventArgs.Continue()"/>,
+    /// <see cref="InterceptedRequestEventArgs.Abort()"/> или
+    /// <see cref="InterceptedRequestEventArgs.Fulfill(InterceptedRequestFulfillment)"/>.
+    /// </summary>
+    public event AsyncEventHandler<WebDriverPage, InterceptedRequestEventArgs>? RequestIntercepted;
+
+    /// <summary>
     /// Происходит непосредственно перед освобождением ресурсов страницы.
     /// Позволяет внешним компонентам (например, браузеру) закрыть вкладку через другой канал.
     /// </summary>
@@ -365,6 +373,30 @@ public sealed class WebDriverPage : IWebPage
 
     /// <inheritdoc cref="DeleteCookiesAsync(CancellationToken)"/>
     public ValueTask DeleteCookiesAsync() => DeleteCookiesAsync(CancellationToken.None);
+
+    /// <summary>
+    /// Включает или отключает перехват сетевых запросов для этой вкладки.
+    /// </summary>
+    /// <param name="enabled">Состояние перехвата.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    public async ValueTask SetRequestInterceptionAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(isDisposed, this);
+
+        await channel.SendCommandAsync(
+            BridgeCommand.InterceptRequest,
+            new JsonObject { ["enabled"] = enabled },
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Вызывается <see cref="WebDriverBrowser"/> при перехвате запроса из этой вкладки.
+    /// </summary>
+    internal async ValueTask OnRequestInterceptedAsync(InterceptedRequestEventArgs e)
+    {
+        if (RequestIntercepted is { } handler)
+            await handler(this, e).ConfigureAwait(false);
+    }
 
     private async ValueTask OnChannelEvent(TabChannel sender, TabChannelEventArgs e)
     {

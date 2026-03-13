@@ -21,6 +21,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 {
     private readonly HttpListener listener = new();
     private readonly ConcurrentDictionary<string, TabChannel> channels = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, InterceptedRequestFulfillment> pendingFulfillments = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource cts = new();
     private Task? acceptLoop;
     private Task? pingLoop;
@@ -50,6 +51,14 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     /// Происходит при получении события от любой вкладки.
     /// </summary>
     public event AsyncEventHandler<BridgeServer, TabChannelEventArgs>? EventReceived;
+
+    /// <summary>
+    /// Происходит при перехвате сетевого запроса расширением.
+    /// Обработчик должен вызвать <see cref="InterceptedRequestEventArgs.Continue()"/>,
+    /// <see cref="InterceptedRequestEventArgs.Abort()"/> или
+    /// <see cref="InterceptedRequestEventArgs.Fulfill(InterceptedRequestFulfillment)"/>.
+    /// </summary>
+    public event AsyncEventHandler<BridgeServer, InterceptedRequestEventArgs>? RequestIntercepted;
 
     /// <summary>
     /// Запускает WebSocket-сервер.
@@ -123,10 +132,27 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         }
     }
 
+#pragma warning disable MA0051 // Диспетчер подключений маршрутизирует HTTP и WebSocket.
     private async Task HandleConnectionAsync(HttpListenerContext context, CancellationToken cancellationToken)
+#pragma warning restore MA0051
     {
         if (!context.Request.IsWebSocketRequest)
         {
+            var path = context.Request.Url?.AbsolutePath ?? "/";
+
+            if (string.Equals(path, "/intercept", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandleInterceptRequestAsync(context, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (path.StartsWith("/fulfill/", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleFulfillRequest(context, path);
+                return;
+            }
+
             HandleHttpRequest(context);
             return;
         }
@@ -228,6 +254,107 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
                 }
             }
         }
+    }
+
+    private async Task HandleInterceptRequestAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        context.Response.AddHeader("Access-Control-Allow-Origin", "*");
+
+        InterceptHttpRequest? request;
+        try
+        {
+            request = await JsonSerializer.DeserializeAsync(
+                context.Request.InputStream,
+                InterceptJsonContext.Default.InterceptHttpRequest,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (JsonException)
+        {
+            context.Response.StatusCode = 400;
+            context.Response.Close();
+            return;
+        }
+
+        if (request?.RequestId is null || request.TabId is null)
+        {
+            context.Response.StatusCode = 400;
+            context.Response.Close();
+            return;
+        }
+
+        var args = new InterceptedRequestEventArgs
+        {
+            RequestId = request.RequestId,
+            Url = request.Url ?? string.Empty,
+            Method = request.Method ?? "GET",
+            ResourceType = request.Type ?? "other",
+            TabId = request.TabId,
+        };
+
+        if (RequestIntercepted is { } handler)
+            await handler(this, args).ConfigureAwait(false);
+
+        args.SetDefaultIfPending();
+
+        var decision = await args.WaitForDecisionAsync(cancellationToken).ConfigureAwait(false);
+        var response = BuildInterceptResponse(decision, request.RequestId);
+
+        context.Response.ContentType = "application/json";
+        var json = JsonSerializer.SerializeToUtf8Bytes(response, InterceptJsonContext.Default.InterceptHttpResponse);
+        context.Response.ContentLength64 = json.Length;
+        await context.Response.OutputStream.WriteAsync(json, cancellationToken).ConfigureAwait(false);
+        context.Response.Close();
+    }
+
+    private InterceptHttpResponse BuildInterceptResponse(InterceptDecision decision, string requestId)
+    {
+        var response = new InterceptHttpResponse { Action = decision.Action.ToString().ToLowerInvariant() };
+
+        if (decision.Action is InterceptAction.Continue && decision.Continuation is { } cont)
+        {
+            response.Url = cont.Url;
+            response.Headers = cont.Headers;
+        }
+        else if (decision.Action is InterceptAction.Fulfill && decision.Fulfillment is { } fulfillment)
+        {
+            pendingFulfillments[requestId] = fulfillment;
+            response.Url = string.Concat("http://127.0.0.1:", Port.ToString(System.Globalization.CultureInfo.InvariantCulture), "/fulfill/", requestId);
+        }
+
+        return response;
+    }
+
+    private void HandleFulfillRequest(HttpListenerContext context, string path)
+    {
+        context.Response.AddHeader("Access-Control-Allow-Origin", "*");
+
+        // path = "/fulfill/{requestId}"
+        var requestId = path["/fulfill/".Length..];
+
+        if (!pendingFulfillments.TryRemove(requestId, out var fulfillment))
+        {
+            context.Response.StatusCode = 404;
+            context.Response.Close();
+            return;
+        }
+
+        context.Response.StatusCode = fulfillment.StatusCode;
+        context.Response.ContentType = fulfillment.ContentType;
+
+        if (fulfillment.Headers is { } headers)
+        {
+            foreach (var (key, value) in headers)
+                context.Response.AddHeader(key, value);
+        }
+
+        if (fulfillment.Body is { } body)
+        {
+            var bytes = Encoding.UTF8.GetBytes(body);
+            context.Response.ContentLength64 = bytes.Length;
+            context.Response.OutputStream.Write(bytes);
+        }
+
+        context.Response.Close();
     }
 
     private void HandleHttpRequest(HttpListenerContext context)
