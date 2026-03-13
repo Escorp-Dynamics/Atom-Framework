@@ -27,10 +27,7 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
 
     private static readonly (string Name, string[] LinuxPaths, string[] WinPaths, bool IsFirefox)[] KnownBrowsers =
     [
-        ("Chrome",
-            ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium"],
-            [@"C:\Program Files\Google\Chrome\Application\chrome.exe"],
-            false),
+        // Chrome исключён — не поддерживает MV2 (начиная с Chrome 130+).
         ("Vivaldi",
             ["/usr/bin/vivaldi-stable", "/usr/bin/vivaldi"],
             [@"C:\Program Files\Vivaldi\Application\vivaldi.exe"],
@@ -807,6 +804,175 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
     }
 
     /// <summary>
+    /// Тесты перехвата сетевых запросов (Continue, Abort, Fulfill).
+    /// </summary>
+    [TestFixture, Category("GUI"), NonParallelizable]
+    public class InterceptionTests
+    {
+        private readonly ILogger logger = ConsoleLogger.Unicode;
+        private WebDriverBrowser browser = null!;
+        private WebDriverPage page = null!;
+
+        [OneTimeSetUp]
+        public async Task SetUp()
+        {
+            var (browserPath, extensionPath) = FindChromiumBrowser();
+            browser = await WebDriverBrowser.LaunchAsync(
+                browserPath, extensionPath,
+                arguments: ["--no-sandbox", "--disable-features=Translate"]);
+            page = await WaitForFirstTabAsync();
+            logger.WriteLine(LogKind.Default, $"Браузер запущен, вкладка: {page.TabId}");
+        }
+
+        [OneTimeTearDown]
+        public async Task TearDown()
+        {
+            await browser.DisposeAsync();
+        }
+
+        [TestCase(TestName = "Interception: Continue — запрос проходит"), Order(1)]
+        public async Task ContinueTest()
+        {
+            await page.SetRequestInterceptionAsync(true);
+
+            var intercepted = new TaskCompletionSource<InterceptedRequestEventArgs>();
+            AsyncEventHandler<WebDriverPage, InterceptedRequestEventArgs> handler = (_, e) =>
+            {
+                if (e.ResourceType == "main_frame")
+                    intercepted.TrySetResult(e);
+                e.Continue();
+                return ValueTask.CompletedTask;
+            };
+            page.RequestIntercepted += handler;
+
+            try
+            {
+                var url = new Uri("https://example.com/continue-test");
+                await page.NavigateAsync(url);
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var args = await intercepted.Task.WaitAsync(cts.Token);
+
+                Assert.That(args.Url, Does.Contain("example.com"), "Перехвачен запрос к example.com.");
+                Assert.That(args.Method, Is.EqualTo("GET"), "Метод — GET.");
+            }
+            finally
+            {
+                page.RequestIntercepted -= handler;
+                await page.SetRequestInterceptionAsync(false);
+            }
+        }
+
+        [TestCase(TestName = "Interception: Abort — запрос отменён"), Order(2)]
+        public async Task AbortTest()
+        {
+            await page.SetRequestInterceptionAsync(true);
+
+            var intercepted = new TaskCompletionSource<InterceptedRequestEventArgs>();
+            AsyncEventHandler<WebDriverPage, InterceptedRequestEventArgs> handler = (_, e) =>
+            {
+                if (e.ResourceType == "main_frame")
+                {
+                    intercepted.TrySetResult(e);
+                    e.Abort();
+                }
+                else
+                {
+                    e.Continue();
+                }
+
+                return ValueTask.CompletedTask;
+            };
+            page.RequestIntercepted += handler;
+
+            try
+            {
+                var url = new Uri("https://example.com");
+                using var navCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                try { await page.NavigateAsync(url, navCts.Token); }
+                catch (OperationCanceledException) { } // Ожидаемо — abort предотвращает загрузку
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var args = await intercepted.Task.WaitAsync(cts.Token);
+
+                Assert.That(args.Url, Does.Contain("example.com"), "Перехвачен запрос к example.com.");
+            }
+            finally
+            {
+                page.RequestIntercepted -= handler;
+                await page.SetRequestInterceptionAsync(false);
+            }
+        }
+
+        [TestCase(TestName = "Interception: Fulfill — кастомный ответ"), Order(3)]
+        public async Task FulfillTest()
+        {
+            await page.SetRequestInterceptionAsync(true);
+
+            const string customBody = "<html><body><h1 id='fulfill-marker'>Intercepted!</h1></body></html>";
+            AsyncEventHandler<WebDriverPage, InterceptedRequestEventArgs> handler = (_, e) =>
+            {
+                if (e.ResourceType == "main_frame")
+                {
+                    e.Fulfill(new InterceptedRequestFulfillment
+                    {
+                        StatusCode = 200,
+                        ContentType = "text/html",
+                        Body = customBody,
+                    });
+                }
+                else
+                {
+                    e.Continue();
+                }
+
+                return ValueTask.CompletedTask;
+            };
+            page.RequestIntercepted += handler;
+
+            try
+            {
+                var url = new Uri("https://example.com/fulfill-test");
+                await page.NavigateAsync(url);
+                await Task.Delay(500);
+
+                var content = await page.GetContentAsync();
+                Assert.That(content, Does.Contain("Intercepted!"), "Ответ подменён кастомным HTML.");
+            }
+            finally
+            {
+                page.RequestIntercepted -= handler;
+                await page.SetRequestInterceptionAsync(false);
+            }
+        }
+
+        private async Task<WebDriverPage> WaitForFirstTabAsync()
+        {
+            var tcs = new TaskCompletionSource<TabConnectedEventArgs>();
+            browser.TabConnected += (_, e) =>
+            {
+                tcs.TrySetResult(e);
+                return ValueTask.CompletedTask;
+            };
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+            if (browser.ConnectionCount > 0)
+            {
+                var existingPage = browser.GetAllPages().First();
+                logger.WriteLine(LogKind.Default, $"Вкладка уже подключена: {existingPage.TabId}");
+                return existingPage;
+            }
+
+            var result = await tcs.Task.WaitAsync(cts.Token);
+            logger.WriteLine(LogKind.Default, $"Вкладка подключилась: {result.TabId}");
+
+            return browser.GetPage(result.TabId)
+                ?? throw new BridgeException($"Страница {result.TabId} не найдена после подключения.");
+        }
+    }
+
+    /// <summary>
     /// Атомарные тесты окон/вкладок. Один браузер на все тесты.
     /// </summary>
     [TestFixture, Category("GUI"), NonParallelizable]
@@ -1307,9 +1473,9 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
     /// </summary>
     private static (string BrowserPath, string ExtensionPath) FindChromiumBrowser()
     {
+        // Chrome исключён — не поддерживает MV2 (начиная с Chrome 130+).
         string? browserPath = null;
         foreach (var candidate in (ReadOnlySpan<string>)[
-            "/usr/bin/google-chrome-stable",
             "/usr/bin/brave",
             "/usr/bin/opera",
             "/usr/bin/vivaldi-stable",
@@ -1352,9 +1518,9 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
         {
             // Chromium-браузеры: pre-seeded профиль (RSA-ключ + Preferences).
             // Firefox Developer Edition: proxy-файл + xpinstall.signatures.required=false.
+            // Chrome исключён — не поддерживает MV2 (начиная с Chrome 130+).
             string[] candidates =
             [
-                "/usr/bin/google-chrome-stable",
                 "/usr/bin/brave",
                 "/usr/bin/opera",
                 "/usr/bin/vivaldi-stable",

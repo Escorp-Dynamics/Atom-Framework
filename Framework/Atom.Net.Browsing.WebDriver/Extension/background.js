@@ -62,6 +62,9 @@ const interceptEnabled = new Set();
 /** @type {Map<string, Object<string, string>>} requestId → заголовки для модификации (передаются из sync XHR ответа в onBeforeSendHeaders). */
 const pendingHeaderOverrides = new Map();
 
+/** @type {Map<number, string>} tabId → compositeId для корректной идентификации вкладки при перехвате запросов. */
+const tabCompositeIds = new Map();
+
 
 // ─── Утилита: выполнение кода в MAIN world ────────────────────
 
@@ -353,6 +356,7 @@ function connectTab(tabId) {
         } else {
             compositeId = `${tab.windowId ?? 0}:${tabId}`;
         }
+        tabCompositeIds.set(tabId, compositeId);
         if (wsReady) sendHandshake(ws, compositeId);
     });
 
@@ -386,6 +390,7 @@ function disconnectTab(tabId) {
     if (!ws) return;
 
     tabSockets.delete(tabId);
+    tabCompositeIds.delete(tabId);
 
     // Очистка контекста изоляции.
     if (tabContexts.has(tabId)) {
@@ -1397,7 +1402,7 @@ if (browser.webRequest?.onBeforeRequest) {
                     url: details.url,
                     method: details.method,
                     type: details.type,
-                    tabId: String(details.tabId),
+                    tabId: tabCompositeIds.get(details.tabId) ?? String(details.tabId),
                 }));
 
                 if (xhr.status !== 200) return {};
