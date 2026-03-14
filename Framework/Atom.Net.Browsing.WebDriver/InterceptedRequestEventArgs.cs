@@ -40,6 +40,12 @@ public sealed class InterceptedRequestContinuation
     /// Заголовки запроса для замены. <see langword="null"/> — без изменений.
     /// </summary>
     public IDictionary<string, string>? Headers { get; init; }
+
+    /// <summary>
+    /// Заголовки ответа для замены. <see langword="null"/> — без изменений.
+    /// Применяются через <c>webRequest.onHeadersReceived</c>.
+    /// </summary>
+    public IDictionary<string, string>? ResponseHeaders { get; init; }
 }
 
 /// <summary>
@@ -118,6 +124,11 @@ public sealed class InterceptedRequestEventArgs : EventArgs
     public IReadOnlyDictionary<string, string[]>? FormData { get; init; }
 
     /// <summary>
+    /// Момент перехвата запроса (UTC).
+    /// </summary>
+    public DateTimeOffset Timestamp { get; init; }
+
+    /// <summary>
     /// Продолжить запрос без изменений.
     /// </summary>
     public void Continue() =>
@@ -131,6 +142,20 @@ public sealed class InterceptedRequestEventArgs : EventArgs
     {
         ArgumentNullException.ThrowIfNull(continuation);
         decision.TrySetResult(new InterceptDecision { Action = InterceptAction.Continue, Continuation = continuation });
+    }
+
+    /// <summary>
+    /// Перенаправить запрос на другой URL.
+    /// </summary>
+    /// <param name="url">Целевой URL.</param>
+    public void Redirect(Uri url)
+    {
+        ArgumentNullException.ThrowIfNull(url);
+        decision.TrySetResult(new InterceptDecision
+        {
+            Action = InterceptAction.Continue,
+            Continuation = new InterceptedRequestContinuation { Url = url.AbsoluteUri },
+        });
     }
 
     /// <summary>
@@ -196,6 +221,7 @@ internal sealed class InterceptHttpRequest
     public string? TabId { get; set; }
     public string? RequestBodyBase64 { get; set; }
     public Dictionary<string, string[]>? FormData { get; set; }
+    public long? Timestamp { get; set; }
 }
 
 /// <summary>
@@ -216,7 +242,12 @@ internal sealed class InterceptHttpResponse
 #pragma warning restore CA1056
 
     /// <summary>
-    /// Заголовки для модификации (при continue с headers).
+    /// Заголовки запроса для модификации (при continue с headers).
     /// </summary>
     public IDictionary<string, string>? Headers { get; set; }
+
+    /// <summary>
+    /// Заголовки ответа для модификации (при continue с responseHeaders).
+    /// </summary>
+    public IDictionary<string, string>? ResponseHeaders { get; set; }
 }

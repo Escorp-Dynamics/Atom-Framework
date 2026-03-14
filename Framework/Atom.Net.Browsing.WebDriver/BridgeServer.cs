@@ -291,6 +291,9 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             TabId = request.TabId,
             PostData = request.RequestBodyBase64 is { } b64 ? Convert.FromBase64String(b64) : null,
             FormData = request.FormData,
+            Timestamp = request.Timestamp is { } ts
+                ? DateTimeOffset.FromUnixTimeMilliseconds(ts)
+                : DateTimeOffset.UtcNow,
         };
 
         if (RequestIntercepted is { } handler)
@@ -316,6 +319,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         {
             response.Url = cont.Url;
             response.Headers = cont.Headers;
+            response.ResponseHeaders = cont.ResponseHeaders;
         }
         else if (decision.Action is InterceptAction.Fulfill && decision.Fulfillment is { } fulfillment)
         {

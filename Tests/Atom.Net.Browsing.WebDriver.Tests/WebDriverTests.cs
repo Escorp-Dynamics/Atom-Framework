@@ -1033,6 +1033,141 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             }
         }
 
+        [TestCase(TestName = "Interception: Timestamp — метка времени перехвата"), Order(6)]
+        public async Task TimestampTest()
+        {
+            await page.SetRequestInterceptionAsync(true);
+
+            var intercepted = new TaskCompletionSource<InterceptedRequestEventArgs>();
+            AsyncEventHandler<WebDriverPage, InterceptedRequestEventArgs> handler = (_, e) =>
+            {
+                if (e.ResourceType == "main_frame")
+                    intercepted.TrySetResult(e);
+                e.Continue();
+                return ValueTask.CompletedTask;
+            };
+            page.RequestIntercepted += handler;
+
+            try
+            {
+                var before = DateTimeOffset.UtcNow;
+                var url = new Uri("https://example.com/timestamp-test");
+                await page.NavigateAsync(url);
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var args = await intercepted.Task.WaitAsync(cts.Token);
+                var after = DateTimeOffset.UtcNow;
+
+                Assert.That(args.Timestamp, Is.GreaterThanOrEqualTo(before.AddSeconds(-2)),
+                    "Timestamp не раньше момента отправки (с допуском 2 сек).");
+                Assert.That(args.Timestamp, Is.LessThanOrEqualTo(after.AddSeconds(2)),
+                    "Timestamp не позже момента получения (с допуском 2 сек).");
+            }
+            finally
+            {
+                page.RequestIntercepted -= handler;
+                await page.SetRequestInterceptionAsync(false);
+            }
+        }
+
+        [TestCase(TestName = "Interception: Redirect — удобный метод перенаправления"), Order(7)]
+        public async Task RedirectTest()
+        {
+            await page.SetRequestInterceptionAsync(true);
+
+            const string fulfillBody = "<html><body><h1 id='redirected'>Redirected!</h1></body></html>";
+            AsyncEventHandler<WebDriverPage, InterceptedRequestEventArgs> handler = (_, e) =>
+            {
+                if (e.ResourceType == "main_frame" && e.Url.Contains("original-page"))
+                {
+                    e.Redirect(new Uri("https://example.com/redirected-page"));
+                }
+                else if (e.ResourceType == "main_frame" && e.Url.Contains("redirected-page"))
+                {
+                    e.Fulfill(new InterceptedRequestFulfillment
+                    {
+                        StatusCode = 200,
+                        ContentType = "text/html",
+                        Body = fulfillBody,
+                    });
+                }
+                else
+                {
+                    e.Continue();
+                }
+                return ValueTask.CompletedTask;
+            };
+            page.RequestIntercepted += handler;
+
+            try
+            {
+                var url = new Uri("https://example.com/original-page");
+                await page.NavigateAsync(url);
+                await Task.Delay(500);
+
+                var content = await page.GetContentAsync();
+                Assert.That(content, Does.Contain("Redirected!"),
+                    "Redirect перенаправил запрос, и подменённый ответ отображён.");
+            }
+            finally
+            {
+                page.RequestIntercepted -= handler;
+                await page.SetRequestInterceptionAsync(false);
+            }
+        }
+
+        [TestCase(TestName = "Interception: Response Headers — модификация заголовков ответа"), Order(8)]
+        public async Task ResponseHeadersOverrideTest()
+        {
+            await page.SetRequestInterceptionAsync(true);
+
+            AsyncEventHandler<WebDriverPage, InterceptedRequestEventArgs> handler = (_, e) =>
+            {
+                if (e.Url.Contains("httpbin.org/get"))
+                {
+                    e.Continue(new InterceptedRequestContinuation
+                    {
+                        ResponseHeaders = new Dictionary<string, string>
+                        {
+                            ["X-Custom-Test"] = "intercepted-value",
+                            ["Access-Control-Expose-Headers"] = "X-Custom-Test",
+                        },
+                    });
+                }
+                else
+                {
+                    e.Continue();
+                }
+                return ValueTask.CompletedTask;
+            };
+            page.RequestIntercepted += handler;
+
+            try
+            {
+                // Запускаем асинхронный fetch и сохраняем результат в window-переменную.
+                // evalInMainWorld выполняет (0,eval) синхронно — промис async IIFE не разрешается,
+                // поэтому читаем результат отдельным вызовом после задержки.
+                await page.ExecuteAsync("""
+                    (async () => {
+                        const resp = await fetch('https://httpbin.org/get');
+                        window.__headerTestResult = resp.headers.get('X-Custom-Test') ?? 'not-found';
+                    })()
+                """);
+
+                await Task.Delay(3000);
+
+                var result = await page.ExecuteAsync("window.__headerTestResult");
+                var headerValue = result?.GetString();
+                Assert.That(headerValue, Is.EqualTo("intercepted-value"),
+                    "Кастомный заголовок ответа присутствует.");
+            }
+            finally
+            {
+                page.RequestIntercepted -= handler;
+                await page.SetRequestInterceptionAsync(false);
+            }
+        }
+
         private async Task<WebDriverPage> WaitForFirstTabAsync()
         {
             var tcs = new TaskCompletionSource<TabConnectedEventArgs>();

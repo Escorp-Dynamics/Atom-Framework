@@ -59,8 +59,11 @@ const virtualCookies = new Map();
 /** @type {Set<number>} Вкладки с включённым перехватом запросов. */
 const interceptEnabled = new Set();
 
-/** @type {Map<string, Object<string, string>>} requestId → заголовки для модификации (передаются из sync XHR ответа в onBeforeSendHeaders). */
+/** @type {Map<string, Object<string, string>>} requestId → заголовки запроса для модификации (передаются из sync XHR ответа в onBeforeSendHeaders). */
 const pendingHeaderOverrides = new Map();
+
+/** @type {Map<string, Object<string, string>>} requestId → заголовки ответа для модификации (передаются из sync XHR ответа в onHeadersReceived). */
+const pendingResponseHeaderOverrides = new Map();
 
 /** @type {Map<number, string>} tabId → compositeId для корректной идентификации вкладки при перехвате запросов. */
 const tabCompositeIds = new Map();
@@ -1459,6 +1462,7 @@ if (browser.webRequest?.onBeforeRequest) {
                     tabId: tabCompositeIds.get(details.tabId) ?? String(details.tabId),
                     requestBodyBase64,
                     formData,
+                    timestamp: Date.now(),
                 }));
 
                 if (xhr.status !== 200) return {};
@@ -1469,6 +1473,9 @@ if (browser.webRequest?.onBeforeRequest) {
                 if (response.action === "continue") {
                     if (response.headers) {
                         pendingHeaderOverrides.set(String(details.requestId), response.headers);
+                    }
+                    if (response.responseHeaders) {
+                        pendingResponseHeaderOverrides.set(String(details.requestId), response.responseHeaders);
                     }
                     if (response.url) return { redirectUrl: response.url };
                 }
@@ -1551,6 +1558,21 @@ if (browser.webRequest?.onBeforeSendHeaders) {
     browser.webRequest.onHeadersReceived.addListener(
         (details) => {
             let modified = false;
+
+            // Применяем response header overrides от перехватчика запросов.
+            const respOverrides = pendingResponseHeaderOverrides.get(String(details.requestId));
+            if (respOverrides) {
+                pendingResponseHeaderOverrides.delete(String(details.requestId));
+                for (const [name, value] of Object.entries(respOverrides)) {
+                    const existing = details.responseHeaders.find(h => h.name.toLowerCase() === name.toLowerCase());
+                    if (existing) {
+                        existing.value = value;
+                    } else {
+                        details.responseHeaders.push({ name, value });
+                    }
+                }
+                modified = true;
+            }
 
             // Снимаем CSP-заголовки для всех вкладок, чтобы evalInMainWorld
             // мог инжектить <script> теги без блокировки Content-Security-Policy.
