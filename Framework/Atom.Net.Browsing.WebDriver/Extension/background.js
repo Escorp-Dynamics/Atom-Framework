@@ -114,8 +114,12 @@ function evalInMainWorld(tabId, code, allFrames) {
         return browser.scripting.executeScript({
             target: allFrames ? { tabId, allFrames: true } : { tabId },
             world: "MAIN",
-            func: (c) => {
-                try { return { s: "ok", v: String((0, eval)(c)) }; }
+            func: async (c) => {
+                try {
+                    let r = (0, eval)(c);
+                    if (r != null && typeof r === "object" && typeof r.then === "function") r = await r;
+                    return { s: "ok", v: r != null ? String(r) : "null" };
+                }
                 catch (e) { return { s: "err", v: e.message }; }
             },
             args: [code],
@@ -125,6 +129,10 @@ function evalInMainWorld(tabId, code, allFrames) {
     // MV2: инъекция <script> через DOM bridge.
     // Код передаётся через DOM-атрибут (безопасно, не требует экранирования).
     // Inline <script> читает код из атрибута, eval-ит, пишет результат обратно.
+    // Для async-результатов (thenable) <script> ставит data-a="1" и пишет data-r
+    // позже через .then(); wrapper возвращает маркер {s:"async",id}, а evalInMainWorld
+    // опрашивает атрибут через повторные tabs.executeScript (Promise из wrapper
+    // нельзя сериализовать через tabs.executeScript в Chrome MV2).
     const wrapper =
         '(function(code){' +
         'var id="__ab"+Math.random().toString(36).slice(2,8);' +
@@ -137,17 +145,59 @@ function evalInMainWorld(tabId, code, allFrames) {
         "var e=document.getElementById('\"+id+\"');" +
         "if(!e)return;" +
         "try{var r=(0,eval)(e.getAttribute('data-c'));" +
+        "if(r!=null&&typeof r==='object'&&typeof r.then==='function'){" +
+        "e.setAttribute('data-a','1');" +
+        "r.then(function(v){e.setAttribute('data-r',JSON.stringify({s:'ok',v:v!=null?String(v):'null'}))})" +
+        ".catch(function(x){e.setAttribute('data-r',JSON.stringify({s:'err',v:x.message}))})" +
+        "}else{" +
         "e.setAttribute('data-r',JSON.stringify({s:'ok',v:r!=null?String(r):'null'}))}" +
-        "catch(x){e.setAttribute('data-r',JSON.stringify({s:'err',v:x.message}))}" +
+        "}catch(x){e.setAttribute('data-r',JSON.stringify({s:'err',v:x.message}))}" +
         "})()\";" +
         'document.documentElement.appendChild(s);s.remove();' +
-        'var j=el.getAttribute("data-r");el.remove();' +
-        'if(!j)return{s:"err",v:"MAIN world injection blocked (CSP?)"};' +
-        'try{return JSON.parse(j)}catch(x){return{s:"err",v:"Bridge parse error"}}' +
+        'var j=el.getAttribute("data-r");' +
+        'if(j){el.remove();try{return JSON.parse(j)}catch(x){return{s:"err",v:"Bridge parse error"}}}' +
+        'if(el.getAttribute("data-a")==="1"){return{s:"async",id:id}}' +
+        'el.remove();return{s:"err",v:"MAIN world injection blocked (CSP?)"}' +
         '})(' + JSON.stringify(code) + ')';
 
     return browser.tabs.executeScript(tabId, { code: wrapper, allFrames: !!allFrames })
-        .then(results => results || []);
+        .then(results => {
+            const r = (results || [])[0];
+            if (r?.s !== "async") return results || [];
+
+            // Async: опрашиваем data-r на DOM-элементе до получения результата.
+            const elId = r.id;
+            return new Promise((resolve) => {
+                let done = false;
+                const poll = () => {
+                    if (done) return;
+                    browser.tabs.executeScript(tabId, {
+                        code: '(function(){var e=document.getElementById("' + elId + '");' +
+                            'if(!e)return null;var j=e.getAttribute("data-r");' +
+                            'if(!j)return null;e.remove();' +
+                            'try{return JSON.parse(j)}catch(x){return{s:"err",v:"Bridge parse error"}}})()',
+                    }).then(res => {
+                        if (done) return;
+                        const pr = (res || [])[0];
+                        if (pr) { done = true; resolve([pr]); }
+                        else setTimeout(poll, 50);
+                    }).catch(() => {
+                        if (done) return;
+                        done = true;
+                        resolve([{ s: "err", v: "Poll failed" }]);
+                    });
+                };
+                setTimeout(poll, 10);
+                setTimeout(() => {
+                    if (done) return;
+                    done = true;
+                    browser.tabs.executeScript(tabId, {
+                        code: '(function(){var e=document.getElementById("' + elId + '");if(e)e.remove()})()',
+                    }).catch(() => { });
+                    resolve([{ s: "err", v: "Async eval timeout (30s)" }]);
+                }, 30000);
+            });
+        });
 }
 
 

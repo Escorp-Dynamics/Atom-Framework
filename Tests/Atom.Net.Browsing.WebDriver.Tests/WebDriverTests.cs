@@ -969,7 +969,7 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ key: 'value123' })
-                    }).catch(() => {});
+                    }).catch(() => {}); 0
                 """);
 
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -1010,8 +1010,10 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             try
             {
                 // Запрос к httpbin.org — должен быть перехвачен.
+                // Суффикс "; 0" предотвращает возврат Promise из eval — тесту не нужен результат fetch,
+                // только факт перехвата. Без этого evalInMainWorld ждёт завершения fetch (до 30с).
                 await page.ExecuteAsync("""
-                    fetch('https://httpbin.org/get').catch(() => {});
+                    fetch('https://httpbin.org/get').catch(() => {}); 0
                 """);
 
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -1020,7 +1022,7 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
 
                 // Запрос к другому хосту — НЕ должен быть перехвачен.
                 await page.ExecuteAsync("""
-                    fetch('https://example.com/test').catch(() => {});
+                    fetch('https://example.com/test').catch(() => {}); 0
                 """);
                 await Task.Delay(2000);
 
@@ -1144,19 +1146,15 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
 
             try
             {
-                // Запускаем асинхронный fetch и сохраняем результат в window-переменную.
-                // evalInMainWorld выполняет (0,eval) синхронно — промис async IIFE не разрешается,
-                // поэтому читаем результат отдельным вызовом после задержки.
-                await page.ExecuteAsync("""
+                // Делаем fetch и читаем заголовок ответа.
+                // evalInMainWorld теперь корректно ожидает промисы из async IIFE.
+                var result = await page.ExecuteAsync("""
                     (async () => {
                         const resp = await fetch('https://httpbin.org/get');
-                        window.__headerTestResult = resp.headers.get('X-Custom-Test') ?? 'not-found';
+                        return resp.headers.get('X-Custom-Test') ?? 'not-found';
                     })()
                 """);
 
-                await Task.Delay(3000);
-
-                var result = await page.ExecuteAsync("window.__headerTestResult");
                 var headerValue = result?.GetString();
                 Assert.That(headerValue, Is.EqualTo("intercepted-value"),
                     "Кастомный заголовок ответа присутствует.");
