@@ -1166,6 +1166,23 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             }
         }
 
+        [TestCase(TestName = "Interception: Body Override — кастомный HTML вместо ответа сервера"), Order(9)]
+        public async Task BodyOverrideTest()
+        {
+            const string customHtml = "<html><body><h1 id='marker'>BODY_OVERRIDE_OK</h1></body></html>";
+            var url = new Uri("https://httpbin.org/html");
+
+            await page.NavigateAsync(url, new NavigationSettings { Body = customHtml });
+            await Task.Delay(500);
+
+            var result = await page.ExecuteAsync("document.getElementById('marker')?.textContent ?? 'not-found'");
+            var text = result?.GetString();
+
+            Assert.That(text, Is.EqualTo("BODY_OVERRIDE_OK"),
+                "Страница должна содержать подставленный HTML, а не ответ сервера.");
+            logger.WriteLine(LogKind.Default, $"BodyOverride: marker text = {text}");
+        }
+
         private async Task<WebDriverPage> WaitForFirstTabAsync()
         {
             var tcs = new TaskCompletionSource<TabConnectedEventArgs>();
@@ -1588,6 +1605,151 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
                 Assert.That(msg.Args[0], Does.Contain("hello"), "Первый аргумент содержит 'hello'.");
                 Assert.That(msg.Timestamp, Is.GreaterThan(DateTimeOffset.UnixEpoch), "Timestamp валиден.");
                 logger.WriteLine(LogKind.Default, $"ConsoleMessage: level={msg.Level}, args=[{string.Join(", ", msg.Args)}]");
+            }
+            finally
+            {
+                newTab.ConsoleMessage -= handler;
+            }
+        }
+
+        [TestCase(TestName = "ConsoleMessage: console.warn → Level.Warn"), Order(15)]
+        public async Task ConsoleWarnLevelTest()
+        {
+            var newTab = await browser.OpenTabAsync(new Uri("about:blank"));
+            await Task.Delay(200);
+
+            var tcs = new TaskCompletionSource<ConsoleMessageEventArgs>();
+            AsyncEventHandler<IWebPage, ConsoleMessageEventArgs> handler = (_, e) =>
+            {
+                if (e.Level == ConsoleMessageLevel.Warn)
+                    tcs.TrySetResult(e);
+                return ValueTask.CompletedTask;
+            };
+            newTab.ConsoleMessage += handler;
+
+            try
+            {
+                await newTab.ExecuteAsync("console.warn('warning message')");
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var msg = await tcs.Task.WaitAsync(cts.Token);
+
+                Assert.That(msg.Level, Is.EqualTo(ConsoleMessageLevel.Warn), "Уровень — Warn.");
+                Assert.That(msg.Args, Has.Count.GreaterThanOrEqualTo(1), "Минимум 1 аргумент.");
+                Assert.That(msg.Args[0], Does.Contain("warning message"), "Аргумент содержит текст.");
+                logger.WriteLine(LogKind.Default, $"ConsoleWarn: level={msg.Level}, args=[{string.Join(", ", msg.Args)}]");
+            }
+            finally
+            {
+                newTab.ConsoleMessage -= handler;
+            }
+        }
+
+        [TestCase(TestName = "ConsoleMessage: console.error → Level.Error"), Order(16)]
+        public async Task ConsoleErrorLevelTest()
+        {
+            var newTab = await browser.OpenTabAsync(new Uri("about:blank"));
+            await Task.Delay(200);
+
+            var tcs = new TaskCompletionSource<ConsoleMessageEventArgs>();
+            AsyncEventHandler<IWebPage, ConsoleMessageEventArgs> handler = (_, e) =>
+            {
+                if (e.Level == ConsoleMessageLevel.Error)
+                    tcs.TrySetResult(e);
+                return ValueTask.CompletedTask;
+            };
+            newTab.ConsoleMessage += handler;
+
+            try
+            {
+                await newTab.ExecuteAsync("console.error('error message', {code: 500})");
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var msg = await tcs.Task.WaitAsync(cts.Token);
+
+                Assert.That(msg.Level, Is.EqualTo(ConsoleMessageLevel.Error), "Уровень — Error.");
+                Assert.That(msg.Args, Has.Count.GreaterThanOrEqualTo(2), "Минимум 2 аргумента.");
+                Assert.That(msg.Args[0], Does.Contain("error message"), "Первый аргумент — текст ошибки.");
+                logger.WriteLine(LogKind.Default, $"ConsoleError: level={msg.Level}, args=[{string.Join(", ", msg.Args)}]");
+            }
+            finally
+            {
+                newTab.ConsoleMessage -= handler;
+            }
+        }
+
+        [TestCase(TestName = "ConsoleMessage: все 5 уровней в последовательности"), Order(17)]
+        public async Task ConsoleAllLevelsTest()
+        {
+            var newTab = await browser.OpenTabAsync(new Uri("about:blank"));
+            await Task.Delay(200);
+
+            var messages = new List<ConsoleMessageEventArgs>();
+            var allReceived = new TaskCompletionSource();
+            AsyncEventHandler<IWebPage, ConsoleMessageEventArgs> handler = (_, e) =>
+            {
+                messages.Add(e);
+                if (messages.Count >= 5)
+                    allReceived.TrySetResult();
+                return ValueTask.CompletedTask;
+            };
+            newTab.ConsoleMessage += handler;
+
+            try
+            {
+                await newTab.ExecuteAsync("""
+                    console.log('msg-log');
+                    console.warn('msg-warn');
+                    console.error('msg-error');
+                    console.info('msg-info');
+                    console.debug('msg-debug');
+                """);
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await allReceived.Task.WaitAsync(cts.Token);
+
+                var levels = messages.Select(m => m.Level).ToHashSet();
+                Assert.That(levels, Does.Contain(ConsoleMessageLevel.Log), "Получен Log.");
+                Assert.That(levels, Does.Contain(ConsoleMessageLevel.Warn), "Получен Warn.");
+                Assert.That(levels, Does.Contain(ConsoleMessageLevel.Error), "Получен Error.");
+                Assert.That(levels, Does.Contain(ConsoleMessageLevel.Info), "Получен Info.");
+                Assert.That(levels, Does.Contain(ConsoleMessageLevel.Debug), "Получен Debug.");
+
+                foreach (var msg in messages)
+                    logger.WriteLine(LogKind.Default, $"  {msg.Level}: [{string.Join(", ", msg.Args)}]");
+            }
+            finally
+            {
+                newTab.ConsoleMessage -= handler;
+            }
+        }
+
+        [TestCase(TestName = "ConsoleMessage: длинные аргументы усекаются"), Order(18)]
+        public async Task ConsoleLargeArgsTest()
+        {
+            var newTab = await browser.OpenTabAsync(new Uri("about:blank"));
+            await Task.Delay(200);
+
+            var tcs = new TaskCompletionSource<ConsoleMessageEventArgs>();
+            AsyncEventHandler<IWebPage, ConsoleMessageEventArgs> handler = (_, e) =>
+            {
+                tcs.TrySetResult(e);
+                return ValueTask.CompletedTask;
+            };
+            newTab.ConsoleMessage += handler;
+
+            try
+            {
+                // Создаём строку длиннее 500 символов — shadow-intercept.js должен усечь.
+                await newTab.ExecuteAsync("console.log('x'.repeat(1000))");
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var msg = await tcs.Task.WaitAsync(cts.Token);
+
+                Assert.That(msg.Args, Has.Count.GreaterThanOrEqualTo(1), "Минимум 1 аргумент.");
+                Assert.That(msg.Args[0].Length, Is.LessThanOrEqualTo(510),
+                    "Длинный аргумент усечён (≈500 символов + допуск).");
+                logger.WriteLine(LogKind.Default, $"LargeArgs: length={msg.Args[0].Length}");
             }
             finally
             {
