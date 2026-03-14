@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using Atom.Net.Browsing.WebDriver.Protocol;
 
@@ -9,7 +9,7 @@ namespace Atom.Net.Browsing.WebDriver;
 /// Все DOM-операции делегируются расширению с указанием хост-элемента,
 /// обеспечивая скоупинг внутри теневого дерева.
 /// </summary>
-internal sealed class WebDriverShadowRoot(string hostElementId, TabChannel channel) : IShadowRoot
+internal sealed class WebDriverShadowRoot(string hostElementId, TabChannel channel, bool isClosed = false) : IShadowRoot
 {
     private bool isDisposed;
 
@@ -67,15 +67,18 @@ internal sealed class WebDriverShadowRoot(string hostElementId, TabChannel chann
         ObjectDisposedException.ThrowIf(isDisposed, this);
         ArgumentNullException.ThrowIfNull(selector);
 
+        var findPayload = new JsonObject
+        {
+            ["strategy"] = selector.Strategy.ToString(),
+            ["value"] = selector.Value,
+            ["shadowHostElementId"] = hostElementId,
+        };
+
+        if (isClosed)
+            findPayload["closedShadow"] = true;
+
         var response = await channel.SendCommandAsync(
-            BridgeCommand.FindElement,
-            new JsonObject
-            {
-                ["strategy"] = selector.Strategy.ToString(),
-                ["value"] = selector.Value,
-                ["shadowHostElementId"] = hostElementId,
-            },
-            cancellationToken).ConfigureAwait(false);
+            BridgeCommand.FindElement, findPayload, cancellationToken).ConfigureAwait(false);
 
         return response.Status == BridgeStatus.Ok && response.Payload is JsonElement el && el.GetString() is { } id
             ? new WebDriverElement(id, channel)
@@ -91,15 +94,18 @@ internal sealed class WebDriverShadowRoot(string hostElementId, TabChannel chann
         ObjectDisposedException.ThrowIf(isDisposed, this);
         ArgumentNullException.ThrowIfNull(selector);
 
+        var findPayload = new JsonObject
+        {
+            ["strategy"] = selector.Strategy.ToString(),
+            ["value"] = selector.Value,
+            ["shadowHostElementId"] = hostElementId,
+        };
+
+        if (isClosed)
+            findPayload["closedShadow"] = true;
+
         var response = await channel.SendCommandAsync(
-            BridgeCommand.FindElements,
-            new JsonObject
-            {
-                ["strategy"] = selector.Strategy.ToString(),
-                ["value"] = selector.Value,
-                ["shadowHostElementId"] = hostElementId,
-            },
-            cancellationToken).ConfigureAwait(false);
+            BridgeCommand.FindElements, findPayload, cancellationToken).ConfigureAwait(false);
 
         if (response.Status != BridgeStatus.Ok || response.Payload is not JsonElement el)
             return [];
@@ -120,16 +126,19 @@ internal sealed class WebDriverShadowRoot(string hostElementId, TabChannel chann
         ObjectDisposedException.ThrowIf(isDisposed, this);
         ArgumentNullException.ThrowIfNull(selector);
 
+        var waitPayload = new JsonObject
+        {
+            ["strategy"] = selector.Strategy.ToString(),
+            ["value"] = selector.Value,
+            ["timeoutMs"] = (timeout ?? TimeSpan.FromSeconds(10)).TotalMilliseconds,
+            ["shadowHostElementId"] = hostElementId,
+        };
+
+        if (isClosed)
+            waitPayload["closedShadow"] = true;
+
         var response = await channel.SendCommandAsync(
-            BridgeCommand.WaitForElement,
-            new JsonObject
-            {
-                ["strategy"] = selector.Strategy.ToString(),
-                ["value"] = selector.Value,
-                ["timeoutMs"] = (timeout ?? TimeSpan.FromSeconds(10)).TotalMilliseconds,
-                ["shadowHostElementId"] = hostElementId,
-            },
-            cancellationToken).ConfigureAwait(false);
+            BridgeCommand.WaitForElement, waitPayload, cancellationToken).ConfigureAwait(false);
 
         return response.Status == BridgeStatus.Ok && response.Payload is JsonElement el && el.GetString() is { } id
             ? new WebDriverElement(id, channel)

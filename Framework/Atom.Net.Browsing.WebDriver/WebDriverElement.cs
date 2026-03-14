@@ -148,10 +148,14 @@ internal sealed class WebDriverElement(string elementId, TabChannel channel) : I
             new JsonObject { ["elementId"] = elementId },
             cancellationToken).ConfigureAwait(false);
 
-        if (response.Status != BridgeStatus.Ok || response.Payload is not JsonElement el || !el.GetBoolean())
+        if (response.Status != BridgeStatus.Ok || response.Payload is not JsonElement el)
             return null;
 
-        return new WebDriverShadowRoot(elementId, channel);
+        var mode = el.GetString();
+        if (mode is not ("open" or "closed"))
+            return null;
+
+        return new WebDriverShadowRoot(elementId, channel, isClosed: string.Equals(mode, "closed", StringComparison.Ordinal));
     }
 
     /// <inheritdoc cref="IElement.OpenShadowRootAsync(CancellationToken)"/>

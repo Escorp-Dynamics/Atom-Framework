@@ -804,6 +804,359 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
     }
 
     /// <summary>
+    /// Тесты Shadow DOM: <see cref="IShadowRoot"/> — IAsyncDisposable-скоуп
+    /// для поиска элементов и выполнения скриптов внутри теневого дерева.
+    /// </summary>
+    [TestFixture, Category("GUI"), NonParallelizable]
+    public class ShadowRootTests
+    {
+        private readonly ILogger logger = ConsoleLogger.Unicode;
+        private WebDriverBrowser browser = null!;
+        private WebDriverPage page = null!;
+
+        [OneTimeSetUp]
+        public async Task SetUp()
+        {
+            var (browserPath, extensionPath) = FindChromiumBrowser();
+            browser = await WebDriverBrowser.LaunchAsync(
+                browserPath, extensionPath,
+                arguments: ["--no-sandbox", "--disable-features=Translate"]);
+            page = await WaitForFirstTabAsync();
+            logger.WriteLine(LogKind.Default, $"[ShadowRootTests] Браузер запущен, вкладка: {page.TabId}");
+        }
+
+        [OneTimeTearDown]
+        public async Task TearDown()
+        {
+            await browser.DisposeAsync();
+        }
+
+        [TestCase(TestName = "ShadowRoot: OpenShadowRootAsync на open shadow root → IShadowRoot"), Order(1)]
+        public async Task OpenShadowRootReturnsScopeTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '';
+                var host = document.createElement('div');
+                host.id = 'sr-host';
+                document.body.appendChild(host);
+                host.attachShadow({mode: 'open'}).innerHTML = '<p id="inner">Shadow</p>';
+            """);
+
+            var host = await page.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#sr-host",
+            });
+
+            Assert.That(host, Is.Not.Null, "Хост-элемент найден.");
+
+            await using var shadow = await host!.OpenShadowRootAsync();
+
+            Assert.That(shadow, Is.Not.Null, "Open shadow root обнаружен.");
+            logger.WriteLine(LogKind.Default, "OpenShadowRoot вернул IShadowRoot.");
+        }
+
+        [TestCase(TestName = "ShadowRoot: OpenShadowRootAsync без shadow root → null"), Order(2)]
+        public async Task OpenShadowRootNoShadowReturnsNullTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '<div id="plain">No shadow here</div>';
+            """);
+
+            var plain = await page.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#plain",
+            });
+
+            Assert.That(plain, Is.Not.Null);
+
+            var shadow = await plain!.OpenShadowRootAsync();
+
+            Assert.That(shadow, Is.Null, "Элемент без shadow root → null.");
+        }
+
+        [TestCase(TestName = "ShadowRoot: FindElementAsync в теневом дереве"), Order(3)]
+        public async Task FindElementInsideShadowTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '';
+                var host = document.createElement('div');
+                host.id = 'sr-find';
+                document.body.appendChild(host);
+                host.attachShadow({mode: 'open'}).innerHTML =
+                    '<p id="shadow-para" class="item">Found inside shadow</p>';
+            """);
+
+            var host = await page.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#sr-find",
+            });
+
+            await using var shadow = await host!.OpenShadowRootAsync();
+            Assert.That(shadow, Is.Not.Null);
+
+            var el = await shadow!.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#shadow-para",
+            });
+
+            Assert.That(el, Is.Not.Null, "Элемент внутри shadow DOM найден по CSS.");
+
+            var text = await el!.GetPropertyAsync("textContent");
+            Assert.That(text, Is.EqualTo("Found inside shadow"));
+            logger.WriteLine(LogKind.Default, $"FindElement в shadow: textContent='{text}'");
+        }
+
+        [TestCase(TestName = "ShadowRoot: FindElementsAsync — несколько элементов"), Order(4)]
+        public async Task FindElementsInsideShadowTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '';
+                var host = document.createElement('div');
+                host.id = 'sr-multi';
+                document.body.appendChild(host);
+                host.attachShadow({mode: 'open'}).innerHTML =
+                    '<span class="si">A</span><span class="si">B</span><span class="si">C</span>';
+            """);
+
+            var host = await page.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#sr-multi",
+            });
+
+            await using var shadow = await host!.OpenShadowRootAsync();
+            Assert.That(shadow, Is.Not.Null);
+
+            var elements = await shadow!.FindElementsAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = ".si",
+            });
+
+            Assert.That(elements, Has.Length.EqualTo(3), "Найдены 3 элемента внутри shadow DOM.");
+            logger.WriteLine(LogKind.Default, $"FindElements в shadow: count={elements.Length}");
+        }
+
+        [TestCase(TestName = "ShadowRoot: ExecuteAsync — переменная shadowRoot доступна"), Order(5)]
+        public async Task ShadowRootExecuteAsyncTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '';
+                var host = document.createElement('div');
+                host.id = 'sr-exec';
+                document.body.appendChild(host);
+                host.attachShadow({mode: 'open'}).innerHTML = '<b>bold</b>';
+            """);
+
+            var host = await page.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#sr-exec",
+            });
+
+            await using var shadow = await host!.OpenShadowRootAsync();
+            Assert.That(shadow, Is.Not.Null);
+
+            var result = await shadow!.ExecuteAsync("return shadowRoot.querySelector('b').textContent");
+
+            Assert.That(result?.ToString(), Is.EqualTo("bold"),
+                "ExecuteAsync внутри shadow scope имеет доступ к переменной shadowRoot.");
+            logger.WriteLine(LogKind.Default, $"ExecuteAsync в shadow: result='{result}'");
+        }
+
+        [TestCase(TestName = "ShadowRoot: GetContentAsync — innerHTML теневого дерева"), Order(6)]
+        public async Task ShadowRootGetContentAsyncTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '';
+                var host = document.createElement('div');
+                host.id = 'sr-content';
+                document.body.appendChild(host);
+                host.attachShadow({mode: 'open'}).innerHTML = '<em>emphasized</em>';
+            """);
+
+            var host = await page.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#sr-content",
+            });
+
+            await using var shadow = await host!.OpenShadowRootAsync();
+            Assert.That(shadow, Is.Not.Null);
+
+            var html = await shadow!.GetContentAsync();
+
+            Assert.That(html, Does.Contain("<em>emphasized</em>"),
+                "GetContentAsync возвращает innerHTML shadow root.");
+            logger.WriteLine(LogKind.Default, $"GetContentAsync: '{html}'");
+        }
+
+        [TestCase(TestName = "ShadowRoot: WaitForElementAsync — ожидание динамического элемента"), Order(7)]
+        public async Task WaitForElementInsideShadowTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '';
+                var host = document.createElement('div');
+                host.id = 'sr-wait';
+                document.body.appendChild(host);
+                host.attachShadow({mode: 'open'});
+            """);
+
+            var host = await page.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#sr-wait",
+            });
+
+            await using var shadow = await host!.OpenShadowRootAsync();
+            Assert.That(shadow, Is.Not.Null);
+
+            // Добавляем элемент в shadow DOM через 300 мс.
+            _ = page.ExecuteAsync("""
+                setTimeout(() => {
+                    var host = document.getElementById('sr-wait');
+                    host.shadowRoot.innerHTML = '<div id="delayed">I appeared</div>';
+                }, 300);
+            """);
+
+            var found = await shadow!.WaitForElementAsync(
+                new ElementSelector { Strategy = ElementSelectorStrategy.Css, Value = "#delayed" },
+                timeout: TimeSpan.FromSeconds(5));
+
+            Assert.That(found, Is.Not.Null, "WaitForElement обнаружил динамически добавленный элемент в shadow DOM.");
+
+            var text = await found!.GetPropertyAsync("textContent");
+            Assert.That(text, Is.EqualTo("I appeared"));
+            logger.WriteLine(LogKind.Default, $"WaitForElement в shadow: textContent='{text}'");
+        }
+
+        [TestCase(TestName = "ShadowRoot: DisposeAsync → ObjectDisposedException"), Order(8)]
+        public async Task ShadowRootDisposeAsyncTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '';
+                var host = document.createElement('div');
+                host.id = 'sr-dispose';
+                document.body.appendChild(host);
+                host.attachShadow({mode: 'open'}).innerHTML = '<p>disposable</p>';
+            """);
+
+            var host = await page.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#sr-dispose",
+            });
+
+            var shadow = await host!.OpenShadowRootAsync();
+            Assert.That(shadow, Is.Not.Null);
+
+            await shadow!.DisposeAsync();
+
+            Assert.ThrowsAsync<ObjectDisposedException>(async () =>
+                await shadow.ExecuteAsync("return 1"));
+
+            Assert.ThrowsAsync<ObjectDisposedException>(async () =>
+                await shadow.FindElementAsync(new ElementSelector
+                {
+                    Strategy = ElementSelectorStrategy.Css,
+                    Value = "p",
+                }));
+
+            Assert.ThrowsAsync<ObjectDisposedException>(async () =>
+                await shadow.FindElementsAsync(new ElementSelector
+                {
+                    Strategy = ElementSelectorStrategy.Css,
+                    Value = "p",
+                }));
+
+            Assert.ThrowsAsync<ObjectDisposedException>(async () =>
+                await shadow.WaitForElementAsync(
+                    new ElementSelector { Strategy = ElementSelectorStrategy.Css, Value = "p" },
+                    TimeSpan.FromSeconds(1)));
+
+            logger.WriteLine(LogKind.Default, "DisposeAsync → все операции бросают ObjectDisposedException.");
+        }
+
+        [TestCase(TestName = "ShadowRoot: элементы в shadow DOM изолированы от основного документа"), Order(9)]
+        public async Task ShadowDomIsolationTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '<p id="outer-unique">Outer</p>';
+                var host = document.createElement('div');
+                host.id = 'sr-iso';
+                document.body.appendChild(host);
+                host.attachShadow({mode: 'open'}).innerHTML = '<p id="inner-unique">Inner</p>';
+            """);
+
+            // Из основного контекста — находим outer, но НЕ inner.
+            var outer = await page.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#outer-unique",
+            });
+            Assert.That(outer, Is.Not.Null, "outer-unique найден в основном DOM.");
+
+            var innerFromPage = await page.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#inner-unique",
+            });
+            Assert.That(innerFromPage, Is.Null, "inner-unique НЕ найден через page (изоляция shadow DOM).");
+
+            // Из shadow scope — находим inner, но НЕ outer.
+            var host = await page.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#sr-iso",
+            });
+
+            await using var shadow = await host!.OpenShadowRootAsync();
+            Assert.That(shadow, Is.Not.Null);
+
+            var inner = await shadow!.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#inner-unique",
+            });
+            Assert.That(inner, Is.Not.Null, "inner-unique найден через shadow scope.");
+
+            var outerFromShadow = await shadow.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#outer-unique",
+            });
+            Assert.That(outerFromShadow, Is.Null, "outer-unique НЕ найден через shadow scope (изоляция).");
+
+            logger.WriteLine(LogKind.Default, "Shadow DOM изоляция подтверждена.");
+        }
+
+        private async Task<WebDriverPage> WaitForFirstTabAsync()
+        {
+            var tcs = new TaskCompletionSource<TabConnectedEventArgs>();
+            browser.TabConnected += (_, e) =>
+            {
+                tcs.TrySetResult(e);
+                return ValueTask.CompletedTask;
+            };
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+            if (browser.ConnectionCount > 0)
+                return browser.GetAllPages().First();
+
+            var result = await tcs.Task.WaitAsync(cts.Token);
+            logger.WriteLine(LogKind.Default, $"Вкладка подключилась: {result.TabId}");
+
+            return browser.GetPage(result.TabId)
+                ?? throw new BridgeException($"Страница {result.TabId} не найдена после подключения.");
+        }
+    }
+
+    /// <summary>
     /// Тесты перехвата сетевых запросов (Continue, Abort, Fulfill).
     /// </summary>
     [TestFixture, Category("GUI"), NonParallelizable]

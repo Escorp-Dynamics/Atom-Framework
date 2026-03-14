@@ -196,29 +196,42 @@ const browser = globalThis.browser ?? globalThis.chrome;
         return error(result?.error || "Script execution failed.");
     }
 
-    function cmdFindElement(payload) {
+    async function cmdFindElement(payload) {
+        if (payload.shadowHostElementId && payload.closedShadow)
+            return closedShadowFind(payload.shadowHostElementId, true, payload.strategy, payload.value, false);
+        if (payload.parentElementId?.startsWith("cr_"))
+            return closedShadowFind(payload.parentElementId, false, payload.strategy, payload.value, false);
+
         const root = resolveRoot(payload);
-        if (root === undefined) return Promise.resolve(error("Root element not found."));
+        if (root === undefined) return error("Root element not found.");
 
         const el = findSingle(payload.strategy, payload.value, root);
-        if (!el) return Promise.resolve({ status: "NotFound", payload: null, error: null });
+        if (!el) return { status: "NotFound", payload: null, error: null };
 
         const id = registerElement(el);
-        return Promise.resolve(ok(id));
+        return ok(id);
     }
 
-    function cmdFindElements(payload) {
+    async function cmdFindElements(payload) {
+        if (payload.shadowHostElementId && payload.closedShadow)
+            return closedShadowFind(payload.shadowHostElementId, true, payload.strategy, payload.value, true);
+        if (payload.parentElementId?.startsWith("cr_"))
+            return closedShadowFind(payload.parentElementId, false, payload.strategy, payload.value, true);
+
         const root = resolveRoot(payload);
-        if (root === undefined) return Promise.resolve(error("Root element not found."));
+        if (root === undefined) return error("Root element not found.");
 
         const elements = findMultiple(payload.strategy, payload.value, root);
         const ids = elements.map((el) => registerElement(el));
-        return Promise.resolve(ok(ids));
+        return ok(ids);
     }
 
-    function cmdElementAction(payload) {
+    async function cmdElementAction(payload) {
+        if (payload.elementId?.startsWith("cr_"))
+            return closedElementAction(payload);
+
         const el = elementRegistry.get(payload.elementId);
-        if (!el) return Promise.resolve({ status: "NotFound", payload: null, error: "Элемент не найден в реестре." });
+        if (!el) return { status: "NotFound", payload: null, error: "Элемент не найден в реестре." };
 
         switch (payload.action) {
             case "Click":
@@ -274,15 +287,18 @@ const browser = globalThis.browser ?? globalThis.chrome;
                 break;
 
             default:
-                return Promise.resolve(error(`Неизвестное действие: ${payload.action}`));
+                return error(`Неизвестное действие: ${payload.action}`);
         }
 
-        return Promise.resolve(ok(null));
+        return ok(null);
     }
 
-    function cmdGetElementProperty(payload) {
+    async function cmdGetElementProperty(payload) {
+        if (payload.elementId?.startsWith("cr_"))
+            return closedElementGetProperty(payload);
+
         const el = elementRegistry.get(payload.elementId);
-        if (!el) return Promise.resolve({ status: "NotFound", payload: null, error: "Элемент не найден в реестре." });
+        if (!el) return { status: "NotFound", payload: null, error: "Элемент не найден в реестре." };
 
         const name = payload.propertyName;
 
@@ -292,10 +308,13 @@ const browser = globalThis.browser ?? globalThis.chrome;
             value = el.getAttribute(name);
         }
 
-        return Promise.resolve(ok(value != null ? String(value) : null));
+        return ok(value != null ? String(value) : null);
     }
 
     function cmdWaitForElement(payload) {
+        if (payload.shadowHostElementId && payload.closedShadow)
+            return waitInClosedShadow(payload);
+
         const timeout = payload.timeoutMs || 10000;
         const root = resolveRoot(payload);
         if (root === undefined) return Promise.resolve(error("Root element not found."));
@@ -327,11 +346,193 @@ const browser = globalThis.browser ?? globalThis.chrome;
         });
     }
 
-    function cmdCheckShadowRoot(payload) {
+    async function cmdCheckShadowRoot(payload) {
         const el = elementRegistry.get(payload.elementId);
-        if (!el) return Promise.resolve({ status: "NotFound", payload: null, error: "Element not found." });
-        return Promise.resolve(ok(!!el.shadowRoot));
+        if (!el) return { status: "NotFound", payload: null, error: "Element not found." };
+        if (el.shadowRoot) return ok("open");
+
+        // Проверяем closed shadow root через MAIN world.
+        const markerId = `asr${++elementIdCounter}`;
+        el.setAttribute("data-atom-sr", markerId);
+        try {
+            const r = await executeInMainWorld(
+                `(function(){var h=document.querySelector('[data-atom-sr="${markerId}"]');` +
+                `return h&&!!h.__capturedShadowRoot?'closed':'false';})()`
+            );
+            if (r?.status === "ok" && r.value === "closed") return ok("closed");
+        } finally {
+            el.removeAttribute("data-atom-sr");
+        }
+        return ok("false");
     }
+
+    // ─── Closed Shadow Root Helpers ────────────────────────────
+
+    /**
+     * Найти элемент(ы) внутри closed/open shadow root через MAIN world.
+     * @param {string} hostOrParentId — elementId хоста (isHost=true) или cr_-ID родителя (isHost=false)
+     * @param {boolean} isHost — true = shadow host; false = cr_-элемент-родитель
+     * @param {string} strategy    — стратегия поиска (Css, Id, Name, TagName, XPath, Text)
+     * @param {string} value       — значение селектора
+     * @param {boolean} multiple   — true = findAll, false = findSingle
+     */
+    async function closedShadowFind(hostOrParentId, isHost, strategy, value, multiple) {
+        let markerId, cleanupFn;
+
+        if (isHost) {
+            const host = elementRegistry.get(hostOrParentId);
+            if (!host) return error("Shadow host element not found.");
+
+            markerId = `asr${++elementIdCounter}`;
+            host.setAttribute("data-atom-sr", markerId);
+            host.setAttribute("data-atom-strat", strategy);
+            host.setAttribute("data-atom-val", value);
+            cleanupFn = () => {
+                host.removeAttribute("data-atom-sr");
+                host.removeAttribute("data-atom-strat");
+                host.removeAttribute("data-atom-val");
+            };
+        } else {
+            markerId = `__acr${++elementIdCounter}`;
+            const marker = document.createElement("span");
+            marker.id = markerId;
+            marker.setAttribute("data-acr-parent", hostOrParentId);
+            marker.setAttribute("data-acr-strat", strategy);
+            marker.setAttribute("data-acr-val", value);
+            marker.style.display = "none";
+            document.documentElement.appendChild(marker);
+            cleanupFn = () => marker.remove();
+        }
+
+        const resolveCode = isHost
+            ? `var h=document.querySelector('[data-atom-sr="${markerId}"]');` +
+            `if(!h)return'null';` +
+            `var root=h.__capturedShadowRoot||h.shadowRoot;` +
+            `var strat=h.getAttribute('data-atom-strat');` +
+            `var val=h.getAttribute('data-atom-val');`
+            : `var mk=document.getElementById('${markerId}');` +
+            `if(!mk)return'null';` +
+            `var root=window.__atomCR.m.get(mk.getAttribute('data-acr-parent'));` +
+            `var strat=mk.getAttribute('data-acr-strat');` +
+            `var val=mk.getAttribute('data-acr-val');`;
+
+        const findFns =
+            `function f1(s,v,r){switch(s){` +
+            `case'Css':return r.querySelector(v);` +
+            `case'Id':return r.getElementById?r.getElementById(v):r.querySelector('#'+CSS.escape(v));` +
+            `case'Name':return r.querySelector('[name=\"'+CSS.escape(v)+'\"]');` +
+            `case'TagName':return r.querySelector(v);` +
+            `case'XPath':return document.evaluate(v,r,null,9,null).singleNodeValue;` +
+            `case'Text':{var w=document.createTreeWalker(r,NodeFilter.SHOW_TEXT);` +
+            `while(w.nextNode()){if(w.currentNode.textContent?.trim()===v)return w.currentNode.parentElement;}return null;}` +
+            `default:return null;}}` +
+            `function fN(s,v,r){switch(s){` +
+            `case'Css':return[...r.querySelectorAll(v)];` +
+            `case'Id':{var e=f1(s,v,r);return e?[e]:[];}` +
+            `case'Name':return[...r.querySelectorAll('[name=\"'+CSS.escape(v)+'\"]')];` +
+            `case'TagName':return[...r.querySelectorAll(v)];` +
+            `case'XPath':{var x=document.evaluate(v,r,null,7,null);var a=[];` +
+            `for(var i=0;i<x.snapshotLength;i++)a.push(x.snapshotItem(i));return a;}` +
+            `case'Text':{var rs=[];var w=document.createTreeWalker(r,NodeFilter.SHOW_TEXT);` +
+            `while(w.nextNode()){if(w.currentNode.textContent?.trim()===v&&w.currentNode.parentElement)rs.push(w.currentNode.parentElement);}return rs;}` +
+            `default:return[];}}`;
+
+        const resultCode = multiple
+            ? `var els=fN(strat,val,root);var ids=[];` +
+            `for(var i=0;i<els.length;i++){var id='cr_'+(++window.__atomCR.c);window.__atomCR.m.set(id,els[i]);ids.push(id);}` +
+            `return JSON.stringify(ids);`
+            : `var el=f1(strat,val,root);if(!el)return'null';` +
+            `var id='cr_'+(++window.__atomCR.c);window.__atomCR.m.set(id,el);return id;`;
+
+        const script =
+            `(function(){window.__atomCR=window.__atomCR||{m:new Map(),c:0};` +
+            resolveCode + `if(!root)return'null';` + findFns + resultCode + `})()`;
+
+        try {
+            const result = await executeInMainWorld(script);
+            if (result?.status !== "ok" || !result.value || result.value === "null") {
+                return multiple ? ok([]) : { status: "NotFound", payload: null, error: null };
+            }
+            return multiple ? ok(JSON.parse(result.value)) : ok(result.value);
+        } finally {
+            cleanupFn();
+        }
+    }
+
+    /**
+     * Выполнить действие над cr_-элементом через MAIN world.
+     */
+    async function closedElementAction(payload) {
+        const crId = payload.elementId;
+        const val = JSON.stringify(payload.value || "");
+
+        let actionCode;
+        switch (payload.action) {
+            case "Click": actionCode = "el.click()"; break;
+            case "DoubleClick": actionCode = "el.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))"; break;
+            case "Type": actionCode = `el.focus();el.value=${val};el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))`; break;
+            case "Clear": actionCode = "el.value='';el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))"; break;
+            case "Hover": actionCode = "el.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));el.dispatchEvent(new MouseEvent('mouseenter',{bubbles:true}))"; break;
+            case "Focus": actionCode = "el.focus()"; break;
+            case "ScrollIntoView": actionCode = "el.scrollIntoView({behavior:'smooth',block:'center'})"; break;
+            case "Select": actionCode = `if(el.tagName==='SELECT'){el.value=${val};el.dispatchEvent(new Event('change',{bubbles:true}))}`; break;
+            case "Check": actionCode = "if('checked' in el){el.checked=!el.checked;el.dispatchEvent(new Event('change',{bubbles:true}))}"; break;
+            default: return error(`Неизвестное действие: ${payload.action}`);
+        }
+
+        const script =
+            `(function(){var el=window.__atomCR?.m?.get('${crId}');` +
+            `if(!el)return'__cr_not_found__';` +
+            `${actionCode};return'ok';})()`;
+
+        const result = await executeInMainWorld(script);
+        if (result?.value === "__cr_not_found__")
+            return { status: "NotFound", payload: null, error: "Closed shadow element not found." };
+        return ok(null);
+    }
+
+    /**
+     * Прочитать свойство/атрибут cr_-элемента через MAIN world.
+     */
+    async function closedElementGetProperty(payload) {
+        const crId = payload.elementId;
+        const propName = JSON.stringify(payload.propertyName);
+
+        const script =
+            `(function(){var el=window.__atomCR?.m?.get('${crId}');` +
+            `if(!el)return'__cr_not_found__';` +
+            `var v=el[${propName}];` +
+            `if(v===undefined)v=el.getAttribute(${propName});` +
+            `return v!=null?String(v):null;})()`;
+
+        const result = await executeInMainWorld(script);
+        if (result?.value === "__cr_not_found__")
+            return { status: "NotFound", payload: null, error: "Closed shadow element not found." };
+
+        const val = result?.status === "ok" ? result.value : null;
+        return ok(val === "null" ? null : val);
+    }
+
+    /**
+     * Ожидание элемента внутри closed shadow DOM через поллинг MAIN world.
+     */
+    async function waitInClosedShadow(payload) {
+        const timeout = payload.timeoutMs || 10000;
+        const deadline = Date.now() + timeout;
+
+        while (Date.now() < deadline) {
+            const result = await closedShadowFind(
+                payload.shadowHostElementId, true, payload.strategy, payload.value, false);
+
+            if (result.status === "Ok" && result.payload) return result;
+
+            await new Promise((r) => setTimeout(r, 100));
+        }
+
+        return { status: "Timeout", payload: null, error: "Элемент не появился в течение таймаута." };
+    }
+
+    // ───────────────────────────────────────────────────────────
 
     function cmdEmulateInput(payload) {
         const target = payload.elementId ? elementRegistry.get(payload.elementId) : document.activeElement;
