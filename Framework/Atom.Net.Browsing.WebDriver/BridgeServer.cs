@@ -447,12 +447,6 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         isDisposed = true;
 
         await cts.CancelAsync().ConfigureAwait(false);
-        listener.Stop();
-
-        foreach (var channel in channels.Values)
-            await channel.DisposeAsync().ConfigureAwait(false);
-
-        channels.Clear();
 
         if (acceptLoop is not null)
         {
@@ -462,6 +456,13 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             catch (TimeoutException) { /* Цикл не завершился за 5 с — пропускаем. */ }
 #pragma warning restore VSTHRD003
         }
+
+        listener.Stop();
+
+        foreach (var channel in channels.Values)
+            await channel.DisposeAsync().ConfigureAwait(false);
+
+        channels.Clear();
 
         if (pingLoop is not null)
         {

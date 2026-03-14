@@ -139,4 +139,9 @@ public enum BridgeCommand
     /// Проверить наличие теневого корня (Shadow Root) у элемента.
     /// </summary>
     CheckShadowRoot,
+
+    /// <summary>
+    /// Очистить зарегистрированные элементы закрытого теневого корня.
+    /// </summary>
+    CleanupClosedShadow,
 }

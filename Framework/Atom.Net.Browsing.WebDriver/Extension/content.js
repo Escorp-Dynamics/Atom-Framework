@@ -19,6 +19,11 @@ const browser = globalThis.browser ?? globalThis.chrome;
     const elementRegistry = new Map();
     let elementIdCounter = 0;
 
+    /** @type {Map<string, string>} cr_X → hostElementId */
+    const closedElementToHost = new Map();
+    /** @type {Map<string, Set<string>>} hostElementId → Set<cr_X> */
+    const closedHostElements = new Map();
+
     // Проверяем, является ли текущая страница discovery-эндпоинтом BridgeServer.
     if (isDiscoveryPage()) {
         // Ждём загрузки DOM, чтобы <meta> теги стали доступны, и отправляем конфигурацию.
@@ -159,6 +164,9 @@ const browser = globalThis.browser ?? globalThis.chrome;
 
             case "CheckShadowRoot":
                 return cmdCheckShadowRoot(payload);
+
+            case "CleanupClosedShadow":
+                return cmdCleanupClosedShadow(payload);
 
             default:
                 return error(`Неизвестная команда: ${command}`);
@@ -311,7 +319,7 @@ const browser = globalThis.browser ?? globalThis.chrome;
         return ok(value != null ? String(value) : null);
     }
 
-    function cmdWaitForElement(payload) {
+    async function cmdWaitForElement(payload) {
         if (payload.shadowHostElementId && payload.closedShadow)
             return waitInClosedShadow(payload);
 
@@ -366,6 +374,22 @@ const browser = globalThis.browser ?? globalThis.chrome;
         return ok("false");
     }
 
+    async function cmdCleanupClosedShadow(payload) {
+        const hostId = payload.hostElementId;
+        const ids = closedHostElements.get(hostId);
+        if (!ids || ids.size === 0) return ok(null);
+
+        const idsJson = JSON.stringify([...ids]);
+        await executeInMainWorld(
+            `(function(){var cr=window.__atomCR;if(!cr)return;` +
+            `var ids=${idsJson};for(var i=0;i<ids.length;i++)cr.m.delete(ids[i]);})()`
+        );
+
+        for (const id of ids) closedElementToHost.delete(id);
+        closedHostElements.delete(hostId);
+        return ok(null);
+    }
+
     // ─── Closed Shadow Root Helpers ────────────────────────────
 
     /**
@@ -404,13 +428,14 @@ const browser = globalThis.browser ?? globalThis.chrome;
             cleanupFn = () => marker.remove();
         }
 
+        const safeMarker = JSON.stringify(markerId);
         const resolveCode = isHost
-            ? `var h=document.querySelector('[data-atom-sr="${markerId}"]');` +
+            ? `var h=document.querySelector('[data-atom-sr='+${safeMarker}+']');` +
             `if(!h)return'null';` +
             `var root=h.__capturedShadowRoot||h.shadowRoot;` +
             `var strat=h.getAttribute('data-atom-strat');` +
             `var val=h.getAttribute('data-atom-val');`
-            : `var mk=document.getElementById('${markerId}');` +
+            : `var mk=document.getElementById(${safeMarker});` +
             `if(!mk)return'null';` +
             `var root=window.__atomCR.m.get(mk.getAttribute('data-acr-parent'));` +
             `var strat=mk.getAttribute('data-acr-strat');` +
@@ -448,12 +473,30 @@ const browser = globalThis.browser ?? globalThis.chrome;
             `(function(){window.__atomCR=window.__atomCR||{m:new Map(),c:0};` +
             resolveCode + `if(!root)return'null';` + findFns + resultCode + `})()`;
 
+        const rootHost = isHost ? hostOrParentId : (closedElementToHost.get(hostOrParentId) ?? hostOrParentId);
+
+        function trackIds(ids) {
+            for (const id of ids) {
+                closedElementToHost.set(id, rootHost);
+                let set = closedHostElements.get(rootHost);
+                if (!set) { set = new Set(); closedHostElements.set(rootHost, set); }
+                set.add(id);
+            }
+        }
+
         try {
             const result = await executeInMainWorld(script);
             if (result?.status !== "ok" || !result.value || result.value === "null") {
                 return multiple ? ok([]) : { status: "NotFound", payload: null, error: null };
             }
-            return multiple ? ok(JSON.parse(result.value)) : ok(result.value);
+            if (multiple) {
+                let ids;
+                try { ids = JSON.parse(result.value); } catch { return ok([]); }
+                trackIds(ids);
+                return ok(ids);
+            }
+            trackIds([result.value]);
+            return ok(result.value);
         } finally {
             cleanupFn();
         }
@@ -480,8 +523,9 @@ const browser = globalThis.browser ?? globalThis.chrome;
             default: return error(`Неизвестное действие: ${payload.action}`);
         }
 
+        const safeCrId = JSON.stringify(crId);
         const script =
-            `(function(){var el=window.__atomCR?.m?.get('${crId}');` +
+            `(function(){var el=window.__atomCR?.m?.get(${safeCrId});` +
             `if(!el)return'__cr_not_found__';` +
             `${actionCode};return'ok';})()`;
 
@@ -497,9 +541,10 @@ const browser = globalThis.browser ?? globalThis.chrome;
     async function closedElementGetProperty(payload) {
         const crId = payload.elementId;
         const propName = JSON.stringify(payload.propertyName);
+        const safeCrId = JSON.stringify(crId);
 
         const script =
-            `(function(){var el=window.__atomCR?.m?.get('${crId}');` +
+            `(function(){var el=window.__atomCR?.m?.get(${safeCrId});` +
             `if(!el)return'__cr_not_found__';` +
             `var v=el[${propName}];` +
             `if(v===undefined)v=el.getAttribute(${propName});` +

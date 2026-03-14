@@ -158,9 +158,19 @@ internal sealed class WebDriverShadowRoot(string hostElementId, TabChannel chann
         => WaitForElementAsync(selector, timeout: null, CancellationToken.None);
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
+        if (isDisposed)
+            return;
+
         isDisposed = true;
-        return default;
+
+        if (isClosed)
+        {
+            await channel.SendCommandAsync(
+                BridgeCommand.CleanupClosedShadow,
+                new JsonObject { ["hostElementId"] = hostElementId },
+                CancellationToken.None).ConfigureAwait(false);
+        }
     }
 }
