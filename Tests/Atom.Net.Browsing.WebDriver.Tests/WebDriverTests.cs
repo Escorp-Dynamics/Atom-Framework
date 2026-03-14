@@ -1559,6 +1559,42 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             logger.WriteLine(LogKind.Default, $"EventReceived: {evt.Message.Event}");
         }
 
+        [TestCase(TestName = "ConsoleMessage: console.log доставляется как событие"), Order(14)]
+        public async Task ConsoleMessageEventTest()
+        {
+            var newTab = await browser.OpenTabAsync(new Uri("about:blank"));
+            await Task.Delay(200);
+
+            var messages = new List<ConsoleMessageEventArgs>();
+            var logTcs = new TaskCompletionSource<ConsoleMessageEventArgs>();
+            AsyncEventHandler<IWebPage, ConsoleMessageEventArgs> handler = (_, e) =>
+            {
+                messages.Add(e);
+                if (e.Level == ConsoleMessageLevel.Log)
+                    logTcs.TrySetResult(e);
+                return ValueTask.CompletedTask;
+            };
+            newTab.ConsoleMessage += handler;
+
+            try
+            {
+                await newTab.ExecuteAsync("console.log('hello', 42)");
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var msg = await logTcs.Task.WaitAsync(cts.Token);
+
+                Assert.That(msg.Level, Is.EqualTo(ConsoleMessageLevel.Log), "Уровень — Log.");
+                Assert.That(msg.Args, Has.Count.GreaterThanOrEqualTo(2), "Минимум 2 аргумента.");
+                Assert.That(msg.Args[0], Does.Contain("hello"), "Первый аргумент содержит 'hello'.");
+                Assert.That(msg.Timestamp, Is.GreaterThan(DateTimeOffset.UnixEpoch), "Timestamp валиден.");
+                logger.WriteLine(LogKind.Default, $"ConsoleMessage: level={msg.Level}, args=[{string.Join(", ", msg.Args)}]");
+            }
+            finally
+            {
+                newTab.ConsoleMessage -= handler;
+            }
+        }
+
         // ─── Стресс-тесты push модели ───────────────────────────────
 
         [TestCase(TestName = "Стресс: 100 скриптов подряд"), Order(12)]

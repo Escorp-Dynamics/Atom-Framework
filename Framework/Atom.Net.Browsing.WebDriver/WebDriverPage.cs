@@ -39,6 +39,11 @@ public sealed class WebDriverPage : IWebPage
     public event AsyncEventHandler<WebDriverPage, TabChannelEventArgs>? EventReceived;
 
     /// <summary>
+    /// Происходит при получении консольного сообщения от вкладки.
+    /// </summary>
+    public event AsyncEventHandler<IWebPage, ConsoleMessageEventArgs>? ConsoleMessage;
+
+    /// <summary>
     /// Происходит при перехвате сетевого запроса из этой вкладки.
     /// Обработчик ДОЛЖЕН вызвать <see cref="InterceptedRequestEventArgs.Continue()"/>,
     /// <see cref="InterceptedRequestEventArgs.Abort()"/> или
@@ -51,6 +56,12 @@ public sealed class WebDriverPage : IWebPage
     /// Позволяет внешним компонентам (например, браузеру) закрыть вкладку через другой канал.
     /// </summary>
     internal event Func<WebDriverPage, ValueTask>? Disposing;
+
+    /// <summary>
+    /// Предоставляет callback для регистрации fulfillment через BridgeServer.
+    /// Устанавливается <see cref="WebDriverBrowser"/> при создании страницы.
+    /// </summary>
+    internal Func<InterceptedRequestFulfillment, string>? RegisterFulfillment { get; set; }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="WebDriverPage"/>.
@@ -107,8 +118,13 @@ public sealed class WebDriverPage : IWebPage
 
         var payload = new JsonObject { ["url"] = url.AbsoluteUri };
 
-        if (settings.Body is not null)
-            payload["body"] = settings.Body;
+        if (settings.Body is not null && RegisterFulfillment is { } registerFulfillment)
+        {
+            payload["bodyFulfillUrl"] = registerFulfillment(new InterceptedRequestFulfillment
+            {
+                Body = settings.Body,
+            });
+        }
 
         await channel.SendCommandAsync(
             BridgeCommand.Navigate,
@@ -423,6 +439,32 @@ public sealed class WebDriverPage : IWebPage
 
     private async ValueTask OnChannelEvent(TabChannel sender, TabChannelEventArgs e)
     {
+        if (e.Message.Event == BridgeEvent.ConsoleMessage
+            && ConsoleMessage is { } consoleHandler
+            && e.Message.Payload is JsonElement payload)
+        {
+            var levelStr = payload.GetProperty("level").GetString();
+            var level = levelStr switch
+            {
+                "warn" => ConsoleMessageLevel.Warn,
+                "error" => ConsoleMessageLevel.Error,
+                "info" => ConsoleMessageLevel.Info,
+                "debug" => ConsoleMessageLevel.Debug,
+                _ => ConsoleMessageLevel.Log,
+            };
+
+            var args = payload.GetProperty("args").EnumerateArray()
+                .Select(a => a.GetString() ?? string.Empty)
+                .ToArray();
+
+            await consoleHandler(this, new ConsoleMessageEventArgs
+            {
+                Level = level,
+                Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(payload.GetProperty("ts").GetInt64()),
+                Args = args,
+            }).ConfigureAwait(false);
+        }
+
         if (EventReceived is { } handler)
             await handler(this, e).ConfigureAwait(false);
     }

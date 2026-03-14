@@ -1178,7 +1178,10 @@ public sealed class WebDriverBrowser : IWebBrowser
         var windowId = ExtractWindowId(e.TabId);
         var window = windows.GetOrAdd(windowId, static id => new WebDriverWindow(id));
 #pragma warning disable CA2000 // Страница передаётся в window.AddPage и будет диспозирована через окно.
-        var page = new WebDriverPage(e.Channel);
+        var page = new WebDriverPage(e.Channel)
+        {
+            RegisterFulfillment = bridge.RegisterFulfillment,
+        };
 #pragma warning restore CA2000
         page.Disposing += OnPageDisposing;
         window.AddPage(page);

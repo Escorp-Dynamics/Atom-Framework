@@ -71,6 +71,9 @@ const tabCompositeIds = new Map();
 /** @type {Map<number, RegExp[]>} tabId → скомпилированные URL-паттерны для фильтрации перехватываемых запросов. */
 const interceptPatterns = new Map();
 
+/** @type {Map<number, string>} tabId → bodyFulfillUrl для подмены main_frame запроса при навигации. */
+const pendingBodyOverrides = new Map();
+
 /**
  * Конвертирует glob-паттерн в RegExp.
  * Поддерживает `*` (любая последовательность) и `?` (один символ).
@@ -812,38 +815,18 @@ function handleExecuteScriptInFrames(senderTabId, message) {
  */
 function handleNavigate(senderTabId, message) {
     const url = message.payload?.url;
-    const body = message.payload?.body;
+    const bodyFulfillUrl = message.payload?.bodyFulfillUrl;
     if (!url) {
         sendResponse(senderTabId, message.id, "Error", null, "url не указан.");
         return;
     }
 
-    // Если передан body — подменяем ответ на сетевом уровне (Firefox)
-    // или через scripting.executeScript после загрузки (Chrome/остальные).
-    // Примечание: HTTP-запрос всё же уходит на сервер — без CDP невозможно
-    // показать произвольный URL в адресной строке без реального запроса.
-    // filterResponseData заменяет тело ответа ДО рендеринга страницы.
-    let filterListener = null;
-    const useFilterResponse = body && typeof browser.webRequest?.filterResponseData === "function";
-    if (body && useFilterResponse) {
-        // Firefox MV2: перехват response body через StreamFilter.
-        // Замена происходит в onstart — как только приходят response headers,
-        // до получения оригинального тела. Страница рендерит только наш HTML.
-        filterListener = (details) => {
-            browser.webRequest.onBeforeRequest.removeListener(filterListener);
-            filterListener = null;
-            const filter = browser.webRequest.filterResponseData(details.requestId);
-            const encoder = new TextEncoder();
-            filter.onstart = () => {
-                filter.write(encoder.encode(body));
-                filter.close();
-            };
-        };
-        browser.webRequest.onBeforeRequest.addListener(
-            filterListener,
-            { urls: ["<all_urls>"], tabId: senderTabId, types: ["main_frame"] },
-            ["blocking"],
-        );
+    // Если передан bodyFulfillUrl — C# уже зарегистрировал fulfillment на BridgeServer.
+    // Расширению нужно только перенаправить первый main_frame запрос на этот URL
+    // через onBeforeRequest (pendingBodyOverrides). Браузер загрузит HTML напрямую
+    // с BridgeServer — без flicker, без platform-specific кода.
+    if (bodyFulfillUrl) {
+        pendingBodyOverrides.set(senderTabId, bodyFulfillUrl);
     }
 
     let responded = false;
@@ -860,41 +843,13 @@ function handleNavigate(senderTabId, message) {
     // Регистрируем listener ДО update, чтобы не пропустить "complete".
     const onUpdated = (tabId, changeInfo) => {
         if (tabId === senderTabId && changeInfo.status === "complete") {
-            if (body && !useFilterResponse) {
-                // document.open/write/close полностью заменяет документ —
-                // в отличие от innerHTML, скрипты (<script>) выполняются корректно.
-                const injectBody = (html) => {
-                    document.open();
-                    document.write(html);
-                    document.close();
-                };
-                if (browser.scripting?.executeScript) {
-                    browser.scripting.executeScript({
-                        target: { tabId: senderTabId },
-                        world: "MAIN",
-                        func: injectBody,
-                        args: [body],
-                    }).then(() => respond()).catch(() => respond());
-                } else {
-                    // MV2 fallback (не Firefox — у Firefox filterResponseData).
-                    const code = `(() => {
-                        document.open();
-                        document.write(${JSON.stringify(body)});
-                        document.close();
-                    })();`;
-                    browser.tabs.executeScript(senderTabId, { code }).then(() => respond()).catch(() => respond());
-                }
-            } else {
-                respond();
-            }
+            respond();
         }
     };
     browser.tabs.onUpdated.addListener(onUpdated);
 
     browser.tabs.update(senderTabId, { url }).catch((err) => {
-        if (filterListener) {
-            browser.webRequest.onBeforeRequest.removeListener(filterListener);
-        }
+        pendingBodyOverrides.delete(senderTabId);
         responded = true;
         browser.tabs.onUpdated.removeListener(onUpdated);
         sendResponse(senderTabId, message.id, "Error", null, err.message);
@@ -1477,6 +1432,14 @@ if (browser.declarativeNetRequest?.updateSessionRules && browser.webRequest?.onH
 if (browser.webRequest?.onBeforeRequest) {
     browser.webRequest.onBeforeRequest.addListener(
         (details) => {
+            // Body override: перенаправляем main_frame на предзарегистрированный fulfill URL.
+            // Проверка ДО interceptEnabled — body override не требует включённого перехвата.
+            if (details.type === "main_frame" && pendingBodyOverrides.has(details.tabId)) {
+                const fulfillUrl = pendingBodyOverrides.get(details.tabId);
+                pendingBodyOverrides.delete(details.tabId);
+                return { redirectUrl: fulfillUrl };
+            }
+
             if (!interceptEnabled.has(details.tabId)) return {};
             if (bridgeConfig && details.url.startsWith(`http://${bridgeConfig.host}:${bridgeConfig.port}/`)) return {};
 

@@ -311,6 +311,18 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         context.Response.Close();
     }
 
+    /// <summary>
+    /// Предварительно регистрирует fulfillment и возвращает URL для его получения через <c>/fulfill/</c>.
+    /// Используется для подмены тела страницы: C# регистрирует контент до навигации,
+    /// а расширение перенаправляет main_frame запрос на этот URL.
+    /// </summary>
+    internal string RegisterFulfillment(InterceptedRequestFulfillment fulfillment)
+    {
+        var id = Guid.NewGuid().ToString("N");
+        pendingFulfillments[id] = fulfillment;
+        return string.Concat("http://127.0.0.1:", Port.ToString(System.Globalization.CultureInfo.InvariantCulture), "/fulfill/", id);
+    }
+
     private InterceptHttpResponse BuildInterceptResponse(InterceptDecision decision, string requestId)
     {
         var response = new InterceptHttpResponse { Action = decision.Action.ToString().ToLowerInvariant() };

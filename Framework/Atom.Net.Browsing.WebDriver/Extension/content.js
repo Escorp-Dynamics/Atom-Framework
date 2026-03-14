@@ -116,6 +116,13 @@ const browser = globalThis.browser ?? globalThis.chrome;
         });
     });
 
+    document.addEventListener("__atom_console", (e) => {
+        try {
+            const data = JSON.parse(e.detail);
+            browser.runtime.sendMessage({ action: "event", event: "ConsoleMessage", data });
+        } catch { /* ignore malformed data */ }
+    });
+
     // ─── Обработчик команд ──────────────────────────────────────
 
     /**

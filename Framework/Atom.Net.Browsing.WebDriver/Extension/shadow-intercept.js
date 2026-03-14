@@ -4,7 +4,7 @@
  * Запускается в MAIN world до всех скриптов страницы (document_start).
  * Перехватывает:
  *   - Element.prototype.attachShadow → window.__shadowRoots
- *   - console.* → window.__consoleLogs
+ *   - console.* → CustomEvent → content.js → background.js → C# event
  *   - EventTarget.prototype.addEventListener → window.__eventListeners + Proxy-обёртка isTrusted
  *
  * Авто-клик Turnstile: при обнаружении click-обработчика на INPUT внутри
@@ -34,25 +34,20 @@
 
     // ─── Console interception ───────────────────────────────────
 
-    window.__consoleLogs = [];
-    const maxLogs = 500;
-
     for (const level of ["log", "warn", "error", "info", "debug"]) {
         const orig = console[level];
         console[level] = function (...args) {
-            if (window.__consoleLogs.length < maxLogs) {
-                window.__consoleLogs.push({
-                    level,
-                    ts: Date.now(),
-                    args: args.map((a) => {
-                        try {
-                            return typeof a === "object" ? JSON.stringify(a)?.substring(0, 500) : String(a).substring(0, 500);
-                        } catch {
-                            return String(a).substring(0, 500);
-                        }
-                    }),
-                });
-            }
+            const serialized = args.map((a) => {
+                try {
+                    return typeof a === "object" ? JSON.stringify(a)?.substring(0, 500) : String(a).substring(0, 500);
+                } catch {
+                    return String(a).substring(0, 500);
+                }
+            });
+            const entry = { level, ts: Date.now(), args: serialized };
+            // Пересылаем в content.js через CustomEvent (detail — строка, чтобы пройти
+            // через границу MAIN → content world в Chrome без потери данных).
+            document.dispatchEvent(new CustomEvent("__atom_console", { detail: JSON.stringify(entry) }));
             return orig.apply(this, args);
         };
     }
