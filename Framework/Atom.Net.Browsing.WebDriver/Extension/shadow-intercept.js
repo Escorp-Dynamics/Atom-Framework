@@ -3,7 +3,7 @@
  *
  * Запускается в MAIN world до всех скриптов страницы (document_start).
  * Перехватывает:
- *   - Element.prototype.attachShadow → window.__shadowRoots
+ *   - Element.prototype.attachShadow → __capturedShadowRoot on host elements
  *   - console.* → CustomEvent → content.js → background.js → C# event
  *   - EventTarget.prototype.addEventListener → window.__eventListeners + Proxy-обёртка isTrusted
  *
@@ -19,16 +19,7 @@
 
     Element.prototype.attachShadow = function (init) {
         const shadowRoot = origAttachShadow.call(this, init);
-
         this.__capturedShadowRoot = shadowRoot;
-
-        window.__shadowRoots = window.__shadowRoots || [];
-        window.__shadowRoots.push({
-            element: this,
-            shadowRoot,
-            mode: init.mode,
-        });
-
         return shadowRoot;
     };
 
@@ -98,7 +89,7 @@
                     cx = rect.x + rect.width / 2;
                     cy = rect.y + rect.height / 2;
                 }
-            } catch {}
+            } catch { }
 
             // Симуляция движения мыши к цели.
             for (let i = 1; i <= 5; i++) {
