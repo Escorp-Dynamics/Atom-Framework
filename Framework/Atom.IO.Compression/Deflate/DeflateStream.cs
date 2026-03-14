@@ -1,4 +1,4 @@
-#pragma warning disable CA2215, S4136
+﻿#pragma warning disable CA2215, S4136
 
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
@@ -98,6 +98,22 @@ public sealed class DeflateStream(System.IO.Stream stream, CompressionMode mode,
     #endregion
 
     #region Read (Decompress)
+
+    /// <inheritdoc/>
+    public override void CopyTo(System.IO.Stream destination, int bufferSize)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ObjectDisposedException.ThrowIf(isDisposed, this);
+
+        if (mode != CompressionMode.Decompress)
+        {
+            base.CopyTo(destination, bufferSize);
+            return;
+        }
+
+        decoder ??= new DeflateDecoder(BaseStream);
+        decoder.CopyToStream(destination);
+    }
 
     /// <inheritdoc/>
     public override int Read(byte[] buffer, int offset, int count)

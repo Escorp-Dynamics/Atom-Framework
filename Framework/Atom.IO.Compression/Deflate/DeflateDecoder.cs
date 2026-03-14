@@ -1,6 +1,7 @@
-#pragma warning disable CA2213, MA0051, S3776, CA1857, S109, S907, S1199, S1854, S3626, IDE0004, IDE0055, S1751, MA0076, MA0182, CS0649, S3459, MA0071, IDE0044
+﻿#pragma warning disable CA2213, MA0051, S3776, CA1857, S109, S907, S1199, S1854, S3626, IDE0004, IDE0055, S1751, MA0076, MA0182, CS0649, S3459, MA0071, IDE0044
 
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 
 namespace Atom.IO.Compression.Deflate;
 
@@ -108,6 +109,81 @@ internal sealed unsafe class DeflateDecoder : IDisposable
     #endregion
 
     #region Public API
+
+    /// <summary>
+    /// Копирует все декодированные данные напрямую в целевой поток.
+    /// Минует промежуточный буфер Read, экономя одну memcpy на каждый batch.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public void CopyToStream(System.IO.Stream destination)
+    {
+        // Pre-size MemoryStream to avoid resize cascade
+        if (destination is System.IO.MemoryStream ms && ms.Position == 0 && ms.Length == 0)
+        {
+            var needed = ws.UnifiedCapacity - WindowSize;
+            if (ms.Capacity < needed)
+                ms.Capacity = needed;
+        }
+
+        while (true)
+        {
+            // 1. Записываем готовые данные напрямую в destination (без промежуточного буфера)
+            var available = bufferPos - bufferStart;
+            if (available > 0)
+            {
+                destination.Write(new ReadOnlySpan<byte>(unifiedPtr + bufferStart, available));
+                bufferStart += available;
+            }
+
+            // 2. Slide window если буфер почти полон
+            if (bufferPos >= ws.UnifiedCapacity - MaxMatchLength)
+            {
+                SlideWindow();
+            }
+
+            // 3. Обработка pending match
+            if (pendingLength > 0)
+            {
+                var space = ws.UnifiedCapacity - bufferPos;
+                var toCopy = Math.Min(pendingLength, space);
+                CopyMatch(pendingDistance, toCopy);
+                pendingLength -= toCopy;
+                continue;
+            }
+
+            // 4. Читаем заголовок блока если нужно
+            if (!isBlockActive)
+            {
+                if (isFinalBlock && !isFirstBlock)
+                {
+                    // Записываем остаток перед выходом
+                    var remaining = bufferPos - bufferStart;
+                    if (remaining > 0)
+                        destination.Write(new ReadOnlySpan<byte>(unifiedPtr + bufferStart, remaining));
+                    return;
+                }
+
+                if (!ReadBlockHeader())
+                {
+                    var remaining = bufferPos - bufferStart;
+                    if (remaining > 0)
+                        destination.Write(new ReadOnlySpan<byte>(unifiedPtr + bufferStart, remaining));
+                    return;
+                }
+                isFirstBlock = false;
+            }
+
+            // 5. Декодируем данные блока
+            var decoded = DecodeBlock();
+            if (decoded == 0)
+            {
+                var remaining = bufferPos - bufferStart;
+                if (remaining > 0)
+                    destination.Write(new ReadOnlySpan<byte>(unifiedPtr + bufferStart, remaining));
+                return;
+            }
+        }
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public int Read(Span<byte> buffer)
@@ -363,33 +439,66 @@ internal sealed unsafe class DeflateDecoder : IDisposable
 
         // Строим таблицы lit/len и distance
         var litLenLengths = new ReadOnlySpan<byte>(codeLengths, hlit);
-        var tableLogLitLen = CalculateTableLog(litLenLengths, 11); // Ограничиваем 11 битами для L1 cache
-        // hlit - полное количество символов для canonical code calculation
-        // 286 - maxValidSymbol (символы 286-287 reserved, их в таблицу не добавляем)
-        // 256 - defaultSymbol (EOB) для пустых ячеек в lit/len таблице
-        litLenMask = BuildHuffmanTablePtr(litLenLengths, hlit, dynLitLenPtr, tableLogLitLen, 286, 256);
+        litLenMask = BuildHuffmanTablePtr(litLenLengths, hlit, dynLitLenPtr, DeflateDecoderWorkspace.PrimaryBits, 286, 256);
         litLenPtr = dynLitLenPtr;
 
         var distLengths = new ReadOnlySpan<byte>(codeLengths + hlit, hdist);
-        var tableLogDist = CalculateTableLog(distLengths, 11); // Ограничиваем 11 битами
-        // hdist - полное количество символов для canonical code calculation
-        // 30 - maxValidSymbol (distance codes 30-31 reserved, их в таблицу не добавляем)
-        // 0 - defaultSymbol для пустых ячеек в distance таблице
-        distMask = BuildHuffmanTablePtr(distLengths, hdist, dynDistPtr, tableLogDist, 30, 0);
+        distMask = BuildHuffmanTablePtr(distLengths, hdist, dynDistPtr, DeflateDecoderWorkspace.PrimaryBits, 30, 0);
         distPtr = dynDistPtr;
 
         return true;
     }
 
-    private static int CalculateTableLog(ReadOnlySpan<byte> codeLengths, int maxLog)
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private static int BuildHuffmanTable(ReadOnlySpan<byte> codeLengths, int numSymbols, Span<uint> table, int tableLog)
     {
-        var maxLen = 0;
-        for (var i = 0; i < codeLengths.Length; i++)
+        var tableSize = 1 << tableLog;
+        var mask = tableSize - 1;
+
+        var defaultEntry = (0u << 8) | (uint)tableLog;
+        table[..tableSize].Fill(defaultEntry);
+
+        var actualSymbols = Math.Min(numSymbols, codeLengths.Length);
+
+        Span<int> blCount = stackalloc int[16];
+        blCount.Clear();
+        for (var i = 0; i < actualSymbols; i++)
         {
-            if (codeLengths[i] > maxLen)
-                maxLen = codeLengths[i];
+            var cl = codeLengths[i];
+            if (cl is > 0 and <= 15)
+                blCount[cl]++;
         }
-        return Math.Min(maxLen, maxLog);
+
+        Span<int> nextCode = stackalloc int[16];
+        var code = 0;
+        for (var bits = 1; bits <= 15; bits++)
+        {
+            code = (code + blCount[bits - 1]) << 1;
+            nextCode[bits] = code;
+        }
+
+        ref var bitRev = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(DeflateTables.BitReverse8);
+
+        for (var sym = 0; sym < actualSymbols; sym++)
+        {
+            var len = codeLengths[sym];
+            if (len is 0 or > 15) continue;
+
+            var huffCode = nextCode[len]++;
+            var fillBits = tableLog - len;
+            if (fillBits < 0) continue;
+
+            var reversed = (Unsafe.Add(ref bitRev, huffCode & 0xFF) << 8)
+                         | Unsafe.Add(ref bitRev, (huffCode >> 8) & 0xFF);
+            var baseIndex = reversed >> (16 - len);
+
+            var entry = (uint)((sym << 8) | len);
+            var fillCount = 1 << fillBits;
+            for (var fill = 0; fill < fillCount; fill++)
+                table[baseIndex | (fill << len)] = entry;
+        }
+
+        return mask;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -448,88 +557,205 @@ internal sealed unsafe class DeflateDecoder : IDisposable
         return mask;
     }
 
+    /// <summary>
+    /// Строит двухуровневую Huffman таблицу.
+    /// Primary: (1 &lt;&lt; primaryBits) записей. Коды &lt;= primaryBits → прямой entry (sym &lt;&lt; 8 | len).
+    /// Коды &gt; primaryBits → redirect entry (subtableOffset &lt;&lt; 8 | subtableBits | 0x40).
+    /// Secondary subtables размещаются после primary в том же буфере.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private static int BuildHuffmanTablePtr(ReadOnlySpan<byte> codeLengths, int numSymbols, uint* table, int tableLog, int maxValidSymbol = int.MaxValue, int defaultSymbol = 0)
+    private static int BuildHuffmanTablePtr(ReadOnlySpan<byte> codeLengths, int numSymbols, uint* table, int primaryBits, int maxValidSymbol = int.MaxValue, int defaultSymbol = 0)
     {
-        // Защита от пустых таблиц
-        if (tableLog == 0)
-            tableLog = 1;
+        if (primaryBits == 0)
+            primaryBits = 1;
 
-        var tableSize = 1 << tableLog;
-        var mask = tableSize - 1;
-
-        // Инициализируем таблицу символом fallback — быстрое заполнение 8 байт
-        var defaultEntry = ((uint)defaultSymbol << 8) | (uint)tableLog;
-        var defaultEntry64 = defaultEntry | ((ulong)defaultEntry << 32);
-        var tableLongs = tableSize >> 1;
-        var tablePtr64 = (ulong*)table;
-        for (var i = 0; i < tableLongs; i++)
-            tablePtr64[i] = defaultEntry64;
+        var primarySize = 1 << primaryBits;
+        var primaryMask = primarySize - 1;
 
         var actualSymbols = Math.Min(numSymbols, codeLengths.Length);
 
-        // Подсчёт кодов по длинам — используем ref для скорости
+        // Подсчёт кодов по длинам
         Span<int> blCount = stackalloc int[16];
         blCount.Clear();
         ref var clRef = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(codeLengths);
+        var maxLen = 0;
         for (var i = 0; i < actualSymbols; i++)
         {
             var cl = Unsafe.Add(ref clRef, i);
             if (cl is > 0 and <= 15)
+            {
                 blCount[cl]++;
+                if (cl > maxLen) maxLen = cl;
+            }
         }
 
-        // Canonical Huffman code generation
-        Span<int> nextCode = stackalloc int[16];
-        var code = 0;
-        for (var bits = 1; bits <= 15; bits++)
+        // Если все коды <= primaryBits — flat таблица (быстрый путь)
+        if (maxLen <= primaryBits)
         {
-            code = (code + blCount[bits - 1]) << 1;
-            nextCode[bits] = code;
+            var defaultEntry = ((uint)defaultSymbol << 8) | (uint)(maxLen > 0 ? maxLen : primaryBits);
+            var defaultEntry64 = defaultEntry | ((ulong)defaultEntry << 32);
+            var tableLongs = primarySize >> 1;
+            var tablePtr64 = (ulong*)table;
+            for (var i = 0; i < tableLongs; i++)
+                tablePtr64[i] = defaultEntry64;
+
+            Span<int> nextCode = stackalloc int[16];
+            var code = 0;
+            for (var bits = 1; bits <= 15; bits++)
+            {
+                code = (code + blCount[bits - 1]) << 1;
+                nextCode[bits] = code;
+            }
+
+            ref var bitRev = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(DeflateTables.BitReverse8);
+
+            for (var sym = 0; sym < actualSymbols; sym++)
+            {
+                var len = Unsafe.Add(ref clRef, sym);
+                if (len is 0 or > 15) continue;
+
+                var huffCode = nextCode[len]++;
+                if (sym >= maxValidSymbol) continue;
+
+                var reversed = (Unsafe.Add(ref bitRev, huffCode & 0xFF) << 8)
+                             | Unsafe.Add(ref bitRev, (huffCode >> 8) & 0xFF);
+                var baseIndex = reversed >> (16 - len);
+
+                var entry = (uint)((sym << 8) | len);
+                var fillCount = 1 << (primaryBits - len);
+
+                if (fillCount == 1)
+                {
+                    table[baseIndex] = entry;
+                }
+                else if (fillCount == 2)
+                {
+                    table[baseIndex] = entry;
+                    table[baseIndex | (1 << len)] = entry;
+                }
+                else
+                {
+                    for (var fill = 0; fill < fillCount; fill++)
+                        table[baseIndex | (fill << len)] = entry;
+                }
+            }
+
+            return primaryMask;
         }
 
-        // Быстрый reverse через lookup
-        ref var bitRev = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(DeflateTables.BitReverse8);
-
-        for (var sym = 0; sym < actualSymbols; sym++)
+        // Двухуровневая таблица: maxLen > primaryBits
         {
-            var len = Unsafe.Add(ref clRef, sym);
-            if (len is 0 or > 15) continue;
-
-            var huffCode = nextCode[len]++;
-
-            // Пропускаем невалидные символы
-            if (sym >= maxValidSymbol) continue;
-
-            var fillBits = tableLog - len;
-            if (fillBits < 0) continue;
-
-            // Inline reverse bits через lookup (до 16 бит)
-            var reversed = (Unsafe.Add(ref bitRev, huffCode & 0xFF) << 8)
-                         | Unsafe.Add(ref bitRev, (huffCode >> 8) & 0xFF);
-            var baseIndex = reversed >> (16 - len);
-
-            var entry = (uint)((sym << 8) | len);
-            var fillCount = 1 << fillBits;
-
-            // Заполняем все вхождения (unrolled для малых fillCount)
-            if (fillCount == 1)
+            Span<int> nextCode = stackalloc int[16];
+            var code = 0;
+            for (var bits = 1; bits <= 15; bits++)
             {
-                table[baseIndex] = entry;
+                code = (code + blCount[bits - 1]) << 1;
+                nextCode[bits] = code;
             }
-            else if (fillCount == 2)
+
+            ref var bitRev = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(DeflateTables.BitReverse8);
+
+            var defaultEntry = ((uint)defaultSymbol << 8) | (uint)primaryBits;
+            var defaultEntry64 = defaultEntry | ((ulong)defaultEntry << 32);
+            var tableLongs = primarySize >> 1;
+            var tablePtr64 = (ulong*)table;
+            for (var i = 0; i < tableLongs; i++)
+                tablePtr64[i] = defaultEntry64;
+
+            Span<int> subtableMaxLen = stackalloc int[primarySize];
+            subtableMaxLen.Clear();
+
+            Span<int> nextCode2 = stackalloc int[16];
+            nextCode.CopyTo(nextCode2);
+
+            for (var sym = 0; sym < actualSymbols; sym++)
             {
-                table[baseIndex] = entry;
-                table[baseIndex | (1 << len)] = entry;
+                var len = (int)Unsafe.Add(ref clRef, sym);
+                if (len is 0 or > 15) continue;
+
+                var huffCode = nextCode2[len]++;
+                if (sym >= maxValidSymbol) continue;
+
+                var reversed = (Unsafe.Add(ref bitRev, huffCode & 0xFF) << 8)
+                             | Unsafe.Add(ref bitRev, (huffCode >> 8) & 0xFF);
+                var baseIndex = reversed >> (16 - len);
+
+                if (len <= primaryBits)
+                {
+                    var entry = (uint)((sym << 8) | len);
+                    var fillCount = 1 << (primaryBits - len);
+                    for (var fill = 0; fill < fillCount; fill++)
+                        table[baseIndex | (fill << len)] = entry;
+                }
+                else
+                {
+                    var primaryIndex = baseIndex & primaryMask;
+                    var secondaryLen = len - primaryBits;
+                    if (secondaryLen > subtableMaxLen[primaryIndex])
+                        subtableMaxLen[primaryIndex] = secondaryLen;
+                }
             }
-            else
+
+            var secondaryStart = primarySize;
+            Span<int> subtableOffset = stackalloc int[primarySize];
+
+            for (var pi = 0; pi < primarySize; pi++)
             {
+                if (subtableMaxLen[pi] > 0)
+                {
+                    var subBits = subtableMaxLen[pi];
+                    var subSize = 1 << subBits;
+
+                    subtableOffset[pi] = secondaryStart;
+
+                    // Redirect entry в primary: offset | subBits | 0x40
+                    table[pi] = (uint)((secondaryStart << 8) | subBits | 0x40);
+
+                    var subDefault = ((uint)defaultSymbol << 8) | (uint)subBits;
+                    for (var si = 0; si < subSize; si++)
+                        table[secondaryStart + si] = subDefault;
+
+                    secondaryStart += subSize;
+                }
+            }
+
+            // Проход 2: заполняем secondary entries для длинных кодов
+            code = 0;
+            for (var bits = 1; bits <= 15; bits++)
+            {
+                code = (code + blCount[bits - 1]) << 1;
+                nextCode[bits] = code;
+            }
+
+            for (var sym = 0; sym < actualSymbols; sym++)
+            {
+                var len = (int)Unsafe.Add(ref clRef, sym);
+                if (len is 0 or > 15) continue;
+
+                var huffCode = nextCode[len]++;
+                if (sym >= maxValidSymbol) continue;
+
+                if (len <= primaryBits) continue;
+
+                var reversed = (Unsafe.Add(ref bitRev, huffCode & 0xFF) << 8)
+                             | Unsafe.Add(ref bitRev, (huffCode >> 8) & 0xFF);
+                var baseIndex = reversed >> (16 - len);
+
+                var primaryIndex = baseIndex & primaryMask;
+                var secondaryBits = baseIndex >> primaryBits;
+                var subBits = subtableMaxLen[primaryIndex];
+                var subStart = subtableOffset[primaryIndex];
+
+                var secondaryLen = len - primaryBits;
+                var entry = (uint)((sym << 8) | secondaryLen);
+                var fillCount = 1 << (subBits - secondaryLen);
+
                 for (var fill = 0; fill < fillCount; fill++)
-                    table[baseIndex | (fill << len)] = entry;
+                    table[subStart + (secondaryBits | (fill << secondaryLen))] = entry;
             }
         }
 
-        return mask;
+        return primaryMask;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -546,7 +772,8 @@ internal sealed unsafe class DeflateDecoder : IDisposable
         return blockType switch
         {
             BlockType.Stored => DecodeStoredBlock(),
-            BlockType.FixedHuffman or BlockType.DynamicHuffman => DecodeHuffmanBlock(),
+            BlockType.FixedHuffman => DecodeFixedHuffmanBlock(),
+            BlockType.DynamicHuffman => DecodeHuffmanBlock(),
             _ => 0,
         };
     }
@@ -591,8 +818,11 @@ internal sealed unsafe class DeflateDecoder : IDisposable
         return bufferPos - startPos;
     }
 
+    // Fixed Huffman: 3-level loop (outer → refill → inner).
+    // After refill to ≥56 bits: max consumption per match = 9(lit/len) + 5(extraLen) + 5(dist) + 13(extraDist) = 32.
+    // 56 ≥ 32, so no mid-match refill needed. Inner loop runs until bitsCount < 9 (min lookup size).
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private int DecodeHuffmanBlock()
+    private int DecodeFixedHuffmanBlock()
     {
         unchecked
         {
@@ -601,9 +831,7 @@ internal sealed unsafe class DeflateDecoder : IDisposable
             var buf = unifiedPtr;
             var inp = inputPtr;
             var ll = litLenPtr;
-            var ds = distPtr;
-            var llMask = (uint)litLenMask;
-            var dsMask = (uint)distMask;
+            const uint llMask = DeflateDecoderWorkspace.PrimarySize - 1;
 
             var pos = bufferPos;
             var bits = bitBuffer;
@@ -611,163 +839,194 @@ internal sealed unsafe class DeflateDecoder : IDisposable
             var inPos = inputPos;
             var inEnd = inputEnd;
 
-            // Prefetch packed tables
-            ref var lengthPacked = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(DeflateTables.LengthPacked);
-            ref var distancePacked = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(DeflateTables.DistancePacked);
-
-            // Границы для fast path
-            var inFastEnd = inEnd - 8;
-
             while (pos < bufEnd)
             {
-                // ============================================================
-                // FAST PATH: пока достаточно входных данных
-                // ============================================================
-                while (inPos <= inFastEnd && pos < bufEnd)
+                var inFastLimit = inEnd - 8;
+                if (inPos <= inFastLimit)
                 {
-                    // Refill до 56+ бит
-                    var bytesToAdd = (64 - bitsCount) >> 3;
-                    bits |= *(ulong*)(inp + inPos) << bitsCount;
-                    inPos += bytesToAdd;
-                    bitsCount += bytesToAdd << 3;
-
-                    // Decode lit/len symbol
-                    var entry = ll[bits & llMask];
-                    var len = (int)(entry & 0xFF);
-                    var sym = (int)(entry >> 8);
-                    bits >>= len; bitsCount -= len;
-
-                    // Literal — самый частый случай
-                    if (sym < 256)
+                    // ── FAST PATH: 3-level loop (outer → refill → inner) ──
+                    while (true)
                     {
-                        buf[pos++] = (byte)sym;
-                        continue;
+                        // Refill to ≥56 bits
+                        if (bitsCount < 56)
+                        {
+                            if (inPos <= inFastLimit)
+                            {
+                                bits |= *(ulong*)(inp + inPos) << bitsCount;
+                                inPos += (63 - bitsCount) >> 3;
+                                bitsCount |= 56;
+                            }
+                            else { break; }
+                        }
+
+                        // ── Inner loop: decode symbols without refill ──
+                        do
+                        {
+                            var entry = ll[bits & llMask];
+                            var len = (int)(entry & 0xFF);
+                            var sym = (int)(entry >> 8);
+                            bits >>= len; bitsCount -= len;
+
+                            if (sym >= 256)
+                            {
+                                if (sym == 256)
+                                    goto FixedSave256;
+
+                                // ── Match decode ──
+                                // Need up to 5(extraLen)+5(dist)+13(extraDist) = 23 bits.
+                                if (bitsCount < 24)
+                                {
+                                    if (inPos <= inFastLimit)
+                                    {
+                                        bits |= *(ulong*)(inp + inPos) << bitsCount;
+                                        inPos += (63 - bitsCount) >> 3;
+                                        bitsCount |= 56;
+                                    }
+                                    else
+                                    {
+                                        while (bitsCount <= 56 && inPos < inEnd)
+                                        { bits |= (ulong)inp[inPos++] << bitsCount; bitsCount += 8; }
+                                    }
+                                }
+
+                                var lengthCode = sym - 257;
+                                if ((uint)lengthCode > 28u)
+                                    goto FixedInvalidData;
+
+                                ref var lengthPacked = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(DeflateTables.LengthPacked);
+                                var lp = Unsafe.Add(ref lengthPacked, lengthCode);
+                                var matchLen = (int)(lp & 0xFFFF) + (int)(bits & ((1u << (int)(lp >> 16)) - 1));
+                                bits >>= (int)(lp >> 16);
+                                bitsCount -= (int)(lp >> 16);
+
+                                var ds = distPtr;
+                                ref var distancePacked = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(DeflateTables.DistancePacked);
+
+                                var distCode = (int)(ds[bits & 31u] >> 8);
+                                bits >>= 5; bitsCount -= 5;
+
+                                if ((uint)distCode > 29u)
+                                    goto FixedInvalidData;
+
+                                var dp = Unsafe.Add(ref distancePacked, distCode);
+                                var distance = (int)(dp & 0xFFFF) + (int)(bits & ((1u << (int)(dp >> 16)) - 1));
+                                bits >>= (int)(dp >> 16);
+                                bitsCount -= (int)(dp >> 16);
+
+                                // Copy match
+                                var src = buf + pos - distance;
+                                var dst = buf + pos;
+                                pos += matchLen;
+
+                                if (distance >= 16)
+                                {
+                                    Vector128.LoadUnsafe(ref *src).StoreUnsafe(ref *dst);
+                                    if (matchLen > 16)
+                                    {
+                                        var mEnd = dst + matchLen;
+                                        dst += 16; src += 16;
+                                        do { Vector128.LoadUnsafe(ref *src).StoreUnsafe(ref *dst); dst += 16; src += 16; } while (dst < mEnd);
+                                    }
+                                }
+                                else if (distance >= 8)
+                                {
+                                    *(ulong*)dst = *(ulong*)src;
+                                    if (matchLen > 8)
+                                    {
+                                        *(ulong*)(dst + 8) = *(ulong*)(src + 8);
+                                        if (matchLen > 16)
+                                        {
+                                            var mEnd = dst + matchLen;
+                                            dst += 16; src += 16;
+                                            do { *(ulong*)dst = *(ulong*)src; dst += 8; src += 8; } while (dst < mEnd);
+                                        }
+                                    }
+                                }
+                                else if (distance == 1)
+                                {
+                                    Unsafe.InitBlockUnaligned(dst, *src, (uint)matchLen);
+                                }
+                                else
+                                {
+                                    ulong pat;
+                                    if (distance == 4)
+                                    {
+                                        pat = *(uint*)src;
+                                        pat |= pat << 32;
+                                    }
+                                    else if (distance == 2)
+                                    {
+                                        pat = *(ushort*)src;
+                                        pat |= pat << 16;
+                                        pat |= pat << 32;
+                                    }
+                                    else
+                                    {
+                                        pat = (ulong)src[0] | ((ulong)src[1] << 8);
+                                        pat |= (ulong)src[2 % distance] << 16;
+                                        pat |= (ulong)src[3 % distance] << 24;
+                                        pat |= (ulong)src[4 % distance] << 32;
+                                        pat |= (ulong)src[5 % distance] << 40;
+                                        pat |= (ulong)src[6 % distance] << 48;
+                                        pat |= (ulong)src[7 % distance] << 56;
+                                    }
+                                    *(ulong*)dst = pat;
+                                    if (matchLen > 8)
+                                    {
+                                        var mEnd = dst + matchLen;
+                                        dst += 8;
+                                        do { *(ulong*)dst = pat; dst += 8; } while (dst < mEnd);
+                                    }
+                                }
+
+                                // After match, break to outer for refill
+                                break;
+                            }
+
+                            buf[pos++] = (byte)sym;
+                        }
+                        while (bitsCount >= 9 && pos < bufEnd);
+
+                        if (pos >= bufEnd)
+                            goto FixedSave;
                     }
 
-                    // End of block
-                    if (sym == 256)
-                    {
-                        bufferPos = pos;
-                        inputPos = inPos;
-                        bitBuffer = bits;
-                        bitsInBuffer = bitsCount;
-                        isBlockActive = false;
+                    if (pos >= bufEnd)
+                        goto FixedSave;
+
+                    // Clear dirty bits above bitsCount before entering slow path
+                    if (bitsCount < 64)
+                        bits &= (1UL << bitsCount) - 1;
+                }
+
+                // --- SLOW PATH: refill from stream ---
+                if (inPos >= inEnd && bitsCount < 9)
+                {
+                    bufferPos = pos;
+                    inputPos = inPos;
+                    bitBuffer = bits;
+                    bitsInBuffer = bitsCount;
+                    RefillInput();
+
+                    bits = bitBuffer;
+                    bitsCount = bitsInBuffer;
+                    inPos = inputPos;
+                    inEnd = inputEnd;
+
+                    if (inEnd == 0 && bitsCount == 0)
                         return pos - startPos;
-                    }
 
-                    // Match decode
-                    var lengthCode = sym - 257;
-                    if ((uint)lengthCode > 28u) goto InvalidData;
-
-                    var lp = Unsafe.Add(ref lengthPacked, lengthCode);
-                    var matchLen = (int)(lp & 0xFFFF);
-                    var extraLenBits = (int)(lp >> 16);
-
-                    matchLen += (int)(bits & ((1u << extraLenBits) - 1));
-                    bits >>= extraLenBits;
-                    bitsCount -= extraLenBits;
-
-                    // Refill for distance
-                    var bytesToAddD = (64 - bitsCount) >> 3;
-                    bits |= *(ulong*)(inp + inPos) << bitsCount;
-                    inPos += bytesToAddD;
-                    bitsCount += bytesToAddD << 3;
-
-                    var distEntry = ds[bits & dsMask];
-                    var distLen = (int)(distEntry & 0xFF);
-                    var distCode = (int)(distEntry >> 8);
-                    bits >>= distLen; bitsCount -= distLen;
-
-                    if ((uint)distCode > 29u) goto InvalidData;
-
-                    var dp = Unsafe.Add(ref distancePacked, distCode);
-                    var distance = (int)(dp & 0xFFFF);
-                    var extraDistBits = (int)(dp >> 16);
-
-                    // Branch-free extra bits extraction
-                    distance += (int)(bits & ((1u << extraDistBits) - 1));
-                    bits >>= extraDistBits;
-                    bitsCount -= extraDistBits;
-
-                    // Copy match — optimized for common cases
-                    var src = buf + pos - distance;
-                    var dst = buf + pos;
-                    pos += matchLen;
-
-                    if (distance >= 8)
-                    {
-                        // Non-overlapping: unrolled 32-byte copy
-                        while (matchLen >= 32)
-                        {
-                            *(ulong*)dst = *(ulong*)src;
-                            *(ulong*)(dst + 8) = *(ulong*)(src + 8);
-                            *(ulong*)(dst + 16) = *(ulong*)(src + 16);
-                            *(ulong*)(dst + 24) = *(ulong*)(src + 24);
-                            dst += 32; src += 32; matchLen -= 32;
-                        }
-                        while (matchLen >= 8) { *(ulong*)dst = *(ulong*)src; dst += 8; src += 8; matchLen -= 8; }
-                        if (matchLen > 0) *(ulong*)dst = *(ulong*)src;
-                    }
-                    else if (distance == 1)
-                    {
-                        var fill = (ulong)*src * 0x0101010101010101UL;
-                        while (matchLen >= 8) { *(ulong*)dst = fill; dst += 8; matchLen -= 8; }
-                        while (matchLen-- > 0) *dst++ = *src;
-                    }
-                    else
-                    {
-                        while (matchLen-- > 0) *dst++ = *src++;
-                    }
+                    if (inEnd > 0)
+                        continue;
                 }
 
-                // ============================================================
-                // SLOW PATH: мало входных данных — refill из stream
-                // ============================================================
-                if (inPos >= inEnd)
-                {
-                    // Если ещё есть биты, попробуем декодировать
-                    if (bitsCount >= 15) // минимум для lit/len + dist в fixed Huffman
-                    {
-                        // Декодируем с оставшимися битами
-                        // (ниже идёт byte-by-byte decode)
-                    }
-                    else
-                    {
-                        bufferPos = pos;
-                        inputPos = inPos;
-                        bitBuffer = bits;
-                        bitsInBuffer = bitsCount;
-                        RefillInput();
-
-                        bits = bitBuffer;
-                        bitsCount = bitsInBuffer;
-                        inPos = inputPos;
-                        inEnd = inputEnd;
-                        inFastEnd = inEnd - 8;
-
-                        // Если stream пуст
-                        if (inEnd == 0)
-                        {
-                            // Если совсем нет битов — выходим
-                            if (bitsCount == 0)
-                                return pos - startPos;
-                            // Иначе декодируем оставшиеся биты ниже
-                        }
-                        else
-                        {
-                            continue;
-                        }
-                    }
-                }
-
-                // Byte-by-byte refill для оставшихся данных
+                // Byte-by-byte refill + decode one symbol
                 while (bitsCount <= 56 && inPos < inEnd)
                 {
                     bits |= (ulong)inp[inPos++] << bitsCount;
                     bitsCount += 8;
                 }
 
-                // Decode one symbol
                 var entryS = ll[bits & llMask];
                 var lenS = (int)(entryS & 0xFF);
                 var symS = (int)(entryS >> 8);
@@ -791,11 +1050,406 @@ internal sealed unsafe class DeflateDecoder : IDisposable
 
                 // Match in slow path
                 var lengthCodeS = symS - 257;
-                if ((uint)lengthCodeS > 28u) goto InvalidData;
+                if ((uint)lengthCodeS > 28u) goto FixedInvalidData;
+
+                ref var lengthPackedS = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(DeflateTables.LengthPacked);
+                var lpS = Unsafe.Add(ref lengthPackedS, lengthCodeS);
+                var matchLenS = (int)(lpS & 0xFFFF);
+                var extraLenS = (int)(lpS >> 16);
+
+                {
+                    // Need extraLen + 5(dist) + 13(extraDist) = up to 23 bits
+                    var needed = extraLenS + 5 + 13;
+                    if (bitsCount < needed)
+                    {
+                        while (bitsCount <= 56 && inPos < inEnd)
+                        { bits |= (ulong)inp[inPos++] << bitsCount; bitsCount += 8; }
+
+                        if (bitsCount < needed && inPos >= inEnd)
+                        {
+                            bufferPos = pos; inputPos = inPos; bitBuffer = bits; bitsInBuffer = bitsCount;
+                            RefillInput();
+                            bits = bitBuffer; bitsCount = bitsInBuffer; inPos = inputPos; inEnd = inputEnd;
+                            while (bitsCount <= 56 && inPos < inEnd)
+                            { bits |= (ulong)inp[inPos++] << bitsCount; bitsCount += 8; }
+                        }
+                    }
+                }
+
+                if (extraLenS != 0)
+                {
+                    matchLenS += (int)(bits & ((1u << extraLenS) - 1));
+                    bits >>= extraLenS; bitsCount -= extraLenS;
+                }
+
+                var dsS = distPtr;
+                ref var distancePackedS = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(DeflateTables.DistancePacked);
+
+                var distCodeS = (int)(dsS[bits & 31u] >> 8);
+                bits >>= 5; bitsCount -= 5;
+
+                if ((uint)distCodeS > 29u) goto FixedInvalidData;
+
+                var dpS = Unsafe.Add(ref distancePackedS, distCodeS);
+                var distanceS = (int)(dpS & 0xFFFF);
+                var extraDistS = (int)(dpS >> 16);
+                if (extraDistS != 0)
+                {
+                    distanceS += (int)(bits & ((1u << extraDistS) - 1));
+                    bits >>= extraDistS; bitsCount -= extraDistS;
+                }
+
+                var srcS = buf + pos - distanceS;
+                var dstS = buf + pos;
+                pos += matchLenS;
+
+                if (distanceS >= 8)
+                {
+                    while (matchLenS >= 8) { *(ulong*)dstS = *(ulong*)srcS; dstS += 8; srcS += 8; matchLenS -= 8; }
+                    if (matchLenS > 0) *(ulong*)dstS = *(ulong*)srcS;
+                }
+                else if (distanceS == 1)
+                {
+                    var fillS = (ulong)*srcS * 0x0101010101010101UL;
+                    while (matchLenS >= 8) { *(ulong*)dstS = fillS; dstS += 8; matchLenS -= 8; }
+                    while (matchLenS-- > 0) *dstS++ = *srcS;
+                }
+                else
+                {
+                    ulong patS;
+                    if (distanceS == 4) { patS = *(uint*)srcS; patS |= patS << 32; }
+                    else if (distanceS == 2) { patS = *(ushort*)srcS; patS |= patS << 16; patS |= patS << 32; }
+                    else
+                    {
+                        patS = (ulong)srcS[0] | ((ulong)srcS[1] << 8);
+                        patS |= (ulong)srcS[2 % distanceS] << 16;
+                        patS |= (ulong)srcS[3 % distanceS] << 24;
+                        patS |= (ulong)srcS[4 % distanceS] << 32;
+                        patS |= (ulong)srcS[5 % distanceS] << 40;
+                        patS |= (ulong)srcS[6 % distanceS] << 48;
+                        patS |= (ulong)srcS[7 % distanceS] << 56;
+                    }
+                    *(ulong*)dstS = patS;
+                    if (matchLenS > 8)
+                    {
+                        var mEndS = dstS + matchLenS;
+                        dstS += 8;
+                        do { *(ulong*)dstS = patS; dstS += 8; } while (dstS < mEndS);
+                    }
+                }
+            }
+
+        FixedSave:
+            if (bitsCount < 64)
+                bits &= (1UL << bitsCount) - 1;
+            bufferPos = pos;
+            inputPos = inPos;
+            bitBuffer = bits;
+            bitsInBuffer = bitsCount;
+            return pos - startPos;
+
+        FixedSave256:
+            if (bitsCount < 64)
+                bits &= (1UL << bitsCount) - 1;
+            bufferPos = pos;
+            inputPos = inPos;
+            bitBuffer = bits;
+            bitsInBuffer = bitsCount;
+            isBlockActive = false;
+            return pos - startPos;
+
+        FixedInvalidData:
+            bufferPos = pos;
+            inputPos = inPos;
+            bitBuffer = bits;
+            bitsInBuffer = bitsCount;
+            throw new InvalidDataException("Invalid Deflate data");
+        }
+    }
+
+    // Dynamic Huffman: 3-level loop (outer → refill → inner).
+    // After refill to ≥56 bits: max consumption per match = 15(lit/len) + 5(extraLen) + 15(dist) + 13(extraDist) = 48.
+    // 56 ≥ 48, so no mid-match refill needed. Inner loop runs until bitsCount < 15 (min code len).
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private int DecodeHuffmanBlock()
+    {
+        unchecked
+        {
+            var startPos = bufferPos;
+            var bufEnd = ws.UnifiedCapacity - MaxMatchLength;
+            var buf = unifiedPtr;
+            var inp = inputPtr;
+            var ll = litLenPtr;
+            var ds = distPtr;
+            var llMask = (uint)litLenMask;
+            var dsMask = (uint)distMask;
+
+            var pos = bufferPos;
+            var bits = bitBuffer;
+            var bitsCount = bitsInBuffer;
+            var inPos = inputPos;
+            var inEnd = inputEnd;
+
+            ref var lengthPacked = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(DeflateTables.LengthPacked);
+            ref var distancePacked = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(DeflateTables.DistancePacked);
+
+            while (pos < bufEnd)
+            {
+                var inFastLimit = inEnd - 8;
+                if (inPos <= inFastLimit)
+                {
+                    // ── FAST PATH: 3-level loop (outer → refill → inner) ──
+                    while (true)
+                    {
+                        // Refill to ≥56 bits
+                        if (bitsCount < 56)
+                        {
+                            if (inPos <= inFastLimit)
+                            {
+                                bits |= *(ulong*)(inp + inPos) << bitsCount;
+                                inPos += (63 - bitsCount) >> 3;
+                                bitsCount |= 56;
+                            }
+                            else { break; }
+                        }
+
+                        // ── Inner loop: decode symbols without refill ──
+                        do
+                        {
+                            // Decode lit/len (two-level table)
+                            var entry = ll[bits & llMask];
+                            var len = (int)(entry & 0xFF);
+                            var sym = (int)(entry >> 8);
+                            if ((len & 0x40) != 0)
+                            {
+                                entry = ll[sym + ((uint)(bits >> DeflateDecoderWorkspace.PrimaryBits) & ((1u << (len & 0x3F)) - 1))];
+                                len = (int)(entry & 0xFF) + DeflateDecoderWorkspace.PrimaryBits;
+                                sym = (int)(entry >> 8);
+                            }
+                            bits >>= len; bitsCount -= len;
+
+                            if (sym >= 256)
+                            {
+                                if (sym == 256)
+                                    goto DynSave256;
+
+                                // ── Match decode ──
+                                // Need up to 5(extraLen)+15(dist two-level)+13(extraDist) = 33 bits.
+                                if (bitsCount < 33)
+                                {
+                                    if (inPos <= inFastLimit)
+                                    {
+                                        bits |= *(ulong*)(inp + inPos) << bitsCount;
+                                        inPos += (63 - bitsCount) >> 3;
+                                        bitsCount |= 56;
+                                    }
+                                    else
+                                    {
+                                        while (bitsCount <= 56 && inPos < inEnd)
+                                        { bits |= (ulong)inp[inPos++] << bitsCount; bitsCount += 8; }
+                                    }
+                                }
+
+                                var lengthCode = sym - 257;
+                                if ((uint)lengthCode > 28u)
+                                    goto DynInvalidData;
+
+                                var lp = Unsafe.Add(ref lengthPacked, lengthCode);
+                                var matchLen = (int)(lp & 0xFFFF) + (int)(bits & ((1u << (int)(lp >> 16)) - 1));
+                                bits >>= (int)(lp >> 16);
+                                bitsCount -= (int)(lp >> 16);
+
+                                // Distance decode (two-level table)
+                                var distEntry = ds[bits & dsMask];
+                                var distLen = (int)(distEntry & 0xFF);
+                                var distCode = (int)(distEntry >> 8);
+                                if ((distLen & 0x40) != 0)
+                                {
+                                    distEntry = ds[distCode + ((uint)(bits >> DeflateDecoderWorkspace.PrimaryBits) & ((1u << (distLen & 0x3F)) - 1))];
+                                    distLen = (int)(distEntry & 0xFF) + DeflateDecoderWorkspace.PrimaryBits;
+                                    distCode = (int)(distEntry >> 8);
+                                }
+                                bits >>= distLen; bitsCount -= distLen;
+
+                                if ((uint)distCode > 29u)
+                                    goto DynInvalidData;
+
+                                var dp = Unsafe.Add(ref distancePacked, distCode);
+                                var distance = (int)(dp & 0xFFFF) + (int)(bits & ((1u << (int)(dp >> 16)) - 1));
+                                bits >>= (int)(dp >> 16);
+                                bitsCount -= (int)(dp >> 16);
+
+                                // Copy match
+                                var src = buf + pos - distance;
+                                var dst = buf + pos;
+                                pos += matchLen;
+
+                                if (distance >= 16)
+                                {
+                                    Vector128.LoadUnsafe(ref *src).StoreUnsafe(ref *dst);
+                                    if (matchLen > 16)
+                                    {
+                                        var mEnd = dst + matchLen;
+                                        dst += 16; src += 16;
+                                        do { Vector128.LoadUnsafe(ref *src).StoreUnsafe(ref *dst); dst += 16; src += 16; } while (dst < mEnd);
+                                    }
+                                }
+                                else if (distance >= 8)
+                                {
+                                    *(ulong*)dst = *(ulong*)src;
+                                    if (matchLen > 8)
+                                    {
+                                        *(ulong*)(dst + 8) = *(ulong*)(src + 8);
+                                        if (matchLen > 16)
+                                        {
+                                            var mEnd = dst + matchLen;
+                                            dst += 16; src += 16;
+                                            do { *(ulong*)dst = *(ulong*)src; dst += 8; src += 8; } while (dst < mEnd);
+                                        }
+                                    }
+                                }
+                                else if (distance == 1)
+                                {
+                                    Unsafe.InitBlockUnaligned(dst, *src, (uint)matchLen);
+                                }
+                                else
+                                {
+                                    ulong pat;
+                                    if (distance == 4)
+                                    {
+                                        pat = *(uint*)src;
+                                        pat |= pat << 32;
+                                    }
+                                    else if (distance == 2)
+                                    {
+                                        pat = *(ushort*)src;
+                                        pat |= pat << 16;
+                                        pat |= pat << 32;
+                                    }
+                                    else
+                                    {
+                                        pat = (ulong)src[0] | ((ulong)src[1] << 8);
+                                        pat |= (ulong)src[2 % distance] << 16;
+                                        pat |= (ulong)src[3 % distance] << 24;
+                                        pat |= (ulong)src[4 % distance] << 32;
+                                        pat |= (ulong)src[5 % distance] << 40;
+                                        pat |= (ulong)src[6 % distance] << 48;
+                                        pat |= (ulong)src[7 % distance] << 56;
+                                    }
+                                    *(ulong*)dst = pat;
+                                    if (matchLen > 8)
+                                    {
+                                        var mEnd = dst + matchLen;
+                                        dst += 8;
+                                        do { *(ulong*)dst = pat; dst += 8; } while (dst < mEnd);
+                                    }
+                                }
+
+                                // After match, break to outer for refill
+                                break;
+                            }
+
+                            buf[pos++] = (byte)sym;
+                        }
+                        while (bitsCount >= 15 && pos < bufEnd);
+
+                        if (pos >= bufEnd)
+                            goto DynSave;
+                    }
+
+                    if (pos >= bufEnd)
+                        goto DynSave;
+
+                    // Clear dirty bits above bitsCount before entering slow path
+                    if (bitsCount < 64)
+                        bits &= (1UL << bitsCount) - 1;
+                }
+
+                // --- SLOW PATH: refill from stream ---
+                if (inPos >= inEnd && bitsCount < 15)
+                {
+                    bufferPos = pos;
+                    inputPos = inPos;
+                    bitBuffer = bits;
+                    bitsInBuffer = bitsCount;
+                    RefillInput();
+
+                    bits = bitBuffer;
+                    bitsCount = bitsInBuffer;
+                    inPos = inputPos;
+                    inEnd = inputEnd;
+
+                    if (inEnd == 0 && bitsCount == 0)
+                        return pos - startPos;
+
+                    if (inEnd > 0)
+                        continue;
+                }
+
+                // Byte-by-byte refill + decode one symbol
+                while (bitsCount <= 56 && inPos < inEnd)
+                {
+                    bits |= (ulong)inp[inPos++] << bitsCount;
+                    bitsCount += 8;
+                }
+
+                // Decode one symbol (two-level table)
+                var entryS = ll[bits & llMask];
+                var lenS = (int)(entryS & 0xFF);
+                var symS = (int)(entryS >> 8);
+                if ((lenS & 0x40) != 0)
+                {
+                    bits >>= DeflateDecoderWorkspace.PrimaryBits;
+                    bitsCount -= DeflateDecoderWorkspace.PrimaryBits;
+                    entryS = ll[symS + ((uint)bits & ((1u << (lenS & 0x3F)) - 1))];
+                    lenS = (int)(entryS & 0xFF);
+                    symS = (int)(entryS >> 8);
+                }
+                bits >>= lenS; bitsCount -= lenS;
+
+                if (symS < 256)
+                {
+                    buf[pos++] = (byte)symS;
+                    continue;
+                }
+
+                if (symS == 256)
+                {
+                    bufferPos = pos;
+                    inputPos = inPos;
+                    bitBuffer = bits;
+                    bitsInBuffer = bitsCount;
+                    isBlockActive = false;
+                    return pos - startPos;
+                }
+
+                // Match in slow path
+                var lengthCodeS = symS - 257;
+                if ((uint)lengthCodeS > 28u) goto DynInvalidData;
 
                 var lpS = Unsafe.Add(ref lengthPacked, lengthCodeS);
                 var matchLenS = (int)(lpS & 0xFFFF);
                 var extraLenS = (int)(lpS >> 16);
+
+                {
+                    // Need extraLen + max 15(dist) + 13(extraDist) = up to 33 bits
+                    var needed = extraLenS + 15 + 13;
+                    if (bitsCount < needed)
+                    {
+                        while (bitsCount <= 56 && inPos < inEnd)
+                        { bits |= (ulong)inp[inPos++] << bitsCount; bitsCount += 8; }
+
+                        if (bitsCount < needed && inPos >= inEnd)
+                        {
+                            bufferPos = pos; inputPos = inPos; bitBuffer = bits; bitsInBuffer = bitsCount;
+                            RefillInput();
+                            bits = bitBuffer; bitsCount = bitsInBuffer; inPos = inputPos; inEnd = inputEnd;
+                            while (bitsCount <= 56 && inPos < inEnd)
+                            { bits |= (ulong)inp[inPos++] << bitsCount; bitsCount += 8; }
+                        }
+                    }
+                }
+
                 if (extraLenS != 0)
                 {
                     matchLenS += (int)(bits & ((1u << extraLenS) - 1));
@@ -808,12 +1462,21 @@ internal sealed unsafe class DeflateDecoder : IDisposable
                     bitsCount += 8;
                 }
 
+                // Distance decode (two-level table)
                 var distEntryS = ds[bits & dsMask];
                 var distLenS = (int)(distEntryS & 0xFF);
                 var distCodeS = (int)(distEntryS >> 8);
+                if ((distLenS & 0x40) != 0)
+                {
+                    bits >>= DeflateDecoderWorkspace.PrimaryBits;
+                    bitsCount -= DeflateDecoderWorkspace.PrimaryBits;
+                    distEntryS = ds[distCodeS + ((uint)bits & ((1u << (distLenS & 0x3F)) - 1))];
+                    distLenS = (int)(distEntryS & 0xFF);
+                    distCodeS = (int)(distEntryS >> 8);
+                }
                 bits >>= distLenS; bitsCount -= distLenS;
 
-                if ((uint)distCodeS > 29u) goto InvalidData;
+                if ((uint)distCodeS > 29u) goto DynInvalidData;
 
                 var dpS = Unsafe.Add(ref distancePacked, distCodeS);
                 var distanceS = (int)(dpS & 0xFFFF);
@@ -841,17 +1504,49 @@ internal sealed unsafe class DeflateDecoder : IDisposable
                 }
                 else
                 {
-                    while (matchLenS-- > 0) *dstS++ = *srcS++;
+                    ulong patS;
+                    if (distanceS == 4) { patS = *(uint*)srcS; patS |= patS << 32; }
+                    else if (distanceS == 2) { patS = *(ushort*)srcS; patS |= patS << 16; patS |= patS << 32; }
+                    else
+                    {
+                        patS = (ulong)srcS[0] | ((ulong)srcS[1] << 8);
+                        patS |= (ulong)srcS[2 % distanceS] << 16;
+                        patS |= (ulong)srcS[3 % distanceS] << 24;
+                        patS |= (ulong)srcS[4 % distanceS] << 32;
+                        patS |= (ulong)srcS[5 % distanceS] << 40;
+                        patS |= (ulong)srcS[6 % distanceS] << 48;
+                        patS |= (ulong)srcS[7 % distanceS] << 56;
+                    }
+                    *(ulong*)dstS = patS;
+                    if (matchLenS > 8)
+                    {
+                        var mEndS = dstS + matchLenS;
+                        dstS += 8;
+                        do { *(ulong*)dstS = patS; dstS += 8; } while (dstS < mEndS);
+                    }
                 }
             }
 
+        DynSave:
+            if (bitsCount < 64)
+                bits &= (1UL << bitsCount) - 1;
             bufferPos = pos;
             inputPos = inPos;
             bitBuffer = bits;
             bitsInBuffer = bitsCount;
             return pos - startPos;
 
-        InvalidData:
+        DynSave256:
+            if (bitsCount < 64)
+                bits &= (1UL << bitsCount) - 1;
+            bufferPos = pos;
+            inputPos = inPos;
+            bitBuffer = bits;
+            bitsInBuffer = bitsCount;
+            isBlockActive = false;
+            return pos - startPos;
+
+        DynInvalidData:
             bufferPos = pos;
             inputPos = inPos;
             bitBuffer = bits;
@@ -869,6 +1564,9 @@ internal sealed unsafe class DeflateDecoder : IDisposable
     {
         inputEnd = input.Read(new Span<byte>(inputPtr, ws.InputCapacity));
         inputPos = 0;
+
+        // Zero-padding для безопасного *(ulong*) на границе буфера
+        *(ulong*)(inputPtr + inputEnd) = 0;
 
         while (bitsInBuffer <= 56 && inputPos < inputEnd)
         {
@@ -888,6 +1586,10 @@ internal sealed unsafe class DeflateDecoder : IDisposable
             {
                 inputEnd = input.Read(new Span<byte>(inputPtr, ws.InputCapacity));
                 inputPos = 0;
+
+                // Zero-padding для безопасного *(ulong*) на границе буфера
+                *(ulong*)(inputPtr + inputEnd) = 0;
+
                 if (inputEnd == 0) return false;
             }
             bitBuffer |= (ulong)inputPtr[inputPos++] << bitsInBuffer;

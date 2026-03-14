@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 
 namespace Atom.IO.Compression.Tests.Deflate;
 
@@ -264,18 +264,26 @@ public sealed class DeflateStreamTests
         AssertFunctionalEquivalence(original, atomCompressed, systemCompressed, level, "большие данные (64 KB)");
     }
 
+    [TestCase(CompressionLevel.Fastest, TestName = "DeflateStream: функциональная эквивалентность при Fastest — очень большие данные 1MB")]
+    [TestCase(CompressionLevel.Optimal, TestName = "DeflateStream: функциональная эквивалентность при Optimal — очень большие данные 1MB")]
     [TestCase(CompressionLevel.SmallestSize, TestName = "DeflateStream: функциональная эквивалентность при SmallestSize — очень большие данные 1MB")]
     public void FunctionalEquivalenceWithSystemCompressionVeryLargeData(CompressionLevel level)
     {
-        // Пробуем разные размеры чтобы найти порог
-        foreach (var size in new[] { 32 * 1024, 64 * 1024, 128 * 1024, 256 * 1024, 512 * 1024, 1024 * 1024 })
-        {
-            var original = GenerateCompressibleData(size);
-            var atomCompressed = Compress(original, level);
-            var atomDecompressed = Decompress(atomCompressed);
+        var original = GenerateCompressibleData(1024 * 1024);
 
-            Assert.That(atomDecompressed, Is.EqualTo(original), $"Roundtrip не работает для {size / 1024}KB данных при {level}");
-        }
+        // Тест 1: Наш decoder на system bitstream (изолирует баг decoder)
+        var systemCompressed = CompressWithSystem(original, level);
+        var atomFromSystem = Decompress(systemCompressed);
+        Assert.That(atomFromSystem, Is.EqualTo(original), $"Atom decoder failed on system bitstream: got {atomFromSystem.Length} bytes, expected {original.Length}");
+
+        // Тест 2: System decoder на нашем bitstream (изолирует баг encoder)
+        var atomCompressed = Compress(original, level);
+        var systemDecompressed = DecompressWithSystem(atomCompressed);
+        Assert.That(systemDecompressed, Is.EqualTo(original), "System decoder failed on our bitstream");
+
+        // Тест 3: Наш roundtrip
+        var atomDecompressed = Decompress(atomCompressed);
+        Assert.That(atomDecompressed, Is.EqualTo(original), $"Atom roundtrip failed: got {atomDecompressed.Length} bytes, expected {original.Length}");
     }
 
     [TestCase(CompressionLevel.NoCompression, TestName = "DeflateStream: функциональная эквивалентность при NoCompression — длинные матчи")]

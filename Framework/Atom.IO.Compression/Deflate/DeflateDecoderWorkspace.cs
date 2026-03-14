@@ -1,4 +1,4 @@
-#pragma warning disable CA1819, CA1051, IDE0032, S1450, S2325, CA1822, MA0041, MA0038, MA0051, S3776, IDE0078
+﻿#pragma warning disable CA1819, CA1051, IDE0032, S1450, S2325, CA1822, MA0041, MA0038, MA0051, S3776, IDE0078
 
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
@@ -13,12 +13,16 @@ internal sealed unsafe class DeflateDecoderWorkspace : IDisposable
 {
     #region Constants
 
-    // Input buffer для чтения из stream
+    // Input buffer для чтения из stream (+ padding для безопасного 8-byte read)
+    private const int InputPrePadding = 8; // Перед буфером — для residual bits при fast path re-entry
     private const int InputSize = 64 * 1024;
+    private const int InputPadding = 8; // После буфера — для безопасного *(ulong*) на границе
 
-    // Unified buffer: 32KB история + 32KB output
+    // Unified buffer: 32KB история + ~1MB output = 1088KB
+    // Больший буфер минимизирует SlideWindow (memmove 32KB) и Stream.Write вызовы.
+    // Для типичных данных ≤1MB: 0 SlideWindow, 1 Write.
     private const int WindowSize = 32 * 1024;
-    private const int UnifiedSize = WindowSize * 2;
+    private const int UnifiedSize = 1088 * 1024; // 1MB output + 32KB window + margin
 
     // Fixed Huffman таблицы (предкомпилированные)
     // Lit/Len: 9-bit = 512 entries × 4 bytes (packed) = 2KB
@@ -31,15 +35,18 @@ internal sealed unsafe class DeflateDecoderWorkspace : IDisposable
     private const int FixedDistSize = 1 << FixedDistLog;
     private const int FixedDistBytes = FixedDistSize * sizeof(uint);
 
-    // Dynamic Huffman таблицы
-    // Lit/Len: 11-bit = 2048 entries × 4 bytes = 8KB (помещается в L1)
-    private const int DynLitLenLog = 11;
-    private const int DynLitLenSize = 1 << DynLitLenLog;
+    // Dynamic Huffman — двухуровневые таблицы
+    // Primary: 9-bit = 512 entries (2KB), помещается в L1 кэш.
+    // Secondary: подтаблицы для кодов > 9 бит, размещаются после primary.
+    // Worst case: primary 512 + secondary 32768 = 33280 entries × 4 bytes = ~130KB.
+    // Реальный размер вторичных таблиц обычно << 1KB.
+    internal const int PrimaryBits = 9;
+    internal const int PrimarySize = 1 << PrimaryBits;
+    private const int DynLitLenSize = PrimarySize + (1 << 15); // 512 + 32768 = 33280
     private const int DynLitLenBytes = DynLitLenSize * sizeof(uint);
 
-    // Distance: 11-bit = 2048 entries × 4 bytes = 8KB
-    private const int DynDistLog = 11;
-    private const int DynDistSize = 1 << DynDistLog;
+    // Distance: аналогично
+    private const int DynDistSize = PrimarySize + (1 << 15); // 512 + 32768 = 33280
     private const int DynDistBytes = DynDistSize * sizeof(uint);
 
     // Code lengths для dynamic Huffman (временный буфер)
@@ -55,8 +62,8 @@ internal sealed unsafe class DeflateDecoderWorkspace : IDisposable
     #region Layout
 
     // Смещения в едином буфере
-    private const int InputOffset = 0;
-    private static readonly int UnifiedOffset = Align(InputOffset + InputSize);
+    private const int InputOffset = InputPrePadding;
+    private static readonly int UnifiedOffset = Align(InputOffset + InputSize + InputPadding);
     private static readonly int FixedLitLenOffset = Align(UnifiedOffset + UnifiedSize);
     private static readonly int FixedDistOffset = Align(FixedLitLenOffset + FixedLitLenBytes);
     private static readonly int DynLitLenOffset = Align(FixedDistOffset + FixedDistBytes);
@@ -83,6 +90,9 @@ internal sealed unsafe class DeflateDecoderWorkspace : IDisposable
         // Единый pinned буфер
         buffer = GC.AllocateUninitializedArray<byte>(TotalSize, pinned: true);
         basePtr = (byte*)Unsafe.AsPointer(ref buffer[0]);
+
+        // Pre-padding обнуляем — fast path может читать отрицательные bitPos
+        *(ulong*)basePtr = 0;
 
         // Строим Fixed Huffman таблицы один раз
         BuildFixedHuffmanTables();
@@ -141,24 +151,24 @@ internal sealed unsafe class DeflateDecoderWorkspace : IDisposable
     /// <summary>Fixed Distance table mask.</summary>
     public int FixedDistMask => FixedDistSize - 1;
 
-    /// <summary>Dynamic Lit/Len Huffman packed table. Size: 32768 entries.</summary>
+    /// <summary>Dynamic Lit/Len two-level Huffman table. Primary: 512 entries, secondary follows.</summary>
     public uint* DynLitLenPtr
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => (uint*)(basePtr + DynLitLenOffset);
     }
 
-    /// <summary>Dynamic Lit/Len table max size.</summary>
+    /// <summary>Dynamic Lit/Len table total capacity.</summary>
     public int DynLitLenMaxSize => DynLitLenSize;
 
-    /// <summary>Dynamic Distance Huffman packed table. Size: 32768 entries.</summary>
+    /// <summary>Dynamic Distance two-level Huffman table. Primary: 512 entries, secondary follows.</summary>
     public uint* DynDistPtr
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => (uint*)(basePtr + DynDistOffset);
     }
 
-    /// <summary>Dynamic Distance table max size.</summary>
+    /// <summary>Dynamic Distance table total capacity.</summary>
     public int DynDistMaxSize => DynDistSize;
 
     /// <summary>Временный буфер для code lengths. Size: 318 bytes.</summary>
