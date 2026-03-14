@@ -5,7 +5,16 @@
         <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
     </head>
     <body>
-        <div class="cf-turnstile" data-sitekey="0x4AAAAAABhlz7Ei4byodYjs"></div>
+        <div class="cf-turnstile"
+             data-sitekey="3x00000000000000000000FF"
+             data-appearance="always"
+             data-error-callback="__tsError"
+             data-callback="__tsSuccess"
+             data-expired-callback="__tsExpired"></div>
+        <script>
+            function __tsError(code) { document.documentElement.dataset.tsError = code; }
+            function __tsSuccess(token) { document.documentElement.dataset.tsToken = token; }
+            function __tsExpired() { document.documentElement.dataset.tsExpired = 'yes'; }
+        </script>
     </body>
 </html>
-<!-- https://visa.vfsglobal.com/ind/en/pol/login -->

@@ -12,6 +12,18 @@
 
 const browser = globalThis.browser ?? globalThis.chrome;
 
+/**
+ * Обёртка над runtime.sendMessage с поддержкой callback-based Chrome MV2 API.
+ * chrome.runtime.sendMessage НЕ возвращает Promise в MV2 — только callback.
+ */
+function sendMessageAsync(message) {
+    return new Promise((resolve) => {
+        browser.runtime.sendMessage(message, (response) => {
+            resolve(response);
+        });
+    });
+}
+
 (async () => {
     "use strict";
 
@@ -53,8 +65,51 @@ const browser = globalThis.browser ?? globalThis.chrome;
     }
 
     // Инициируем подключение к мосту и получаем tabId.
-    const connectResult = await browser.runtime.sendMessage({ action: "connect" });
+    const connectResult = await sendMessageAsync({ action: "connect" });
     const myTabId = connectResult?.tabId;
+
+    // Body override: если background.js вернул HTML для подмены, заменяем содержимое.
+    // Внешние скрипты оригинальной страницы заблокированы через webRequest.onBeforeRequest,
+    // поэтому VFS JS не выполнится и не перезапишет наш DOM.
+    if (connectResult?.bodyOverride) {
+        const parser = new DOMParser();
+        const newDoc = parser.parseFromString(connectResult.bodyOverride, "text/html");
+
+        // Заполняем <head>: только не-скриптовые узлы.
+        // Скрипты добавим позже, после разблокировки.
+        const head = document.head || document.documentElement.appendChild(document.createElement("head"));
+        head.innerHTML = "";
+        const deferredScripts = [];
+        for (const node of Array.from(newDoc.head.childNodes)) {
+            if (node.tagName === "SCRIPT") {
+                deferredScripts.push({ parent: head, node });
+            } else {
+                head.appendChild(document.importNode(node, true));
+            }
+        }
+
+        // Заполняем <body>: только не-скриптовые узлы.
+        const body = document.body || document.documentElement.appendChild(document.createElement("body"));
+        body.innerHTML = "";
+        for (const node of Array.from(newDoc.body.childNodes)) {
+            if (node.tagName === "SCRIPT") {
+                deferredScripts.push({ parent: body, node });
+            } else {
+                body.appendChild(document.importNode(node, true));
+            }
+        }
+
+        document.title = newDoc.title;
+
+        // Разблокируем скрипты и добавляем наши (Turnstile и т.д.).
+        await sendMessageAsync({ action: "unblockScripts" });
+        for (const { parent, node } of deferredScripts) {
+            const script = document.createElement("script");
+            for (const attr of node.attributes) script.setAttribute(attr.name, attr.value);
+            script.textContent = node.textContent;
+            parent.appendChild(script);
+        }
+    }
 
     // ─── Персистентный порт для мгновенной доставки команд (push) ─
 
@@ -1177,7 +1232,7 @@ const browser = globalThis.browser ?? globalThis.chrome;
         if (overrides.length === 0) return ok(null);
 
         const script = overrides.join('\n');
-        const result = await browser.runtime.sendMessage({
+        const result = await sendMessageAsync({
             action: "executeInMain",
             script,
         });

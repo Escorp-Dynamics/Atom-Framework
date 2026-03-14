@@ -74,6 +74,9 @@ const interceptPatterns = new Map();
 /** @type {Map<number, string>} tabId → bodyFulfillUrl для подмены main_frame запроса при навигации. */
 const pendingBodyOverrides = new Map();
 
+/** @type {Set<number>} Табы, для которых блокируются внешние скрипты оригинальной страницы при body override. */
+const bodyOverrideScriptBlock = new Set();
+
 /**
  * Конвертирует glob-паттерн в RegExp.
  * Поддерживает `*` (любая последовательность) и `?` (один символ).
@@ -315,38 +318,61 @@ browser.tabs.onActivated.addListener(({ tabId }) => {
 
 // ─── Обмен сообщениями с content.js ──────────────────────────
 
-browser.runtime.onMessage.addListener((message, sender) => {
-    if (!sender.tab?.id) return Promise.resolve({ ok: false, error: "Нет tabId." });
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!sender.tab?.id) { sendResponse({ ok: false, error: "Нет tabId." }); return; }
 
     const tabId = sender.tab.id;
 
     switch (message.action) {
-        case "connect":
+        case "connect": {
             connectTab(tabId);
-            return Promise.resolve({ ok: true, tabId });
+            // Body override: если для этого таба зарегистрирована подмена, получаем HTML
+            // с BridgeServer и возвращаем его content.js вместе с ответом.
+            const fulfillUrl = pendingBodyOverrides.get(tabId);
+            if (fulfillUrl) {
+                pendingBodyOverrides.delete(tabId);
+                fetch(fulfillUrl)
+                    .then((r) => r.text())
+                    .then((html) => sendResponse({ ok: true, tabId, bodyOverride: html }))
+                    .catch(() => sendResponse({ ok: true, tabId }));
+                return true; // keep channel open for async sendResponse
+            }
+            sendResponse({ ok: true, tabId });
+            return;
+        }
 
         case "disconnect":
             disconnectTab(tabId);
-            return Promise.resolve({ ok: true });
+            sendResponse({ ok: true });
+            return;
+
+        case "unblockScripts":
+            bodyOverrideScriptBlock.delete(tabId);
+            sendResponse({ ok: true });
+            return;
 
         case "event":
             sendEvent(tabId, message.event, message.data);
-            return Promise.resolve({ ok: true });
+            sendResponse({ ok: true });
+            return;
 
         case "response":
             forwardResponseToBridge(tabId, message.id, message.status, message.payload, message.error);
-            return Promise.resolve({ ok: true });
+            sendResponse({ ok: true });
+            return;
 
         case "configure":
             bridgeConfig = { host: message.host, port: message.port, secret: message.secret };
             autoConnectEnabled = true;
             // Подключаем discovery-вкладку напрямую к мосту.
             connectTab(tabId);
-            return Promise.resolve({ ok: true });
+            sendResponse({ ok: true });
+            return;
 
         case "getContext": {
             const ctx = tabContexts.get(tabId);
-            return Promise.resolve(ctx || null);
+            sendResponse(ctx || null);
+            return;
         }
 
         case "poll": {
@@ -354,13 +380,16 @@ browser.runtime.onMessage.addListener((message, sender) => {
             if (queue && queue.length > 0) {
                 const cmd = queue.shift();
                 if (queue.length === 0) commandQueues.delete(tabId);
-                return Promise.resolve(cmd);
+                sendResponse(cmd);
+                return;
             }
-            return Promise.resolve(null);
+            sendResponse(null);
+            return;
         }
 
         default:
-            return Promise.resolve({ ok: false, error: "Неизвестное действие." });
+            sendResponse({ ok: false, error: "Неизвестное действие." });
+            return;
     }
 });
 
@@ -822,11 +851,12 @@ function handleNavigate(senderTabId, message) {
     }
 
     // Если передан bodyFulfillUrl — C# уже зарегистрировал fulfillment на BridgeServer.
-    // Расширению нужно только перенаправить первый main_frame запрос на этот URL
-    // через onBeforeRequest (pendingBodyOverrides). Браузер загрузит HTML напрямую
-    // с BridgeServer — без flicker, без platform-specific кода.
+    // content.js при подключении получит HTML и подставит его через DOM API.
+    // На время загрузки блокируем внешние скрипты оригинальной страницы,
+    // чтобы они не перезаписали DOM после подмены.
     if (bodyFulfillUrl) {
         pendingBodyOverrides.set(senderTabId, bodyFulfillUrl);
+        bodyOverrideScriptBlock.add(senderTabId);
     }
 
     let responded = false;
@@ -1432,12 +1462,10 @@ if (browser.declarativeNetRequest?.updateSessionRules && browser.webRequest?.onH
 if (browser.webRequest?.onBeforeRequest) {
     browser.webRequest.onBeforeRequest.addListener(
         (details) => {
-            // Body override: перенаправляем main_frame на предзарегистрированный fulfill URL.
-            // Проверка ДО interceptEnabled — body override не требует включённого перехвата.
-            if (details.type === "main_frame" && pendingBodyOverrides.has(details.tabId)) {
-                const fulfillUrl = pendingBodyOverrides.get(details.tabId);
-                pendingBodyOverrides.delete(details.tabId);
-                return { redirectUrl: fulfillUrl };
+            // Body override: блокируем внешние скрипты оригинальной страницы,
+            // пока content.js заменяет DOM на наш HTML.
+            if (details.type === "script" && bodyOverrideScriptBlock.has(details.tabId)) {
+                return { cancel: true };
             }
 
             if (!interceptEnabled.has(details.tabId)) return {};

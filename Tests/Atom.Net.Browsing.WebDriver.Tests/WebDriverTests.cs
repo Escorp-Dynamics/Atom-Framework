@@ -4174,6 +4174,83 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             Assert.That(turnstileToken, Is.Not.Null.And.Not.Empty, "Turnstile token должен быть получен (auto-click через isTrusted Proxy).");
         }
 
+        [TestCase(TestName = "Turnstile через body override на внешнем HTTPS-домене"), Order(60)]
+        public async Task TurnstileRealSitekeyTest()
+        {
+            var tab = await browser.OpenIsolatedTabAsync();
+
+            // Подменяем содержимое страницы visa.vfsglobal.com на наш HTML с Turnstile.
+            var replaceHtml = await File.ReadAllTextAsync(
+                Path.Combine(TestContext.CurrentContext.TestDirectory, "assets", "replace.html"));
+
+            var targetUrl = new Uri("https://visa.vfsglobal.com/ind/en/pol/login");
+            await tab.NavigateAsync(targetUrl, new NavigationSettings { Body = replaceHtml });
+
+            // URL и origin остаются оригинальными после body override.
+            var currentUrl = (await tab.ExecuteAsync("location.href"))?.ToString();
+            Assert.That(currentUrl, Does.Contain("visa.vfsglobal.com"), "URL должен оставаться оригинальным после body override.");
+
+            var origin = (await tab.ExecuteAsync("location.origin"))?.ToString();
+            Assert.That(origin, Does.Contain("visa.vfsglobal.com"), "Origin должен быть visa.vfsglobal.com.");
+
+            // Title из подменённого HTML.
+            var title = (await tab.ExecuteAsync("document.title"))?.ToString();
+            Assert.That(title, Is.EqualTo("Turnstile Zero"), "Body override должен заменить документ.");
+
+            // Ждём появления Turnstile виджета (до 15 секунд).
+            using var widgetCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            string? sitekey = null;
+
+            while (!widgetCts.IsCancellationRequested)
+            {
+                var sk = (await tab.ExecuteAsync(
+                    "document.querySelector('[data-sitekey]')?.getAttribute('data-sitekey') || ''",
+                    widgetCts.Token))?.ToString();
+
+                if (!string.IsNullOrEmpty(sk))
+                {
+                    sitekey = sk;
+                    break;
+                }
+
+                await Task.Delay(500, widgetCts.Token);
+            }
+
+            Assert.That(sitekey, Is.Not.Null.And.Not.Empty, "На странице должен быть Turnstile виджет с data-sitekey.");
+
+            // Ожидаем Turnstile token.
+            using var tokenCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            string? turnstileToken = null;
+
+            while (!tokenCts.IsCancellationRequested)
+            {
+                var token = (await tab.ExecuteAsync(
+                    "document.querySelector('[name=\"cf-turnstile-response\"]')?.value || ''",
+                    tokenCts.Token))?.ToString();
+
+                if (!string.IsNullOrEmpty(token))
+                {
+                    turnstileToken = token;
+                    break;
+                }
+
+                // Fallback: token из JavaScript-callback.
+                var cbTok = (await tab.ExecuteAsync(
+                    "document.documentElement.dataset.tsToken || ''",
+                    tokenCts.Token))?.ToString();
+                if (!string.IsNullOrEmpty(cbTok))
+                {
+                    turnstileToken = cbTok;
+                    break;
+                }
+
+                await Task.Delay(500, tokenCts.Token);
+            }
+
+            logger.WriteLine(LogKind.Default, $"turnstile token={turnstileToken?[..Math.Min(turnstileToken?.Length ?? 0, 60)]}");
+            Assert.That(turnstileToken, Is.Not.Null.And.Not.Empty, "Turnstile token должен быть получен через body override.");
+        }
+
         private async Task<WebDriverPage> WaitForFirstTabAsync()
         {
             var tcs = new TaskCompletionSource<TabConnectedEventArgs>();
