@@ -1,4 +1,4 @@
-#pragma warning disable CA1000, CA1815, S109, S4136, S4275, MA0071, S1066, MA0015, S3928, IDE0032, IDE0022
+﻿#pragma warning disable CA1000, CA1815, S109, S4136, S4275, MA0071, S1066, MA0015, S3928, IDE0032, IDE0022
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -184,17 +184,24 @@ public ref struct BitWriter
         {
             value &= (uint)((1UL << count) - 1);
             buffer |= (ulong)value << bufferBits;
+            bufferBits += count;
+
+            if (bufferBits >= 8)
+            {
+                FlushBufferBatchLsb();
+            }
         }
         else
         {
             value &= (uint)((1UL << count) - 1);
             buffer |= (ulong)value << (64 - bufferBits - count);
+            bufferBits += count;
+
+            while (bufferBits >= 8 && !isOverflow)
+            {
+                TryFlushOneByte();
+            }
         }
-
-        bufferBits += count;
-
-        while (bufferBits >= 8 && !isOverflow)
-            TryFlushOneByte();
     }
 
     /// <summary>
@@ -243,6 +250,53 @@ public ref struct BitWriter
         }
 
         bufferBits -= 8;
+    }
+
+    /// <summary>
+    /// Пакетный сброс LSB-буфера: записывает до 8 байт за одну операцию вместо побайтного цикла.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void FlushBufferBatchLsb()
+    {
+        var bytesToFlush = bufferBits >> 3;
+        if ((uint)(bytePosition + 8) <= (uint)data.Length)
+        {
+            Unsafe.WriteUnaligned(
+                ref Unsafe.Add(ref MemoryMarshal.GetReference(data), bytePosition),
+                buffer);
+            bytePosition += bytesToFlush;
+            buffer >>= bytesToFlush << 3;
+            bufferBits -= bytesToFlush << 3;
+        }
+        else
+        {
+            while (bufferBits >= 8 && !isOverflow)
+            {
+                TryFlushOneByte();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Быстрая запись бит в LSB-first режиме без валидации.
+    /// </summary>
+    /// <remarks>
+    /// Оптимизированный путь для hot-loop кодеков (VP8L, DEFLATE).
+    /// Пропускает проверки overflow, count range и IsLsbFirst.
+    /// Вызывающий код должен гарантировать: IsLsbFirst == true, count в [1..32], буфер достаточного размера.
+    /// </remarks>
+    /// <param name="value">Значение для записи.</param>
+    /// <param name="count">Количество бит для записи (1-32).</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void WriteBitsLsb(uint value, int count)
+    {
+        buffer |= (ulong)(value & ((1U << count) - 1)) << bufferBits;
+        bufferBits += count;
+
+        if (bufferBits >= 32)
+        {
+            FlushBufferBatchLsb();
+        }
     }
 
     #endregion

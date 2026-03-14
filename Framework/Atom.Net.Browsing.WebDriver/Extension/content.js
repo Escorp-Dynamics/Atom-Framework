@@ -157,6 +157,9 @@ const browser = globalThis.browser ?? globalThis.chrome;
             case "ApplyContext":
                 return cmdApplyContext(payload);
 
+            case "CheckShadowRoot":
+                return cmdCheckShadowRoot(payload);
+
             default:
                 return error(`Неизвестная команда: ${command}`);
         }
@@ -165,13 +168,39 @@ const browser = globalThis.browser ?? globalThis.chrome;
     // ─── Реализация команд ──────────────────────────────────────
 
     async function cmdExecuteScript(payload) {
+        if (payload.shadowHostElementId) {
+            const host = elementRegistry.get(payload.shadowHostElementId);
+            if (!host) return error("Shadow host element not found.");
+
+            const markerId = `asr${++elementIdCounter}`;
+            host.setAttribute("data-atom-sr", markerId);
+
+            try {
+                const wrappedScript =
+                    `(function(){var h=document.querySelector('[data-atom-sr="${markerId}"]');` +
+                    `if(!h)return null;h.removeAttribute('data-atom-sr');` +
+                    `var shadowRoot=h.__capturedShadowRoot||h.shadowRoot;` +
+                    `if(!shadowRoot)return null;` +
+                    `return(function(shadowRoot){${payload.script}})(shadowRoot);})()`;
+
+                const result = await executeInMainWorld(wrappedScript);
+                if (result?.status === "ok") return ok(result.value ?? null);
+                return error(result?.error || "Script execution in shadow root failed.");
+            } finally {
+                host.removeAttribute("data-atom-sr");
+            }
+        }
+
         const result = await executeInMainWorld(payload.script);
         if (result?.status === "ok") return ok(result.value ?? null);
         return error(result?.error || "Script execution failed.");
     }
 
     function cmdFindElement(payload) {
-        const el = findSingle(payload.strategy, payload.value);
+        const root = resolveRoot(payload);
+        if (root === undefined) return Promise.resolve(error("Root element not found."));
+
+        const el = findSingle(payload.strategy, payload.value, root);
         if (!el) return Promise.resolve({ status: "NotFound", payload: null, error: null });
 
         const id = registerElement(el);
@@ -179,7 +208,10 @@ const browser = globalThis.browser ?? globalThis.chrome;
     }
 
     function cmdFindElements(payload) {
-        const elements = findMultiple(payload.strategy, payload.value);
+        const root = resolveRoot(payload);
+        if (root === undefined) return Promise.resolve(error("Root element not found."));
+
+        const elements = findMultiple(payload.strategy, payload.value, root);
         const ids = elements.map((el) => registerElement(el));
         return Promise.resolve(ok(ids));
     }
@@ -265,16 +297,20 @@ const browser = globalThis.browser ?? globalThis.chrome;
 
     function cmdWaitForElement(payload) {
         const timeout = payload.timeoutMs || 10000;
+        const root = resolveRoot(payload);
+        if (root === undefined) return Promise.resolve(error("Root element not found."));
 
         return new Promise((resolve) => {
-            const existing = findSingle(payload.strategy, payload.value);
+            const existing = findSingle(payload.strategy, payload.value, root);
             if (existing) {
                 resolve(ok(registerElement(existing)));
                 return;
             }
 
+            const observeTarget = root === document ? document.documentElement : root;
+
             const observer = new MutationObserver(() => {
-                const el = findSingle(payload.strategy, payload.value);
+                const el = findSingle(payload.strategy, payload.value, root);
                 if (el) {
                     observer.disconnect();
                     clearTimeout(timer);
@@ -282,13 +318,19 @@ const browser = globalThis.browser ?? globalThis.chrome;
                 }
             });
 
-            observer.observe(document.documentElement, { childList: true, subtree: true });
+            observer.observe(observeTarget, { childList: true, subtree: true });
 
             const timer = setTimeout(() => {
                 observer.disconnect();
                 resolve({ status: "Timeout", payload: null, error: "Элемент не появился в течение таймаута." });
             }, timeout);
         });
+    }
+
+    function cmdCheckShadowRoot(payload) {
+        const el = elementRegistry.get(payload.elementId);
+        if (!el) return Promise.resolve({ status: "NotFound", payload: null, error: "Element not found." });
+        return Promise.resolve(ok(!!el.shadowRoot));
     }
 
     function cmdEmulateInput(payload) {
@@ -2439,24 +2481,42 @@ const browser = globalThis.browser ?? globalThis.chrome;
     }
 
     /**
+     * Определяет корневой узел для поиска на основе payload.
+     * @param {object} payload
+     * @returns {Document|ShadowRoot|Element|undefined} undefined если элемент не найден.
+     */
+    function resolveRoot(payload) {
+        if (payload.shadowHostElementId) {
+            const host = elementRegistry.get(payload.shadowHostElementId);
+            if (!host) return undefined;
+            return host.shadowRoot || undefined;
+        }
+        if (payload.parentElementId) {
+            return elementRegistry.get(payload.parentElementId) || undefined;
+        }
+        return document;
+    }
+
+    /**
      * @param {string} strategy
      * @param {string} value
+     * @param {Document|ShadowRoot|Element} root
      * @returns {Element|null}
      */
-    function findSingle(strategy, value) {
+    function findSingle(strategy, value, root = document) {
         switch (strategy) {
             case "Css":
-                return document.querySelector(value);
+                return root.querySelector(value);
             case "XPath":
-                return document.evaluate(value, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                return document.evaluate(value, root, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
             case "Id":
-                return document.getElementById(value);
+                return root.getElementById ? root.getElementById(value) : root.querySelector(`#${CSS.escape(value)}`);
             case "Text":
-                return findByText(value);
+                return findByText(value, root);
             case "Name":
-                return document.querySelector(`[name="${CSS.escape(value)}"]`);
+                return root.querySelector(`[name="${CSS.escape(value)}"]`);
             case "TagName":
-                return document.querySelector(value);
+                return root.querySelector(value);
             default:
                 return null;
         }
@@ -2465,14 +2525,15 @@ const browser = globalThis.browser ?? globalThis.chrome;
     /**
      * @param {string} strategy
      * @param {string} value
+     * @param {Document|ShadowRoot|Element} root
      * @returns {Element[]}
      */
-    function findMultiple(strategy, value) {
+    function findMultiple(strategy, value, root = document) {
         switch (strategy) {
             case "Css":
-                return [...document.querySelectorAll(value)];
+                return [...root.querySelectorAll(value)];
             case "XPath": {
-                const result = document.evaluate(value, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+                const result = document.evaluate(value, root, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
                 const elements = [];
                 for (let i = 0; i < result.snapshotLength; i++) {
                     elements.push(result.snapshotItem(i));
@@ -2480,15 +2541,15 @@ const browser = globalThis.browser ?? globalThis.chrome;
                 return elements;
             }
             case "Id": {
-                const el = document.getElementById(value);
+                const el = root.getElementById ? root.getElementById(value) : root.querySelector(`#${CSS.escape(value)}`);
                 return el ? [el] : [];
             }
             case "Text":
-                return findAllByText(value);
+                return findAllByText(value, root);
             case "Name":
-                return [...document.querySelectorAll(`[name="${CSS.escape(value)}"]`)];
+                return [...root.querySelectorAll(`[name="${CSS.escape(value)}"]`)];
             case "TagName":
-                return [...document.querySelectorAll(value)];
+                return [...root.querySelectorAll(value)];
             default:
                 return [];
         }
@@ -2496,10 +2557,13 @@ const browser = globalThis.browser ?? globalThis.chrome;
 
     /**
      * @param {string} text
+     * @param {Document|ShadowRoot|Element} root
      * @returns {Element|null}
      */
-    function findByText(text) {
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    function findByText(text, root = document) {
+        const walkRoot = root === document ? document.body : root;
+        if (!walkRoot) return null;
+        const walker = document.createTreeWalker(walkRoot, NodeFilter.SHOW_TEXT);
         while (walker.nextNode()) {
             if (walker.currentNode.textContent?.trim() === text) {
                 return walker.currentNode.parentElement;
@@ -2510,11 +2574,14 @@ const browser = globalThis.browser ?? globalThis.chrome;
 
     /**
      * @param {string} text
+     * @param {Document|ShadowRoot|Element} root
      * @returns {Element[]}
      */
-    function findAllByText(text) {
+    function findAllByText(text, root = document) {
         const results = [];
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        const walkRoot = root === document ? document.body : root;
+        if (!walkRoot) return results;
+        const walker = document.createTreeWalker(walkRoot, NodeFilter.SHOW_TEXT);
         while (walker.nextNode()) {
             if (walker.currentNode.textContent?.trim() === text && walker.currentNode.parentElement) {
                 results.push(walker.currentNode.parentElement);

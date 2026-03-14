@@ -39,6 +39,10 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<InternalsVisibleTo Include="Atom.Media.Video.Tests" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<None Update="icon.png" PackagePath="\" Pack="true" />
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>

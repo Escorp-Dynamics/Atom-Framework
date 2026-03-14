@@ -1,3 +1,4 @@
+﻿using Atom.IO;
 using Atom.IO.Compression.Huffman;
 
 namespace Atom.IO.Compression.Tests.Huffman;
@@ -468,6 +469,240 @@ public sealed class HuffmanTests
             // Символ 0 должен иметь относительно короткий код (учитывая, что есть 200 разных символов)
             Assert.That(codeLengths[0], Is.LessThanOrEqualTo(5), "Частый символ должен иметь короткий код");
         });
+    }
+
+    #endregion
+
+    #region HuffmanTable16 Tests
+
+    [TestCase(TestName = "HuffmanTable16: построение и декодирование с 16-битными символами")]
+    public void HuffmanTable16BuildAndDecode()
+    {
+        // Алфавит > 256: символы 0, 300, 500
+        byte[] codeLengths = new byte[501];
+        codeLengths[0] = 1;   // символ 0: 1 бит
+        codeLengths[300] = 2; // символ 300: 2 бита
+        codeLengths[500] = 2; // символ 500: 2 бита
+
+        using var buffer = new HuffmanTableBuffer16(tableLog: 2, symbolCount: 501);
+        HuffmanTreeBuilder.BuildDecodeTable16(codeLengths, buffer.Symbols, buffer.Lengths, maxBits: 2, lsbFirst: true);
+        buffer.BuildPackedTable();
+        var table = buffer.ToTable();
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(table.TableLog, Is.EqualTo(2));
+            Assert.That(table.TableSize, Is.EqualTo(4));
+
+            // Проверяем декодирование
+            var sym0 = table.DecodeFast(0b00, out var len0);
+            Assert.That(sym0, Is.Zero);
+            Assert.That(len0, Is.EqualTo(1));
+
+            var sym1 = table.DecodeFast(0b01, out var len1);
+            Assert.That(sym1, Is.EqualTo(300));
+            Assert.That(len1, Is.EqualTo(2));
+
+            var sym2 = table.DecodeFast(0b11, out var len2);
+            Assert.That(sym2, Is.EqualTo(500));
+            Assert.That(len2, Is.EqualTo(2));
+        }
+    }
+
+    [TestCase(TestName = "HuffmanDecoder: декодирование одного 16-битного символа из BitReader")]
+    public void HuffmanDecoder16SingleSymbol()
+    {
+        // Символы 0 (1 бит: 0), 300 (2 бита: 01), 500 (2 бита: 11)
+        byte[] codeLengths = new byte[501];
+        codeLengths[0] = 1;
+        codeLengths[300] = 2;
+        codeLengths[500] = 2;
+
+        using var buffer = new HuffmanTableBuffer16(tableLog: 2, symbolCount: 501);
+        HuffmanTreeBuilder.BuildDecodeTable16(codeLengths, buffer.Symbols, buffer.Lengths, maxBits: 2, lsbFirst: true);
+        buffer.BuildPackedTable();
+        var table = buffer.ToTable();
+
+        // Кодируем вручную: символ 300 = 01, символ 500 = 11, символ 0 = 0
+        // LSB-first: биты 0→7: 01 | 11 | 0 | xxx = 0b_xxx_0_11_01 = 0b00001101 = 0x0D
+        byte[] data = [0x0D];
+        var reader = new BitReader(data, lsbFirst: true);
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(HuffmanDecoder.Decode(ref reader, in table), Is.EqualTo(300));
+            Assert.That(HuffmanDecoder.Decode(ref reader, in table), Is.EqualTo(500));
+            Assert.That(HuffmanDecoder.Decode(ref reader, in table), Is.Zero);
+        }
+    }
+
+    [TestCase(TestName = "HuffmanDecoder: TryDecode для 16-битных символов")]
+    public void HuffmanDecoder16TryDecode()
+    {
+        byte[] codeLengths = new byte[501];
+        codeLengths[0] = 1;
+        codeLengths[300] = 2;
+        codeLengths[500] = 2;
+
+        using var buffer = new HuffmanTableBuffer16(tableLog: 2, symbolCount: 501);
+        HuffmanTreeBuilder.BuildDecodeTable16(codeLengths, buffer.Symbols, buffer.Lengths, maxBits: 2, lsbFirst: true);
+        buffer.BuildPackedTable();
+        var table = buffer.ToTable();
+
+        // Пустой ридер — TryDecode должен вернуть false
+        byte[] empty = [];
+        var reader = new BitReader(empty, lsbFirst: true);
+
+        Assert.That(HuffmanDecoder.TryDecode(ref reader, in table, out _), Is.False);
+    }
+
+    [TestCase(TestName = "HuffmanDecoder: пакетное декодирование 16-битных символов")]
+    public void HuffmanDecoder16Batch()
+    {
+        byte[] codeLengths = new byte[501];
+        codeLengths[0] = 1;
+        codeLengths[300] = 2;
+        codeLengths[500] = 2;
+
+        using var buffer = new HuffmanTableBuffer16(tableLog: 2, symbolCount: 501);
+        HuffmanTreeBuilder.BuildDecodeTable16(codeLengths, buffer.Symbols, buffer.Lengths, maxBits: 2, lsbFirst: true);
+        buffer.BuildPackedTable();
+        var table = buffer.ToTable();
+
+        // Кодируем 5 символов: 0, 300, 500, 0, 0
+        // LSB-first: bit0=0 | bit1..2=01 | bit3..4=11 | bit5=0 | bit6=0 = 0b00011010 = 0x1A (7 бит)
+        byte[] data = [0x1A];
+        var reader = new BitReader(data, lsbFirst: true);
+
+        var output = new ushort[5];
+        var decoded = HuffmanDecoder.DecodeBatch(ref reader, in table, output, 5);
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(decoded, Is.EqualTo(5));
+            Assert.That(output[0], Is.Zero);
+            Assert.That(output[1], Is.EqualTo(300));
+            Assert.That(output[2], Is.EqualTo(500));
+            Assert.That(output[3], Is.Zero);
+            Assert.That(output[4], Is.Zero);
+        }
+    }
+
+    [TestCase(TestName = "HuffmanEncoder: кодирование 16-битных символов")]
+    public void HuffmanEncoder16SingleSymbol()
+    {
+        byte[] codeLengths = new byte[501];
+        codeLengths[0] = 1;
+        codeLengths[300] = 2;
+        codeLengths[500] = 2;
+
+        var codes = new uint[501];
+        HuffmanTreeBuilder.BuildEncodeCodes(codeLengths, codes, lsbFirst: true);
+
+        var encoded = new byte[8];
+        var writer = new BitWriter(encoded, lsbFirst: true);
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(HuffmanEncoder.TryEncode(ref writer, (ushort)300, codes, codeLengths), Is.True);
+            Assert.That(HuffmanEncoder.TryEncode(ref writer, (ushort)500, codes, codeLengths), Is.True);
+            Assert.That(HuffmanEncoder.TryEncode(ref writer, (ushort)0, codes, codeLengths), Is.True);
+        }
+    }
+
+    [TestCase(TestName = "HuffmanEncoder: пакетное кодирование 16-битных символов")]
+    public void HuffmanEncoder16Batch()
+    {
+        byte[] codeLengths = new byte[501];
+        codeLengths[0] = 1;
+        codeLengths[300] = 2;
+        codeLengths[500] = 2;
+
+        var codes = new uint[501];
+        HuffmanTreeBuilder.BuildEncodeCodes(codeLengths, codes, lsbFirst: true);
+
+        ushort[] symbols = [0, 300, 500, 0, 0];
+        var encoded = new byte[8];
+        var writer = new BitWriter(encoded, lsbFirst: true);
+
+        var count = HuffmanEncoder.EncodeBatch(ref writer, symbols, codes, codeLengths);
+        Assert.That(count, Is.EqualTo(5));
+    }
+
+    [TestCase(TestName = "HuffmanTreeBuilder: алфавит > 512 символов (VP8L)")]
+    public void BuildFromFrequenciesLargeAlphabet()
+    {
+        // VP8L-подобный алфавит: 600 символов
+        var frequencies = new uint[600];
+        var random = new Random(42);
+        for (var i = 0; i < frequencies.Length; i++)
+        {
+            frequencies[i] = (uint)random.Next(1, 1000);
+        }
+
+        var codeLengths = new byte[600];
+        var maxBits = HuffmanTreeBuilder.BuildFromFrequencies(frequencies, codeLengths, maxCodeLength: 15);
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(maxBits, Is.GreaterThan(0));
+            Assert.That(maxBits, Is.LessThanOrEqualTo(15));
+            Assert.That(HuffmanTreeBuilder.ValidateCodeLengths(codeLengths), Is.True);
+        }
+    }
+
+    [TestCase(TestName = "Huffman16: round-trip кодирование/декодирование с большим алфавитом")]
+    public void RoundTrip16LargeAlphabet()
+    {
+        // Алфавит: 400 символов с разными частотами
+        var random = new Random(42);
+        const int symbolCount = 400;
+        const int dataLength = 500;
+
+        var original = new ushort[dataLength];
+        var frequencies = new uint[symbolCount];
+        for (var i = 0; i < dataLength; i++)
+        {
+            // Смещаем распределение к младшим символам
+            original[i] = (ushort)random.Next(0, symbolCount);
+            frequencies[original[i]]++;
+        }
+
+        // Строим коды
+        var codeLengths = new byte[symbolCount];
+        var maxBits = HuffmanTreeBuilder.BuildFromFrequencies(frequencies, codeLengths, maxCodeLength: 15);
+
+        Assert.That(maxBits, Is.GreaterThan(0));
+
+        var codes = new uint[symbolCount];
+        HuffmanTreeBuilder.BuildEncodeCodes(codeLengths, codes, lsbFirst: true);
+
+        // Кодируем
+        var encoded = new byte[dataLength * 2]; // достаточно места
+        var writer = new BitWriter(encoded, lsbFirst: true);
+        var encodedCount = HuffmanEncoder.EncodeBatch(ref writer, original, codes, codeLengths);
+        writer.Flush();
+        var writtenBytes = writer.BytesWritten;
+
+        Assert.That(encodedCount, Is.EqualTo(dataLength));
+
+        // Строим таблицу декодирования
+        using var buffer = new HuffmanTableBuffer16(tableLog: maxBits, symbolCount: symbolCount);
+        HuffmanTreeBuilder.BuildDecodeTable16(codeLengths, buffer.Symbols, buffer.Lengths, maxBits, lsbFirst: true);
+        buffer.BuildPackedTable();
+        var table = buffer.ToTable();
+
+        // Декодируем
+        var reader = new BitReader(encoded.AsSpan(0, writtenBytes), lsbFirst: true);
+        var decoded = new ushort[dataLength];
+        var decodedCount = HuffmanDecoder.DecodeBatch(ref reader, in table, decoded, dataLength);
+
+        Assert.That(decodedCount, Is.EqualTo(dataLength));
+
+        for (var i = 0; i < dataLength; i++)
+        {
+            Assert.That(decoded[i], Is.EqualTo(original[i]), $"Несовпадение на позиции {i}: ожидалось {original[i]}, получено {decoded[i]}");
+        }
     }
 
     #endregion

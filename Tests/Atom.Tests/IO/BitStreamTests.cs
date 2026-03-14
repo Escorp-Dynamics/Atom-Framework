@@ -1,4 +1,4 @@
-namespace Atom.IO.Tests;
+﻿namespace Atom.IO.Tests;
 
 /// <summary>
 /// Тесты BitReader и BitWriter.
@@ -621,11 +621,11 @@ public sealed class BitStreamTests(ILogger logger) : BenchmarkTests<BitStreamTes
         writer.WriteBits(0b1101, 4);
         Assert.That(writer.TryFinishWithPadding(), Is.True);
 
-        // Результат: 4 бита данных + 4 нуля + 1 бит = 0b00001101, 0b00000001
+        // RFC 8878: маркерный бит '1' ставится сразу после данных, затем pad нулями до байта
+        // 4 бита данных (1101) + 1 маркер + 3 нуля = 0b00011101 = 0x1D
         var result = writer.GetWrittenSpan();
-        Assert.That(result.Length, Is.EqualTo(2));
-        Assert.That(result[0], Is.EqualTo(0x0D)); // 0b00001101
-        Assert.That(result[1], Is.EqualTo(0x01)); // padding '1'
+        Assert.That(result.Length, Is.EqualTo(1));
+        Assert.That(result[0], Is.EqualTo(0x1D)); // 0b00011101: data=1101, marker=1, pad=000
     }
 
     #endregion

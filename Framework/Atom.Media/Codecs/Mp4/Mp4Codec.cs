@@ -1,4 +1,4 @@
-#pragma warning disable CA1822, IDE0010, IDE0032, MA0041, MA0051, S109, S1144, S2325, S3776
+﻿#pragma warning disable CA1822, IDE0010, IDE0032, MA0041, MA0051, S109, S1144, S2325, S3776
 
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
@@ -12,8 +12,11 @@ namespace Atom.Media;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Поддерживает Store mode для zero-overhead round-trip с использованием
-/// собственного AFRM (Atom Frame) chunk внутри ISO Base Media контейнера.
+/// Два режима работы:
+/// <list type="bullet">
+/// <item>Store mode: zero-overhead round-trip с AFRM (Atom Frame) chunk.</item>
+/// <item>H.264 decode: Annex B и AVCC (MP4/MKV контейнер) → RGBA32.</item>
+/// </list>
 /// </para>
 /// <para>
 /// Форматы пикселей: YUV420P, YUV422P, YUV444P, RGB24, RGBA32, BGR24, BGRA32.
@@ -55,6 +58,12 @@ public sealed partial class Mp4Codec : IVideoCodec
     private bool isDisposed;
     private long frameIndex;
 
+    // H.264 decode state
+    private H264Decoder? h264Decoder;
+    private H264Sps? h264Sps;
+    private H264Pps? h264Pps;
+    private int nalLengthSize;
+
     #endregion
 
     #region Properties
@@ -63,7 +72,7 @@ public sealed partial class Mp4Codec : IVideoCodec
     public MediaCodecId CodecId { get; private set; } = MediaCodecId.H264;
 
     /// <inheritdoc/>
-    public string Name => "MP4 H.264/AVC (Atom Store Mode)";
+    public string Name => "MP4 H.264/AVC";
 
     /// <inheritdoc/>
     public string MimeType => "video/mp4";
@@ -106,6 +115,12 @@ public sealed partial class Mp4Codec : IVideoCodec
         isEncoder = false;
         isInitialized = true;
         frameIndex = 0;
+
+        // Parse AVCC configuration from ExtraData (SPS/PPS for MP4 containers)
+        if (!parameters.ExtraData.IsEmpty)
+        {
+            ParseAvccConfig(parameters.ExtraData.Span);
+        }
 
         return CodecResult.Success;
     }
@@ -229,11 +244,17 @@ public sealed partial class Mp4Codec : IVideoCodec
 
     /// <inheritdoc/>
     public CodecResult Flush(ref VideoFrame frame) =>
-        // Store mode кодек не буферизует данные
         CodecResult.EndOfStream;
 
     /// <inheritdoc/>
-    public void Reset() => frameIndex = 0;
+    public void Reset()
+    {
+        frameIndex = 0;
+        h264Decoder = null;
+        h264Sps = null;
+        h264Pps = null;
+        nalLengthSize = 0;
+    }
 
     #endregion
 
@@ -245,6 +266,73 @@ public sealed partial class Mp4Codec : IVideoCodec
         if (isDisposed) return;
         isDisposed = true;
         isInitialized = false;
+        h264Decoder = null;
+        h264Sps = null;
+        h264Pps = null;
+    }
+
+    #endregion
+
+    #region AVCC Config Parsing
+
+    /// <summary>
+    /// Parses AVCDecoderConfigurationRecord from ExtraData to extract SPS/PPS.
+    /// </summary>
+    private void ParseAvccConfig(ReadOnlySpan<byte> extraData)
+    {
+        // AVCDecoderConfigurationRecord (ISO 14496-15)
+        // byte[0]: configurationVersion = 1
+        // byte[1]: AVCProfileIndication
+        // byte[2]: profile_compatibility
+        // byte[3]: AVCLevelIndication
+        // byte[4]: xxxxxx ll → nalLengthSize = (ll & 0x03) + 1
+        // byte[5]: xxx nnnnn → numSPS = nnnnn & 0x1F
+        if (extraData.Length < 7)
+            return;
+
+        nalLengthSize = (extraData[4] & 0x03) + 1;
+
+        var offset = 5;
+        var numSps = extraData[offset] & 0x1F;
+        offset++;
+
+        for (var i = 0; i < numSps && offset + 2 <= extraData.Length; i++)
+        {
+            var spsLen = (extraData[offset] << 8) | extraData[offset + 1];
+            offset += 2;
+
+            if (offset + spsLen > extraData.Length || spsLen < 2)
+                break;
+
+            // Skip NAL header byte (1 byte)
+            var rbsp = new byte[spsLen];
+            var rbspLen = H264Nal.RemoveEmulationPrevention(extraData.Slice(offset + 1, spsLen - 1), rbsp);
+            h264Sps = H264Sps.Parse(rbsp.AsSpan(0, rbspLen));
+            offset += spsLen;
+        }
+
+        if (offset >= extraData.Length)
+            return;
+
+        var numPps = extraData[offset];
+        offset++;
+
+        for (var i = 0; i < numPps && offset + 2 <= extraData.Length; i++)
+        {
+            var ppsLen = (extraData[offset] << 8) | extraData[offset + 1];
+            offset += 2;
+
+            if (offset + ppsLen > extraData.Length || ppsLen < 2)
+                break;
+
+            // Skip NAL header byte (1 byte)
+            var rbsp = new byte[ppsLen];
+            var rbspLen = H264Nal.RemoveEmulationPrevention(extraData.Slice(offset + 1, ppsLen - 1), rbsp);
+            h264Pps = H264Pps.Parse(rbsp.AsSpan(0, rbspLen));
+            offset += ppsLen;
+        }
+
+        h264Decoder = new H264Decoder();
     }
 
     #endregion

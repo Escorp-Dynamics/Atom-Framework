@@ -2170,7 +2170,7 @@ public class ValueStringBuilderTests(ILogger logger) : BenchmarkTests<ValueStrin
         {
             var span = "Hello, World! This is a long string.".AsSpan();
             vsb.Append(span);
-            Assert.That(vsb.ToString(), Is.EqualTo("Hello, World! This is a long string"));
+            Assert.That(vsb.ToString(), Is.EqualTo("Hello, World! This is a long string."));
         }
         finally
         {

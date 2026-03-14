@@ -15,7 +15,7 @@
 		<NoWarn>CA1031;CA1716;RS1041;NU5128</NoWarn>
 
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.6.2</Version>
+		<Version>0.6.5</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -26,6 +26,28 @@
 		<PackageTags>atom;framework;escorp;exomode;system;threading;log;debug;extension;web</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
+
+	<!-- Исключаем сохранённые generated-файлы из компиляции, чтобы избежать CS0757 -->
+	<ItemGroup>
+		<Compile Remove="$(CompilerGeneratedFilesOutputPath)/**" />
+	</ItemGroup>
+
+	<!--
+		При использовании через ProjectReference (OutputItemType="Analyzer")
+		компилятор получает только основную DLL генератора.
+		NuGet решает это автоматически — все файлы из analyzers/dotnet/cs попадают в контекст.
+		Для ProjectReference экспортируем зависимости через TargetPathWithTargetPlatformMoniker,
+		чтобы потребители получили их вместе с анализатором.
+	-->
+	<Target Name="_IncludeAnalyzerDependencies"
+		AfterTargets="GetTargetPathWithTargetPlatformMoniker">
+		<ItemGroup>
+			<TargetPathWithTargetPlatformMoniker
+				Include="$(MSBuildProjectDirectory)/$(OutputPath)Escorp.Atom.dll">
+				<TargetFrameworkMoniker>$(TargetFrameworkMoniker)</TargetFrameworkMoniker>
+			</TargetPathWithTargetPlatformMoniker>
+		</ItemGroup>
+	</Target>
 
 	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
@@ -45,7 +67,11 @@
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="*" />
-		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="*" />
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="Atom.SourceGeneration.Tests" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -68,7 +94,8 @@
 			Condition="Exists('$(OutputPath)\Escorp.Atom.dll')" />
 	</ItemGroup>
 
-	<Target Name="PublishPackages" AfterTargets="Pack" Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
+	<Target Name="PublishPackages" AfterTargets="Pack"
+		Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
 		<PropertyGroup>
 			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
 		</PropertyGroup>

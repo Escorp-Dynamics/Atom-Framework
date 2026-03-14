@@ -1,10 +1,11 @@
-#pragma warning disable CA1062, CA2213, MA0042, MA0051, MA0140, S1871, S3923, S3776, S109
+﻿#pragma warning disable CA1062, CA2213, MA0042, MA0051, MA0140, S1871, S3923, S3776, S109, S907, IDE0055
 
 using System.IO.Compression;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using Atom.IO.Compression.Huffman;
 
 namespace Atom.IO.Compression.Deflate;
 
@@ -31,9 +32,9 @@ internal sealed unsafe class DeflateEncoder : IDisposable
     private const int MaxDistance = 32768;
     private const int HashBits = 15;
     private const int HashSize = 1 << HashBits;
-    private const int MaxChainLength = 128;
+    private const int MaxChainLength = 32;
     private const int BlockSize = 32768;
-    private const int OutputBufferSize = 8192;
+    private const int OutputBufferSize = 8192; // 64KB — снижает количество Stream.Write вызовов
 
     #endregion
 
@@ -142,6 +143,10 @@ internal sealed unsafe class DeflateEncoder : IDisposable
     // Fastest streaming state
     private bool fastestBlockStarted;
 
+    // NoCompression: буфер для последнего (≤65535) блока, который будет записан с BFINAL=1
+    private byte[]? noCompressionPending;
+    private int noCompressionPendingLength;
+
     // Состояние
     private bool isFinished;
     private bool isDisposed;
@@ -155,16 +160,19 @@ internal sealed unsafe class DeflateEncoder : IDisposable
         this.output = output;
         this.level = level;
 
-        window = new byte[WindowSize * 2];  // history + lookahead
-        outputBuffer = new byte[OutputBufferSize];
+        // Pinned arrays — исключаем overhead GC-пиннинга в hot path
+        // +32 padding для AVX2 LoadVector256 в match comparison (overread до 32 байт за max)
+        window = GC.AllocateArray<byte>((WindowSize * 2) + 32, pinned: true);
+        outputBuffer = GC.AllocateArray<byte>(OutputBufferSize, pinned: true);
 
         // Аллоцируем hash только если нужно сжатие
         if (level != CompressionLevel.NoCompression)
         {
-            hashHead = new int[HashSize];
-            hashPrev = new int[WindowSize];
-            litLenBuffer = new ushort[BlockSize];
-            distBuffer = new ushort[BlockSize];
+            hashHead = GC.AllocateArray<int>(HashSize, pinned: true);
+            hashPrev = GC.AllocateArray<int>(WindowSize, pinned: true);
+
+            litLenBuffer = GC.AllocateArray<ushort>(BlockSize, pinned: true);
+            distBuffer = GC.AllocateArray<ushort>(BlockSize, pinned: true);
 
             // Инициализация hash heads — нужно для корректности
             Array.Fill(hashHead, -1);
@@ -209,59 +217,91 @@ internal sealed unsafe class DeflateEncoder : IDisposable
                 continue;
             }
 
-            // Сжимаем, пока lookahead достаточно
-            while (lookaheadSize >= MinMatch)
-            {
-                ProcessByte();
-
-                // Если буфер блока заполнен — пишем блок
-                if (bufferPos >= BlockSize)
-                {
-                    WriteBlock(isFinal: false);
-                }
-            }
+            // Оптимизированный bulk-путь для Optimal/SmallestSize
+            ProcessOptimalBulk();
         }
     }
 
     /// <summary>
     /// Ultra-fast NoCompression: записывает stored blocks напрямую без промежуточных буферов.
+    /// Полные 65535-байтные блоки пишутся с BFINAL=0, хвост буферизуется
+    /// для записи с BFINAL=1 в FinishNoCompression.
     /// </summary>
     private void WriteNoCompressionDirect(ReadOnlySpan<byte> buffer)
     {
-        // Максимальный размер stored block = 65535 байт
         const int maxStoredBlockSize = 65535;
+
+        // Если есть pending данные, объединяем с новым буфером
+        if (noCompressionPendingLength > 0)
+        {
+            // Проверяем, поместится ли всё в один блок
+            var totalPending = noCompressionPendingLength + buffer.Length;
+            if (totalPending <= maxStoredBlockSize)
+            {
+                // Всё помещается — добавляем к pending
+                EnsureNoCompressionPendingCapacity(totalPending);
+                buffer.CopyTo(noCompressionPending.AsSpan(noCompressionPendingLength));
+                noCompressionPendingLength = totalPending;
+                return;
+            }
+
+            // Не помещается — flush pending как BFINAL=0, продолжаем обработку buffer
+            WriteStoredBlockDirect(noCompressionPending.AsSpan(0, noCompressionPendingLength), isFinal: false);
+            noCompressionPendingLength = 0;
+        }
 
         var offset = 0;
         while (offset < buffer.Length)
         {
             var remaining = buffer.Length - offset;
-            var blockSize = Math.Min(remaining, maxStoredBlockSize);
 
-            // BFINAL=0 (не финальный), BTYPE=00 (stored)
-            WriteBits(0, 1);
-            WriteBits(0, 2);
-
-            // Выравнивание на границу байта
-            FlushBits();
-
-            // LEN и NLEN (unchecked для побитовой инверсии)
-            unchecked
+            if (remaining <= maxStoredBlockSize)
             {
-                var len = (ushort)blockSize;
-                var nlen = (ushort)~len;
-
-                WriteByteBuffered((byte)(len & 0xFF));
-                WriteByteBuffered((byte)(len >> 8));
-                WriteByteBuffered((byte)(nlen & 0xFF));
-                WriteByteBuffered((byte)(nlen >> 8));
+                // Последний кусок — буферизуем для записи с BFINAL=1 в Finish
+                EnsureNoCompressionPendingCapacity(remaining);
+                buffer.Slice(offset, remaining).CopyTo(noCompressionPending.AsSpan(0, remaining));
+                noCompressionPendingLength = remaining;
+                return;
             }
 
-            // Записываем данные блока
-            var blockData = buffer.Slice(offset, blockSize);
-            WriteBlockData(blockData);
-
+            // Полный блок — пишем с BFINAL=0
+            var blockSize = Math.Min(remaining, maxStoredBlockSize);
+            WriteStoredBlockDirect(buffer.Slice(offset, blockSize), isFinal: false);
             offset += blockSize;
         }
+    }
+
+    /// <summary>
+    /// Гарантирует, что noCompressionPending имеет достаточную ёмкость.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void EnsureNoCompressionPendingCapacity(int required)
+    {
+        if (noCompressionPending is null || noCompressionPending.Length < required)
+            noCompressionPending = new byte[Math.Max(required, 65535)];
+    }
+
+    /// <summary>
+    /// Записывает один stored block с указанным BFINAL.
+    /// </summary>
+    private void WriteStoredBlockDirect(ReadOnlySpan<byte> data, bool isFinal)
+    {
+        WriteBits(isFinal ? 1u : 0u, 1);
+        WriteBits(0, 2);
+        FlushBits();
+
+        unchecked
+        {
+            var len = (ushort)data.Length;
+            var nlen = (ushort)~len;
+
+            WriteByteBuffered((byte)(len & 0xFF));
+            WriteByteBuffered((byte)(len >> 8));
+            WriteByteBuffered((byte)(nlen & 0xFF));
+            WriteByteBuffered((byte)(nlen >> 8));
+        }
+
+        WriteBlockData(data);
     }
 
     /// <summary>
@@ -327,19 +367,19 @@ internal sealed unsafe class DeflateEncoder : IDisposable
             {
                 while (remaining >= MinMatch)
                 {
-                    // Hash lookup
+                    // Hash lookup (4-byte hash для уменьшения коллизий)
                     var v = *(uint*)(windowPtr + pos);
-                    var hash = (int)(((v & 0xFFFFFF) * 0x1E35A7BDu) >> (32 - HashBits));
+                    var hash = (int)((v * 0x1E35A7BDu) >> (32 - HashBits));
                     var matchPos = hashHeadPtr[hash];
                     hashHeadPtr[hash] = pos;
 
                     var distance = pos - matchPos;
-                    if (matchPos >= 0 && distance > 0 && distance <= MaxDistance && *(uint*)(windowPtr + matchPos) == v)
+                    if (remaining >= 4 && matchPos >= 0 && distance > 0 && distance <= MaxDistance && *(uint*)(windowPtr + matchPos) == v)
                     {
                         // Match found — extend it
                         var p1 = windowPtr + matchPos;
                         var p2 = windowPtr + pos;
-                        var max = remaining < 66 ? remaining : 66;
+                        var max = remaining < MaxMatch ? remaining : MaxMatch;
                         var len = 4;
 
                         while (len + 8 <= max && *(ulong*)(p1 + len) == *(ulong*)(p2 + len))
@@ -375,6 +415,15 @@ internal sealed unsafe class DeflateEncoder : IDisposable
                             var distExtra = distance - DeflateTables.DistanceBase[distCode];
                             bits |= (ulong)(uint)distExtra << bitsCount;
                             bitsCount += distExtraBits;
+                        }
+
+                        // Вставляем хэш для конца match (pos + len - 3): после пропуска match
+                        // эта позиция — ближайший актуальный кандидат для следующих lookup'ов
+                        if (len >= 4 && remaining - len >= 4)
+                        {
+                            var tailPos = pos + len - 3;
+                            var tailH = (int)((*(uint*)(windowPtr + tailPos) * 0x1E35A7BDu) >> (32 - HashBits));
+                            hashHeadPtr[tailH] = tailPos;
                         }
 
                         pos += len;
@@ -495,6 +544,274 @@ internal sealed unsafe class DeflateEncoder : IDisposable
         }
     }
 
+    /// <summary>
+    /// Bulk-обработка для Optimal/SmallestSize — token collection + Dynamic/Fixed Huffman.
+    /// Поддерживает hash chain traversal и lazy matching (SmallestSize).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private void ProcessOptimalBulk()
+    {
+        // Параметры в зависимости от уровня сжатия
+        int chainLen, goodLen, niceLen;
+        var useLazy = level == CompressionLevel.SmallestSize;
+        if (useLazy)
+        {
+            // zlib level 9: chain=4096, good=32, nice=258, lazy=258
+            // good=32 позволяет сократить chain traversal вдвое при нахождении 32+ byte match
+            chainLen = 4096;
+            goodLen = 32;
+            niceLen = MaxMatch;
+        }
+        else
+        {
+            // zlib level 6: chain=32, good=16, nice=128
+            chainLen = MaxChainLength; // 32
+            goodLen = 16;
+            niceLen = 128;
+        }
+
+        fixed (byte* windowPtr = window)
+        fixed (int* hashHeadPtr = hashHead, hashPrevPtr = hashPrev)
+        fixed (ushort* litPtr = litLenBuffer, dstPtr = distBuffer)
+        {
+            while (lookaheadSize >= MinMatch)
+            {
+                var pos = windowPos;
+
+                // Inline hash + chain lookup
+                var v = *(uint*)(windowPtr + pos);
+                var hash = unchecked((int)(((v & 0xFFFFFF) * 0x1E35A7BDu) >> (32 - HashBits)));
+
+                var bestLength = MinMatch - 1;
+                var bestDistance = 0;
+                var matchPos = hashHeadPtr[hash];
+                var limit = Math.Max(pos - MaxDistance, 0);
+                var cl = chainLen;
+
+                while (matchPos >= limit && cl-- > 0)
+                {
+                    var distance = pos - matchPos;
+                    if (distance > MaxDistance) break;
+
+                    if (bestLength >= MinMatch && windowPtr[matchPos + bestLength] != windowPtr[pos + bestLength])
+                    {
+                        matchPos = hashPrevPtr[matchPos & WindowMask];
+                        continue;
+                    }
+
+                    var max = Math.Min(lookaheadSize, MaxMatch);
+                    var p1 = windowPtr + matchPos;
+                    var p2 = windowPtr + pos;
+                    var len = 0;
+
+                    // SIMD-ускоренное сравнение: 32 байта за шаг (AVX2)
+                    if (Avx2.IsSupported && max >= 32)
+                    {
+                        while (len + 32 <= max)
+                        {
+                            var v1 = Avx.LoadVector256(p1 + len);
+                            var v2 = Avx.LoadVector256(p2 + len);
+                            var cmp = Avx2.CompareEqual(v1, v2);
+                            var mask = unchecked((uint)Avx2.MoveMask(cmp));
+                            if (mask != 0xFFFFFFFFu)
+                            {
+                                len = Math.Min(len + BitOperations.TrailingZeroCount(~mask), max);
+                                goto MatchDone;
+                            }
+                            len += 32;
+                        }
+                    }
+                    else if (max >= 8)
+                    {
+                        var v1 = *(ulong*)p1;
+                        var v2 = *(ulong*)p2;
+                        if (v1 != v2)
+                        {
+                            len = Math.Min(BitOperations.TrailingZeroCount(v1 ^ v2) >> 3, max);
+                            goto MatchDone;
+                        }
+                        len = 8;
+                    }
+
+                    while (len + 8 <= max && *(ulong*)(p1 + len) == *(ulong*)(p2 + len))
+                        len += 8;
+                    while (len < max && p1[len] == p2[len])
+                        len++;
+
+                    MatchDone:
+                    if (len > bestLength)
+                    {
+                        bestLength = len;
+                        bestDistance = distance;
+                        if (len >= niceLen) break;
+                        if (len >= goodLen) cl >>= 1;
+                    }
+
+                    matchPos = hashPrevPtr[matchPos & WindowMask];
+                }
+
+                // Обновляем hash chain
+                hashPrevPtr[pos & WindowMask] = hashHeadPtr[hash];
+                hashHeadPtr[hash] = pos;
+
+                // Lazy matching (SmallestSize)
+                if (useLazy && hasPrevMatch)
+                {
+                    if (bestLength > prevLength)
+                    {
+                        // Новый лучший — emit предыдущий литерал
+                        litPtr[bufferPos] = prevLiteral;
+                        dstPtr[bufferPos] = 0;
+                        bufferPos++;
+
+                        if (bestLength >= MinMatch)
+                        {
+                            prevLength = bestLength;
+                            prevDistance = bestDistance;
+                            prevLiteral = windowPtr[pos];
+                            windowPos++;
+                            lookaheadSize--;
+                            goto CheckBlock;
+                        }
+
+                        hasPrevMatch = false;
+                        litPtr[bufferPos] = windowPtr[pos];
+                        dstPtr[bufferPos] = 0;
+                        bufferPos++;
+                        windowPos++;
+                        lookaheadSize--;
+                        goto CheckBlock;
+                    }
+
+                    // Предыдущий match лучше — emit его
+                    litPtr[bufferPos] = (ushort)(prevLength + 256);
+                    dstPtr[bufferPos] = (ushort)prevDistance;
+                    bufferPos++;
+                    hasPrevMatch = false;
+
+                    // Пропускаем позиции внутри предыдущего матча.
+                    // Вставляем hash entries для первых 2 позиций в матче,
+                    // чтобы улучшить будущие поиски. Больше вставок удлиняет цепочки
+                    // и создаёт feedback loop (замедляет последующие поиски на 30-40%).
+                    var skip = prevLength - 1;
+                    var maxIns = Math.Min(skip - 1, 2);
+                    for (var i = 0; i < skip && lookaheadSize > 0; i++)
+                    {
+                        windowPos++;
+                        lookaheadSize--;
+                        if (i < maxIns && lookaheadSize >= MinMatch)
+                        {
+                            var sp = windowPos;
+                            var sh = unchecked((int)(((*(uint*)(windowPtr + sp) & 0xFFFFFF) * 0x1E35A7BDu) >> (32 - HashBits)));
+                            hashPrevPtr[sp & WindowMask] = hashHeadPtr[sh];
+                            hashHeadPtr[sh] = sp;
+                        }
+                    }
+                    goto CheckBlock;
+                }
+
+                if (bestLength >= MinMatch)
+                {
+                    if (useLazy)
+                    {
+                        hasPrevMatch = true;
+                        prevLength = bestLength;
+                        prevDistance = bestDistance;
+                        prevLiteral = windowPtr[pos];
+                        windowPos++;
+                        lookaheadSize--;
+                    }
+                    else
+                    {
+                        // Greedy emit match
+                        litPtr[bufferPos] = (ushort)(bestLength + 256);
+                        dstPtr[bufferPos] = (ushort)bestDistance;
+                        bufferPos++;
+
+                        // Вставляем позиции внутри матча в hash chain (как zlib level 6).
+                        // max_insert_length=goodLen: для коротких матчей обновляем таблицу,
+                        // для длинных — пропускаем (цена > выгоды).
+                        if (bestLength <= goodLen)
+                        {
+                            var insertEnd = pos + bestLength - 2; // -2: последние 2 позиции не хешируем (< MinMatch до конца)
+                            for (var ip = pos + 1; ip <= insertEnd; ip++)
+                            {
+                                var ih = unchecked((int)(((*(uint*)(windowPtr + ip) & 0xFFFFFF) * 0x1E35A7BDu) >> (32 - HashBits)));
+                                hashPrevPtr[ip & WindowMask] = hashHeadPtr[ih];
+                                hashHeadPtr[ih] = ip;
+                            }
+                        }
+
+                        windowPos += bestLength;
+                        lookaheadSize -= bestLength;
+                    }
+                }
+                else
+                {
+                    litPtr[bufferPos] = windowPtr[pos];
+                    dstPtr[bufferPos] = 0;
+                    bufferPos++;
+                    windowPos++;
+                    lookaheadSize--;
+                }
+
+                CheckBlock:
+                if (bufferPos >= BlockSize)
+                    WriteBlock(isFinal: false);
+
+                if (windowPos >= WindowSize)
+                {
+                    Buffer.BlockCopy(window, WindowSize, window, 0, WindowSize);
+                    windowPos -= WindowSize;
+                    UpdateHashTablesInline(hashHeadPtr, hashPrevPtr);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Inline SIMD обновление hash tables — без повторного fixed.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void UpdateHashTablesInline(int* headPtr, int* prevPtr)
+    {
+        if (Avx2.IsSupported)
+        {
+            var shift = Vector256.Create(WindowSize);
+            var minVal = Vector256.Create(-1);
+
+            for (var i = 0; i < HashSize; i += 8)
+            {
+                var vec = Avx.LoadVector256(headPtr + i);
+                vec = Avx2.Subtract(vec, shift);
+                vec = Avx2.Max(vec, minVal);
+                Avx.Store(headPtr + i, vec);
+            }
+
+            for (var i = 0; i < WindowSize; i += 8)
+            {
+                var vec = Avx.LoadVector256(prevPtr + i);
+                vec = Avx2.Subtract(vec, shift);
+                vec = Avx2.Max(vec, minVal);
+                Avx.Store(prevPtr + i, vec);
+            }
+        }
+        else
+        {
+            for (var i = 0; i < HashSize; i++)
+            {
+                var val = headPtr[i] - WindowSize;
+                headPtr[i] = val < -1 ? -1 : val;
+            }
+
+            for (var i = 0; i < WindowSize; i++)
+            {
+                var val = prevPtr[i] - WindowSize;
+                prevPtr[i] = val < -1 ? -1 : val;
+            }
+        }
+    }
+
     public ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken _ = default)
     {
         Write(buffer.Span);
@@ -522,17 +839,17 @@ internal sealed unsafe class DeflateEncoder : IDisposable
     {
         if (isFinished) return;
 
-        // Специальная обработка для Fastest — streaming mode
-        if (level == CompressionLevel.Fastest)
-        {
-            FinishFastest();
-            return;
-        }
-
         // Специальная обработка для NoCompression — пишем финальный пустой stored block
         if (level == CompressionLevel.NoCompression)
         {
             FinishNoCompression();
+            return;
+        }
+
+        // Fastest: inline encoding уже записал все данные, нужно только закрыть блоки
+        if (level == CompressionLevel.Fastest)
+        {
+            FinishFastest();
             return;
         }
 
@@ -547,13 +864,16 @@ internal sealed unsafe class DeflateEncoder : IDisposable
                 }
                 else
                 {
-                    // Перед записью литералов нужно flush pending lazy match
+                    // Flush pending lazy match — эмитим сам матч, а не литерал.
+                    // Матч уже найден и верифицирован, просто не был записан из-за lazy check.
                     if (hasPrevMatch)
                     {
-                        // Записываем prevLiteral, потому что мы не можем использовать
-                        // отложенный матч (недостаточно данных для сравнения)
-                        EmitLiteral(prevLiteral);
+                        EmitMatch(prevLength, prevDistance);
                         hasPrevMatch = false;
+                        var skip = prevLength - 1;
+                        for (var i = 0; i < skip && lookaheadSize > 0; i++)
+                            AdvanceWindow(1);
+                        continue;
                     }
 
                     EmitLiteral(windowPtr[windowPos]);
@@ -565,7 +885,7 @@ internal sealed unsafe class DeflateEncoder : IDisposable
         // Flush pending lazy match (если цикл завершился после ProcessByte)
         if (hasPrevMatch)
         {
-            EmitLiteral(prevLiteral);
+            EmitMatch(prevLength, prevDistance);
             hasPrevMatch = false;
         }
 
@@ -632,18 +952,17 @@ internal sealed unsafe class DeflateEncoder : IDisposable
     /// </summary>
     private void FinishNoCompression()
     {
-        // Записываем пустой финальный stored block: BFINAL=1, BTYPE=00
-        WriteBits(1, 1); // BFINAL = 1
-        WriteBits(0, 2); // BTYPE = 00 (stored)
-
-        // Выравнивание на границу байта
-        FlushBits();
-
-        // LEN=0, NLEN=0xFFFF
-        WriteByteBuffered(0);
-        WriteByteBuffered(0);
-        WriteByteBuffered(0xFF);
-        WriteByteBuffered(0xFF);
+        // Записываем pending данные как финальный stored block (BFINAL=1)
+        if (noCompressionPendingLength > 0)
+        {
+            WriteStoredBlockDirect(noCompressionPending.AsSpan(0, noCompressionPendingLength), isFinal: true);
+            noCompressionPendingLength = 0;
+        }
+        else
+        {
+            // Нет pending данных — пустой финальный stored block
+            WriteStoredBlockDirect([], isFinal: true);
+        }
 
         // Flush output buffer
         if (outputPos > 0)
@@ -669,13 +988,6 @@ internal sealed unsafe class DeflateEncoder : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ProcessByte()
     {
-        // Специальный быстрый путь для Fastest - минимум overhead
-        if (level == CompressionLevel.Fastest)
-        {
-            ProcessByteFastest();
-            return;
-        }
-
         fixed (byte* windowPtr = window)
         {
             if (level == CompressionLevel.NoCompression)
@@ -743,83 +1055,6 @@ internal sealed unsafe class DeflateEncoder : IDisposable
                 AdvanceWindow(1);
             }
         }
-    }
-
-    /// <summary>
-    /// Оптимизированный ProcessByte для Fastest: greedy matching без hash chain traversal.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ProcessByteFastest()
-    {
-        if (lookaheadSize < MinMatch)
-        {
-            if (lookaheadSize > 0)
-            {
-                fixed (byte* windowPtr = window)
-                {
-                    EmitLiteral(windowPtr[windowPos]);
-                }
-                AdvanceWindowFast(1);
-            }
-            return;
-        }
-
-        fixed (byte* windowPtr = window)
-        {
-            var hash = ComputeHashPtr(windowPtr, windowPos);
-            var matchPos = hashHead[hash];
-            var distance = windowPos - matchPos;
-
-            // Обновляем hash chain сразу
-            hashPrev[windowPos & WindowMask] = matchPos;
-            hashHead[hash] = windowPos;
-
-            // Greedy: проверяем только первый матч (без chain traversal)
-            // Быстрая проверка первых 4 байт + валидация позиции
-            if (matchPos >= 0 && distance <= MaxDistance && distance > 0 &&
-                *(uint*)(windowPtr + matchPos) == *(uint*)(windowPtr + windowPos))
-            {
-                var len = MatchLengthPtr(windowPtr, matchPos, windowPos);
-                if (len >= MinMatch)
-                {
-                    EmitMatch(len, distance);
-                    AdvanceWindowFast(len);
-                    return;
-                }
-            }
-
-            EmitLiteral(windowPtr[windowPos]);
-            AdvanceWindowFast(1);
-        }
-    }
-
-    /// <summary>
-    /// Быстрый AdvanceWindow для Fastest — без промежуточных хешей.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AdvanceWindowFast(int count)
-    {
-        windowPos += count;
-        lookaheadSize -= count;
-
-        // Shift window при переполнении
-        if (windowPos >= WindowSize)
-        {
-            Buffer.BlockCopy(window, WindowSize, window, 0, WindowSize);
-            windowPos -= WindowSize;
-            // Для Fastest просто сбрасываем hash tables — быстрее чем обновлять
-            Array.Fill(hashHead, -1);
-        }
-    }
-
-    /// <summary>
-    /// Вычисление хеша с использованием уже pinned pointer.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int ComputeHashPtr(byte* windowPtr, int pos)
-    {
-        var v = *(uint*)(windowPtr + pos);
-        return unchecked((int)(((v & 0xFFFFFF) * 0x1E35A7BDu) >> (32 - HashBits)));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1193,14 +1428,15 @@ internal sealed unsafe class DeflateEncoder : IDisposable
     {
         if (bufferPos == 0 && !isFinal) return;
 
-        // Выбираем тип блока
         if (level == CompressionLevel.NoCompression)
         {
             WriteStoredBlock(isFinal);
         }
         else
         {
-            WriteFixedHuffmanBlock(isFinal);
+            // WriteDynamicHuffmanBlock содержит сравнение Fixed vs Dynamic —
+            // автоматически выбирает оптимальный вариант для каждого блока.
+            WriteDynamicHuffmanBlock(isFinal);
         }
 
         bufferPos = 0;
@@ -1237,93 +1473,24 @@ internal sealed unsafe class DeflateEncoder : IDisposable
         WriteBits(isFinal ? 1u : 0u, 1);
         WriteBits(1, 2);
 
-        // Локальные копии для избежания field access в hot loop
-        var localBitBuffer = bitBuffer;
-        var localBitsInBuffer = bitsInBuffer;
-
-        fixed (ushort* litPtr = litLenBuffer, distPtr = distBuffer)
-        fixed (uint* fixedCodesPtr = FixedLitLenCodes)
-        fixed (byte* revDistPtr = ReversedDistCodes)
-        fixed (byte* outBufPtr = outputBuffer)
+        // Safe path using WriteBits — no manual bit buffer management
+        for (var i = 0; i < bufferPos; i++)
         {
-            var outPos = outputPos;
+            var litLen = litLenBuffer[i];
+            var dist = distBuffer[i];
 
-            unchecked
+            if (dist == 0)
             {
-                for (var i = 0; i < bufferPos; i++)
-                {
-                    var litLen = litPtr[i];
-                    var dist = distPtr[i];
-
-                    if (dist == 0)
-                    {
-                        // Literal — inline
-                        var encoded = fixedCodesPtr[litLen];
-                        localBitBuffer |= (ulong)(encoded & 0xFFFF) << localBitsInBuffer;
-                        localBitsInBuffer += (int)(encoded >> 16);
-                    }
-                    else
-                    {
-                        // Match — inline
-                        var length = litLen - 256;
-                        var lengthCode = DeflateTables.LengthToCode[length];
-
-                        // Write length code
-                        var encoded = fixedCodesPtr[lengthCode];
-                        localBitBuffer |= (ulong)(encoded & 0xFFFF) << localBitsInBuffer;
-                        localBitsInBuffer += (int)(encoded >> 16);
-
-                        // Length extra bits
-                        var baseCode = lengthCode - 257;
-                        var extraBits = DeflateTables.LengthExtraBits[baseCode];
-                        if (extraBits > 0)
-                        {
-                            var extra = length - DeflateTables.LengthBase[baseCode];
-                            localBitBuffer |= (ulong)(uint)extra << localBitsInBuffer;
-                            localBitsInBuffer += extraBits;
-                        }
-
-                        // Distance code
-                        var distCode = DeflateTables.GetDistanceCode(dist);
-                        localBitBuffer |= (ulong)revDistPtr[distCode] << localBitsInBuffer;
-                        localBitsInBuffer += 5;
-
-                        // Distance extra bits
-                        var distExtraBits = DeflateTables.DistanceExtraBits[distCode];
-                        if (distExtraBits > 0)
-                        {
-                            var distExtra = dist - DeflateTables.DistanceBase[distCode];
-                            localBitBuffer |= (ulong)(uint)distExtra << localBitsInBuffer;
-                            localBitsInBuffer += distExtraBits;
-                        }
-                    }
-
-                    // Flush 32+ bits inline
-                    if (localBitsInBuffer >= 32)
-                    {
-                        if (outPos + 4 > OutputBufferSize)
-                        {
-                            outputPos = outPos;
-                            bitBuffer = localBitBuffer;
-                            bitsInBuffer = localBitsInBuffer;
-                            FlushOutputBuffer();
-                            outPos = outputPos;
-                        }
-
-                        *(uint*)(outBufPtr + outPos) = (uint)localBitBuffer;
-                        outPos += 4;
-                        localBitBuffer >>= 32;
-                        localBitsInBuffer -= 32;
-                    }
-                }
+                WriteFixedLiteral(litLen);
             }
-
-            outputPos = outPos;
+            else
+            {
+                var length = litLen - 256;
+                var lengthCode = DeflateTables.LengthToCode[length];
+                WriteFixedLength(lengthCode, length);
+                WriteFixedDistance(dist);
+            }
         }
-
-        // Sync back
-        bitBuffer = localBitBuffer;
-        bitsInBuffer = localBitsInBuffer;
 
         // End of block (256)
         WriteFixedLiteral(256);
@@ -1337,6 +1504,324 @@ internal sealed unsafe class DeflateEncoder : IDisposable
         var code = encoded & 0xFFFF;
         var length = (int)(encoded >> 16);
         WriteBits(code, length);
+    }
+
+    /// <summary>
+    /// Записывает блок с Dynamic Huffman кодированием (BTYPE=10).
+    /// Строит оптимальные таблицы из статистики символов блока.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private void WriteDynamicHuffmanBlock(bool isFinal)
+    {
+        // 1. Подсчёт частот символов
+        Span<uint> litLenFreqs = stackalloc uint[286];
+        Span<uint> distFreqs = stackalloc uint[30];
+        litLenFreqs.Clear();
+        distFreqs.Clear();
+
+        fixed (ushort* litPtr = litLenBuffer, dPtr = distBuffer)
+        {
+            for (var i = 0; i < bufferPos; i++)
+            {
+                if (dPtr[i] == 0)
+                {
+                    // Литерал
+                    litLenFreqs[litPtr[i]]++;
+                }
+                else
+                {
+                    // Match: litLenBuffer хранит length + 256
+                    var length = litPtr[i] - 256;
+                    var lengthCode = DeflateTables.LengthToCode[length];
+                    litLenFreqs[lengthCode]++;
+
+                    var distCode = DeflateTables.GetDistanceCode(dPtr[i]);
+                    distFreqs[distCode]++;
+                }
+            }
+        }
+
+        litLenFreqs[256] = 1; // End-of-block обязателен
+
+        // Гарантируем хотя бы один distance code (требование спецификации)
+        var hasAnyDist = false;
+        for (var i = 0; i < 30; i++)
+        {
+            if (distFreqs[i] > 0) { hasAnyDist = true; break; }
+        }
+        if (!hasAnyDist) distFreqs[0] = 1;
+
+        // 2. Построение оптимальных длин кодов
+        Span<byte> litLenCodeLengths = stackalloc byte[286];
+        Span<byte> distCodeLengths = stackalloc byte[30];
+        HuffmanTreeBuilder.BuildFromFrequencies(litLenFreqs, litLenCodeLengths, maxCodeLength: 15);
+        HuffmanTreeBuilder.BuildFromFrequencies(distFreqs, distCodeLengths, maxCodeLength: 15);
+
+        // 3. Построение reversed кодов (LSB-first для Deflate)
+        Span<uint> litLenCodes = stackalloc uint[286];
+        Span<uint> distCodesArr = stackalloc uint[30];
+        HuffmanTreeBuilder.BuildEncodeCodes(litLenCodeLengths, litLenCodes, lsbFirst: true);
+        HuffmanTreeBuilder.BuildEncodeCodes(distCodeLengths, distCodesArr, lsbFirst: true);
+
+        // 4. Определяем HLIT и HDIST (обрезаем trailing zeros)
+        var hlit = 286;
+        while (hlit > 257 && litLenCodeLengths[hlit - 1] == 0) hlit--;
+
+        var hdist = 30;
+        while (hdist > 1 && distCodeLengths[hdist - 1] == 0) hdist--;
+
+        // 5. RLE-кодирование объединённых длин кодов
+        var totalCodes = hlit + hdist;
+        Span<byte> combinedLengths = stackalloc byte[totalCodes];
+        litLenCodeLengths[..hlit].CopyTo(combinedLengths);
+        distCodeLengths[..hdist].CopyTo(combinedLengths[hlit..]);
+
+        // RLE-кодирование (worst case: каждый символ отдельно)
+        Span<byte> rleCodes = stackalloc byte[totalCodes * 2];
+        Span<byte> rleExtra = stackalloc byte[totalCodes * 2];
+        Span<byte> rleExtraBits = stackalloc byte[totalCodes * 2];
+        var rleCount = RleEncodeCodeLengths(combinedLengths[..totalCodes], rleCodes, rleExtra, rleExtraBits);
+
+        // 6. Частоты code length алфавита и построение кодов
+        Span<uint> clFreqs = stackalloc uint[19];
+        clFreqs.Clear();
+        for (var i = 0; i < rleCount; i++)
+            clFreqs[rleCodes[i]]++;
+
+        Span<byte> clCodeLengths = stackalloc byte[19];
+        HuffmanTreeBuilder.BuildFromFrequencies(clFreqs, clCodeLengths, maxCodeLength: 7);
+
+        Span<uint> clCodes = stackalloc uint[19];
+        HuffmanTreeBuilder.BuildEncodeCodes(clCodeLengths, clCodes, lsbFirst: true);
+
+        // 7. Определяем HCLEN (обрезаем trailing zeros в порядке спецификации)
+        ReadOnlySpan<int> clOrder = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+        var hclen = 19;
+        while (hclen > 4 && clCodeLengths[clOrder[hclen - 1]] == 0) hclen--;
+
+        // 7b. Оцениваем размер Dynamic vs Fixed Huffman и выбираем лучший вариант
+        // Dynamic: заголовок + данные
+        var dynamicHeaderBits = 3 + 14 + (hclen * 3); // BFINAL + BTYPE + HLIT/HDIST/HCLEN + CL lengths
+        for (var i = 0; i < rleCount; i++)
+            dynamicHeaderBits += clCodeLengths[rleCodes[i]] + rleExtraBits[i];
+
+        var dynamicDataBits = 0;
+        for (var s = 0; s < 286; s++)
+        {
+            if (litLenFreqs[s] > 0)
+                dynamicDataBits += (int)litLenFreqs[s] * litLenCodeLengths[s];
+        }
+        for (var s = 0; s < 30; s++)
+        {
+            if (distFreqs[s] > 0)
+                dynamicDataBits += (int)distFreqs[s] * distCodeLengths[s];
+        }
+
+        // Экстра-биты для length и distance (одинаковы для Fixed и Dynamic)
+        var extraBitsCost = 0;
+        fixed (ushort* litP = litLenBuffer, distP = distBuffer)
+        {
+            for (var i = 0; i < bufferPos; i++)
+            {
+                if (distP[i] != 0)
+                {
+                    var len = litP[i] - 256;
+                    extraBitsCost += DeflateTables.LengthExtraBits[DeflateTables.LengthToCode[len] - 257];
+                    extraBitsCost += DeflateTables.DistanceExtraBits[DeflateTables.GetDistanceCode(distP[i])];
+                }
+            }
+        }
+
+        var dynamicTotalBits = dynamicHeaderBits + dynamicDataBits + extraBitsCost;
+
+        // Fixed Huffman: 3 бита header + fixed code lengths
+        var fixedDataBits = 3; // BFINAL + BTYPE
+        for (var s = 0; s < 286; s++)
+        {
+            if (litLenFreqs[s] > 0)
+            {
+                // Fixed Huffman code lengths: 0-143→8, 144-255→9, 256-279→7, 280-287→8
+                var fixedLen = GetFixedLitLenCodeLength(s);
+                fixedDataBits += (int)litLenFreqs[s] * fixedLen;
+            }
+        }
+        // Distance codes в Fixed Huffman всегда 5 бит
+        for (var s = 0; s < 30; s++)
+        {
+            if (distFreqs[s] > 0)
+                fixedDataBits += (int)distFreqs[s] * 5;
+        }
+        fixedDataBits += extraBitsCost;
+
+        // Выбираем меньший вариант
+        if (fixedDataBits <= dynamicTotalBits)
+        {
+            // Fixed дешевле — перенаправляем
+            WriteFixedHuffmanBlock(isFinal);
+            return;
+        }
+
+        // 8. Записываем заголовок блока: BFINAL + BTYPE=10
+        WriteBits(isFinal ? 1u : 0u, 1);
+        WriteBits(2, 2); // BTYPE=10 (Dynamic Huffman)
+
+        // HLIT, HDIST, HCLEN
+        WriteBits((uint)(hlit - 257), 5);
+        WriteBits((uint)(hdist - 1), 5);
+        WriteBits((uint)(hclen - 4), 4);
+
+        // 9. Записываем длины кодов code length алфавита (в порядке спецификации)
+        for (var i = 0; i < hclen; i++)
+            WriteBits(clCodeLengths[clOrder[i]], 3);
+
+        // 10. Записываем RLE-кодированные длины кодов
+        for (var i = 0; i < rleCount; i++)
+        {
+            var code = rleCodes[i];
+            WriteBits(clCodes[code], clCodeLengths[code]);
+            if (rleExtraBits[i] > 0)
+                WriteBits(rleExtra[i], rleExtraBits[i]);
+        }
+
+        // 11. Записываем данные блока с Dynamic Huffman кодами
+        WriteDynamicBlockData(litLenCodes, litLenCodeLengths, distCodesArr, distCodeLengths);
+
+        // 12. End-of-block
+        WriteBits(litLenCodes[256], litLenCodeLengths[256]);
+    }
+
+    /// <summary>
+    /// Длина кода Fixed Huffman для lit/len символа (RFC 1951 §3.2.6).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int GetFixedLitLenCodeLength(int symbol)
+    {
+        if (symbol <= 143) return 8;
+        if (symbol <= 255) return 9;
+        return symbol <= 279 ? 7 : 8;
+    }
+
+    /// <summary>
+    /// RLE-кодирование массива длин кодов для Dynamic Huffman заголовка (RFC 1951 §3.2.7).
+    /// Использует специальные коды: 16 (повтор), 17 (нули 3-10), 18 (нули 11-138).
+    /// </summary>
+    private static int RleEncodeCodeLengths(
+        ReadOnlySpan<byte> lengths,
+        Span<byte> codes,
+        Span<byte> extra,
+        Span<byte> extraBits)
+    {
+        var count = 0;
+        var i = 0;
+
+        while (i < lengths.Length)
+        {
+            var cur = lengths[i];
+
+            if (cur == 0)
+            {
+                // Считаем последовательные нули
+                var run = 1;
+                while (i + run < lengths.Length && lengths[i + run] == 0 && run < 138)
+                    run++;
+
+                if (run >= 11)
+                {
+                    // Код 18: повтор 0 для 11-138 раз (7 extra bits)
+                    codes[count] = 18;
+                    extra[count] = (byte)(run - 11);
+                    extraBits[count] = 7;
+                    count++;
+                    i += run;
+                }
+                else if (run >= 3)
+                {
+                    // Код 17: повтор 0 для 3-10 раз (3 extra bits)
+                    codes[count] = 17;
+                    extra[count] = (byte)(run - 3);
+                    extraBits[count] = 3;
+                    count++;
+                    i += run;
+                }
+                else
+                {
+                    // Отдельные нули
+                    for (var j = 0; j < run; j++)
+                    {
+                        codes[count] = 0;
+                        extra[count] = 0;
+                        extraBits[count] = 0;
+                        count++;
+                    }
+                    i += run;
+                }
+            }
+            else
+            {
+                // Записываем значение
+                codes[count] = cur;
+                extra[count] = 0;
+                extraBits[count] = 0;
+                count++;
+                i++;
+
+                // Проверяем повторы
+                var run = 0;
+                while (i + run < lengths.Length && lengths[i + run] == cur && run < 6)
+                    run++;
+
+                if (run >= 3)
+                {
+                    // Код 16: повтор предыдущего 3-6 раз (2 extra bits)
+                    codes[count] = 16;
+                    extra[count] = (byte)(run - 3);
+                    extraBits[count] = 2;
+                    count++;
+                    i += run;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Записывает данные блока с Dynamic Huffman кодами — оптимизированный hot loop.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private void WriteDynamicBlockData(
+        ReadOnlySpan<uint> llCodes, ReadOnlySpan<byte> llLengths,
+        ReadOnlySpan<uint> dCodes, ReadOnlySpan<byte> dLengths)
+    {
+        // Safe path using WriteBits — no manual bit buffer management
+        for (var i = 0; i < bufferPos; i++)
+        {
+            var litLen = litLenBuffer[i];
+            var dist = distBuffer[i];
+
+            if (dist == 0)
+            {
+                WriteBits(llCodes[litLen], llLengths[litLen]);
+            }
+            else
+            {
+                var length = litLen - 256;
+                var lengthCode = DeflateTables.LengthToCode[length];
+                WriteBits(llCodes[lengthCode], llLengths[lengthCode]);
+
+                var baseCode = lengthCode - 257;
+                var extraBitsLen = DeflateTables.LengthExtraBits[baseCode];
+                if (extraBitsLen > 0)
+                    WriteBits((uint)(length - DeflateTables.LengthBase[baseCode]), extraBitsLen);
+
+                var distCode = DeflateTables.GetDistanceCode(dist);
+                WriteBits(dCodes[distCode], dLengths[distCode]);
+
+                var distExtraBits = DeflateTables.DistanceExtraBits[distCode];
+                if (distExtraBits > 0)
+                    WriteBits((uint)(dist - DeflateTables.DistanceBase[distCode]), distExtraBits);
+            }
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

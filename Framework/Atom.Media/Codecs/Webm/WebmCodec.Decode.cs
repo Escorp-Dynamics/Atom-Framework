@@ -1,13 +1,14 @@
-#pragma warning disable IDE0010, IDE0047, IDE0048, IDE0078, S109, S3776, MA0051
+﻿#pragma warning disable IDE0010, IDE0047, IDE0048, IDE0078, S109, S3776, MA0051
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics.X86;
+using Atom.Media.Codecs.Webm;
 
 namespace Atom.Media;
 
 /// <summary>
-/// Декодирование WebM (Store mode).
+/// Декодирование WebM (Store mode + VP9).
 /// </summary>
 public sealed partial class WebmCodec
 {
@@ -25,17 +26,26 @@ public sealed partial class WebmCodec
         if (isEncoder)
             return CodecResult.UnsupportedFormat;
 
-        if (packet.Length < AfrmHeaderSize)
+        if (packet.Length < 4)
             return CodecResult.InvalidData;
 
-        // Проверяем AFRM magic
+        // Check data format and route accordingly
         ref var dataRef = ref MemoryMarshal.GetReference(packet);
         var magic = Unsafe.ReadUnaligned<uint>(ref dataRef);
 
-        if (magic != AfrmMagic)
-            return CodecResult.InvalidData;
+        // 1. AFRM Store mode (raw pixel data)
+        if (magic == AfrmMagic && packet.Length >= AfrmHeaderSize)
+        {
+            return DecodeAfrmFast(ref dataRef, packet.Length, ref frame);
+        }
 
-        return DecodeAfrmFast(ref dataRef, packet.Length, ref frame);
+        // 2. VP9 compressed frame (frame marker 0b10 in bits 7-6 of first byte)
+        if (Vp9Decoder.IsVp9Frame(packet))
+        {
+            return DecodeVp9(packet, ref frame);
+        }
+
+        return CodecResult.InvalidData;
     }
 
     /// <inheritdoc/>
@@ -50,6 +60,19 @@ public sealed partial class WebmCodec
         var frame = buffer.AsFrame();
         var result = Decode(packet.Span, ref frame);
         return new ValueTask<CodecResult>(result);
+    }
+
+    #endregion
+
+    #region VP9 Decoding
+
+    /// <summary>
+    /// Decodes a VP9 compressed frame.
+    /// </summary>
+    private CodecResult DecodeVp9(ReadOnlySpan<byte> packet, ref VideoFrame frame)
+    {
+        vp9Decoder ??= new Vp9Decoder();
+        return vp9Decoder.Decode(packet, ref frame);
     }
 
     #endregion

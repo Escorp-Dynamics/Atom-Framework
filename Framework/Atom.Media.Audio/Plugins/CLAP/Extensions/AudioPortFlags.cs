@@ -1,4 +1,4 @@
-namespace Atom.Audio.Plugins.CLAP.Extensions;
+namespace Atom.Media.Audio.Plugins.CLAP.Extensions;
 
 /// <summary>
 /// Флаги для портов аудио в CLAP.

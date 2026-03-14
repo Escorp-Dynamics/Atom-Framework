@@ -1,7 +1,8 @@
-#pragma warning disable CA1000, CA1062, CA2208, S3776, MA0015, S109, MA0051
+﻿#pragma warning disable CA1000, CA1062, CA2208, S3776, MA0015, S109, MA0051, IDE0007
 
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Atom.IO.Compression.Huffman;
 
@@ -15,17 +16,20 @@ namespace Atom.IO.Compression.Huffman;
 /// - Canonical Huffman codes
 /// - Package-Merge для ограничения глубины
 ///
-/// Реализация с unsafe pointer-арифметикой для максимальной производительности.
+/// Реализация с Unsafe ref-арифметикой для максимальной производительности.
 /// </remarks>
-public static unsafe class HuffmanTreeBuilder
+public static class HuffmanTreeBuilder
 {
     #region Constants
 
     /// <summary>Максимальная длина кода по умолчанию.</summary>
     public const int DefaultMaxCodeLength = 15;
 
-    /// <summary>Максимальный размер алфавита.</summary>
-    public const int MaxAlphabetSize = 288;
+    /// <summary>Максимальный размер алфавита (VP8L с максимальным color cache: 256 + 24 + 2048).</summary>
+    public const int MaxAlphabetSize = 2328;
+
+    /// <summary>Порог для stackalloc: алфавиты больше этого значения аллоцируются в куче.</summary>
+    private const int StackAllocThreshold = 512;
 
     #endregion
 
@@ -80,32 +84,28 @@ public static unsafe class HuffmanTreeBuilder
         }
 
         // Инициализируем таблицу значениями по умолчанию
-        fixed (byte* symPtr = symbols, lenPtr = lengths)
-        {
-            for (var i = 0; i < tableSize; i++)
-            {
-                symPtr[i] = 0;
-                lenPtr[i] = (byte)maxBits;
-            }
-        }
+        symbols[..tableSize].Clear();
+        var defaultLen = (byte)maxBits;
+        lengths[..tableSize].Fill(defaultLen);
+
+        ref var symRef = ref MemoryMarshal.GetReference(symbols);
+        ref var lenRef = ref MemoryMarshal.GetReference(lengths);
 
         // Заполняем таблицу
-        fixed (byte* symPtr = symbols, lenPtr = lengths, clPtr = codeLengths)
+        ref var clRef = ref MemoryMarshal.GetReference(codeLengths);
+        for (var sym = 0; sym < codeLengths.Length; sym++)
         {
-            for (var sym = 0; sym < codeLengths.Length; sym++)
+            var len = Unsafe.Add(ref clRef, sym);
+            if (len == 0 || len > maxBits) continue;
+
+            var c = nextCode[len]++;
+            var tableIndex = lsbFirst ? (int)ReverseBits(c, len) : c;
+            var stride = 1 << len;
+
+            for (var idx = tableIndex; idx < tableSize; idx += stride)
             {
-                var len = clPtr[sym];
-                if (len == 0 || len > maxBits) continue;
-
-                var c = nextCode[len]++;
-                var tableIndex = lsbFirst ? (int)ReverseBits(c, len) : c;
-                var stride = 1 << len;
-
-                for (var idx = tableIndex; idx < tableSize; idx += stride)
-                {
-                    symPtr[idx] = (byte)sym;
-                    lenPtr[idx] = len;
-                }
+                Unsafe.Add(ref symRef, idx) = (byte)sym;
+                Unsafe.Add(ref lenRef, idx) = len;
             }
         }
 
@@ -168,34 +168,28 @@ public static unsafe class HuffmanTreeBuilder
         }
 
         // Инициализируем таблицу значениями по умолчанию
-        fixed (ushort* symPtr = symbols)
-        fixed (byte* lenPtr = lengths)
-        {
-            for (var i = 0; i < tableSize; i++)
-            {
-                symPtr[i] = 0;
-                lenPtr[i] = (byte)maxBits;
-            }
-        }
+        symbols[..tableSize].Clear();
+        var defaultLen16 = (byte)maxBits;
+        lengths[..tableSize].Fill(defaultLen16);
+
+        ref var symRef16 = ref MemoryMarshal.GetReference(symbols);
+        ref var lenRef16 = ref MemoryMarshal.GetReference(lengths);
 
         // Заполняем таблицу
-        fixed (ushort* symPtr = symbols)
-        fixed (byte* lenPtr = lengths, clPtr = codeLengths)
+        ref var clRef16 = ref MemoryMarshal.GetReference(codeLengths);
+        for (var sym = 0; sym < codeLengths.Length; sym++)
         {
-            for (var sym = 0; sym < codeLengths.Length; sym++)
+            var len = Unsafe.Add(ref clRef16, sym);
+            if (len == 0 || len > maxBits) continue;
+
+            var c = nextCode[len]++;
+            var tableIndex = lsbFirst ? (int)ReverseBits(c, len) : c;
+            var stride = 1 << len;
+
+            for (var idx = tableIndex; idx < tableSize; idx += stride)
             {
-                var len = clPtr[sym];
-                if (len == 0 || len > maxBits) continue;
-
-                var c = nextCode[len]++;
-                var tableIndex = lsbFirst ? (int)ReverseBits(c, len) : c;
-                var stride = 1 << len;
-
-                for (var idx = tableIndex; idx < tableSize; idx += stride)
-                {
-                    symPtr[idx] = (ushort)sym;
-                    lenPtr[idx] = len;
-                }
+                Unsafe.Add(ref symRef16, idx) = (ushort)sym;
+                Unsafe.Add(ref lenRef16, idx) = len;
             }
         }
 
@@ -286,8 +280,10 @@ public static unsafe class HuffmanTreeBuilder
         Span<byte> codeLengths,
         int maxCodeLength)
     {
-        // Собираем активные символы
-        Span<(int symbol, uint freq)> active = stackalloc (int, uint)[frequencies.Length];
+        // Собираем активные символы (heap fallback для больших алфавитов)
+        Span<(int symbol, uint freq)> active = frequencies.Length <= StackAllocThreshold
+            ? stackalloc (int, uint)[frequencies.Length]
+            : new (int, uint)[frequencies.Length];
         var activeCount = 0;
 
         for (var i = 0; i < frequencies.Length; i++)
@@ -302,8 +298,10 @@ public static unsafe class HuffmanTreeBuilder
         SortByFrequency(active[..activeCount]);
 
         // Kraft inequality: sum(2^(-l_i)) = 1
-        // Используем in-place построение через depth
-        Span<int> depths = stackalloc int[activeCount];
+        // Используем in-place построение через depth (heap fallback для больших алфавитов)
+        Span<int> depths = activeCount <= StackAllocThreshold
+            ? stackalloc int[activeCount]
+            : new int[activeCount];
 
         // Простой жадный алгоритм с ограничением глубины
         BuildDepthsGreedy(active[..activeCount], depths, maxCodeLength);
@@ -324,19 +322,27 @@ public static unsafe class HuffmanTreeBuilder
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void SortByFrequency(Span<(int symbol, uint freq)> items)
     {
-        // Insertion sort — эффективен для небольших массивов
-        for (var i = 1; i < items.Length; i++)
+        if (items.Length <= 32)
         {
-            var key = items[i];
-            var j = i - 1;
-
-            while (j >= 0 && items[j].freq > key.freq)
+            // Insertion sort — эффективен для небольших массивов
+            for (var i = 1; i < items.Length; i++)
             {
-                items[j + 1] = items[j];
-                j--;
-            }
+                var key = items[i];
+                var j = i - 1;
 
-            items[j + 1] = key;
+                while (j >= 0 && items[j].freq > key.freq)
+                {
+                    items[j + 1] = items[j];
+                    j--;
+                }
+
+                items[j + 1] = key;
+            }
+        }
+        else
+        {
+            // Introsort для больших алфавитов (VP8L: до 2328 символов)
+            items.Sort(static (a, b) => a.freq.CompareTo(b.freq));
         }
     }
 
@@ -361,7 +367,7 @@ public static unsafe class HuffmanTreeBuilder
         BuildHuffmanTree(sorted, depths, n);
 
         // Ограничиваем глубины и корректируем для Kraft inequality
-        LimitAndAdjustDepths(sorted, depths, n, maxDepth);
+        LimitAndAdjustDepths(depths, n, maxDepth);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -370,102 +376,96 @@ public static unsafe class HuffmanTreeBuilder
         Span<int> depths,
         int n)
     {
-        // Массив узлов: (weight, left, right, isLeaf)
-        Span<(ulong weight, int left, int right, bool isLeaf)> nodes = stackalloc (ulong, int, int, bool)[(n * 2) - 1];
-        var nodeCount = 0;
+        // Two-queue подход: O(n) вместо O(n²).
+        // Queue 1 = отсортированные листья (sorted[]), Queue 2 = внутренние узлы.
+        // Внутренние узлы тоже отсортированы по весу (сумма двух наименьших ≤ следующей суммы).
+        // Merging двух очередей для поиска минимума — O(1) за шаг.
+        // Heap fallback для больших алфавитов (VP8L color cache: до 2328 символов)
+        Span<ulong> internalWeight = n - 1 <= StackAllocThreshold
+            ? stackalloc ulong[n - 1]
+            : new ulong[n - 1];
+        // parent[i] для i < n — лист, для i >= n — внутренний узел (i - n)
+        var parentSize = (2 * n) - 1;
+        Span<int> parent = parentSize <= StackAllocThreshold
+            ? stackalloc int[parentSize]
+            : new int[parentSize];
+        parent.Fill(-1);
 
-        // Инициализируем листья
-        for (var i = 0; i < n; i++)
-            nodes[nodeCount++] = (sorted[i].freq, i, -1, true);
+        var leafIdx = 0;   // голова очереди листьев
+        var intHead = 0;   // голова очереди внутренних узлов
+        var intTail = 0;   // хвост очереди внутренних узлов
 
-        // Активные узлы для построения дерева
-        Span<int> activeNodes = stackalloc int[n];
-        for (var i = 0; i < n; i++)
-            activeNodes[i] = i;
-
-        var activeCount = n;
-
-        // Строим дерево: объединяем два минимальных узла
-        while (activeCount > 1)
+        for (var step = 0; step < n - 1; step++)
         {
-            FindTwoMinimum(nodes, activeNodes, activeCount, out var min1Idx, out var min2Idx);
-
-            var left = activeNodes[min1Idx];
-            var right = activeNodes[min2Idx];
-            var newWeight = nodes[left].weight + nodes[right].weight;
-            var newNode = nodeCount++;
-            nodes[newNode] = (newWeight, left, right, false);
-
-            // Обновляем активные узлы
-            if (min1Idx > min2Idx) (min1Idx, min2Idx) = (min2Idx, min1Idx);
-            activeNodes[min2Idx] = activeNodes[activeCount - 1];
-            activeNodes[min1Idx] = newNode;
-            activeCount--;
-        }
-
-        // Вычисляем глубины обходом дерева
-        ComputeDepthsFromTree(nodes, activeNodes[0], depths, n);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void FindTwoMinimum(
-        ReadOnlySpan<(ulong weight, int left, int right, bool isLeaf)> nodes,
-        ReadOnlySpan<int> activeNodes,
-        int activeCount,
-        out int min1Idx,
-        out int min2Idx)
-    {
-        min1Idx = 0;
-        min2Idx = 1;
-        if (nodes[activeNodes[min1Idx]].weight > nodes[activeNodes[min2Idx]].weight)
-            (min1Idx, min2Idx) = (min2Idx, min1Idx);
-
-        for (var i = 2; i < activeCount; i++)
-        {
-            var w = nodes[activeNodes[i]].weight;
-            if (w < nodes[activeNodes[min1Idx]].weight)
+            // Выбираем первый минимальный узел
+            ulong w1;
+            int node1;
+            if (intHead < intTail && (leafIdx >= n || internalWeight[intHead] <= sorted[leafIdx].freq))
             {
-                min2Idx = min1Idx;
-                min1Idx = i;
-            }
-            else if (w < nodes[activeNodes[min2Idx]].weight)
-            {
-                min2Idx = i;
-            }
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ComputeDepthsFromTree(
-        ReadOnlySpan<(ulong weight, int left, int right, bool isLeaf)> nodes,
-        int root,
-        Span<int> depths,
-        int n)
-    {
-        Span<(int nodeIdx, int depth)> stack = stackalloc (int, int)[(n * 2)];
-        var stackTop = 0;
-        stack[stackTop++] = (root, 0);
-
-        while (stackTop > 0)
-        {
-            var (nodeIdx, depth) = stack[--stackTop];
-            var (_, left, right, isLeaf) = nodes[nodeIdx];
-
-            if (isLeaf)
-            {
-                depths[left] = depth == 0 ? 1 : depth;
+                w1 = internalWeight[intHead];
+                node1 = n + intHead;
+                intHead++;
             }
             else
             {
-                stack[stackTop++] = (left, depth + 1);
-                stack[stackTop++] = (right, depth + 1);
+                w1 = sorted[leafIdx].freq;
+                node1 = leafIdx;
+                leafIdx++;
             }
+
+            // Выбираем второй минимальный узел
+            ulong w2;
+            int node2;
+            if (intHead < intTail && (leafIdx >= n || internalWeight[intHead] <= sorted[leafIdx].freq))
+            {
+                w2 = internalWeight[intHead];
+                node2 = n + intHead;
+                intHead++;
+            }
+            else
+            {
+                w2 = sorted[leafIdx].freq;
+                node2 = leafIdx;
+                leafIdx++;
+            }
+
+            // Создаём внутренний узел
+            internalWeight[intTail] = w1 + w2;
+            var parentNode = n + intTail;
+            parent[node1] = parentNode;
+            parent[node2] = parentNode;
+            intTail++;
+        }
+
+        // Вычисляем глубины: top-down от корня (один проход)
+        // depth[i] для i < n — лист, для i >= n — внутренний узел
+        Span<int> nodeDepth = parentSize <= StackAllocThreshold
+            ? stackalloc int[parentSize]
+            : new int[parentSize];
+
+        // Корень — последний внутренний узел: n + (n-2)
+        var root = (2 * n) - 2;
+        nodeDepth[root] = 0;
+
+        // Пройти все узлы и проставить depth = parent.depth + 1
+        // Внутренние узлы идут в порядке создания, parent[node] всегда > node
+        // ⇒ обрабатываем в обратном порядке от корня
+        for (var node = root - 1; node >= 0; node--)
+        {
+            if (parent[node] >= 0)
+            {
+                nodeDepth[node] = nodeDepth[parent[node]] + 1;
+            }
+        }
+
+        for (var i = 0; i < n; i++)
+        {
+            depths[i] = Math.Max(nodeDepth[i], 1);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void LimitAndAdjustDepths(
-        ReadOnlySpan<(int symbol, uint freq)> sorted,
         Span<int> depths,
         int n,
         int maxDepth)
@@ -482,12 +482,11 @@ public static unsafe class HuffmanTreeBuilder
         }
 
         if (needsAdjustment)
-            AdjustDepthsForKraft(sorted, depths, n, maxDepth);
+            AdjustDepthsForKraft(depths, n, maxDepth);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private static void AdjustDepthsForKraft(
-        ReadOnlySpan<(int symbol, uint freq)> sorted,
         Span<int> depths,
         int n,
         int maxDepth)
@@ -496,28 +495,42 @@ public static unsafe class HuffmanTreeBuilder
         var kraftSum = 0u;
 
         for (var i = 0; i < n; i++)
-            kraftSum += 1u << (maxDepth - depths[i]);
-
-        while (kraftSum > kraftLimit)
         {
-            var minIdx = -1;
-            var minFreq = uint.MaxValue;
+            kraftSum += 1u << (maxDepth - depths[i]);
+        }
 
-            for (var i = 0; i < n; i++)
+        // Фаза 1: Oversubscribed (kraftSum > kraftLimit) — увеличиваем depth наименее частых символов
+        for (var i = 0; i < n && kraftSum > kraftLimit; i++)
+        {
+            while (depths[i] < maxDepth && kraftSum > kraftLimit)
             {
-                if (depths[i] < maxDepth && sorted[i].freq < minFreq)
+                var oldContrib = 1u << (maxDepth - depths[i]);
+                depths[i]++;
+                var newContrib = 1u << (maxDepth - depths[i]);
+                kraftSum = kraftSum - oldContrib + newContrib;
+            }
+        }
+
+        // Фаза 2: Underfull (kraftSum < kraftLimit) — уменьшаем depth наиболее глубоких символов
+        // Итерируем от конца (наибольшая частота / наибольший depth после фазы 1)
+        for (var i = n - 1; i >= 0 && kraftSum < kraftLimit; i--)
+        {
+            while (depths[i] > 1 && kraftSum < kraftLimit)
+            {
+                var oldContrib = 1u << (maxDepth - depths[i]);
+                var newContrib = 1u << (maxDepth - (depths[i] - 1));
+                var delta = newContrib - oldContrib;
+
+                if (kraftSum + delta <= kraftLimit)
                 {
-                    minFreq = sorted[i].freq;
-                    minIdx = i;
+                    depths[i]--;
+                    kraftSum += delta;
+                }
+                else
+                {
+                    break;
                 }
             }
-
-            if (minIdx < 0) break;
-
-            var oldContrib = 1u << (maxDepth - depths[minIdx]);
-            depths[minIdx]++;
-            var newContrib = 1u << (maxDepth - depths[minIdx]);
-            kraftSum = kraftSum - oldContrib + newContrib;
         }
     }
 
@@ -538,21 +551,28 @@ public static unsafe class HuffmanTreeBuilder
         Span<uint> codes,
         bool lsbFirst = true)
     {
+        ref var clRef = ref MemoryMarshal.GetReference(codeLengths);
+        ref var codeRef = ref MemoryMarshal.GetReference(codes);
+        var n = codeLengths.Length;
+
         // Находим maxBits
         var maxBits = 0;
-        for (var i = 0; i < codeLengths.Length; i++)
+        for (var i = 0; i < n; i++)
         {
-            if (codeLengths[i] > maxBits)
-                maxBits = codeLengths[i];
+            var len = Unsafe.Add(ref clRef, i);
+            if (len > maxBits)
+            {
+                maxBits = len;
+            }
         }
 
         if (maxBits == 0) return 0;
 
         // Подсчёт символов каждой длины
         Span<int> blCount = stackalloc int[maxBits + 1];
-        for (var i = 0; i < codeLengths.Length; i++)
+        for (var i = 0; i < n; i++)
         {
-            var len = codeLengths[i];
+            var len = Unsafe.Add(ref clRef, i);
             if (len != 0) blCount[len]++;
         }
 
@@ -566,17 +586,17 @@ public static unsafe class HuffmanTreeBuilder
         }
 
         // Назначаем коды
-        for (var i = 0; i < codeLengths.Length; i++)
+        for (var i = 0; i < n; i++)
         {
-            var len = codeLengths[i];
+            var len = Unsafe.Add(ref clRef, i);
             if (len == 0)
             {
-                codes[i] = 0;
+                Unsafe.Add(ref codeRef, i) = 0;
                 continue;
             }
 
             var c = (uint)nextCode[len]++;
-            codes[i] = lsbFirst ? ReverseBits((int)c, len) : c;
+            Unsafe.Add(ref codeRef, i) = lsbFirst ? ReverseBits((int)c, len) : c;
         }
 
         return maxBits;

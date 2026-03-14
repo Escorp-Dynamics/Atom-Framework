@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Atom.IO.Compression;
@@ -19,7 +19,9 @@ internal struct XxHash64
     private ulong v1, v2, v3, v4, totalLen;
 
     private int memSize;
+#pragma warning disable MA0189
     private unsafe fixed byte memory[32];
+#pragma warning restore MA0189
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public XxHash64()

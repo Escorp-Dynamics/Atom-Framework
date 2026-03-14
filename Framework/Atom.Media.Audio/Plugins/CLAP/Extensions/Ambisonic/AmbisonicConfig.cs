@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Atom.Audio.Plugins.CLAP.Extensions.Ambisonic;
+namespace Atom.Media.Audio.Plugins.CLAP.Extensions.Ambisonic;
 
 /// <summary>
 /// Представляет конфигурацию Ambisonic.

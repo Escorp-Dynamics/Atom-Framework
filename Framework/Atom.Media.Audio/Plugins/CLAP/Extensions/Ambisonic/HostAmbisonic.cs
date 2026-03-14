@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Atom.Audio.Plugins.CLAP.Extensions;
+namespace Atom.Media.Audio.Plugins.CLAP.Extensions;
 
 /// <summary>
 /// Информирует хост о том, что информация изменилась.

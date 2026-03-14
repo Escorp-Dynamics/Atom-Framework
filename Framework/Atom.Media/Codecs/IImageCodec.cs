@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 
 namespace Atom.Media;
@@ -62,7 +62,7 @@ public readonly record struct ImageCodecParameters
         Width = width;
         Height = height;
         PixelFormat = pixelFormat;
-        Quality = 90;
+        Quality = 0;
         CompressionLevel = 6;
     }
 }

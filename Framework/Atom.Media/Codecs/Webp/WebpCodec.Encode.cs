@@ -1,4 +1,4 @@
-#pragma warning disable IDE0010, IDE0047, IDE0048, S109, S3776, MA0051, CS0219, S1481, S3358
+﻿#pragma warning disable IDE0010, IDE0047, IDE0048, S109, S3776, MA0051, CS0219, S1481, S3358
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -25,11 +25,14 @@ public sealed partial class WebpCodec
             return CodecResult.UnsupportedFormat;
         }
 
-        var hasAlpha = frame.PixelFormat == VideoPixelFormat.Rgba32;
+        // VP8 lossy encoding when Quality > 0, VP8L lossless otherwise
+        if (Parameters.Quality > 0)
+        {
+            var encoder = new Vp8Encoder { Quality = Parameters.Quality };
+            return encoder.Encode(frame, output, out bytesWritten);
+        }
 
-        // ARAW Store mode: максимально быстрое lossless кодирование
-        // VP8L encoder требует полноценной реализации Huffman + LZ77
-        return EncodeStoreFast(frame, output, hasAlpha, out bytesWritten);
+        return Vp8LEncoder.Encode(frame, output, out bytesWritten);
     }
 
     /// <inheritdoc/>

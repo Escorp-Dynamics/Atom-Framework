@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace Atom.Audio.Plugins.CLAP;
+namespace Atom.Media.Audio.Plugins.CLAP;
 
 /// <summary>
 /// Представляет базовый класс для реализации плагинов CLAP.
@@ -15,9 +15,9 @@ public abstract class PluginBehavior
     public Host Host => host;
 
     protected virtual void OnInitialized(PluginDescriptor descriptor) { }
-    
+
     [UnmanagedCallersOnly(EntryPoint = "clap_init")]
-    public static extern nint Init(nint hostPointer)
+    public static nint Init(nint hostPointer)
     {
         host = Marshal.PtrToStructure<Host>(hostPointer);
         return host.ToPointer();

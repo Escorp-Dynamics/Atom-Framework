@@ -1,4 +1,4 @@
-#pragma warning disable CA1000, CA1815, S109, S4136, S4275, MA0071, S1066, MA0015, S3928
+﻿#pragma warning disable CA1000, CA1815, S109, S4136, S4275, MA0071, S1066, MA0015, S3928
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -284,6 +284,18 @@ public ref struct BitReader
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void SkipBits(int count)
     {
+        // Fast path: buffer has enough bits (common after EnsureBits+PeekBits)
+        if (count <= bufferBits)
+        {
+            if (IsLsbFirst)
+                buffer >>= count;
+            else
+                buffer <<= count;
+
+            bufferBits -= count;
+            return;
+        }
+
         while (count > 0)
         {
             if (bufferBits == 0 && !TryFillBuffer())
@@ -408,6 +420,21 @@ public ref struct BitReader
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void EnsureBits(int count)
     {
+        if (bufferBits >= count)
+            return;
+
+        // Batch fill: читаем до 7 байт за раз через Unsafe.ReadUnaligned
+        if (IsLsbFirst && BytesConsumed + 8 <= data.Length)
+        {
+            var chunk = Unsafe.ReadUnaligned<ulong>(ref MemoryMarshal.GetReference(data[BytesConsumed..]));
+            buffer |= chunk << bufferBits;
+            var bytesRead = (64 - bufferBits) >> 3; // сколько целых байт влезет
+            bufferBits += bytesRead << 3;
+            BytesConsumed += bytesRead;
+            return;
+        }
+
+        // Fallback: побайтовое заполнение
         while (bufferBits < count && BytesConsumed < data.Length)
         {
             var b = data[BytesConsumed++];
@@ -427,6 +454,20 @@ public ref struct BitReader
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool TryFillBuffer()
     {
+        if (BytesConsumed >= data.Length)
+            return false;
+
+        // Batch fill для LSB-first
+        if (IsLsbFirst && BytesConsumed + 8 <= data.Length && bufferBits <= 56)
+        {
+            var chunk = Unsafe.ReadUnaligned<ulong>(ref MemoryMarshal.GetReference(data[BytesConsumed..]));
+            buffer |= chunk << bufferBits;
+            var bytesRead = (64 - bufferBits) >> 3;
+            bufferBits += bytesRead << 3;
+            BytesConsumed += bytesRead;
+            return true;
+        }
+
         var filled = false;
 
         while (bufferBits <= 56 && BytesConsumed < data.Length)
@@ -443,6 +484,89 @@ public ref struct BitReader
         }
 
         return filled;
+    }
+
+    #endregion
+
+    #region Fused Huffman Decode
+
+    /// <summary>
+    /// Fused 4-channel literal decode: 1 EnsureBits + 4 table lookups.
+    /// Assembles ARGB pixel from green, red, blue, alpha Huffman tables.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public unsafe uint DecodeLiteral4Lsb(
+        int greenSym, int tableLog, int mask,
+        uint* redP, uint* blueP, uint* alphaP)
+    {
+        // After green decode, buffer may be low. Pre-fill for remaining 3 channels.
+        if (bufferBits < tableLog * 3)
+            EnsureBitsLsb(tableLog * 3);
+
+        var pr = redP[(int)(buffer & (uint)mask)];
+        var rl = (int)(pr & 0xFF);
+        buffer >>= rl;
+        bufferBits -= rl;
+        var red = (int)(pr >> 8);
+
+        var pb = blueP[(int)(buffer & (uint)mask)];
+        var bl = (int)(pb & 0xFF);
+        buffer >>= bl;
+        bufferBits -= bl;
+        var blue = (int)(pb >> 8);
+
+        var pa = alphaP[(int)(buffer & (uint)mask)];
+        var al = (int)(pa & 0xFF);
+        buffer >>= al;
+        bufferBits -= al;
+        var alpha = (int)(pa >> 8);
+
+        return ((uint)alpha << 24) | ((uint)red << 16) | ((uint)greenSym << 8) | (uint)blue;
+    }
+
+    /// <summary>
+    /// Fused LSB-first Huffman decode: EnsureBits + PeekBits + table lookup + SkipBits в одном вызове.
+    /// Использует packed таблицу (symbol &lt;&lt; 8 | length) для single memory read.
+    /// </summary>
+    /// <param name="tableLog">Log2 размера таблицы.</param>
+    /// <param name="packed">Указатель на packed таблицу (uint*): (symbol &lt;&lt; 8) | length.</param>
+    /// <param name="mask">Маска таблицы (2^tableLog - 1).</param>
+    /// <returns>Декодированный символ (0-255 для 8-bit, 0-65535 для 16-bit).</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public unsafe int DecodeLsb(int tableLog, uint* packed, int mask)
+    {
+        if (bufferBits < tableLog)
+            EnsureBitsLsb(tableLog);
+
+        var p = packed[(int)(buffer & (uint)mask)];
+        var length = (int)(p & 0xFF);
+        buffer >>= length;
+        bufferBits -= length;
+        return (int)(p >> 8);
+    }
+
+    /// <summary>
+    /// Заполнение буфера для LSB-first режима (вынесено для инлайнинга DecodeLsb).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void EnsureBitsLsb(int count)
+    {
+        if (BytesConsumed + 8 <= data.Length)
+        {
+            var chunk = Unsafe.ReadUnaligned<ulong>(ref MemoryMarshal.GetReference(data[BytesConsumed..]));
+            buffer |= chunk << bufferBits;
+            var bytesRead = (64 - bufferBits) >> 3;
+            bufferBits += bytesRead << 3;
+            BytesConsumed += bytesRead;
+        }
+        else
+        {
+            while (bufferBits < count && BytesConsumed < data.Length)
+            {
+                buffer |= (ulong)data[BytesConsumed++] << bufferBits;
+                bufferBits += 8;
+            }
+        }
     }
 
     #endregion

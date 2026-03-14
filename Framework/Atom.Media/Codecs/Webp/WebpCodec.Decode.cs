@@ -1,4 +1,4 @@
-#pragma warning disable IDE0010, IDE0047, IDE0048, IDE0078, S109, S3776, MA0051
+﻿#pragma warning disable IDE0010, IDE0047, IDE0048, IDE0078, S109, S3776, MA0051
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -49,10 +49,30 @@ public sealed partial class WebpCodec
                 return DecodeArawChunkFast(ref Unsafe.Add(ref dataRef, offset + 8), chunkSize, ref frame);
             }
 
-            // VP8L lossless / VP8 lossy — не поддерживаются (требуют полную реализацию кодека)
-            if (chunkType is 0x4C385056 or 0x20385056) // "VP8L" / "VP8 "
+            // VP8L lossless
+            if (chunkType == 0x4C385056) // "VP8L"
             {
-                return CodecResult.UnsupportedFormat;
+                if (offset + 8 + chunkSize > length)
+                {
+                    return CodecResult.InvalidData;
+                }
+
+                var vp8lData = data.Slice(offset + 8, chunkSize);
+                using var decoder = new Vp8LDecoder();
+                return decoder.Decode(vp8lData, ref frame);
+            }
+
+            // VP8 lossy
+            if (chunkType == 0x20385056) // "VP8 "
+            {
+                if (offset + 8 + chunkSize > length)
+                {
+                    return CodecResult.InvalidData;
+                }
+
+                var vp8Data = data.Slice(offset + 8, chunkSize);
+                var vp8Decoder = new Vp8Decoder();
+                return vp8Decoder.Decode(vp8Data, ref frame);
             }
 
             // Следующий chunk (с выравниванием)

@@ -1,4 +1,4 @@
-#pragma warning disable CA1024
+﻿#pragma warning disable CA1024
 
 namespace Atom.Media;
 
@@ -7,8 +7,34 @@ namespace Atom.Media;
 /// </summary>
 public static class CodecRegistry
 {
-    private static readonly Dictionary<MediaCodecId, Func<IVideoCodec>> videoCodecFactories = [];
-    private static readonly Dictionary<MediaCodecId, Func<IAudioCodec>> audioCodecFactories = [];
+    private static readonly Dictionary<MediaCodecId, Func<IVideoCodec>> videoCodecFactories = new()
+    {
+        [MediaCodecId.RawRgb24] = static () => new RawVideoCodec(),
+        [MediaCodecId.RawRgba32] = static () => new RawVideoCodec(),
+        [MediaCodecId.RawBgr24] = static () => new RawVideoCodec(),
+        [MediaCodecId.RawBgra32] = static () => new RawVideoCodec(),
+        [MediaCodecId.RawYuv420P] = static () => new RawVideoCodec(),
+        [MediaCodecId.RawYuv422P] = static () => new RawVideoCodec(),
+        [MediaCodecId.RawYuv444P] = static () => new RawVideoCodec(),
+        [MediaCodecId.RawNv12] = static () => new RawVideoCodec(),
+        [MediaCodecId.RawNv21] = static () => new RawVideoCodec(),
+    };
+
+    private static readonly Dictionary<MediaCodecId, Func<IAudioCodec>> audioCodecFactories = new()
+    {
+        [MediaCodecId.PcmS16Le] = static () => new RawAudioCodec(),
+        [MediaCodecId.PcmS16Be] = static () => new RawAudioCodec(),
+        [MediaCodecId.PcmS32Le] = static () => new RawAudioCodec(),
+        [MediaCodecId.PcmS32Be] = static () => new RawAudioCodec(),
+        [MediaCodecId.PcmF32Le] = static () => new RawAudioCodec(),
+        [MediaCodecId.PcmF32Be] = static () => new RawAudioCodec(),
+        [MediaCodecId.PcmF64Le] = static () => new RawAudioCodec(),
+        [MediaCodecId.PcmU8] = static () => new RawAudioCodec(),
+        [MediaCodecId.PcmALaw] = static () => new RawAudioCodec(),
+        [MediaCodecId.PcmMuLaw] = static () => new RawAudioCodec(),
+        [MediaCodecId.Flac] = static () => new FlacDecoder(),
+        [MediaCodecId.Alac] = static () => new AlacDecoder(),
+    };
 
     /// <summary>
     /// Регистрирует фабрику видеокодека.

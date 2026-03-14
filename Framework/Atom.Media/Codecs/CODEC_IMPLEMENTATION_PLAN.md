@@ -4,142 +4,157 @@
 
 | Кодек | Контейнер | Компрессия | Реальный формат | Совместимость |
 |-------|-----------|------------|-----------------|---------------|
-| **PNG** | ✅ Полный | DEFLATE (zlib) | ✅ Да | ✅ Открывается везде |
-| **WebP** | ✅ RIFF/WEBP | ARAW (raw) | ❌ Store mode | ❌ Только внутренний |
+| **PNG** | ✅ Полный | ✅ DEFLATE (Atom.IO.Compression) | ✅ Да | ✅ Открывается везде |
+| **WebP** | ✅ RIFF/WEBP | ✅ VP8L Lossless | ✅ Да | ✅ Chrome, GIMP, ImageMagick |
 | **MP4** | ✅ ISO BMFF | AFRM (raw) | ❌ Store mode | ❌ Только внутренний |
 | **WebM** | ✅ EBML/Matroska | AFRM (raw) | ❌ Store mode | ❌ Только внутренний |
+
+### Готовые фундаментальные модули
+
+| Модуль | Расположение | Статус | Тесты |
+|--------|-------------|--------|-------|
+| **BitReader/BitWriter** | `Atom.IO.BitReader` / `Atom.IO.BitWriter` | ✅ Полный | 35/35 |
+| **Huffman (8-bit)** | `Atom.IO.Compression.Huffman` | ✅ Полный | 24/24 |
+| **Huffman (16-bit)** | `Atom.IO.Compression.Huffman.HuffmanTable16` | ✅ Полный | 24/24 |
+| **DEFLATE Decoder** | `Atom.IO.Compression.Deflate.DeflateDecoder` | ✅ Оптимизирован | 53 pass |
+| **DEFLATE Encoder** | `Atom.IO.Compression.Deflate.DeflateEncoder` | ✅ Полный | 53 pass |
+| **SIMD Histogram** | `Atom.IO.Compression.Huffman.SimdHistogram` | ✅ AVX2/SSE2 | ✅ |
+| **Zstd Decoder** | `Atom.IO.Compression.Zstd` | ✅ Полный | ✅ |
+
+#### Характеристики BitReader/BitWriter
+
+- `ref struct`, zero-allocation, 64-bit буфер
+- LSB-first и MSB-first режимы
+- API: ReadBits(0-32), PeekBits, SkipBits, EnsureBits, AlignToByte, Seek, Reset
+- TryFinishWithPadding (RFC 8878)
+- Расположение: `Framework/Atom/IO/BitReader.cs`, `Framework/Atom/IO/BitWriter.cs`
+
+#### Характеристики Huffman модуля
+
+- Pointer-based flat lookup tables (не tree-based)
+- `HuffmanTable` (8-bit символы) + `HuffmanTable16` (16-bit символы, packed uint)
+- `HuffmanTreeBuilder`: BuildDecodeTable, BuildDecodeTable16, BuildFromFrequencies, BuildEncodeCodes
+- `HuffmanDecoder`: Decode, TryDecode, DecodeBatch, DecodeBatchUnrolled — для обоих таблиц
+- `HuffmanEncoder`: TryEncode, Encode, EncodeBatch, EncodeBatchUnrolled — byte и ushort
+- `MaxAlphabetSize` = 2328 (VP8L color cache max)
+- Heap fallback для больших алфавитов (>512 символов)
+- LSB-first и MSB-first поддержка
+- Расположение: `Framework/Atom.IO.Compression/Huffman/`
+
+#### Характеристики DEFLATE (vs zlib-ng)
+
+- Decoder: Fastest ~1.11x, Optimal ~0.93x, SmallestSize ~1.02x (managed vs native zlib-ng)
+- Encoder: Fastest ~1.04x, Optimal ~1.31x, SmallestSize ~0.92x
+- Size ratios: ≈1.0x (паритет по степени сжатия)
+- Оптимизации: tight literal loop, extraBits guards, overlap copy (dist≥8: 32B unroll, dist=1: fill, dist≥4: uint), phantom-bit cleanup, CopyToStream, unified pinned buffer 256KB
 
 ---
 
 ## Архитектура модулей
 
 ```
+Framework/Atom/IO/
+├── BitReader.cs              # ✅ ГОТОВ: универсальный bit reader (ref struct, 64-bit buf)
+└── BitWriter.cs              # ✅ ГОТОВ: универсальный bit writer (ref struct, 64-bit buf)
+
+Framework/Atom.IO.Compression/
+├── Deflate/                  # ✅ ГОТОВ: полный RFC 1951 encoder/decoder
+├── Huffman/                  # ✅ ГОТОВ: HuffmanTable (8/16-bit), TreeBuilder, Encoder, Decoder, SimdHistogram
+├── Zstd/                     # ✅ ГОТОВ: полный RFC 8878 decoder
+└── Properties/
+
 Framework/Atom.Media/
-├── Compression/                    # Алгоритмы сжатия
-│   ├── Deflate/                    # ✅ ЕСТЬ (через System.IO.Compression)
-│   ├── Huffman/                    # 🔧 НУЖНО: универсальный Huffman codec
-│   ├── Lz77/                       # 🔧 НУЖНО: LZ77 back-references
-│   └── Arithmetic/                 # 🔧 НУЖНО: arithmetic coding (VP8L/H.264)
+├── Codecs/
+│   ├── Png/                  # ✅ ГОТОВ (использует Deflate через System.IO.Compression)
+│   ├── Webp/                 # ✅ VP8L lossless реализован (encoder + decoder + pipeline)
+│   │   ├── Vp8L/             # ✅ VP8L lossless (9.8 FPS @ 1080p)
+│   │   └── Vp8/              # 🔧 НУЖНО: VP8 lossy decoder/encoder
+│   ├── Mp4/                  # 🔧 НУЖНО: H.264 реализация
+│   └── Webm/                 # 🔧 НУЖНО: VP9 реализация
 │
-├── Transforms/                     # Математические преобразования
-│   ├── Dct/                        # 🔧 НУЖНО: DCT/IDCT (JPEG, H.264, VP8/VP9)
-│   ├── Hadamard/                   # 🔧 НУЖНО: WHT (H.264, VP8)
-│   └── Wavelet/                    # 📌 ОПЦИОНАЛЬНО: DWT (JPEG 2000)
+├── Transforms/               # Математические преобразования
+│   ├── Dct/                  # 🔧 НУЖНО: DCT/IDCT (VP8, H.264, VP9)
+│   └── Hadamard/             # 🔧 НУЖНО: WHT (VP8, H.264)
 │
-├── Prediction/                     # Предсказание пикселей
-│   ├── Intra/                      # 🔧 НУЖНО: внутрикадровое (H.264/VP8/VP9)
-│   └── Inter/                      # 🔧 НУЖНО: межкадровое + motion vectors
+├── Entropy/                  # Энтропийное кодирование
+│   ├── BoolCoder/            # 🔧 НУЖНО: VP8/VP9 boolean coder
+│   ├── Cavlc/                # 🔧 НУЖНО: CAVLC (H.264 Baseline)
+│   └── Cabac/                # 🔧 НУЖНО: CABAC (H.264 High Profile)
 │
-├── Entropy/                        # Энтропийное кодирование
-│   ├── Cabac/                      # 🔧 НУЖНО: CABAC (H.264 High Profile)
-│   ├── Cavlc/                      # 🔧 НУЖНО: CAVLC (H.264 Baseline)
-│   └── BoolCoder/                  # 🔧 НУЖНО: VP8/VP9 boolean coder
+├── Prediction/               # Предсказание пикселей
+│   ├── Intra/                # 🔧 НУЖНО: внутрикадровое (VP8/H.264/VP9)
+│   └── Inter/                # 🔧 НУЖНО: межкадровое + motion vectors
 │
-├── Bitstream/                      # Работа с битовыми потоками
-│   ├── BitReader.cs                # 🔧 НУЖНО: универсальный bit reader
-│   ├── BitWriter.cs                # 🔧 НУЖНО: универсальный bit writer
-│   └── ExpGolomb.cs                # 🔧 НУЖНО: Exp-Golomb кодирование (H.264)
+├── Quantization/             # Квантование
+│   ├── QuantTable.cs         # 🔧 НУЖНО: таблицы квантования
+│   └── Dequant.cs            # 🔧 НУЖНО: обратное квантование
 │
-├── Quantization/                   # Квантование
-│   ├── QuantTable.cs               # 🔧 НУЖНО: таблицы квантования
-│   └── Dequant.cs                  # 🔧 НУЖНО: обратное квантование
-│
-└── Codecs/
-    ├── Png/                        # ✅ ГОТОВ (нужны улучшения)
-    ├── Webp/                       # 🔧 НУЖНО: VP8L/VP8 реализация
-    ├── Mp4/                        # 🔧 НУЖНО: H.264 реализация
-    └── Webm/                       # 🔧 НУЖНО: VP9 реализация
+├── Containers/               # ✅ Контейнерные форматы (muxer/demuxer)
+├── Frames/                   # ✅ Фреймы (Frame<T>)
+├── ColorSpaces/              # ✅ Цветовые пространства
+└── Formats/                  # ✅ Форматы пикселей/сэмплов
 ```
 
 ---
 
-## Модуль 1: Bitstream (Приоритет: КРИТИЧЕСКИЙ)
+## Модуль 1: Bitstream (Статус: ✅ ГОТОВ)
 
-Фундаментальный модуль для всех кодеков.
+Фундаментальный модуль для всех кодеков. **Реализован в `Atom.IO`.**
 
-### Файлы
+### Реализация
 
-```
-Bitstream/
-├── BitReader.cs          # Чтение произвольного кол-ва бит
-├── BitWriter.cs          # Запись произвольного кол-ва бит
-├── ExpGolomb.cs          # Exp-Golomb для H.264
-├── VlcTable.cs           # Variable Length Codes таблицы
-└── VlcDecoder.cs         # VLC декодирование
-```
+| Файл | Статус |
+|------|--------|
+| `Framework/Atom/IO/BitReader.cs` | ✅ Полный (501 строка) |
+| `Framework/Atom/IO/BitWriter.cs` | ✅ Полный (512 строк) |
+| `Tests/Atom.Tests/IO/BitStreamTests.cs` | ✅ 35/35 тестов |
 
-### BitReader.cs
+### API (реализованный)
 
 ```csharp
-/// <summary>
-/// Высокопроизводительный читатель битового потока.
-/// </summary>
-/// <remarks>
-/// Поддерживает:
-/// - LSB/MSB first порядок бит
-/// - Чтение 1-32 бит за операцию
-/// - Peek без продвижения позиции
-/// - Выравнивание на байт
-/// </remarks>
 public ref struct BitReader
 {
-    private readonly ReadOnlySpan<byte> data;
-    private int bytePosition;
-    private int bitPosition;  // 0-7, биты внутри текущего байта
-    private ulong buffer;     // 64-bit буфер для быстрого чтения
-    private int bufferBits;   // сколько бит в буфере
+    // Конструктор с выбором порядка бит
+    public BitReader(ReadOnlySpan<byte> data, bool lsbFirst = true);
 
-    // Конструктор
-    public BitReader(ReadOnlySpan<byte> data);
-
-    // Основные операции
+    // Чтение
     public uint ReadBits(int count);           // 1-32 бит
     public uint PeekBits(int count);           // без продвижения
     public bool ReadBit();                     // 1 бит
+    public int ReadSignedBits(int count);      // знаковое
     public void SkipBits(int count);           // пропуск
     public void AlignToByte();                 // выравнивание
 
+    // Bulk
+    public byte ReadByte();
+    public ushort ReadUInt16();
+    public uint ReadUInt32();
+    public void ReadBytes(Span<byte> buffer);
+
     // Состояние
-    public int Position { get; }               // позиция в битах
-    public int Remaining { get; }              // оставшиеся биты
+    public int BitPosition { get; }
+    public int BytePosition { get; }
+    public int RemainingBits { get; }
+    public int AvailableBits { get; }
     public bool IsAtEnd { get; }
-}
-```
+    public bool IsLsbFirst { get; }
 
-### BitWriter.cs
-
-```csharp
-/// <summary>
-/// Высокопроизводительный писатель битового потока.
-/// </summary>
-public ref struct BitWriter
-{
-    private readonly Span<byte> data;
-    private int bytePosition;
-    private int bitPosition;
-    private ulong buffer;
-    private int bufferBits;
-
-    public BitWriter(Span<byte> data);
-
-    public void WriteBits(uint value, int count);
-    public void WriteBit(bool value);
-    public void AlignToByte();
-    public void Flush();
-
-    public int BytesWritten { get; }
+    // Навигация
+    public void EnsureBits(int count);
+    public void Seek(int bitPosition);
+    public void Reset();
 }
 ```
 
 ### Зависимости
-- Нет внешних зависимостей
-- Используется: Huffman, ExpGolomb, все кодеки
 
-### Тесты
-- Чтение/запись 1-32 бит
-- LSB/MSB режимы
-- Выравнивание
-- Edge cases (конец данных)
+- Нет внешних зависимостей
+- Используется: Huffman, DEFLATE, VP8L, VP8, H.264, Zstd
+
+### Заметки
+
+- `ExpGolomb.cs` — нужен только для H.264. Реализовать в Фазе 4.
+- `VlcTable.cs` / `VlcDecoder.cs` — не нужны отдельно, Huffman модуль покрывает VLC.
 
 ---
 
@@ -147,344 +162,206 @@ public ref struct BitWriter
 
 Нужен для: PNG (внутри DEFLATE), VP8L, JPEG.
 
-### Файлы
+## Модуль 2: Huffman (Статус: ✅ ГОТОВ)
 
-```
-Compression/Huffman/
-├── HuffmanTree.cs           # Построение дерева
-├── HuffmanDecoder.cs        # Декодирование (lookup table)
-├── HuffmanEncoder.cs        # Кодирование (canonical)
-├── CanonicalHuffman.cs      # Canonical Huffman codes
-└── HuffmanVectors.cs        # SIMD константы
-```
+Полный Huffman-модуль с поддержкой 8-bit и 16-bit алфавитов. **Реализован в `Atom.IO.Compression`.**
 
-### HuffmanTree.cs
+### Реализация
 
-```csharp
-/// <summary>
-/// Дерево Хаффмана с поддержкой canonical codes.
-/// </summary>
-public sealed class HuffmanTree
-{
-    // Максимальная длина кода (VP8L: 15, DEFLATE: 15, JPEG: 16)
-    public const int MaxCodeLength = 16;
+| Файл | Статус |
+|------|--------|
+| `Framework/Atom.IO.Compression/Huffman/HuffmanCode.cs` | ✅ Generic struct (Symbol:ushort, Length:byte, Code:uint) |
+| `Framework/Atom.IO.Compression/Huffman/HuffmanTable.cs` | ✅ HuffmanTable (byte), HuffmanTable16 (ushort), Buffer wrappers |
+| `Framework/Atom.IO.Compression/Huffman/HuffmanDecoder.cs` | ✅ 8-bit + 16-bit Decode/TryDecode/DecodeBatch/DecodeBatchUnrolled |
+| `Framework/Atom.IO.Compression/Huffman/HuffmanEncoder.cs` | ✅ 8-bit + 16-bit TryEncode/Encode/EncodeBatch/EncodeBatchUnrolled |
+| `Framework/Atom.IO.Compression/Huffman/HuffmanTreeBuilder.cs` | ✅ BuildFromCodeLengths, BuildFromFrequencies, PackageMerge |
+| `Framework/Atom.IO.Compression/Huffman/SimdHistogram.cs` | ✅ AVX2/SSE2 подсчёт частот |
+| `Tests/Atom.IO.Compression.Tests/Huffman/HuffmanTests.cs` | ✅ 24/24 тестов |
 
-    // Lookup tables для быстрого декодирования
-    private readonly ushort[] firstCode;      // первый код каждой длины
-    private readonly ushort[] firstSymbol;    // первый символ каждой длины
-    private readonly ushort[] symbols;        // отсортированные символы
-    private readonly byte[] codeLengths;      // длины кодов
+### Ключевые характеристики
 
-    // Построение из code lengths (как в DEFLATE/VP8L)
-    public static HuffmanTree FromCodeLengths(ReadOnlySpan<byte> codeLengths);
-
-    // Построение из частот (для encoder)
-    public static HuffmanTree FromFrequencies(ReadOnlySpan<uint> frequencies, int maxLength);
-
-    // Декодирование одного символа
-    public int DecodeSymbol(ref BitReader reader);
-
-    // Fast-path: lookup table для коротких кодов (≤8 бит)
-    // Для более длинных - дерево
-}
-```
-
-### HuffmanDecoder.cs
-
-```csharp
-/// <summary>
-/// Высокооптимизированный декодер Хаффмана.
-/// </summary>
-/// <remarks>
-/// Оптимизации:
-/// - 8-bit lookup table для коротких кодов (90%+ случаев)
-/// - Branchless декодирование
-/// - SIMD пакетное декодирование (где возможно)
-/// </remarks>
-public readonly ref struct HuffmanDecoder
-{
-    // 8-bit lookup: [8-bit peek] -> (symbol << 8) | length
-    // Если length == 0 → нужен slow path
-    private readonly ushort[] fastTable;
-
-    // Slow path для длинных кодов
-    private readonly HuffmanTree tree;
-
-    public int Decode(ref BitReader reader);
-
-    // Пакетное декодирование (для DEFLATE literals)
-    public int DecodeBatch(ref BitReader reader, Span<byte> output);
-}
-```
+- **Packed format**: `(symbol << 8) | length` в `uint*` — один lookup за операцию
+- **MaxAlphabetSize**: 2328 (покрывает VP8L: 256+24+2048)
+- **Heap fallback**: для алфавитов >512 символов (VP8L distance codes)
+- **Pointer-based tables**: `HuffmanTable16` работает с `uint*` для zero-copy
 
 ### Зависимости
-- BitReader/BitWriter
-- Используется: DEFLATE, VP8L, JPEG
 
-### Тесты
-- Построение дерева из code lengths
-- Canonical Huffman корректность
-- Декодирование референсных данных
-- Производительность (пакетное vs поштучное)
+- BitReader/BitWriter (Atom.IO)
+- Используется: DEFLATE, VP8L, Zstd
 
 ---
 
-## Модуль 3: LZ77 (Приоритет: КРИТИЧЕСКИЙ)
+## Модуль 3: LZ77 (Статус: ⚡ ВСТРОЕН)
 
-Нужен для: DEFLATE (PNG), VP8L.
+LZ77 back-reference декодирование **встроено inline** в DeflateDecoder и будет аналогично встроено в VP8L.
 
-### Файлы
+### Заметки
 
-```
-Compression/Lz77/
-├── Lz77Decoder.cs           # Декодирование back-references
-├── Lz77Encoder.cs           # Поиск совпадений (hash chain)
-├── Lz77Match.cs             # Структура match (distance, length)
-├── HashChain.cs             # Hash chain для быстрого поиска
-└── Lz77Constants.cs         # Константы (min/max length/distance)
-```
-
-### Lz77Decoder.cs
-
-```csharp
-/// <summary>
-/// Декодер LZ77 back-references.
-/// </summary>
-public static class Lz77Decoder
-{
-    /// <summary>
-    /// Копирует данные с учётом overlapping (length > distance).
-    /// </summary>
-    /// <remarks>
-    /// КРИТИЧНО: при length > distance нужно побайтовое копирование,
-    /// т.к. источник и назначение перекрываются!
-    /// </remarks>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void CopyMatch(Span<byte> output, int position, int distance, int length)
-    {
-        var src = position - distance;
-
-        if (distance >= length)
-        {
-            // Быстрый путь: нет перекрытия
-            output.Slice(src, length).CopyTo(output.Slice(position, length));
-        }
-        else
-        {
-            // Медленный путь: перекрытие, побайтово
-            for (var i = 0; i < length; i++)
-                output[position + i] = output[src + i];
-        }
-    }
-}
-```
-
-### Lz77Encoder.cs
-
-```csharp
-/// <summary>
-/// LZ77 encoder с hash chain.
-/// </summary>
-public sealed class Lz77Encoder
-{
-    // Hash chain для поиска совпадений
-    private readonly int[] head;      // head[hash] → position
-    private readonly int[] prev;      // prev[position] → previous with same hash
-
-    // Параметры
-    private readonly int minMatch;    // DEFLATE: 3, VP8L: 2
-    private readonly int maxMatch;    // DEFLATE: 258, VP8L: 4096
-    private readonly int maxDistance; // DEFLATE: 32768, VP8L: зависит от image size
-    private readonly int chainLimit;  // максимум проверок в цепочке
-
-    // Поиск лучшего match
-    public Lz77Match FindMatch(ReadOnlySpan<byte> data, int position, int maxLength);
-
-    // Greedy vs Lazy matching
-    public Lz77Match FindMatchLazy(ReadOnlySpan<byte> data, int position);
-}
-```
-
-### Зависимости
-- Нет внешних зависимостей
-- Используется: DEFLATE, VP8L
-
-### Тесты
-- Overlapping copy корректность
-- Hash chain collision handling
-- Match finding accuracy
-- Производительность поиска
+- **Отдельный модуль LZ77 НЕ нужен** — overhead вызовов нивелирует преимущества
+- **DeflateDecoder**: overlap copy реализован inline с оптимизацией (8-byte Vector copy для distance ≥ 8)
+- **VP8L**: будет аналогичный inline overlap copy в Vp8LDecoder
+- **LZ77 Encoder** (hash chain): нужен только для DEFLATE encoder и VP8L encoder. Реализовать при необходимости.
 
 ---
 
-## Модуль 4: DEFLATE (Приоритет: ВЫСОКИЙ)
+## Модуль 4: DEFLATE (Статус: ✅ ГОТОВ)
 
-PNG использует DEFLATE. Сейчас через System.IO.Compression, но для полного контроля нужна своя реализация.
+Полная managed-реализация RFC 1951. **Реализован в `Atom.IO.Compression`.**
 
-### Файлы
+### Реализация
 
-```
-Compression/Deflate/
-├── DeflateDecoder.cs        # RFC 1951 декодер
-├── DeflateEncoder.cs        # RFC 1951 энкодер
-├── DeflateBlock.cs          # Типы блоков (stored, fixed, dynamic)
-├── DeflateTables.cs         # Статические таблицы Хаффмана
-└── DeflateVectors.cs        # SIMD оптимизации
-```
+| Файл | Статус |
+|------|--------|
+| `Framework/Atom.IO.Compression/Deflate/DeflateDecoder.cs` | ✅ ~1060 строк, unified buffer 256KB |
+| `Framework/Atom.IO.Compression/Deflate/DeflateEncoder.cs` | ✅ Stored + Fixed + Dynamic blocks |
+| `Framework/Atom.IO.Compression/Deflate/DeflateLevel.cs` | ✅ Fastest/Fast/Default/Optimal/SmallestSize |
+| `Tests/Atom.IO.Compression.Tests/Deflate/DeflateTests.cs` | ✅ 53 тестов (+ 7 benchmark-only) |
 
-### DeflateDecoder.cs
+### Производительность (vs zlib-ng native)
 
-```csharp
-/// <summary>
-/// DEFLATE декодер (RFC 1951).
-/// </summary>
-/// <remarks>
-/// Типы блоков:
-/// - 00: Stored (несжатый)
-/// - 01: Fixed Huffman (статические таблицы)
-/// - 10: Dynamic Huffman (таблицы в потоке)
-/// </remarks>
-public ref struct DeflateDecoder
-{
-    private BitReader bits;
-    private HuffmanDecoder literalDecoder;
-    private HuffmanDecoder distanceDecoder;
+| Уровень | Декодер | Энкодер |
+|---------|---------|---------|
+| Fastest | ~1.08-1.13x | ~1.00-1.07x |
+| Optimal | ~0.92-0.93x | ~1.28-1.34x |
+| SmallestSize | ~1.01-1.03x | ~0.84-0.99x |
 
-    // Декодирование в output
-    public int Decode(ReadOnlySpan<byte> input, Span<byte> output);
+### Оптимизации
 
-    // Декодирование одного блока
-    private int DecodeBlock(Span<byte> output, ref int outPos);
-
-    // Чтение dynamic Huffman tables
-    private void ReadDynamicTables();
-}
-```
-
-### Зависимости
-- BitReader
-- HuffmanDecoder
-- Lz77Decoder (для back-references)
-- Используется: PNG
-
-### Тесты
-- Stored blocks
-- Fixed Huffman
-- Dynamic Huffman
-- Сравнение с System.IO.Compression
+- 64-bit bit buffer, flat packed Huffman tables
+- `[SkipLocalsInit]`, unified pinned buffer, overlap copy inlined
+- Min-of-batches benchmarking (10×200 iterations)
 
 ---
 
-## Модуль 5: VP8L Codec (Приоритет: ВЫСОКИЙ)
+## Модуль 5: VP8L Codec (Статус: ✅ ЗАВЕРШЁН)
 
-WebP Lossless формат.
+WebP Lossless формат. Полностью реализован и оптимизирован.
+
+### Реализация
+
+| Файл | Строки | Статус |
+|------|--------|--------|
+| `Codecs/Webp/Vp8L/Vp8LDecoder.cs` | 1215 | ✅ Полный, SIMD-оптимизирован |
+| `Codecs/Webp/Vp8L/Vp8LEncoder.cs` | 2178 | ✅ Полный, SIMD-оптимизирован |
+| `Codecs/Webp/Vp8L/Vp8LTransforms.cs` | 598 | ✅ Forward + Inverse, Parallel.For, V256 |
+| `Codecs/Webp/Vp8L/Vp8LPredictors.cs` | 132 | ✅ 14 предикторов |
+| `Codecs/Webp/Vp8L/Vp8LColorCache.cs` | 89 | ✅ InsertBatch оптимизация |
+| `Codecs/Webp/Vp8L/Vp8LConstants.cs` | 210 | ✅ Таблицы, константы |
+| `Codecs/Webp/Vp8L/Vp8LStreamPipeline.cs` | 174 | ✅ Double-buffer pipeline |
+| `Tests/Atom.Media.Tests/Codecs/Vp8LEncoder.Tests.cs` | — | ✅ 37/37 тестов |
+
+### Производительность (1080p, Optimize=true)
+
+| Компонент | Время | Доля |
+|-----------|-------|------|
+| **Pipeline (параллельный)** | **101.6ms (9.8 FPS)** | — |
+| **Encoder TOTAL** | **~72-90ms** | 100% |
+| — Selection (Parallel.For) | ~2.0ms | 3% |
+| — Apply (Mode 11 SIMD) | ~3.0ms | 4% |
+| — CrossColor (Parallel.For + SIMD) | ~1.5ms | 2% |
+| — LZ77 (chain=8, V256 match) | ~25ms | 34% |
+| — BitstreamWrite (merged writes) | ~38ms | 53% |
+| **Decoder TOTAL** | **95.4ms** | 100% |
+| — DecodePixels (batch literal + backref) | 78.2ms | 82% |
+| — InverseTransforms (SIMD + Parallel.For) | 13.3ms | 14% |
+| — ReadTransforms | 2.9ms | 3% |
+| — WriteToFrame (SIMD shuffle) | 0.9ms | 1% |
+
+### Оптимизации
+
+**Encoder:**
+
+- Parallel.For predictor selection (8×8 tiles)
+- Parallel.For CrossColor transform (8×8 tiles)
+- Mode 11 (Select) SIMD — int32 per-channel
+- LZ77: chain=8, early exit≥8, V256/V128 match, Sse.Prefetch0
+- BitstreamWrite: 4-channel literal merge (totalLen≤32 → 1 call), merged len+extra, dist+extra
+- BitWriter: 64-bit ulong buffer + 8-byte unaligned flush
+
+**Decoder:**
+
+- DecodeLiteral4Lsb: 1 EnsureBitsLsb(33) + 3 branchless table lookups
+- Batch literal loop: inner do-while без 3-way branch
+- Bulk backref copy: MemoryCopy (non-overlapping) + scalar (overlapping)
+- InsertBatch для color cache
+- InverseCrossColor Parallel.For
+- InversePredictor SIMD V256 для modes 0,2,3,4,8,9
+- InverseSubtractGreen SIMD V256
+- WriteToFrame SIMD ARGB→RGBA shuffle
+- Workspace pooling (zero-allocation hot paths)
 
 ### Файлы
 
 ```
 Codecs/Webp/Vp8L/
-├── Vp8LDecoder.cs           # Основной декодер
-├── Vp8LEncoder.cs           # Основной энкодер
-├── Vp8LBitReader.cs         # LSB-first bit reader
-├── Vp8LHuffman.cs           # VP8L Huffman (meta-codes)
-├── Vp8LTransforms.cs        # Color transforms
-├── Vp8LPredictors.cs        # Spatial predictors (14 типов)
-├── Vp8LColorCache.cs        # Color cache (hash table)
-└── Vp8LConstants.cs         # Константы
+├── Vp8LDecoder.cs           # ✅ Основной декодер (1215 строк)
+├── Vp8LEncoder.cs           # ✅ Основной энкодер (2178 строк)
+├── Vp8LTransforms.cs        # ✅ Color transforms (4 типа, forward + inverse)
+├── Vp8LPredictors.cs        # ✅ Spatial predictors (14 типов)
+├── Vp8LColorCache.cs        # ✅ Color cache (hash table + InsertBatch)
+├── Vp8LConstants.cs         # ✅ Константы, таблицы
+└── Vp8LStreamPipeline.cs    # ✅ Double-buffer encode/decode pipeline
 ```
 
-### Vp8LDecoder.cs
+> **Примечание:** `Vp8LBitReader` и `Vp8LHuffman` НЕ нужны — используем готовые:
+>
+> - `BitReader` из `Atom.IO` (LSB-first режим ✅)
+> - `HuffmanDecoder` + `HuffmanTable16` из `Atom.IO.Compression` (16-bit алфавиты ✅)
 
-```csharp
-/// <summary>
-/// VP8L (WebP Lossless) декодер.
-/// </summary>
-/// <remarks>
-/// Алгоритм:
-/// 1. Читаем заголовок (width, height, alpha hint)
-/// 2. Читаем transforms (SubtractGreen, Predictor, CrossColor, ColorIndexing)
-/// 3. Строим Huffman trees для каждого meta-code
-/// 4. Декодируем pixels: literal ARGB или back-reference
-/// 5. Применяем inverse transforms в обратном порядке
-/// </remarks>
-public ref struct Vp8LDecoder
-{
-    // Transforms (до 4 штук)
-    private readonly Vp8LTransform[] transforms;
-    private int transformCount;
+### Vp8LDecoder.cs — ✅ РЕАЛИЗОВАН
 
-    // Huffman groups (до 256 meta-codes × 5 trees)
-    // 5 trees: green/length, red, blue, alpha, distance
-    private readonly HuffmanTree[,] huffmanTrees;
+Полный VP8L декодер (1215 строк). Алгоритм:
 
-    // Color cache
-    private readonly Vp8LColorCache colorCache;
+1. Читает заголовок (width, height, alpha hint, version)
+2. Читает transforms (SubtractGreen, Predictor, CrossColor, ColorIndexing)
+3. Строит Huffman trees для каждого meta-code (5 деревьев × N групп)
+4. Декодирует pixels: literal ARGB (batch) или back-reference (LZ77 bulk copy)
+5. Применяет inverse transforms в обратном порядке
 
-    public CodecResult Decode(ReadOnlySpan<byte> input, Span<Rgba32> output);
-}
-```
+Зависимости: BitReader (Atom.IO, LSB-first), HuffmanDecoder + HuffmanTable16 (Atom.IO.Compression)
 
-### Vp8LTransforms.cs
+### Vp8LEncoder.cs — ✅ РЕАЛИЗОВАН
 
-```csharp
-/// <summary>
-/// VP8L color transforms.
-/// </summary>
-public static class Vp8LTransforms
-{
-    // SubtractGreen: G хранится отдельно, R и B = R-G, B-G
-    public static void InverseSubtractGreen(Span<Rgba32> pixels);
+Полный VP8L энкодер (2178 строк). Pipeline:
 
-    // Predictor: 14 типов предсказания (Left, Top, TopLeft, Average, Paeth, etc.)
-    public static void InversePredictor(Span<Rgba32> pixels, ReadOnlySpan<byte> modes, int width);
+1. Frame → ARGB буфер (SIMD конвертация)
+2. Predictor selection (14 режимов per 8×8 tile, Parallel.For)
+3. Forward transforms: Predictor → CrossColor → SubtractGreen
+4. LZ77 hash-chain (window=8192, chain=8, V256 match)
+5. Huffman кодирование (5 таблиц, merged writes)
+6. RIFF/WEBP bitstream output
 
-    // CrossColor: предсказание одного канала из другого
-    public static void InverseCrossColor(Span<Rgba32> pixels, ReadOnlySpan<byte> multipliers, int width);
+### Vp8LTransforms.cs — ✅ РЕАЛИЗОВАН
 
-    // ColorIndexing: palette-based
-    public static void InverseColorIndexing(ReadOnlySpan<Rgba32> palette, Span<byte> indices, Span<Rgba32> output);
-}
-```
+Forward + Inverse transforms (598 строк):
 
-### Vp8LPredictors.cs
+- SubtractGreen: V256 byte-add/sub
+- Predictor: 14 режимов, SIMD V256 для modes 0,2,3,4,8,9
+- CrossColor: Parallel.For + SIMD coefficient accumulation
+- ColorIndexing: palette unpacking с bit-packing
 
-```csharp
-/// <summary>
-/// 14 предикторов VP8L.
-/// </summary>
-public static class Vp8LPredictors
-{
-    // 0: ARGB_BLACK (0xff000000)
-    // 1: Left pixel
-    // 2: Top pixel
-    // 3: TopRight pixel
-    // 4: TopLeft pixel
-    // 5: Average(Left, TopRight)
-    // 6: Average(Left, TopLeft)
-    // 7: Average(Left, Top)
-    // 8: Average(TopLeft, Top)
-    // 9: Average(Top, TopRight)
-    // 10: Average(Average(Left, TopLeft), Average(Top, TopRight))
-    // 11: Select (gradient detection)
-    // 12: ClampAddSubtractFull
-    // 13: ClampAddSubtractHalf
+### Vp8LPredictors.cs — ✅ РЕАЛИЗОВАН
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Rgba32 Predict(int mode, Rgba32 left, Rgba32 top, Rgba32 topLeft, Rgba32 topRight);
-}
-```
+14 предикторов VP8L (132 строки). ✅ Реализован.
 
-### Зависимости
-- BitReader (LSB-first mode)
-- HuffmanDecoder
-- Lz77Decoder
-- Используется: WebpCodec
+Modes 0-13: ARGB_BLACK, Left, Top, TopRight, TopLeft, Average(L,TR), Average(L,TL),
+Average(L,T), Average(TL,T), Average(T,TR), Average(Avg(L,TL),Avg(T,TR)),
+Select (gradient), ClampAddSubtractFull, ClampAddSubtractHalf.
 
-### Тесты
-- Каждый predictor отдельно
-- Каждый transform отдельно
-- Color cache
-- Full decode/encode round-trip
+### Зависимости — ✅ все готовы
+
+- **BitReader** (Atom.IO) — LSB-first mode ✅
+- **HuffmanDecoder + HuffmanTable/Table16** (Atom.IO.Compression) ✅
+- LZ77 back-references — inline bulk copy (MemoryCopy + scalar overlap)
+- Используется: WebpCodec ✅
+
+### Тесты — ✅ 37/37
+
+- Full decode/encode round-trip (множество тестовых изображений)
+- Pipeline encode+decode
+- Различные размеры (1×1, 256×256, 1920×1080)
+- RGBA/RGB форматы
 
 ---
 
@@ -582,11 +459,13 @@ public static class Vp8Prediction
 ```
 
 ### Зависимости
+
 - Vp8BoolDecoder/Encoder
 - Vp8Dct
 - Используется: WebpCodec (lossy mode)
 
 ### Тесты
+
 - Boolean decoder/encoder round-trip
 - DCT/IDCT accuracy (compare with reference)
 - Prediction modes
@@ -671,12 +550,14 @@ public ref struct H264Cavlc
 ```
 
 ### Зависимости
+
 - BitReader/BitWriter
 - ExpGolomb
 - DCT
 - Используется: Mp4Codec
 
 ### Тесты
+
 - NAL parsing
 - Exp-Golomb encoding/decoding
 - CAVLC round-trip
@@ -705,6 +586,7 @@ Codecs/Vp9/
 ```
 
 ### Особенности VP9
+
 - Superblocks 64x64 (vs macroblocks 16x16 в VP8)
 - Transforms: 4x4, 8x8, 16x16, 32x32
 - 10 intra modes (vs 4+10 в VP8)
@@ -712,6 +594,7 @@ Codecs/Vp9/
 - Reference frame management (3 refs + golden)
 
 ### Зависимости
+
 - Range coder (похож на VP8)
 - Большие transforms
 - Используется: WebmCodec
@@ -753,71 +636,83 @@ Containers/
 
 ## Приоритизация реализации
 
-### Фаза 1: Фундамент (1-2 недели)
-1. **Bitstream** — BitReader, BitWriter
-2. **Huffman** — HuffmanTree, HuffmanDecoder
-3. **LZ77** — Lz77Decoder (только декодирование)
+### Фаза 1: Фундамент — ✅ ЗАВЕРШЕНА
 
-### Фаза 2: VP8L (2-3 недели)
-4. **VP8L Decoder** — полный декодер WebP Lossless
-5. **VP8L Encoder** — базовый энкодер (без оптимизаций)
-6. **WebP Integration** — интеграция с WebpCodec
+1. ~~**Bitstream** — BitReader, BitWriter~~ ✅ `Atom.IO`
+2. ~~**Huffman** — HuffmanTable, HuffmanDecoder, HuffmanEncoder, TreeBuilder~~ ✅ `Atom.IO.Compression`
+3. ~~**LZ77** — inline в DeflateDecoder~~ ✅
+4. ~~**DEFLATE** — DeflateDecoder, DeflateEncoder~~ ✅ `Atom.IO.Compression`
 
-### Фаза 3: VP8 Lossy (2-3 недели)
-7. **VP8 Boolean Decoder**
-8. **VP8 DCT/IDCT**
-9. **VP8 Intra Prediction**
-10. **VP8 Loop Filter**
-11. **VP8 Full Decoder**
+### Фаза 2: VP8L — ✅ ЗАВЕРШЕНА
 
-### Фаза 4: H.264 Baseline (3-4 недели)
-12. **NAL Parser**
-13. **Exp-Golomb**
-14. **CAVLC**
-15. **H.264 DCT**
-16. **H.264 Intra Prediction**
-17. **H.264 Deblocking**
-18. **H.264 Full Decoder**
+1. ~~**VP8L Decoder** — декодер WebP Lossless~~ ✅ 1215 строк, SIMD, 37/37 тестов
+2. ~~**VP8L Encoder** — энкодер WebP Lossless~~ ✅ 2178 строк, SIMD, Parallel.For, LZ77
+3. ~~**WebP Integration** — интеграция с WebpCodec~~ ✅ Encode/Decode через VP8L
+4. ~~**VP8L Transforms** — forward + inverse, 4 типа~~ ✅ 598 строк, V256, Parallel.For
+5. ~~**VP8L Pipeline** — double-buffer encode/decode~~ ✅ 174 строки, 9.8 FPS (1080p)
 
-### Фаза 5: Containers (1 неделя)
-19. **ISO Base Media** — MP4 box parsing
-20. **EBML/Matroska** — WebM parsing
+**Результат**: Pipeline 9.8 FPS (1080p), Encoder ~72-90ms, Decoder 95.4ms
 
-### Фаза 6: Encoders + Оптимизация (2-3 недели)
-21. VP8 Encoder
-22. H.264 Encoder (I-frames only изначально)
-23. SIMD оптимизации (AVX2/SSE4.1)
+### Фаза 3: VP8 Lossy
 
-### Фаза 7: VP9 (Опционально, 3-4 недели)
-24. VP9 Decoder
-25. VP9 Encoder
+1. **VP8 Boolean Decoder**
+2. **VP8 DCT/IDCT**
+3. **VP8 Intra Prediction**
+4. **VP8 Loop Filter**
+5. **VP8 Full Decoder**
+
+### Фаза 4: H.264 Baseline
+
+1. **NAL Parser** + **Exp-Golomb**
+2. **CAVLC**
+3. **H.264 DCT** + **Prediction** + **Deblocking**
+4. **H.264 Full I-frame Decoder**
+
+### Фаза 5: Containers
+
+1. **RIFF** — WebP container (простой, можно раньше при необходимости)
+2. **ISO Base Media** — MP4 box parsing
+3. **EBML/Matroska** — WebM parsing
+
+### Фаза 6: Encoders + Оптимизация
+
+1. VP8 Encoder
+2. H.264 Encoder (I-frames only)
+3. SIMD оптимизации (AVX2/SSE4.1) для transforms/prediction
+
+### Фаза 7: VP9 (Опционально)
+
+1. VP9 Decoder
+2. VP9 Encoder
 
 ---
 
 ## Метрики успеха
 
-| Кодек | Decode | Encode | Совместимость |
-|-------|--------|--------|---------------|
-| PNG | ✅ Полный | ✅ Полный | Все приложения |
-| WebP Lossless | ✅ Полный | ✅ Полный | Chrome, GIMP, ImageMagick |
-| WebP Lossy | ✅ Полный | ⚠️ Базовый | Chrome, GIMP |
-| MP4 H.264 | ✅ I-frames | ⚠️ I-frames | VLC, ffmpeg, браузеры |
-| WebM VP9 | ⚠️ Базовый | ❌ | Chrome, Firefox |
+| Кодек | Decode | Encode | Совместимость | Статус |
+|-------|--------|--------|---------------|--------|
+| PNG | ✅ Полный | ✅ Полный | Все приложения | ✅ Готов |
+| WebP Lossless | ✅ Полный (95.4ms@1080p) | ✅ Полный (72-90ms@1080p) | Chrome, GIMP, ImageMagick | ✅ Готов |
+| WebP Lossy | ❌ Не начат | ❌ Не начат | Chrome, GIMP | Фаза 3 |
+| MP4 H.264 | ❌ Не начат | ❌ Не начат | VLC, ffmpeg, браузеры | Фаза 4 |
+| WebM VP9 | ❌ Не начат | ❌ Не начат | Chrome, Firefox | Фаза 7 |
 
 ---
 
 ## Referece Materials
 
 ### Спецификации
+
 - **PNG**: ISO/IEC 15948, RFC 2083
 - **DEFLATE**: RFC 1951
-- **WebP**: https://developers.google.com/speed/webp/docs/riff_container
-- **VP8L**: https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification
+- **WebP**: <https://developers.google.com/speed/webp/docs/riff_container>
+- **VP8L**: <https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification>
 - **VP8**: RFC 6386
 - **H.264**: ITU-T H.264 (free access via ITU)
-- **VP9**: https://www.webmproject.org/vp9/
+- **VP9**: <https://www.webmproject.org/vp9/>
 
 ### Reference Implementations
+
 - **libwebp**: BSD license, reference VP8/VP8L
 - **x264**: GPL, high-quality H.264 encoder
 - **libaom/libvpx**: BSD, VP8/VP9/AV1
@@ -826,4 +721,17 @@ Containers/
 
 ## Следующий шаг
 
-Начать с **Модуля 1: Bitstream** (BitReader/BitWriter), так как это фундамент для всех остальных модулей.
+Начать с **Модуля 6: VP8 Lossy** (Фаза 3) — Boolean Arithmetic Coder, DCT/IDCT 4×4, WHT, Intra Prediction, Loop Filter, Quantization.
+Файлы создаются в `Framework/Atom.Media/Codecs/Webp/Vp8/`.
+
+Зависимости: BitReader/BitWriter (✅ готов). VP8 BoolCoder — отдельная реализация (range coder с 8-bit вероятностями).
+
+### Альтернативный порядок
+
+Если приоритет — H.264 (MP4 совместимость), можно начать с **Модуля 7: H.264 Baseline** (Фаза 4):
+
+- NAL Parser + Exp-Golomb → `Framework/Atom.Media/Codecs/H264/`
+- CAVLC → `Framework/Atom.Media/Codecs/H264/H264Cavlc.cs`
+- DCT + Prediction + Deblocking
+
+Или **Модуль 9: Container Parsers** (Фаза 5) для полноценной совместимости MP4/WebM с внешним софтом.

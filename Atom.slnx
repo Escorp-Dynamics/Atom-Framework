@@ -2,6 +2,7 @@
   <Folder Name="/Framework/">
     <Project Path="Framework/Atom.Debug/Atom.Debug.csproj" />
     <Project Path="Framework/Atom.IO.Compression/Atom.IO.Compression.csproj" />
+    <Project Path="Framework/Atom.Media.Audio/Atom.Media.Audio.csproj" />
     <Project Path="Framework/Atom.Media.Video/Atom.Media.Video.csproj" />
     <Project Path="Framework/Atom.Media/Atom.Media.csproj" />
     <Project Path="Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj" />
@@ -15,6 +16,7 @@
   <Folder Name="/Tests/">
     <Project Path="Tests/Atom.Debug.Tests/Atom.Debug.Tests.csproj" />
     <Project Path="Tests/Atom.IO.Compression.Tests/Atom.IO.Compression.Tests.csproj" />
+    <Project Path="Tests/Atom.Media.Audio.Tests/Atom.Media.Audio.Tests.csproj" />
     <Project Path="Tests/Atom.Media.Tests/Atom.Media.Tests.csproj" />
     <Project Path="Tests/Atom.Media.Video.Tests/Atom.Media.Video.Tests.csproj" />
     <Project Path="Tests/Atom.Net.Browsing.Tests/Atom.Net.Browsing.Tests.csproj" />

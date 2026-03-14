@@ -1,4 +1,4 @@
-#pragma warning disable CA1000, CA2208, S3776
+﻿#pragma warning disable CA1000, CA2208, S3776, S4136
 
 using System.Runtime.CompilerServices;
 
@@ -60,6 +60,147 @@ public static class HuffmanEncoder
         var code = codes[symbol];
         var length = lengths[symbol];
         writer.WriteBits(code, length);
+    }
+
+    #endregion
+
+    #region Single Symbol Encoding (16-bit)
+
+    /// <summary>
+    /// Кодирует один 16-битный символ в BitWriter.
+    /// </summary>
+    /// <param name="writer">BitWriter.</param>
+    /// <param name="symbol">Символ для кодирования (0..65535).</param>
+    /// <param name="codes">Массив кодов (индексируется символом).</param>
+    /// <param name="lengths">Массив длин (индексируется символом).</param>
+    /// <returns>True если успешно, false если overflow.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool TryEncode(
+        ref BitWriter writer,
+        ushort symbol,
+        ReadOnlySpan<uint> codes,
+        ReadOnlySpan<byte> lengths)
+    {
+        var code = codes[symbol];
+        var length = lengths[symbol];
+        return length != 0 && writer.TryWriteBits(code, length);
+    }
+
+    /// <summary>
+    /// Кодирует один 16-битный символ (unsafe версия без проверки overflow).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Encode(
+        ref BitWriter writer,
+        ushort symbol,
+        ReadOnlySpan<uint> codes,
+        ReadOnlySpan<byte> lengths)
+    {
+        var code = codes[symbol];
+        var length = lengths[symbol];
+        writer.WriteBits(code, length);
+    }
+
+    #endregion
+
+    #region Batch Encoding (16-bit)
+
+    /// <summary>
+    /// Пакетное кодирование 16-битных символов.
+    /// </summary>
+    /// <param name="writer">BitWriter.</param>
+    /// <param name="symbols">Входные символы.</param>
+    /// <param name="codes">Массив кодов.</param>
+    /// <param name="lengths">Массив длин.</param>
+    /// <returns>Количество успешно закодированных символов.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public static unsafe int EncodeBatch(
+        ref BitWriter writer,
+        ReadOnlySpan<ushort> symbols,
+        ReadOnlySpan<uint> codes,
+        ReadOnlySpan<byte> lengths)
+    {
+        var encoded = 0;
+
+        fixed (ushort* symPtr = symbols)
+        fixed (byte* lenPtr = lengths)
+        fixed (uint* codePtr = codes)
+        {
+            var count = symbols.Length;
+            for (var i = 0; i < count; i++)
+            {
+                var symbol = symPtr[i];
+                var code = codePtr[symbol];
+                var length = lenPtr[symbol];
+
+                if (length == 0 || !writer.TryWriteBits(code, length))
+                    break;
+
+                encoded++;
+            }
+        }
+
+        return encoded;
+    }
+
+    /// <summary>
+    /// Пакетное кодирование 16-битных символов с развёрнутым циклом.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public static unsafe int EncodeBatchUnrolled(
+        ref BitWriter writer,
+        ReadOnlySpan<ushort> symbols,
+        ReadOnlySpan<uint> codes,
+        ReadOnlySpan<byte> lengths)
+    {
+        var encoded = 0;
+        var count = symbols.Length;
+
+        fixed (ushort* symPtr = symbols)
+        fixed (uint* codePtr = codes)
+        fixed (byte* lenPtr = lengths)
+        {
+            // Развёрнутый цикл: 4 символа
+            while (encoded + 4 <= count)
+            {
+                var s0 = symPtr[encoded];
+                var s1 = symPtr[encoded + 1];
+                var s2 = symPtr[encoded + 2];
+                var s3 = symPtr[encoded + 3];
+
+                var l0 = lenPtr[s0];
+                var l1 = lenPtr[s1];
+                var l2 = lenPtr[s2];
+                var l3 = lenPtr[s3];
+
+                // Проверяем, что все символы валидны
+                if (l0 == 0 || l1 == 0 || l2 == 0 || l3 == 0)
+                    break;
+
+                // Пробуем записать все 4 символа
+                if (!writer.TryWriteBits(codePtr[s0], l0)) break;
+                if (!writer.TryWriteBits(codePtr[s1], l1)) break;
+                if (!writer.TryWriteBits(codePtr[s2], l2)) break;
+                if (!writer.TryWriteBits(codePtr[s3], l3)) break;
+
+                encoded += 4;
+            }
+
+            // Остаток
+            while (encoded < count)
+            {
+                var s = symPtr[encoded];
+                var l = lenPtr[s];
+                var c = codePtr[s];
+
+                if (l == 0 || !writer.TryWriteBits(c, l))
+                    break;
+
+                encoded++;
+            }
+        }
+
+        return encoded;
     }
 
     #endregion

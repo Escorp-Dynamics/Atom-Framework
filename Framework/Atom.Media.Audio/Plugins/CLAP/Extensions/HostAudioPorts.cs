@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Atom.Audio.Plugins.CLAP.Extensions;
+namespace Atom.Media.Audio.Plugins.CLAP.Extensions;
 
 /// <summary>
 /// Определяет делегат для функции, которая проверяет, разрешает ли хост плагину изменять определенный аспект определения аудиопортов.

@@ -1,4 +1,4 @@
-#pragma warning disable CA1027, CA1028
+﻿#pragma warning disable CA1027, CA1028
 
 namespace Atom.Media;
 
@@ -95,6 +95,22 @@ public enum VideoPixelFormat : byte
 
     /// <summary>Grayscale + Alpha 16-bit (8:8).</summary>
     GrayAlpha16 = 66,
+
+    // ═══════════════════════════════════════════════════════════════
+    // COMPRESSED / ENCODED
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>MJPEG (Motion JPEG). Многие USB камеры.</summary>
+    Mjpeg = 128,
+
+    /// <summary>H.264 / AVC. Аппаратные камеры, Logitech C920+.</summary>
+    H264 = 129,
+
+    /// <summary>VP8. WebRTC камеры.</summary>
+    Vp8 = 130,
+
+    /// <summary>VP9. WebRTC камеры, улучшенное сжатие.</summary>
+    Vp9 = 131,
 }
 
 /// <summary>
@@ -158,6 +174,13 @@ public static class VideoPixelFormatExtensions
         VideoPixelFormat.Bgr24 or VideoPixelFormat.Bgra32 or
         VideoPixelFormat.Argb32 or VideoPixelFormat.Abgr32 or
         VideoPixelFormat.Rgb48 or VideoPixelFormat.Rgba64;
+
+    /// <summary>
+    /// Возвращает true, если формат использует сжатие (кодек).
+    /// </summary>
+    public static bool IsCompressed(this VideoPixelFormat format) => format is
+        VideoPixelFormat.Mjpeg or VideoPixelFormat.H264 or
+        VideoPixelFormat.Vp8 or VideoPixelFormat.Vp9;
 
     /// <summary>
     /// Вычисляет размер буфера для кадра в байтах.

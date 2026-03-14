@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using Atom.Buffers;
 using Atom.Collections;
 using Atom.Text;
@@ -160,7 +160,7 @@ public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
                 if (string.IsNullOrWhiteSpace(l)) l = null;
 
                 sb.AppendLine(l);
-                if (line.EndsWith('{')) spaces += "    ";
+                if (line.EndsWith('{')) spaces = string.Concat(spaces, "    ");
             }
 
             sb.AppendLine($"{spaces}}}");

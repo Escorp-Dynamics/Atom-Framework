@@ -1,4 +1,4 @@
-#pragma warning disable CA1000, CA1815, CA1819, IDE0032, IDE0290
+﻿#pragma warning disable CA1000, CA1815, CA1819, IDE0032, IDE0290
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -34,6 +34,7 @@ public readonly unsafe struct HuffmanTable
 
     private readonly byte* symbols;
     private readonly byte* lengths;
+    private readonly uint* packed;
 
     #endregion
 
@@ -46,13 +47,15 @@ public readonly unsafe struct HuffmanTable
     /// <param name="symbolsPtr">Указатель на массив символов.</param>
     /// <param name="lengthsPtr">Указатель на массив длин кодов.</param>
     /// <param name="symbolCount">Количество символов в алфавите.</param>
+    /// <param name="packedPtr">Указатель на packed таблицу (symbol &lt;&lt; 8 | length), null если не используется.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public HuffmanTable(int tableLog, byte* symbolsPtr, byte* lengthsPtr, int symbolCount = MaxSymbols)
+    public HuffmanTable(int tableLog, byte* symbolsPtr, byte* lengthsPtr, int symbolCount = MaxSymbols, uint* packedPtr = null)
     {
         TableLog = tableLog;
         Mask = (1 << tableLog) - 1;
         symbols = symbolsPtr;
         lengths = lengthsPtr;
+        packed = packedPtr;
         SymbolCount = symbolCount;
     }
 
@@ -107,6 +110,13 @@ public readonly unsafe struct HuffmanTable
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => symbols != null && lengths != null && TableLog > 0;
+    }
+
+    /// <summary>Указатель на packed таблицу (symbol &lt;&lt; 8 | length) для fused decode.</summary>
+    public uint* PackedPtr
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => packed;
     }
 
     #endregion
@@ -217,7 +227,9 @@ public sealed class HuffmanTableBuffer : IDisposable
     #region Fields
 
     private readonly byte[] storage;
+    private readonly uint[] packedTable;
     private readonly GCHandle handle;
+    private readonly GCHandle packedHandle;
     private bool disposed;
 
     #endregion
@@ -241,6 +253,10 @@ public sealed class HuffmanTableBuffer : IDisposable
         // symbols + lengths
         storage = new byte[tableSize * 2];
         handle = GCHandle.Alloc(storage, GCHandleType.Pinned);
+
+        // Packed table: (symbol << 8) | length per entry
+        packedTable = new uint[tableSize];
+        packedHandle = GCHandle.Alloc(packedTable, GCHandleType.Pinned);
     }
 
     #endregion
@@ -262,9 +278,32 @@ public sealed class HuffmanTableBuffer : IDisposable
     /// <summary>Span для записи длин.</summary>
     public Span<byte> Lengths => storage.AsSpan(TableSize, TableSize);
 
+    /// <summary>Span для packed таблицы (symbol shifted left 8 OR length).</summary>
+    public Span<uint> Packed => packedTable.AsSpan();
+
     #endregion
 
     #region Methods
+
+    /// <summary>
+    /// Строит packed таблицу из symbols и lengths.
+    /// Вызывать после заполнения Symbols и Lengths.
+    /// </summary>
+    public unsafe void BuildPackedTable()
+    {
+        var tableSize = TableSize;
+        fixed (byte* storagePtr = storage)
+        fixed (uint* packedPtr = packedTable)
+        {
+            var symPtr = storagePtr;
+            var lenPtr = storagePtr + tableSize;
+
+            for (var i = 0; i < tableSize; i++)
+            {
+                packedPtr[i] = ((uint)symPtr[i] << 8) | lenPtr[i];
+            }
+        }
+    }
 
     /// <summary>
     /// Возвращает готовую таблицу для декодирования.
@@ -274,7 +313,8 @@ public sealed class HuffmanTableBuffer : IDisposable
         ObjectDisposedException.ThrowIf(disposed, this);
 
         var ptr = (byte*)handle.AddrOfPinnedObject();
-        return new HuffmanTable(TableLog, ptr, ptr + TableSize, SymbolCount);
+        var packedPtr = (uint*)packedHandle.AddrOfPinnedObject();
+        return new HuffmanTable(TableLog, ptr, ptr + TableSize, SymbolCount, packedPtr);
     }
 
     #endregion
@@ -289,6 +329,9 @@ public sealed class HuffmanTableBuffer : IDisposable
 
         if (handle.IsAllocated)
             handle.Free();
+
+        if (packedHandle.IsAllocated)
+            packedHandle.Free();
     }
 
     #endregion
@@ -302,8 +345,8 @@ public readonly unsafe struct HuffmanTable16
 {
     #region Constants
 
-    /// <summary>Максимальный размер алфавита (Deflate: 288 литералов/длин).</summary>
-    public const int MaxSymbols = 288;
+    /// <summary>Максимальный размер алфавита (VP8L с color cache: 256 + 24 + 2048).</summary>
+    public const int MaxSymbols = 2328;
 
     #endregion
 
@@ -351,6 +394,9 @@ public readonly unsafe struct HuffmanTable16
 
     /// <summary>Массив packed таблицы для fixed доступа.</summary>
     public uint[] PackedTable { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => packedArray; }
+
+    /// <summary>Указатель на packed таблицу для fused decode.</summary>
+    public uint* PackedPtr { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => packed; }
 
     #endregion
 

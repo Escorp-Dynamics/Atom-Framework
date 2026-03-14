@@ -1,8 +1,9 @@
-#pragma warning disable CA1822, IDE0010, IDE0032, MA0041, MA0051, S109, S1144, S2325, S3776
+﻿#pragma warning disable CA1822, IDE0010, IDE0032, MA0041, MA0051, S109, S1144, S2325, S3776
 
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Atom.Media.Codecs.Webm;
 using Microsoft.Extensions.Logging;
 
 namespace Atom.Media;
@@ -50,6 +51,7 @@ public sealed partial class WebmCodec : IVideoCodec
     private bool isEncoder;
     private bool isDisposed;
     private long frameIndex;
+    private Vp9Decoder? vp9Decoder;
 
     #endregion
 
@@ -229,7 +231,11 @@ public sealed partial class WebmCodec : IVideoCodec
         CodecResult.EndOfStream;
 
     /// <inheritdoc/>
-    public void Reset() => frameIndex = 0;
+    public void Reset()
+    {
+        frameIndex = 0;
+        vp9Decoder = null;
+    }
 
     #endregion
 
@@ -241,6 +247,7 @@ public sealed partial class WebmCodec : IVideoCodec
         if (isDisposed) return;
         isDisposed = true;
         isInitialized = false;
+        vp9Decoder = null;
     }
 
     #endregion

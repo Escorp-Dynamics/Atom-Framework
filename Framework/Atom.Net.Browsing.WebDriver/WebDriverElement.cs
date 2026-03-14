@@ -140,6 +140,23 @@ internal sealed class WebDriverElement(string elementId, TabChannel channel) : I
     public ValueTask<IElement[]> FindElementsAsync(ElementSelector selector)
         => FindElementsAsync(selector, CancellationToken.None);
 
+    /// <inheritdoc />
+    public async ValueTask<IShadowRoot?> OpenShadowRootAsync(CancellationToken cancellationToken)
+    {
+        var response = await channel.SendCommandAsync(
+            BridgeCommand.CheckShadowRoot,
+            new JsonObject { ["elementId"] = elementId },
+            cancellationToken).ConfigureAwait(false);
+
+        if (response.Status != BridgeStatus.Ok || response.Payload is not JsonElement el || !el.GetBoolean())
+            return null;
+
+        return new WebDriverShadowRoot(elementId, channel);
+    }
+
+    /// <inheritdoc cref="IElement.OpenShadowRootAsync(CancellationToken)"/>
+    public ValueTask<IShadowRoot?> OpenShadowRootAsync() => OpenShadowRootAsync(CancellationToken.None);
+
     private static async ValueTask ActionAsync(
         TabChannel channel, string elementId, ElementActionType action, string? value, CancellationToken cancellationToken)
     {

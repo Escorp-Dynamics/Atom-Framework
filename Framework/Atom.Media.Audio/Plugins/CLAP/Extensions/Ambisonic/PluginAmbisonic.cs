@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
-using Atom.Audio.Plugins.CLAP.Extensions.Ambisonic;
+using Atom.Media.Audio.Plugins.CLAP.Extensions.Ambisonic;
 
-namespace Atom.Audio.Plugins.CLAP.Extensions;
+namespace Atom.Media.Audio.Plugins.CLAP.Extensions;
 
 /// <summary>
 /// Возвращает true, если указанная конфигурация поддерживается.

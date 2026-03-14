@@ -1,4 +1,4 @@
-#pragma warning disable IDE0010, IDE0047, IDE0048, IDE0078, S109, S3776, MA0051
+﻿#pragma warning disable IDE0010, IDE0047, IDE0048, IDE0078, S109, S3776, MA0051
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -7,14 +7,13 @@ using System.Runtime.Intrinsics.X86;
 namespace Atom.Media;
 
 /// <summary>
-/// Декодирование MP4 (Store mode).
+/// Декодирование MP4 (Store mode + H.264).
 /// </summary>
 public sealed partial class Mp4Codec
 {
     #region Decode
 
     /// <inheritdoc/>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public CodecResult Decode(ReadOnlySpan<byte> packet, ref VideoFrame frame)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
@@ -25,17 +24,32 @@ public sealed partial class Mp4Codec
         if (isEncoder)
             return CodecResult.UnsupportedFormat;
 
-        if (packet.Length < AfrmHeaderSize)
+        if (packet.Length < 4)
             return CodecResult.InvalidData;
 
-        // Проверяем AFRM magic
+        // Check data format and route accordingly
         ref var dataRef = ref MemoryMarshal.GetReference(packet);
         var magic = Unsafe.ReadUnaligned<uint>(ref dataRef);
 
-        if (magic != AfrmMagic)
-            return CodecResult.InvalidData;
+        // 1. AFRM Store mode (raw pixel data)
+        if (magic == AfrmMagic && packet.Length >= AfrmHeaderSize)
+        {
+            return DecodeAfrmFast(ref dataRef, packet.Length, ref frame);
+        }
 
-        return DecodeAfrmFast(ref dataRef, packet.Length, ref frame);
+        // 2. H.264 Annex B (start code 0x00000001 or 0x000001)
+        if (IsAnnexBStartCode(packet))
+        {
+            return DecodeH264AnnexB(packet, ref frame);
+        }
+
+        // 3. H.264 AVCC (length-prefixed NALs from MP4/MKV demuxer)
+        if (h264Decoder is not null && h264Sps is not null && h264Pps is not null)
+        {
+            return DecodeH264Avcc(packet, ref frame);
+        }
+
+        return CodecResult.InvalidData;
     }
 
     /// <inheritdoc/>
@@ -230,6 +244,33 @@ public sealed partial class Mp4Codec
             dst[i] = src[i];
         }
     }
+
+    #endregion
+
+    #region H.264 Decoding
+
+    /// <summary>
+    /// Detects Annex B start code (0x00000001 or 0x000001).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsAnnexBStartCode(ReadOnlySpan<byte> data) =>
+        data.Length >= 4 && data[0] == 0 && data[1] == 0 &&
+        ((data[2] == 0 && data[3] == 1) || data[2] == 1);
+
+    /// <summary>
+    /// Decodes H.264 Annex B bitstream (start code delimited NAL units).
+    /// </summary>
+    private CodecResult DecodeH264AnnexB(ReadOnlySpan<byte> packet, ref VideoFrame frame)
+    {
+        h264Decoder ??= new H264Decoder();
+        return h264Decoder.Decode(packet, ref frame);
+    }
+
+    /// <summary>
+    /// Decodes H.264 AVCC bitstream (length-prefixed NAL units from MP4/MKV).
+    /// </summary>
+    private CodecResult DecodeH264Avcc(ReadOnlySpan<byte> packet, ref VideoFrame frame) =>
+        h264Decoder!.DecodeAvcc(packet, nalLengthSize, h264Sps!, h264Pps!, ref frame);
 
     #endregion
 }

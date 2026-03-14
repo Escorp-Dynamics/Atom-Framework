@@ -1,4 +1,4 @@
-﻿namespace Atom.Audio.Plugins.CLAP;
+﻿namespace Atom.Media.Audio.Plugins.CLAP;
 
 /// <summary>
 /// Представляет список расширений CLAP.

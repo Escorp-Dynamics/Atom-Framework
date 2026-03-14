@@ -1,4 +1,4 @@
-#pragma warning disable CA1000, CA2208
+﻿#pragma warning disable CA1000, CA2208, S4136
 
 using System.Runtime.CompilerServices;
 
@@ -148,6 +148,146 @@ public static class HuffmanDecoder
 
                 var bits = reader.PeekBits(tableLog);
                 outPtr[decoded++] = table.DecodeSymbol(bits, out var len);
+                reader.SkipBits(len);
+            }
+        }
+
+        return decoded;
+    }
+
+    #endregion
+
+    #region Single Symbol Decoding (16-bit)
+
+    /// <summary>
+    /// Декодирует один 16-битный символ из BitReader.
+    /// </summary>
+    /// <param name="reader">BitReader.</param>
+    /// <param name="table">Таблица декодирования с 16-битными символами.</param>
+    /// <returns>Декодированный символ.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int Decode(ref BitReader reader, in HuffmanTable16 table)
+    {
+        reader.EnsureBits(table.TableLog);
+        var peek = (int)reader.PeekBits(table.TableLog);
+        var symbol = table.DecodeFast(peek, out var codeLength);
+        reader.SkipBits(codeLength);
+        return symbol;
+    }
+
+    /// <summary>
+    /// Пытается декодировать один 16-битный символ.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool TryDecode(ref BitReader reader, in HuffmanTable16 table, out int symbol)
+    {
+        if (reader.AvailableBits < table.TableLog)
+        {
+            symbol = 0;
+            return false;
+        }
+
+        var peek = (int)reader.PeekBits(table.TableLog);
+        symbol = table.DecodeFast(peek, out var codeLength);
+        reader.SkipBits(codeLength);
+        return true;
+    }
+
+    #endregion
+
+    #region Batch Decoding (16-bit)
+
+    /// <summary>
+    /// Пакетное декодирование 16-битных символов в выходной буфер.
+    /// </summary>
+    /// <param name="reader">BitReader.</param>
+    /// <param name="table">Таблица декодирования с 16-битными символами.</param>
+    /// <param name="output">Выходной буфер.</param>
+    /// <param name="count">Количество символов для декодирования.</param>
+    /// <returns>Количество декодированных символов.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public static unsafe int DecodeBatch(
+        ref BitReader reader,
+        in HuffmanTable16 table,
+        Span<ushort> output,
+        int count)
+    {
+        var decoded = 0;
+        var limit = Math.Min(count, output.Length);
+        var tableLog = table.TableLog;
+
+        fixed (ushort* outPtr = output)
+        {
+            while (decoded < limit)
+            {
+                reader.EnsureBits(tableLog);
+                if (reader.AvailableBits < tableLog)
+                    break;
+
+                var peek = (int)reader.PeekBits(tableLog);
+                outPtr[decoded++] = (ushort)table.DecodeFast(peek, out var codeLength);
+                reader.SkipBits(codeLength);
+            }
+        }
+
+        return decoded;
+    }
+
+    /// <summary>
+    /// Пакетное декодирование 16-битных символов с развёрнутым циклом (4 символа за итерацию).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public static unsafe int DecodeBatchUnrolled(
+        ref BitReader reader,
+        in HuffmanTable16 table,
+        Span<ushort> output,
+        int count)
+    {
+        var decoded = 0;
+        var limit = Math.Min(count, output.Length);
+        var tableLog = table.TableLog;
+
+        fixed (ushort* outPtr = output)
+        {
+            // Развёрнутый цикл: 4 символа
+            while (decoded + 4 <= limit)
+            {
+                reader.EnsureBits(tableLog * 4);
+                if (reader.AvailableBits < tableLog * 4)
+                    break;
+
+                var peek0 = (int)reader.PeekBits(tableLog);
+                var sym0 = table.DecodeFast(peek0, out var len0);
+                reader.SkipBits(len0);
+
+                var peek1 = (int)reader.PeekBits(tableLog);
+                var sym1 = table.DecodeFast(peek1, out var len1);
+                reader.SkipBits(len1);
+
+                var peek2 = (int)reader.PeekBits(tableLog);
+                var sym2 = table.DecodeFast(peek2, out var len2);
+                reader.SkipBits(len2);
+
+                var peek3 = (int)reader.PeekBits(tableLog);
+                var sym3 = table.DecodeFast(peek3, out var len3);
+                reader.SkipBits(len3);
+
+                outPtr[decoded] = (ushort)sym0;
+                outPtr[decoded + 1] = (ushort)sym1;
+                outPtr[decoded + 2] = (ushort)sym2;
+                outPtr[decoded + 3] = (ushort)sym3;
+                decoded += 4;
+            }
+
+            // Остаток
+            while (decoded < limit)
+            {
+                reader.EnsureBits(tableLog);
+                if (reader.AvailableBits < tableLog)
+                    break;
+
+                var peek = (int)reader.PeekBits(tableLog);
+                outPtr[decoded++] = (ushort)table.DecodeFast(peek, out var len);
                 reader.SkipBits(len);
             }
         }

@@ -1,7 +1,7 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace Atom.Audio.Plugins.CLAP;
+namespace Atom.Media.Audio.Plugins.CLAP;
 
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]

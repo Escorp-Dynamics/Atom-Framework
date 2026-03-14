@@ -1,4 +1,4 @@
-#pragma warning disable CA1000, S3776, MA0051
+﻿#pragma warning disable CA1000, S3776, MA0051
 
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -75,7 +75,7 @@ public static unsafe class SimdHistogram
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static int CountNonZeroSymbols(ReadOnlySpan<uint> histogram)
     {
-        var length = Math.Min(histogram.Length, 256);
+        var length = histogram.Length;
 
         if (Avx2.IsSupported && length >= 8)
             return CountNonZeroAvx2(histogram, length);
@@ -95,7 +95,7 @@ public static unsafe class SimdHistogram
         if (histogram.IsEmpty)
             return (0, -1);
 
-        var length = Math.Min(histogram.Length, 256);
+        var length = histogram.Length;
 
         if (Avx2.IsSupported && length >= 8)
             return FindMaxAvx2(histogram, length);
@@ -109,7 +109,7 @@ public static unsafe class SimdHistogram
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static ulong Sum(ReadOnlySpan<uint> histogram)
     {
-        var length = Math.Min(histogram.Length, 256);
+        var length = histogram.Length;
 
         if (Avx2.IsSupported && length >= 8)
             return SumAvx2(histogram, length);

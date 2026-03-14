@@ -178,6 +178,21 @@
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </None>
 
+    <None Update="assets/spa_type.h">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </None>
+
+    <None Update="assets/spa_subtype.h">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </None>
+
+    <None Update="assets/spa_constants.reference">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </None>
+
   </ItemGroup>
 
 </Project>

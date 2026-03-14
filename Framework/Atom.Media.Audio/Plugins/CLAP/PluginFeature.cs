@@ -1,4 +1,4 @@
-﻿namespace Atom.Audio;
+﻿namespace Atom.Media.Audio;
 
 /// <summary>
 /// Возможности плагина.

@@ -1,4 +1,4 @@
-#pragma warning disable CA1861, S125
+﻿#pragma warning disable CA1861, S125
 
 using System.Diagnostics;
 

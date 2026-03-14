@@ -1,0 +1,64 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>Escorp.Atom.Media.Audio</AssemblyName>
+    <NoWarn>CA1028;CA1708;CA1711</NoWarn>
+
+    <PackageId>$(AssemblyName)</PackageId>
+    <Version>0.0.1</Version>
+    <Authors>Yuriy Yesin, Escorp Labs</Authors>
+    <Company>Escorp Dynamics</Company>
+    <Product>Escorp.$(AssemblyName)</Product>
+    <RepositoryUrl>https://gitflic.ru/project/escorp-lab/atom</RepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageTags>atom;framework;escorp;exomode;audio;vst;clap;mp3;wav;sound;music;microphone</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <!-- CLAP-плагины — WIP, исключены до завершения -->
+  <ItemGroup>
+    <Compile Remove="Plugins/**" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <!-- Генераторы ComponentSource/Reactively/Pooled/JsonContext не используются в этом проекте,
+         но при ProjectReference загружаются все генераторы из DLL, и те что зависят от Escorp.Atom
+         не могут разрезолвить зависимость в анализаторном контексте компилятора. -->
+    <NoWarn>$(NoWarn);CS8784</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(Configuration)' == 'Debug'">
+    <ProjectReference Include="../Atom/Atom.csproj" />
+    <ProjectReference Include="../Atom.Media/Atom.Media.csproj" />
+    <ProjectReference Include="../Atom.SourceGeneration/Atom.SourceGeneration.csproj"
+      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <PackageReference Include="Escorp.Atom" Version="*" />
+    <PackageReference Include="Escorp.Atom.Media" Version="*" />
+    <PackageReference Include="Escorp.Atom.SourceGeneration" Version="*" PrivateAssets="all"
+      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="Backends/PipeWire/Headers/spa_*.h" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Atom.Media.Audio.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="icon.png" PackagePath="\" Pack="true" />
+    <None Update="README.md" PackagePath="\" Pack="true" />
+  </ItemGroup>
+
+</Project>

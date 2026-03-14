@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace Atom.Audio.Plugins.CLAP;
+namespace Atom.Media.Audio.Plugins.CLAP;
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate nint GetAudioPorts(nint plugin, uint index);

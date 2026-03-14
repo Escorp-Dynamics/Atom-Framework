@@ -134,4 +134,9 @@ public enum BridgeCommand
     /// Диагностика: получить статус порта для вкладки (debug-only).
     /// </summary>
     DebugPortStatus,
+
+    /// <summary>
+    /// Проверить наличие теневого корня (Shadow Root) у элемента.
+    /// </summary>
+    CheckShadowRoot,
 }

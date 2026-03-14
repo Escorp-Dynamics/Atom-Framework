@@ -1,4 +1,4 @@
-namespace Atom.Audio.Plugins.CLAP.Extensions.Ambisonic;
+namespace Atom.Media.Audio.Plugins.CLAP.Extensions.Ambisonic;
 
 /// <summary>
 /// Порядок каналов Ambisonic.

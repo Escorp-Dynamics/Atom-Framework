@@ -1,4 +1,4 @@
-#pragma warning disable CA1024
+﻿#pragma warning disable CA1024
 
 namespace Atom.Media;
 
@@ -7,8 +7,24 @@ namespace Atom.Media;
 /// </summary>
 public static class ContainerFactory
 {
-    private static readonly Dictionary<string, Func<IDemuxer>> demuxerFactories = [];
-    private static readonly Dictionary<string, Func<IMuxer>> muxerFactories = [];
+    private static readonly Dictionary<string, Func<IDemuxer>> demuxerFactories = new(StringComparer.Ordinal)
+    {
+        ["wav"] = static () => new WavDemuxer(),
+        ["mp3"] = static () => new Mp3Demuxer(),
+        ["ogg"] = static () => new OggDemuxer(),
+        ["matroska"] = static () => new MatroskaDemuxer(),
+        ["webm"] = static () => new MatroskaDemuxer(),
+        ["flac"] = static () => new FlacDemuxer(),
+        ["aac"] = static () => new AacDemuxer(),
+    };
+
+    private static readonly Dictionary<string, Func<IMuxer>> muxerFactories = new(StringComparer.Ordinal)
+    {
+        ["wav"] = static () => new WavMuxer(),
+        ["ogg"] = static () => new OggMuxer(),
+        ["matroska"] = static () => new MatroskaMuxer(),
+        ["webm"] = static () => new MatroskaMuxer(),
+    };
 
     /// <summary>
     /// Регистрирует demuxer для формата.
@@ -65,6 +81,7 @@ public static class ContainerFactory
             ".wav" => "wav",
             ".mp3" => "mp3",
             ".flac" => "flac",
+            ".aac" => "aac",
             _ => null,
         };
     }
