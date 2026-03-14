@@ -379,13 +379,36 @@ public sealed class WebDriverPage : IWebPage
     /// </summary>
     /// <param name="enabled">Состояние перехвата.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
-    public async ValueTask SetRequestInterceptionAsync(bool enabled, CancellationToken cancellationToken = default)
+    public ValueTask SetRequestInterceptionAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        SetRequestInterceptionAsync(enabled, urlPatterns: null, cancellationToken);
+
+    /// <summary>
+    /// Включает или отключает перехват сетевых запросов для этой вкладки
+    /// с фильтрацией по URL-паттернам.
+    /// </summary>
+    /// <param name="enabled">Состояние перехвата.</param>
+    /// <param name="urlPatterns">
+    /// Glob-паттерны URL для перехвата (например, <c>*://api.example.com/*</c>).
+    /// <see langword="null"/> — перехватывать все запросы.
+    /// </param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    public async ValueTask SetRequestInterceptionAsync(bool enabled, IEnumerable<string>? urlPatterns, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
+        var payload = new JsonObject { ["enabled"] = enabled };
+
+        if (urlPatterns is not null)
+        {
+            var array = new JsonArray();
+            foreach (var pattern in urlPatterns)
+                array.Add((JsonNode?)JsonValue.Create(pattern));
+            payload["patterns"] = array;
+        }
+
         await channel.SendCommandAsync(
             BridgeCommand.InterceptRequest,
-            new JsonObject { ["enabled"] = enabled },
+            payload,
             cancellationToken).ConfigureAwait(false);
     }
 

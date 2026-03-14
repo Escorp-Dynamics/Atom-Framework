@@ -289,6 +289,8 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             Method = request.Method ?? "GET",
             ResourceType = request.Type ?? "other",
             TabId = request.TabId,
+            PostData = request.RequestBodyBase64 is { } b64 ? Convert.FromBase64String(b64) : null,
+            FormData = request.FormData,
         };
 
         if (RequestIntercepted is { } handler)

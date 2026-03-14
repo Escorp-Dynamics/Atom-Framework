@@ -65,6 +65,33 @@ const pendingHeaderOverrides = new Map();
 /** @type {Map<number, string>} tabId → compositeId для корректной идентификации вкладки при перехвате запросов. */
 const tabCompositeIds = new Map();
 
+/** @type {Map<number, RegExp[]>} tabId → скомпилированные URL-паттерны для фильтрации перехватываемых запросов. */
+const interceptPatterns = new Map();
+
+/**
+ * Конвертирует glob-паттерн в RegExp.
+ * Поддерживает `*` (любая последовательность) и `?` (один символ).
+ * @param {string} pattern
+ * @returns {RegExp}
+ */
+function globToRegExp(pattern) {
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    const regexStr = escaped.replace(/\*/g, ".*").replace(/\?/g, ".");
+    return new RegExp(`^${regexStr}$`);
+}
+
+/**
+ * Кодирует ArrayBuffer в base64-строку.
+ * @param {ArrayBuffer} buffer
+ * @returns {string}
+ */
+function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+}
+
 
 // ─── Утилита: выполнение кода в MAIN world ────────────────────
 
@@ -391,6 +418,7 @@ function disconnectTab(tabId) {
 
     tabSockets.delete(tabId);
     tabCompositeIds.delete(tabId);
+    interceptPatterns.delete(tabId);
 
     // Очистка контекста изоляции.
     if (tabContexts.has(tabId)) {
@@ -487,8 +515,15 @@ function handleBridgeMessage(tabId, raw) {
             const enabled = message.payload?.enabled;
             if (enabled) {
                 interceptEnabled.add(tabId);
+                const patterns = message.payload?.patterns;
+                if (Array.isArray(patterns) && patterns.length > 0) {
+                    interceptPatterns.set(tabId, patterns.map(globToRegExp));
+                } else {
+                    interceptPatterns.delete(tabId);
+                }
             } else {
                 interceptEnabled.delete(tabId);
+                interceptPatterns.delete(tabId);
             }
             sendResponse(tabId, message.id, "Ok", { enabled: !!enabled });
             return;
@@ -1392,6 +1427,25 @@ if (browser.webRequest?.onBeforeRequest) {
             if (!interceptEnabled.has(details.tabId)) return {};
             if (bridgeConfig && details.url.startsWith(`http://${bridgeConfig.host}:${bridgeConfig.port}/`)) return {};
 
+            // Фильтрация по URL-паттернам (если заданы).
+            const patterns = interceptPatterns.get(details.tabId);
+            if (patterns && !patterns.some(re => re.test(details.url))) return {};
+
+            // Кодирование тела запроса.
+            let requestBodyBase64 = null;
+            let formData = null;
+            if (details.requestBody) {
+                if (details.requestBody.raw?.length) {
+                    const chunks = details.requestBody.raw
+                        .filter(part => part.bytes)
+                        .map(part => arrayBufferToBase64(part.bytes));
+                    if (chunks.length) requestBodyBase64 = chunks.join("");
+                }
+                if (details.requestBody.formData) {
+                    formData = details.requestBody.formData;
+                }
+            }
+
             const requestId = crypto.randomUUID().replaceAll("-", "");
             try {
                 const xhr = new XMLHttpRequest();
@@ -1403,6 +1457,8 @@ if (browser.webRequest?.onBeforeRequest) {
                     method: details.method,
                     type: details.type,
                     tabId: tabCompositeIds.get(details.tabId) ?? String(details.tabId),
+                    requestBodyBase64,
+                    formData,
                 }));
 
                 if (xhr.status !== 200) return {};
@@ -1420,7 +1476,7 @@ if (browser.webRequest?.onBeforeRequest) {
             return {};
         },
         { urls: ["<all_urls>"] },
-        ["blocking"],
+        ["blocking", "requestBody"],
     );
 }
 

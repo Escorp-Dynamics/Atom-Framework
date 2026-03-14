@@ -946,6 +946,93 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             }
         }
 
+        [TestCase(TestName = "Interception: PostData — тело POST-запроса доступно"), Order(4)]
+        public async Task PostDataTest()
+        {
+            await page.SetRequestInterceptionAsync(true);
+
+            var intercepted = new TaskCompletionSource<InterceptedRequestEventArgs>();
+            AsyncEventHandler<WebDriverPage, InterceptedRequestEventArgs> handler = (_, e) =>
+            {
+                if (e.Method == "POST" && e.Url.Contains("httpbin.org"))
+                    intercepted.TrySetResult(e);
+                e.Continue();
+                return ValueTask.CompletedTask;
+            };
+            page.RequestIntercepted += handler;
+
+            try
+            {
+                // Инъектируем fetch POST с JSON-телом.
+                await page.ExecuteAsync("""
+                    fetch('https://httpbin.org/post', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ key: 'value123' })
+                    }).catch(() => {});
+                """);
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                var args = await intercepted.Task.WaitAsync(cts.Token);
+
+                Assert.That(args.Method, Is.EqualTo("POST"), "Метод — POST.");
+                Assert.That(args.PostData, Is.Not.Null, "PostData не null для POST-запроса.");
+                var bodyText = System.Text.Encoding.UTF8.GetString(args.PostData!.Value.Span);
+                Assert.That(bodyText, Does.Contain("value123"), "Тело содержит отправленные данные.");
+            }
+            finally
+            {
+                page.RequestIntercepted -= handler;
+                await page.SetRequestInterceptionAsync(false);
+            }
+        }
+
+        [TestCase(TestName = "Interception: URL Patterns — фильтрация по паттернам"), Order(5)]
+        public async Task UrlPatternsTest()
+        {
+            // Перехватывать только запросы к httpbin.org.
+            await page.SetRequestInterceptionAsync(true, ["*httpbin.org*"]);
+
+            var httpbinIntercepted = new TaskCompletionSource<InterceptedRequestEventArgs>();
+            var otherIntercepted = false;
+
+            AsyncEventHandler<WebDriverPage, InterceptedRequestEventArgs> handler = (_, e) =>
+            {
+                if (e.Url.Contains("httpbin.org"))
+                    httpbinIntercepted.TrySetResult(e);
+                else
+                    otherIntercepted = true;
+                e.Continue();
+                return ValueTask.CompletedTask;
+            };
+            page.RequestIntercepted += handler;
+
+            try
+            {
+                // Запрос к httpbin.org — должен быть перехвачен.
+                await page.ExecuteAsync("""
+                    fetch('https://httpbin.org/get').catch(() => {});
+                """);
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                var args = await httpbinIntercepted.Task.WaitAsync(cts.Token);
+                Assert.That(args.Url, Does.Contain("httpbin.org"), "Перехвачен запрос к httpbin.org.");
+
+                // Запрос к другому хосту — НЕ должен быть перехвачен.
+                await page.ExecuteAsync("""
+                    fetch('https://example.com/test').catch(() => {});
+                """);
+                await Task.Delay(2000);
+
+                Assert.That(otherIntercepted, Is.False, "Запрос к example.com НЕ перехвачен (паттерн не совпал).");
+            }
+            finally
+            {
+                page.RequestIntercepted -= handler;
+                await page.SetRequestInterceptionAsync(false);
+            }
+        }
+
         private async Task<WebDriverPage> WaitForFirstTabAsync()
         {
             var tcs = new TaskCompletionSource<TabConnectedEventArgs>();

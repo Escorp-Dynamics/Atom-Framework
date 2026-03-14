@@ -107,6 +107,17 @@ public sealed class InterceptedRequestEventArgs : EventArgs
     public required string TabId { get; init; }
 
     /// <summary>
+    /// Тело запроса (POST/PUT/PATCH). <see langword="null"/> для GET-запросов.
+    /// </summary>
+    public ReadOnlyMemory<byte>? PostData { get; init; }
+
+    /// <summary>
+    /// Данные формы (<c>multipart/form-data</c> или <c>application/x-www-form-urlencoded</c>).
+    /// <see langword="null"/> если тело не является формой.
+    /// </summary>
+    public IReadOnlyDictionary<string, string[]>? FormData { get; init; }
+
+    /// <summary>
     /// Продолжить запрос без изменений.
     /// </summary>
     public void Continue() =>
@@ -167,6 +178,7 @@ internal sealed class InterceptDecision
 /// </summary>
 [JsonSerializable(typeof(InterceptHttpRequest))]
 [JsonSerializable(typeof(InterceptHttpResponse))]
+[JsonSerializable(typeof(Dictionary<string, string[]>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
@@ -182,6 +194,8 @@ internal sealed class InterceptHttpRequest
     public string? Method { get; set; }
     public string? Type { get; set; }
     public string? TabId { get; set; }
+    public string? RequestBodyBase64 { get; set; }
+    public Dictionary<string, string[]>? FormData { get; set; }
 }
 
 /// <summary>
