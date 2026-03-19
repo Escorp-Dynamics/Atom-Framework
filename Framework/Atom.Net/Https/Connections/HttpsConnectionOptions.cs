@@ -1,11 +1,14 @@
-using System.Net;
+﻿using System.Net;
+using System.Net.Security;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 
 namespace Atom.Net.Https.Connections;
 
 /// <summary>
 /// Иммутабельный снимок настроек, необходимых для открытия/привязки соединения
 /// под конкретный <c>authority</c> (host:port + схема).
-/// Хранится и передаётся по ссылке (<c>in</c>) для исключения копий и аллокаций.
+/// Хранится и передаётся по ссылке (<see langword="in"/>) для исключения копий и аллокаций.
 /// </summary>
 internal readonly record struct HttpsConnectionOptions
 {
@@ -50,6 +53,26 @@ internal readonly record struct HttpsConnectionOptions
     /// Таймаут приёма заголовков ответа (старт первой байтовой активности после отправки запроса).
     /// </summary>
     public TimeSpan ResponseHeadersTimeout { get; init; }
+
+    /// <summary>
+    /// Разрешённые версии TLS для защищённого соединения.
+    /// </summary>
+    public SslProtocols SslProtocols { get; init; }
+
+    /// <summary>
+    /// Использовать ли онлайн-проверку отзыва сертификата при валидации цепочки.
+    /// </summary>
+    public bool CheckCertificateRevocationList { get; init; }
+
+    /// <summary>
+    /// Пользовательская валидация сертификата сервера.
+    /// </summary>
+    public Func<X509Certificate2?, X509Chain?, SslPolicyErrors, bool>? ServerCertificateValidationCallback { get; init; }
+
+    /// <summary>
+    /// Максимально допустимый суммарный размер status line и response headers в байтах.
+    /// </summary>
+    public int MaxResponseHeadersBytes { get; init; }
 
     /// <summary>
     /// Таймаут простоя соединения, после которого оно переводится в drain/закрывается пулом.

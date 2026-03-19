@@ -6,7 +6,9 @@ using Atom.Architect.Components;
 
 namespace Atom.Tests;
 
-public class Component1 : IComponent
+public interface ITestComponent : IComponent;
+
+public class Component1 : ITestComponent
 {
     /// <inheritdoc/>
     public IComponentOwner? Owner { get; protected set; }
@@ -61,7 +63,7 @@ public class Component1 : IComponent
     }
 }
 
-public class Component2 : IComponent
+public class Component2 : ITestComponent
 {
     /// <inheritdoc/>
     public IComponentOwner? Owner { get; protected set; }
@@ -116,6 +118,5 @@ public class Component2 : IComponent
     }
 }
 
-[ComponentOwner(typeof(Component1))]
-[ComponentOwner(typeof(Component2))]
+[ComponentOwner(typeof(ITestComponent))]
 public partial class TestFactory;

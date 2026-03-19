@@ -1,5 +1,6 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
+using System.Net.Security;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -87,6 +88,28 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
 
     private byte[]? decCache;
     private int decPos, decRemaining;
+    private byte[]? handshakeFragmentBuffer;
+    private int handshakeFragmentLength;
+    [SuppressMessage("Major Code Smell", "S4487:Unread private fields should be removed", Justification = "Temporary TLS handshake diagnostics for dump inspection.")]
+    private TlsHandshakeType lastHandshakeType;
+    [SuppressMessage("Major Code Smell", "S4487:Unread private fields should be removed", Justification = "Temporary TLS handshake diagnostics for dump inspection.")]
+    private int lastHandshakeLength;
+    [SuppressMessage("Major Code Smell", "S4487:Unread private fields should be removed", Justification = "Temporary TLS handshake diagnostics for dump inspection.")]
+    private int lastHandshakeAvailable;
+    [SuppressMessage("Major Code Smell", "S4487:Unread private fields should be removed", Justification = "Temporary TLS record diagnostics for dump inspection.")]
+    private byte lastRecordType;
+    [SuppressMessage("Major Code Smell", "S4487:Unread private fields should be removed", Justification = "Temporary TLS record diagnostics for dump inspection.")]
+    private ushort lastRecordVersion;
+    [SuppressMessage("Major Code Smell", "S4487:Unread private fields should be removed", Justification = "Temporary TLS record diagnostics for dump inspection.")]
+    private int lastRecordLength;
+    [SuppressMessage("Major Code Smell", "S4487:Unread private fields should be removed", Justification = "Temporary TLS record diagnostics for dump inspection.")]
+    private byte lastPayloadByte0;
+    [SuppressMessage("Major Code Smell", "S4487:Unread private fields should be removed", Justification = "Temporary TLS record diagnostics for dump inspection.")]
+    private byte lastPayloadByte1;
+    [SuppressMessage("Major Code Smell", "S4487:Unread private fields should be removed", Justification = "Temporary TLS record diagnostics for dump inspection.")]
+    private byte lastPayloadByte2;
+    [SuppressMessage("Major Code Smell", "S4487:Unread private fields should be removed", Justification = "Temporary TLS record diagnostics for dump inspection.")]
+    private byte lastPayloadByte3;
 
     private bool useEms;
 
@@ -662,10 +685,6 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         {
             fin.Dispose();
         }
-
-        // Попробуем принять один или несколько NewSessionTicket (TLS 1.2) сразу после Finished.
-        // Многие серверы/CDN присылают тикеты пост-хендшейк. Браузеры их читают и сохраняют.
-        await ReadOptionalNewSessionTicketsAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -676,6 +695,9 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private async ValueTask ReadOptionalNewSessionTicketsAsync(CancellationToken cancellationToken)
     {
+        var nonceBuffer = new byte[12];
+        var aadBuffer = new byte[13];
+
         while (true)
         {
             var (hdr, payload) = await ReadRecordAsync(cancellationToken).ConfigureAwait(false);
@@ -690,10 +712,8 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
                 var cipherTag = payload.AsSpan(8, hdr.Length - 8);
                 var plainLen = cipherTag.Length - aeadRead12.TagSize;
 
-                // nonce and aad are small stack-allocated buffers; allocate them here
-                // after the await so they are not captured across an async suspension.
-                Span<byte> nonce = stackalloc byte[12]; // 4 (salt) + 8 (explicit_iv)
-                Span<byte> aad = stackalloc byte[13]; // 8 + 1 + 2 + 2
+                var nonce = nonceBuffer.AsSpan(); // 4 (salt) + 8 (explicit_iv)
+                var aad = aadBuffer.AsSpan(); // 8 + 1 + 2 + 2
 
                 BuildAadAndNonceForRead(TlsContentType.Handshake, plainLen, seqRead12, explicitIv, nonce, aad);
 
@@ -832,8 +852,6 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
             .WithSessionIdPolicy(Settings.SessionIdPolicy);
 
         var clientHello = builder.Build();
-        ClientHelloBuilder.Return(builder);
-
         if (clientHello.Length > destination.Length) throw new InvalidOperationException("Буфер мал для ClientHello");
 
         // Извлечь client_random (после: record(5) + handshake(4) + legacy_version(2) = 11 байт). Билдер кладёт random сразу после legacy_version, так что 32 байта random начинаются по смещению 11
@@ -841,105 +859,105 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
 
         // client_random начинается на смещении 5 (record hdr) + 4 (hs hdr) + 2 (legacy_version) = 11
         var cr = new byte[32];
-        clientHello.Slice(11, 32).CopyTo(cr);
+        destination.Slice(11, 32).CopyTo(cr);
         clientRandom = cr;
-
-        // ---- Извлечь и закешировать SNI (server_name extension) ----
-        // В транскрипт мы кладём только Handshake-фрейм (без record header).
-        // Возьмём его «тело» и распарсим ext=0x0000.
-        var recordLen = (clientHello[3] << 8) | clientHello[4];
-        var hs = destination.Slice(5, recordLen);       // Handshake запись
-        // Проверим, что это client_hello (type=1)
-        if (hs[0] == 1 && hs.Length >= 4 + 2 + 32 + 1)
-        {
-            var body = hs[4..]; // тело ClientHello
-            var p = 0;
-
-            // legacy_version(2) + random(32)
-            p += 2 + 32;
-            if (p >= body.Length) goto SNI_DONE;
-
-            // session_id
-            var sidLen = body[p++];
-            p += sidLen;
-            if (p + 2 > body.Length) goto SNI_DONE;
-
-            // cipher_suites
-            var csLen = (body[p] << 8) | body[p + 1];
-            p += 2 + csLen;
-            if (p >= body.Length) goto SNI_DONE;
-
-            // compression_methods
-            var cmLen = body[p++];
-            p += cmLen;
-            if (p + 2 > body.Length) goto SNI_DONE;
-
-            // extensions
-            while (p + 4 <= body.Length)
-            {
-                var et = (body[p] << 8) | body[p + 1];
-                var el = (body[p + 2] << 8) | body[p + 3];
-                p += 4;
-
-                if (p + el > body.Length) break;
-
-                if (et is 0x0000) // server_name
-                {
-                    var ext = body.Slice(p, el);
-
-                    if (ext.Length >= 2)
-                    {
-                        var listLen = (ext[0] << 8) | ext[1];
-
-                        if (listLen >= 3 && 2 + listLen <= ext.Length)
-                        {
-                            var q = 2;
-                            var nameType = ext[q++];
-                            var nameLen = (ext[q] << 8) | ext[q + 1]; q += 2;
-
-                            if (nameType == 0 && nameLen > 0 && q + nameLen <= ext.Length)
-                            {
-                                // RFC 6066: host_name — ASCII/IDNA. Нормально преобразуем в string один раз.
-                                sniHost = Encoding.ASCII.GetString(ext.Slice(q, nameLen));
-                            }
-                        }
-                    }
-
-                    break; // нашли — достаточно
-                }
-
-                p += el;
-            }
-        }
-    SNI_DONE:
+        var recordLen = (destination[3] << 8) | destination[4];
+        sniHost = GetServerName(Settings.Extensions);
         transcript.Append(destination.Slice(5, recordLen)); // 5 = размер record hdr
+        ClientHelloBuilder.Return(builder);
         return clientHello.Length;
+    }
+
+    private static string? GetServerName(IEnumerable<Extensions.ITlsExtension> extensions)
+    {
+        foreach (var extension in extensions)
+        {
+            if (extension is Extensions.ServerNameTlsExtension serverName && !string.IsNullOrWhiteSpace(serverName.HostName))
+                return serverName.HostName;
+        }
+
+        return null;
     }
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected override ValueTask<bool> OnHandshakeRecordAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var span = payload.Span;
+        byte[]? combinedBuffer = null;
 
-        while (span.Length >= 4)
+        if (handshakeFragmentLength > 0)
         {
-            var type = (TlsHandshakeType)span[0];
-            var len = (span[1] << 16) | (span[2] << 8) | span[3];
-
-            if (4 + len > span.Length) throw new InvalidOperationException("Повреждённый Handshake фрейм");
-
-            var msg = span[..(4 + len)];
-            var body = msg[4..];
-
-            transcript.Append(msg); // важно для verify_data
-
-            if (HandleHandshakeMessage(type, body)) return ValueTask.FromResult(true);
-
-            span = span[(4 + len)..];
+            combinedBuffer = ArrayPool<byte>.Shared.Rent(handshakeFragmentLength + span.Length);
+            handshakeFragmentBuffer.AsSpan(0, handshakeFragmentLength).CopyTo(combinedBuffer);
+            span.CopyTo(combinedBuffer.AsSpan(handshakeFragmentLength));
+            span = combinedBuffer.AsSpan(0, handshakeFragmentLength + span.Length);
+            ClearHandshakeFragmentBuffer();
         }
 
-        return ValueTask.FromResult(false);
+        try
+        {
+            while (span.Length >= 4)
+            {
+                var type = (TlsHandshakeType)span[0];
+                var len = (span[1] << 16) | (span[2] << 8) | span[3];
+                var messageLength = 4 + len;
+                lastHandshakeType = type;
+                lastHandshakeLength = len;
+                lastHandshakeAvailable = span.Length;
+
+                if (messageLength > span.Length)
+                {
+                    StoreHandshakeFragment(span);
+                    return ValueTask.FromResult(false);
+                }
+
+                var msg = span[..messageLength];
+                var body = msg[4..];
+
+                transcript.Append(msg); // важно для verify_data
+
+                if (HandleHandshakeMessage(type, body))
+                {
+                    ClearHandshakeFragmentBuffer();
+                    return ValueTask.FromResult(true);
+                }
+
+                span = span[messageLength..];
+            }
+
+            if (!span.IsEmpty)
+                StoreHandshakeFragment(span);
+
+            return ValueTask.FromResult(false);
+        }
+        finally
+        {
+            if (combinedBuffer is not null)
+                ArrayPool<byte>.Shared.Return(combinedBuffer);
+        }
+    }
+
+    private void StoreHandshakeFragment(ReadOnlySpan<byte> fragment)
+    {
+        ClearHandshakeFragmentBuffer();
+
+        handshakeFragmentBuffer = ArrayPool<byte>.Shared.Rent(fragment.Length);
+        fragment.CopyTo(handshakeFragmentBuffer);
+        handshakeFragmentLength = fragment.Length;
+    }
+
+    private void ClearHandshakeFragmentBuffer()
+    {
+        if (handshakeFragmentBuffer is not null)
+        {
+            ArrayPool<byte>.Shared.Return(handshakeFragmentBuffer, clearArray: true);
+            handshakeFragmentBuffer = null;
+        }
+
+        handshakeFragmentLength = 0;
     }
 
     /// <summary>
@@ -1243,7 +1261,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
             var chSize = BuildClientHello(chBuf.AsSpan(0, 4096));
             if (chSize <= 0) throw new InvalidOperationException("ClientHello не сформирован");
 
-            await SendPlainRecordAsync(TlsContentType.Handshake, chBuf.AsMemory(0, chSize), cancellationToken).ConfigureAwait(false);
+            await WriteTransportAsync(chBuf.AsMemory(0, chSize), cancellationToken).ConfigureAwait(false);
             state = State.ClientHelloSent;
         }
         finally
@@ -1258,6 +1276,13 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         while (!done)
         {
             var (hdr, payload) = await ReadRecordAsync(cancellationToken).ConfigureAwait(false);
+            lastRecordType = (byte)hdr.ContentType;
+            lastRecordVersion = hdr.LegacyVersion;
+            lastRecordLength = hdr.Length;
+            lastPayloadByte0 = hdr.Length > 0 ? payload[0] : (byte)0;
+            lastPayloadByte1 = hdr.Length > 1 ? payload[1] : (byte)0;
+            lastPayloadByte2 = hdr.Length > 2 ? payload[2] : (byte)0;
+            lastPayloadByte3 = hdr.Length > 3 ? payload[3] : (byte)0;
 
             try
             {
@@ -1576,7 +1601,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     /// Валидация цепочки X.509 как в браузерах: SAN/CN против SNI, EKU=ServerAuth, revocation по политике.
     /// Минимум для мимикрии: построить цепочку и проверить имя хоста.
     /// </summary>
-    private static void ValidateServerCertificate(List<X509Certificate2> certs, string sniHost)
+    private void ValidateServerCertificate(List<X509Certificate2> certs, string sniHost)
     {
         if (certs is null || certs.Count is 0) throw new CryptographicException("Сертификат сервера отсутствует");
 
@@ -1584,7 +1609,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
 
         using var chain = new X509Chain();
         // Политика максимально близкая к браузерам; подстройте из вашего Settings/Profile.
-        chain.ChainPolicy.RevocationMode = X509RevocationMode.Online;   // или NoCheck/Offline по профилю
+        chain.ChainPolicy.RevocationMode = Settings.CheckCertificateRevocationList ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
         chain.ChainPolicy.RevocationFlag = X509RevocationFlag.ExcludeRoot;
         chain.ChainPolicy.VerificationFlags = X509VerificationFlags.NoFlag;
         chain.ChainPolicy.DisableCertificateDownloads = false;          // AIA разрешены (как в браузерах)
@@ -1596,15 +1621,29 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         // Прокладываем промежуточные в ExtraStore
         for (var i = 1; i < certs.Count; i++) chain.ChainPolicy.ExtraStore.Add(certs[i]);
 
-        if (!chain.Build(leaf))
+        var chainBuilt = chain.Build(leaf);
+        var nameMatches = HostnameMatches(leaf, sniHost);
+        var sslPolicyErrors = SslPolicyErrors.None;
+
+        if (!chainBuilt)
+            sslPolicyErrors |= SslPolicyErrors.RemoteCertificateChainErrors;
+
+        if (!nameMatches)
+            sslPolicyErrors |= SslPolicyErrors.RemoteCertificateNameMismatch;
+
+        var callback = Settings.ServerCertificateValidationCallback;
+        if (callback is not null)
         {
-            // В реальных браузерах часть ошибок revocation может быть soft-fail.
-            // Здесь для простоты считаем hard-fail. Можно ослабить по профилю.
-            throw new CryptographicException("Не удалось построить цепочку сертификатов сервера");
+            if (!callback(leaf, chain, sslPolicyErrors))
+                throw new CryptographicException("Пользовательская валидация сертификата сервера отклонила соединение");
+
+            return;
         }
 
-        // Проверка имени хоста по SAN/CN (упрощённо, с поддержкой wildcard *.example.com)
-        if (!HostnameMatches(leaf, sniHost))
+        if ((sslPolicyErrors & SslPolicyErrors.RemoteCertificateChainErrors) is not 0)
+            throw new CryptographicException("Не удалось построить цепочку сертификатов сервера");
+
+        if ((sslPolicyErrors & SslPolicyErrors.RemoteCertificateNameMismatch) is not 0)
             throw new CryptographicException("Имя хоста не соответствует сертификату сервера");
     }
 

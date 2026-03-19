@@ -501,62 +501,6 @@ internal sealed unsafe class DeflateDecoder : IDisposable
         return mask;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private static int BuildHuffmanTable(ReadOnlySpan<byte> codeLengths, int numSymbols, Span<uint> table, int tableLog)
-    {
-        var tableSize = 1 << tableLog;
-        var mask = tableSize - 1;
-
-        // Инициализируем таблицу — быстрое заполнение
-        var defaultEntry = (0u << 8) | (uint)tableLog;
-        table[..tableSize].Fill(defaultEntry);
-
-        var actualSymbols = Math.Min(numSymbols, codeLengths.Length);
-
-        Span<int> blCount = stackalloc int[16];
-        blCount.Clear();
-        for (var i = 0; i < actualSymbols; i++)
-        {
-            var cl = codeLengths[i];
-            if (cl is > 0 and <= 15)
-                blCount[cl]++;
-        }
-
-        // Canonical Huffman code generation
-        Span<int> nextCode = stackalloc int[16];
-        var code = 0;
-        for (var bits = 1; bits <= 15; bits++)
-        {
-            code = (code + blCount[bits - 1]) << 1;
-            nextCode[bits] = code;
-        }
-
-        // Быстрый reverse через lookup
-        ref var bitRev = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(DeflateTables.BitReverse8);
-
-        for (var sym = 0; sym < actualSymbols; sym++)
-        {
-            var len = codeLengths[sym];
-            if (len is 0 or > 15) continue;
-
-            var huffCode = nextCode[len]++;
-            var fillBits = tableLog - len;
-            if (fillBits < 0) continue;
-
-            // Inline reverse bits
-            var reversed = (Unsafe.Add(ref bitRev, huffCode & 0xFF) << 8)
-                         | Unsafe.Add(ref bitRev, (huffCode >> 8) & 0xFF);
-            var baseIndex = reversed >> (16 - len);
-
-            var entry = (uint)((sym << 8) | len);
-            var fillCount = 1 << fillBits;
-            for (var fill = 0; fill < fillCount; fill++)
-                table[baseIndex | (fill << len)] = entry;
-        }
-
-        return mask;
-    }
-
     /// <summary>
     /// Строит двухуровневую Huffman таблицу.
     /// Primary: (1 &lt;&lt; primaryBits) записей. Коды &lt;= primaryBits → прямой entry (sym &lt;&lt; 8 | len).

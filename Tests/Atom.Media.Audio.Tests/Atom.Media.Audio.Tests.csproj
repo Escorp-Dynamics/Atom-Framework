@@ -5,16 +5,20 @@
         <LangVersion>preview</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <EnableNUnitRunner>true</EnableNUnitRunner>
+        <OutputType>Exe</OutputType>
 
         <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
 
         <IsPackable>false</IsPackable>
         <IsTestProject>true</IsTestProject>
+        <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
         <TrimMode>link</TrimMode>
     </PropertyGroup>
 
     <ItemGroup>
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="*" />
+        <PackageReference Include="NUnit" Version="*" />
         <PackageReference Include="coverlet.collector" Version="*">
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
             <PrivateAssets>all</PrivateAssets>
@@ -35,6 +39,7 @@
 
     <ItemGroup>
         <ProjectReference Include="../../Framework/Atom.Media.Audio/Atom.Media.Audio.csproj" />
+        <ProjectReference Include="../../Framework/Atom.Media.Video/Atom.Media.Video.csproj" />
         <ProjectReference Include="../Atom.Tests/Atom.Tests.csproj" />
     </ItemGroup>
 

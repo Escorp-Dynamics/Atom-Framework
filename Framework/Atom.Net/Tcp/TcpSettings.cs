@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Runtime.CompilerServices;
 
 namespace Atom.Net.Tcp;
@@ -69,7 +69,7 @@ public readonly struct TcpSettings() : IEquatable<TcpSettings>
     public IPEndPoint? LocalEndPoint { get; init; }
 
     /// <summary>
-    /// DSCP/ECN.
+    /// DSCP для IPv4 ToS или IPv6 Traffic Class.
     /// </summary>
     public byte Dscp { get; init; }
 
@@ -105,41 +105,18 @@ public readonly struct TcpSettings() : IEquatable<TcpSettings>
     {
         var hashCode = new HashCode();
 
-        hashCode.Add(IsNagleDisabled.GetHashCode());
-        hashCode.Add(SendBufferSize.GetHashCode());
-        hashCode.Add(ReceiveBufferSize.GetHashCode());
-        hashCode.Add(UseFastOpen.GetHashCode());
-        hashCode.Add(TimeToLive.GetHashCode());
-        hashCode.Add(MaxSegmentSize.GetHashCode());
-        hashCode.Add(UseHappyEyeballsAlternating.GetHashCode());
-        hashCode.Add(HappyEyeballsDelay.GetHashCode());
-        hashCode.Add(HappyEyeballsStepDelay.GetHashCode());
-        hashCode.Add(HappyEyeballsMaxConcurrency.GetHashCode());
-
-        if (LocalEndPoint is not null) hashCode.Add(LocalEndPoint.GetHashCode());
-
-        hashCode.Add(Dscp.GetHashCode());
-        hashCode.Add(KeepAlivePingDelay.GetHashCode());
-        hashCode.Add(KeepAlivePingTimeout.GetHashCode());
-        hashCode.Add(KeepAlivePingPolicy.GetHashCode());
-        hashCode.Add(Delay.GetHashCode());
-        hashCode.Add(AttemptTimeout.GetHashCode());
+        AddCoreHash(ref hashCode);
+        AddKeepAliveHash(ref hashCode);
 
         return hashCode.ToHashCode();
     }
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Equals(TcpSettings other) => IsNagleDisabled.Equals(other.IsNagleDisabled) && SendBufferSize.Equals(other.SendBufferSize)
-        && ReceiveBufferSize.Equals(other.ReceiveBufferSize) && UseFastOpen.Equals(other.UseFastOpen)
-        && TimeToLive.Equals(other.TimeToLive) && MaxSegmentSize.Equals(other.MaxSegmentSize)
-        && UseHappyEyeballsAlternating.Equals(other.UseHappyEyeballsAlternating) && HappyEyeballsDelay.Equals(other.HappyEyeballsDelay)
-        && HappyEyeballsStepDelay.Equals(other.HappyEyeballsStepDelay) && HappyEyeballsMaxConcurrency.Equals(other.HappyEyeballsMaxConcurrency)
-        && ((LocalEndPoint is null && other.LocalEndPoint is null) || (LocalEndPoint is not null && other.LocalEndPoint is not null && LocalEndPoint.Equals(other.LocalEndPoint)))
-        && Dscp.Equals(other.Dscp)
-        && KeepAlivePingDelay.Equals(other.KeepAlivePingDelay) && KeepAlivePingTimeout.Equals(other.KeepAlivePingTimeout)
-        && KeepAlivePingPolicy.Equals(other.KeepAlivePingPolicy) && Delay.Equals(other.Delay)
-        && AttemptTimeout.Equals(other.AttemptTimeout);
+    public bool Equals(TcpSettings other)
+        => EqualsCore(other)
+        && EqualsLocalEndPoint(other)
+        && EqualsKeepAlive(other);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -156,4 +133,62 @@ public readonly struct TcpSettings() : IEquatable<TcpSettings>
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator !=(TcpSettings left, TcpSettings right) => !(left == right);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void AddCoreHash(ref HashCode hashCode)
+    {
+        hashCode.Add(IsNagleDisabled);
+        hashCode.Add(SendBufferSize);
+        hashCode.Add(ReceiveBufferSize);
+        hashCode.Add(UseFastOpen);
+        hashCode.Add(TimeToLive);
+        hashCode.Add(MaxSegmentSize);
+        hashCode.Add(UseHappyEyeballsAlternating);
+        hashCode.Add(HappyEyeballsDelay);
+        hashCode.Add(HappyEyeballsStepDelay);
+        hashCode.Add(HappyEyeballsMaxConcurrency);
+
+        if (LocalEndPoint is not null) hashCode.Add(LocalEndPoint);
+
+        hashCode.Add(Dscp);
+        hashCode.Add(Delay);
+        hashCode.Add(AttemptTimeout);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void AddKeepAliveHash(ref HashCode hashCode)
+    {
+        hashCode.Add(KeepAlivePingDelay);
+        hashCode.Add(KeepAlivePingTimeout);
+        hashCode.Add(KeepAlivePingPolicy);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool EqualsCore(TcpSettings other)
+        => IsNagleDisabled == other.IsNagleDisabled
+        && SendBufferSize == other.SendBufferSize
+        && ReceiveBufferSize == other.ReceiveBufferSize
+        && UseFastOpen == other.UseFastOpen
+        && TimeToLive == other.TimeToLive
+        && MaxSegmentSize == other.MaxSegmentSize
+        && UseHappyEyeballsAlternating == other.UseHappyEyeballsAlternating
+        && HappyEyeballsDelay == other.HappyEyeballsDelay
+        && HappyEyeballsStepDelay == other.HappyEyeballsStepDelay
+        && HappyEyeballsMaxConcurrency == other.HappyEyeballsMaxConcurrency
+        && Dscp == other.Dscp
+        && Delay == other.Delay
+        && AttemptTimeout == other.AttemptTimeout;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool EqualsKeepAlive(TcpSettings other)
+        => KeepAlivePingDelay == other.KeepAlivePingDelay
+        && KeepAlivePingTimeout == other.KeepAlivePingTimeout
+        && KeepAlivePingPolicy == other.KeepAlivePingPolicy;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool EqualsLocalEndPoint(TcpSettings other)
+    {
+        if (LocalEndPoint is null) return other.LocalEndPoint is null;
+        return LocalEndPoint.Equals(other.LocalEndPoint);
+    }
 }

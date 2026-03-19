@@ -92,9 +92,7 @@ internal ref struct Vp8BoolEncoder
     public void EncodeSigned(int value, int n)
     {
         EncodeLiteral((uint)Math.Abs(value), n);
-
-        if (value != 0)
-            EncodeBit(value < 0 ? 1 : 0, 128);
+        EncodeBit(value < 0 ? 1 : 0, 128);
     }
 
     /// <summary>

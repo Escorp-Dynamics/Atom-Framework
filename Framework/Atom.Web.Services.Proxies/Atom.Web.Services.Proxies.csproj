@@ -1,0 +1,93 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <LangVersion>preview</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <OptimizationPreference>speed</OptimizationPreference>
+        <AssemblyName>Escorp.Atom.Web.Services.Proxies</AssemblyName>
+
+        <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+        <AnalysisLevel>latest-all</AnalysisLevel>
+        <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
+        <WarningLevel>9999</WarningLevel>
+        <AnalysisMode>AllEnabledByDefault</AnalysisMode>
+
+        <IsTrimmable>true</IsTrimmable>
+        <IsAotCompatible>true</IsAotCompatible>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+
+        <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
+        <IlcOptimizationPreference>speed</IlcOptimizationPreference>
+
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <PackageId>$(AssemblyName)</PackageId>
+        <Version>0.0.1</Version>
+        <Authors>Yuriy Yesin, Escorp Labs</Authors>
+        <Company>Escorp Dynamics</Company>
+        <Product>Escorp.$(AssemblyName)</Product>
+        <RepositoryUrl>https://gitflic.ru/project/escorp-lab/atom</RepositoryUrl>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <PackageIcon>icon.png</PackageIcon>
+        <PackageTags>atom;framework;escorp;exomode;web;services;proxy;proxies</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+        <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+        <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>
+        <RunAnalyzers>false</RunAnalyzers>
+        <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+        <EnableNETAnalyzers>false</EnableNETAnalyzers>
+        <AnalysisMode>None</AnalysisMode>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    </PropertyGroup>
+
+    <ItemGroup Condition="'$(Configuration)' == 'Debug'">
+        <ProjectReference Include="../Atom.Web.Services/Atom.Web.Services.csproj" />
+        <ProjectReference Include="../Atom.SourceGeneration/Atom.SourceGeneration.csproj"
+            OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(Configuration)' == 'Release'">
+        <PackageReference Include="Escorp.Atom.Web.Services" Version="*" />
+        <PackageReference Include="Escorp.Atom.SourceGeneration" Version="*" PrivateAssets="all"
+            OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="README.md" Pack="true" PackagePath="\" />
+        <None Include="../Atom.Web.Services/icon.png" Link="icon.png" Pack="true" PackagePath="\" />
+    </ItemGroup>
+
+    <Target Name="PublishPackages" AfterTargets="Pack">
+        <PropertyGroup>
+            <PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
+        </PropertyGroup>
+
+        <ItemGroup>
+            <PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" />
+            <PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg"
+                Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
+        </ItemGroup>
+
+        <Exec
+            Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;"
+            Condition="'%(PackageFiles.Identity)' != ''"
+            IgnoreExitCode="true">
+            <Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
+        </Exec>
+
+    </Target>
+
+</Project>

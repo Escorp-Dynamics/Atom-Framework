@@ -11,6 +11,9 @@
     <Project Path="Framework/Atom.SourceGeneration/Atom.SourceGeneration.csproj" />
     <Project Path="Framework/Atom.Testing/Atom.Testing.csproj" />
     <Project Path="Framework/Atom.Web/Atom.Web.csproj" />
+    <Project Path="Framework/Atom.Web.Services/Atom.Web.Services.csproj" />
+    <Project Path="Framework/Atom.Web.Services.Proxies/Atom.Web.Services.Proxies.csproj" />
+    <Project Path="Framework/Atom.Web.Services.Markets/Atom.Web.Services.Markets.csproj" />
     <Project Path="Framework/Atom/Atom.csproj" />
   </Folder>
   <Folder Name="/Tests/">
@@ -25,5 +28,8 @@
     <Project Path="Tests/Atom.SourceGeneration.Tests/Atom.SourceGeneration.Tests.csproj" />
     <Project Path="Tests/Atom.Tests/Atom.Tests.csproj" />
     <Project Path="Tests/Atom.Web.Tests/Atom.Web.Tests.csproj" />
+    <Project Path="Tests/Atom.Web.Services.Tests/Atom.Web.Services.Tests.csproj" />
+    <Project Path="Tests/Atom.Web.Services.Proxies.Tests/Atom.Web.Services.Proxies.Tests.csproj" />
+    <Project Path="Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj" />
   </Folder>
 </Solution>

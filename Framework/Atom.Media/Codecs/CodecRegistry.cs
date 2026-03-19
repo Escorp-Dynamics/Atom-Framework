@@ -20,6 +20,12 @@ public static class CodecRegistry
         [MediaCodecId.RawNv21] = static () => new RawVideoCodec(),
     };
 
+    private static readonly Dictionary<MediaCodecId, Func<IImageCodec>> imageCodecFactories = new()
+    {
+        [MediaCodecId.Png] = static () => new PngCodec(),
+        [MediaCodecId.WebP] = static () => new WebpCodec(),
+    };
+
     private static readonly Dictionary<MediaCodecId, Func<IAudioCodec>> audioCodecFactories = new()
     {
         [MediaCodecId.PcmS16Le] = static () => new RawAudioCodec(),
@@ -47,6 +53,11 @@ public static class CodecRegistry
     public static void RegisterAudioCodec(MediaCodecId codecId, Func<IAudioCodec> factory) => audioCodecFactories[codecId] = factory;
 
     /// <summary>
+    /// Регистрирует фабрику image-кодека.
+    /// </summary>
+    public static void RegisterImageCodec(MediaCodecId codecId, Func<IImageCodec> factory) => imageCodecFactories[codecId] = factory;
+
+    /// <summary>
     /// Создаёт видеокодек по ID.
     /// </summary>
     /// <returns>Кодек или null, если не зарегистрирован.</returns>
@@ -61,6 +72,18 @@ public static class CodecRegistry
         => audioCodecFactories.TryGetValue(codecId, out var factory) ? factory() : null;
 
     /// <summary>
+    /// Создаёт image-кодек по ID.
+    /// </summary>
+    public static IImageCodec? CreateImageCodec(MediaCodecId codecId)
+        => imageCodecFactories.TryGetValue(codecId, out var factory) ? factory() : null;
+
+    /// <summary>
+    /// Создаёт image-кодек по расширению файла.
+    /// </summary>
+    public static IImageCodec? CreateImageCodec(string extension)
+        => CreateImageCodec(GetImageCodecId(extension));
+
+    /// <summary>
     /// Проверяет, зарегистрирован ли видеокодек.
     /// </summary>
     public static bool IsVideoCodecRegistered(MediaCodecId codecId)
@@ -73,6 +96,12 @@ public static class CodecRegistry
         => audioCodecFactories.ContainsKey(codecId);
 
     /// <summary>
+    /// Проверяет, зарегистрирован ли image-кодек.
+    /// </summary>
+    public static bool IsImageCodecRegistered(MediaCodecId codecId)
+        => imageCodecFactories.ContainsKey(codecId);
+
+    /// <summary>
     /// Возвращает все зарегистрированные видеокодеки.
     /// </summary>
     public static IEnumerable<MediaCodecId> GetRegisteredVideoCodecs()
@@ -83,6 +112,27 @@ public static class CodecRegistry
     /// </summary>
     public static IEnumerable<MediaCodecId> GetRegisteredAudioCodecs()
         => audioCodecFactories.Keys;
+
+    /// <summary>
+    /// Возвращает все зарегистрированные image-кодеки.
+    /// </summary>
+    public static IEnumerable<MediaCodecId> GetRegisteredImageCodecs()
+        => imageCodecFactories.Keys;
+
+    /// <summary>
+    /// Определяет image codec ID по расширению.
+    /// </summary>
+    public static MediaCodecId GetImageCodecId(string extension)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(extension);
+
+        return extension.ToUpperInvariant() switch
+        {
+            ".PNG" => MediaCodecId.Png,
+            ".WEBP" => MediaCodecId.WebP,
+            _ => MediaCodecId.Unknown,
+        };
+    }
 
     /// <summary>
     /// Определяет ID кодека по FOURCC.

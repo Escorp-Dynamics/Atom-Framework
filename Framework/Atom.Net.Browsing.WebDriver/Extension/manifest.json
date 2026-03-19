@@ -7,6 +7,7 @@
         "tabs",
         "cookies",
         "proxy",
+        "webNavigation",
         "webRequest",
         "webRequestBlocking",
         "<all_urls>"
@@ -27,20 +28,7 @@
             ],
             "run_at": "document_start",
             "all_frames": false
-        },
-        {
-            "matches": [
-                "<all_urls>"
-            ],
-            "js": [
-                "shadow-intercept-loader.js"
-            ],
-            "run_at": "document_start",
-            "all_frames": true
         }
-    ],
-    "web_accessible_resources": [
-        "shadow-intercept.js"
     ],
     "icons": {
         "16": "icons/icon16.png",

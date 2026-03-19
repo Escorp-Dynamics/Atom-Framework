@@ -50,9 +50,9 @@ internal static class Vp8Quantization
         Vp8QuantMatrix m;
         m.Y1DcDequant = Vp8Constants.DcQLookup[ClampQp(baseQp + y1DcDelta)];
         m.Y1AcDequant = Vp8Constants.AcQLookup[ClampQp(baseQp)];
-        m.Y2DcDequant = (short)Math.Max((int)Vp8Constants.DcQLookup[ClampQp(baseQp + y2DcDelta)], 8);
-        m.Y2AcDequant = (short)Math.Max((int)Vp8Constants.AcQLookup[ClampQp(baseQp + y2AcDelta)], 8);
-        m.UvDcDequant = Vp8Constants.DcQLookup[ClampQp(baseQp + uvDcDelta)];
+        m.Y2DcDequant = (short)(Vp8Constants.DcQLookup[ClampQp(baseQp + y2DcDelta)] * 2);
+        m.Y2AcDequant = (short)Math.Max(Vp8Constants.AcQLookup[ClampQp(baseQp + y2AcDelta)] * 155 / 100, 8);
+        m.UvDcDequant = (short)Math.Min((int)Vp8Constants.DcQLookup[ClampQp(baseQp + uvDcDelta)], 132);
         m.UvAcDequant = Vp8Constants.AcQLookup[ClampQp(baseQp + uvAcDelta)];
         return m;
     }

@@ -1,43 +1,107 @@
-﻿#pragma warning disable CA1069, CA2101, CA5392, SYSLIB1054
+﻿#pragma warning disable CA1069, CA2101, CA5392, SYSLIB1054, MA0182
 
 using System.Runtime.InteropServices;
 
 namespace Atom.Media.Video.Backends.PipeWire;
 
 /// <summary>
-/// P/Invoke привязки к libpipewire-0.3.
+/// P/Invoke привязки к libpipewire-0.3 и базовым ABI SPA.
 /// </summary>
 internal static unsafe partial class PipeWireNative
 {
     private const string Lib = "libpipewire-0.3.so.0";
+    private const string LibC = "libc.so.6";
 
-    // ═══════════════════════════════════════════════════════════════
-    // Константы
-    // ═══════════════════════════════════════════════════════════════
+    internal const string SPA_TYPE_INTERFACE_Device = "Spa:Pointer:Interface:Device";
+    internal const string SPA_TYPE_INTERFACE_Node = "Spa:Pointer:Interface:Node";
 
-    /// <summary>PW_DIRECTION_OUTPUT = 1.</summary>
     internal const int PW_DIRECTION_OUTPUT = 1;
-
-    /// <summary>PW_ID_ANY = 0xFFFFFFFF.</summary>
     internal const uint PW_ID_ANY = 0xFFFFFFFF;
 
-    /// <summary>PW_STREAM_FLAG_MAP_BUFFERS.</summary>
-    internal const int PW_STREAM_FLAG_MAP_BUFFERS = 1 << 2;
+    internal const uint SPA_DIRECTION_OUTPUT = 1;
 
-    /// <summary>PW_STREAM_FLAG_DRIVER.</summary>
-    internal const int PW_STREAM_FLAG_DRIVER = 1 << 3;
+    internal const uint SPA_VERSION_DEVICE = 0;
+    internal const uint SPA_VERSION_DEVICE_EVENTS = 0;
+    internal const uint SPA_VERSION_DEVICE_METHODS = 0;
+    internal const uint SPA_VERSION_DEVICE_OBJECT_INFO = 0;
+    internal const uint SPA_VERSION_NODE = 0;
+    internal const uint SPA_VERSION_NODE_EVENTS = 0;
+    internal const uint SPA_VERSION_NODE_CALLBACKS = 0;
+    internal const uint SPA_VERSION_NODE_METHODS = 0;
 
-    /// <summary>PW_VERSION_STREAM_EVENTS.</summary>
-    internal const uint PW_VERSION_STREAM_EVENTS = 2;
+    internal const uint SPA_NODE_CHANGE_MASK_FLAGS = 1u << 0;
+    internal const uint SPA_NODE_CHANGE_MASK_PROPS = 1u << 1;
+    internal const uint SPA_NODE_CHANGE_MASK_PARAMS = 1u << 2;
 
-    // Состояния PipeWire stream
-    internal const int PW_STREAM_STATE_ERROR = -1;
-    internal const int PW_STREAM_STATE_UNCONNECTED = 0;
-    internal const int PW_STREAM_STATE_CONNECTING = 1;
-    internal const int PW_STREAM_STATE_PAUSED = 2;
-    internal const int PW_STREAM_STATE_STREAMING = 3;
+    internal const uint SPA_DEVICE_CHANGE_MASK_FLAGS = 1u << 0;
+    internal const uint SPA_DEVICE_CHANGE_MASK_PROPS = 1u << 1;
+    internal const uint SPA_DEVICE_CHANGE_MASK_PARAMS = 1u << 2;
+    internal const uint SPA_DEVICE_OBJECT_CHANGE_MASK_FLAGS = 1u << 0;
+    internal const uint SPA_DEVICE_OBJECT_CHANGE_MASK_PROPS = 1u << 1;
 
-    // SPA_PROP видео контролы
+    internal const uint SPA_PORT_CHANGE_MASK_FLAGS = 1u << 0;
+    internal const uint SPA_PORT_CHANGE_MASK_PROPS = 1u << 2;
+    internal const uint SPA_PORT_CHANGE_MASK_PARAMS = 1u << 3;
+
+    internal const ulong SPA_PORT_FLAG_CAN_ALLOC_BUFFERS = 1u << 2;
+    internal const ulong SPA_PORT_FLAG_NO_REF = 1u << 4;
+    internal const ulong SPA_PORT_FLAG_LIVE = 1u << 5;
+    internal const ulong SPA_PORT_FLAG_PHYSICAL = 1u << 6;
+    internal const ulong SPA_PORT_FLAG_TERMINAL = 1u << 7;
+
+    internal const uint SPA_PARAM_INFO_SERIAL = 1u << 0;
+    internal const uint SPA_PARAM_INFO_READ = 1u << 1;
+    internal const uint SPA_PARAM_INFO_WRITE = 1u << 2;
+
+    internal const uint SPA_PARAM_EnumFormat = 3;
+    internal const uint SPA_PARAM_Format = 4;
+    internal const uint SPA_PARAM_Buffers = 5;
+    internal const uint SPA_PARAM_Meta = 6;
+    internal const uint SPA_PARAM_IO = 7;
+
+    internal const uint SPA_PARAM_BUFFERS_buffers = 1;
+    internal const uint SPA_PARAM_BUFFERS_blocks = 2;
+    internal const uint SPA_PARAM_BUFFERS_size = 3;
+    internal const uint SPA_PARAM_BUFFERS_stride = 4;
+    internal const uint SPA_PARAM_BUFFERS_align = 5;
+    internal const uint SPA_PARAM_BUFFERS_dataType = 6;
+    internal const uint SPA_PARAM_BUFFERS_metaType = 7;
+
+    internal const uint SPA_PARAM_META_type = 1;
+    internal const uint SPA_PARAM_META_size = 2;
+
+    internal const uint SPA_PARAM_IO_id = 1;
+    internal const uint SPA_PARAM_IO_size = 2;
+
+    internal const uint SPA_META_Header = 1;
+
+    internal const uint SPA_IO_Buffers = 1;
+
+    internal const uint SPA_DATA_MemPtr = 1;
+    internal const uint SPA_DATA_MemFd = 2;
+
+    internal const int SPA_STATUS_OK = 0;
+    internal const int SPA_STATUS_NEED_DATA = 1 << 0;
+    internal const int SPA_STATUS_HAVE_DATA = 1 << 1;
+
+    internal const uint SPA_RESULT_TYPE_NODE_ERROR = 1;
+    internal const uint SPA_RESULT_TYPE_NODE_PARAMS = 2;
+
+    internal const uint SPA_TYPE_COMMAND_Node = 0x30002;
+    internal const uint SPA_TYPE_OBJECT_Format = 0x40003;
+    internal const uint SPA_TYPE_OBJECT_ParamBuffers = 0x40004;
+    internal const uint SPA_TYPE_OBJECT_ParamMeta = 0x40005;
+    internal const uint SPA_TYPE_OBJECT_ParamIO = 0x40006;
+
+    internal const uint SPA_NODE_COMMAND_Suspend = 0;
+    internal const uint SPA_NODE_COMMAND_Pause = 1;
+    internal const uint SPA_NODE_COMMAND_Start = 2;
+
+    internal const int PROT_READ = 0x1;
+    internal const int PROT_WRITE = 0x2;
+    internal const int MAP_SHARED = 0x01;
+    internal static readonly IntPtr MAP_FAILED = new(-1);
+
     internal const uint SPA_PROP_brightness = 0x20001;
     internal const uint SPA_PROP_contrast = 0x20002;
     internal const uint SPA_PROP_saturation = 0x20003;
@@ -47,19 +111,11 @@ internal static unsafe partial class PipeWireNative
     internal const uint SPA_PROP_gain = 0x20007;
     internal const uint SPA_PROP_sharpness = 0x20008;
 
-    // ═══════════════════════════════════════════════════════════════
-    // Инициализация
-    // ═══════════════════════════════════════════════════════════════
-
     [DllImport(Lib, EntryPoint = "pw_init")]
     internal static extern void pw_init(IntPtr argc, IntPtr argv);
 
     [DllImport(Lib, EntryPoint = "pw_deinit")]
     internal static extern void pw_deinit();
-
-    // ═══════════════════════════════════════════════════════════════
-    // Thread Loop
-    // ═══════════════════════════════════════════════════════════════
 
     [DllImport(Lib, EntryPoint = "pw_thread_loop_new")]
     internal static extern IntPtr pw_thread_loop_new(
@@ -83,10 +139,6 @@ internal static unsafe partial class PipeWireNative
     [DllImport(Lib, EntryPoint = "pw_thread_loop_get_loop")]
     internal static extern IntPtr pw_thread_loop_get_loop(IntPtr loop);
 
-    // ═══════════════════════════════════════════════════════════════
-    // Context
-    // ═══════════════════════════════════════════════════════════════
-
     [DllImport(Lib, EntryPoint = "pw_context_new")]
     internal static extern IntPtr pw_context_new(IntPtr loop, IntPtr properties, nuint userDataSize);
 
@@ -96,16 +148,25 @@ internal static unsafe partial class PipeWireNative
     [DllImport(Lib, EntryPoint = "pw_context_connect")]
     internal static extern IntPtr pw_context_connect(IntPtr context, IntPtr properties, nuint userDataSize);
 
-    // ═══════════════════════════════════════════════════════════════
-    // Core
-    // ═══════════════════════════════════════════════════════════════
-
     [DllImport(Lib, EntryPoint = "pw_core_disconnect")]
     internal static extern int pw_core_disconnect(IntPtr core);
 
-    // ═══════════════════════════════════════════════════════════════
-    // Properties
-    // ═══════════════════════════════════════════════════════════════
+    [DllImport(Lib, EntryPoint = "pw_core_sync")]
+    internal static extern int pw_core_sync(IntPtr core, uint id, int seq);
+
+    [DllImport(Lib, EntryPoint = "pw_core_export")]
+    internal static extern IntPtr pw_core_export(
+        IntPtr core,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string type,
+        IntPtr props,
+        IntPtr objectPointer,
+        nuint userDataSize);
+
+    [DllImport(Lib, EntryPoint = "pw_proxy_destroy")]
+    internal static extern void pw_proxy_destroy(IntPtr proxy);
+
+    [DllImport(Lib, EntryPoint = "pw_proxy_get_bound_id")]
+    internal static extern uint pw_proxy_get_bound_id(IntPtr proxy);
 
     [DllImport(Lib, EntryPoint = "pw_properties_new")]
     internal static extern IntPtr pw_properties_new(IntPtr sentinel);
@@ -118,52 +179,15 @@ internal static unsafe partial class PipeWireNative
     [DllImport(Lib, EntryPoint = "pw_properties_free")]
     internal static extern void pw_properties_free(IntPtr props);
 
-    // ═══════════════════════════════════════════════════════════════
-    // Stream
-    // ═══════════════════════════════════════════════════════════════
-
-    [DllImport(Lib, EntryPoint = "pw_stream_new")]
-    internal static extern IntPtr pw_stream_new(IntPtr core,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
-        IntPtr properties);
-
-    [DllImport(Lib, EntryPoint = "pw_stream_destroy")]
-    internal static extern void pw_stream_destroy(IntPtr stream);
-
-    [DllImport(Lib, EntryPoint = "pw_stream_connect")]
-    internal static extern int pw_stream_connect(IntPtr stream,
-        int direction, uint targetId, int flags,
-        IntPtr* paramPods, uint paramCount);
-
-    [DllImport(Lib, EntryPoint = "pw_stream_disconnect")]
-    internal static extern int pw_stream_disconnect(IntPtr stream);
-
-    [DllImport(Lib, EntryPoint = "pw_stream_set_active")]
-    internal static extern int pw_stream_set_active(IntPtr stream, [MarshalAs(UnmanagedType.U1)] bool active);
-
-    [DllImport(Lib, EntryPoint = "pw_stream_dequeue_buffer")]
-    internal static extern PwBuffer* pw_stream_dequeue_buffer(IntPtr stream);
-
-    [DllImport(Lib, EntryPoint = "pw_stream_queue_buffer")]
-    internal static extern int pw_stream_queue_buffer(IntPtr stream, PwBuffer* buffer);
-
-    [DllImport(Lib, EntryPoint = "pw_stream_set_control")]
-    internal static extern int pw_stream_set_control(IntPtr stream, uint id, uint nValues, float* values);
-
-    [DllImport(Lib, EntryPoint = "pw_stream_get_control")]
-    internal static extern PwStreamControl* pw_stream_get_control(IntPtr stream, uint id);
-
-    [DllImport(Lib, EntryPoint = "pw_stream_add_listener")]
-    internal static extern void pw_stream_add_listener(IntPtr stream,
-        SpaHook* listener, PwStreamEvents* events, void* data);
-
     [DllImport(Lib, EntryPoint = "pw_core_add_listener")]
     internal static extern void pw_core_add_listener(IntPtr core,
         SpaHook* listener, PwCoreEvents* events, void* data);
 
-    // ═══════════════════════════════════════════════════════════════
-    // Структуры
-    // ═══════════════════════════════════════════════════════════════
+    [DllImport(LibC, EntryPoint = "mmap", SetLastError = true)]
+    internal static extern IntPtr mmap(IntPtr addr, nuint length, int prot, int flags, int fd, nint offset);
+
+    [DllImport(LibC, EntryPoint = "munmap", SetLastError = true)]
+    internal static extern int munmap(IntPtr addr, nuint length);
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct SpaHook
@@ -177,72 +201,223 @@ internal static unsafe partial class PipeWireNative
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct PwStreamEvents
+    internal struct SpaCallbacks
     {
-        public uint Version;
-        public delegate* unmanaged[Cdecl]<void*, void> Destroy;
-        public delegate* unmanaged[Cdecl]<void*, int, int, byte*, void> StateChanged;
-        public delegate* unmanaged[Cdecl]<void*, uint, PwStreamControl*, void> ControlInfo;
-        public IntPtr IoChanged;
-        public delegate* unmanaged[Cdecl]<void*, uint, IntPtr, void> ParamChanged;
-        public IntPtr AddBuffer;
-        public IntPtr RemoveBuffer;
-        public delegate* unmanaged[Cdecl]<void*, void> Process;
-        public IntPtr Drained;
-        public IntPtr Command;
-        public IntPtr TriggerDone;
+        public IntPtr Funcs;
+        public void* Data;
     }
 
-    /// <summary>
-    /// pw_stream_control — информация о контроле стрима.
-    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
-    internal struct PwStreamControl
+    internal struct SpaInterface
     {
-        public IntPtr Name;
+        public IntPtr Type;
+        public uint Version;
+        public SpaCallbacks Callbacks;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaNode
+    {
+        public SpaInterface Interface;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaDevice
+    {
+        public SpaInterface Interface;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaFraction
+    {
+        public uint Num;
+        public uint Denom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaDict
+    {
         public uint Flags;
-        public float Default;
-        public float Min;
-        public float Max;
-        public float* Values;
-        public uint NValues;
-        public uint MaxValues;
+        public uint NItems;
+        public IntPtr Items;
     }
 
-    /// <summary>
-    /// PipeWire core events — мониторинг соединения с daemon.
-    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
-    internal struct PwCoreEvents
+    internal struct SpaDictItem
+    {
+        public IntPtr Key;
+        public IntPtr Value;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PwProperties
+    {
+        public SpaDict Dict;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaPod
+    {
+        public uint Size;
+        public uint Type;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaCommandBody
+    {
+        public uint Type;
+        public uint Id;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaCommand
+    {
+        public SpaPod Pod;
+        public SpaCommandBody Body;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaNodeEvents
     {
         public uint Version;
-        public IntPtr Info;
-        public IntPtr Done;
-        public IntPtr Ping;
-        public delegate* unmanaged[Cdecl]<void*, uint, int, int, byte*, void> Error;
-        public IntPtr RemoveId;
-        public IntPtr BoundId;
-        public IntPtr AddMem;
-        public IntPtr RemoveMem;
-        public IntPtr BoundProps;
+        public delegate* unmanaged[Cdecl]<void*, SpaNodeInfo*, void> Info;
+        public delegate* unmanaged[Cdecl]<void*, uint, uint, SpaPortInfo*, void> PortInfo;
+        public delegate* unmanaged[Cdecl]<void*, int, int, uint, void*, void> Result;
+        public delegate* unmanaged[Cdecl]<void*, IntPtr, void> Event;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct PwBuffer
+    internal struct SpaDeviceEvents
     {
-        public SpaBuffer* Buffer;
-        public void* UserData;
-        public ulong Size;
-        public ulong Requested;
+        public uint Version;
+        public delegate* unmanaged[Cdecl]<void*, SpaDeviceInfo*, void> Info;
+        public delegate* unmanaged[Cdecl]<void*, int, int, uint, void*, void> Result;
+        public delegate* unmanaged[Cdecl]<void*, IntPtr, void> Event;
+        public delegate* unmanaged[Cdecl]<void*, uint, SpaDeviceObjectInfo*, void> ObjectInfo;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct SpaBuffer
+    internal struct SpaNodeCallbacks
     {
-        public IntPtr Metas;
-        public uint MetaCount;
-        public SpaData* Datas;
-        public uint DataCount;
+        public uint Version;
+        public delegate* unmanaged[Cdecl]<void*, int, int> Ready;
+        public delegate* unmanaged[Cdecl]<void*, uint, uint, int> ReuseBuffer;
+        public delegate* unmanaged[Cdecl]<void*, ulong, ulong, IntPtr, int> XRun;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaNodeMethods
+    {
+        public uint Version;
+        public delegate* unmanaged[Cdecl]<void*, SpaHook*, SpaNodeEvents*, void*, int> AddListener;
+        public delegate* unmanaged[Cdecl]<void*, SpaNodeCallbacks*, void*, int> SetCallbacks;
+        public delegate* unmanaged[Cdecl]<void*, int, int> Sync;
+        public delegate* unmanaged[Cdecl]<void*, int, uint, uint, uint, SpaPod*, int> EnumParams;
+        public delegate* unmanaged[Cdecl]<void*, uint, uint, SpaPod*, int> SetParam;
+        public delegate* unmanaged[Cdecl]<void*, uint, void*, nuint, int> SetIo;
+        public delegate* unmanaged[Cdecl]<void*, SpaCommand*, int> SendCommand;
+        public delegate* unmanaged[Cdecl]<void*, uint, uint, IntPtr, int> AddPort;
+        public delegate* unmanaged[Cdecl]<void*, uint, uint, int> RemovePort;
+        public delegate* unmanaged[Cdecl]<void*, int, uint, uint, uint, uint, uint, SpaPod*, int> PortEnumParams;
+        public delegate* unmanaged[Cdecl]<void*, uint, uint, uint, uint, SpaPod*, int> PortSetParam;
+        public delegate* unmanaged[Cdecl]<void*, uint, uint, uint, SpaBuffer**, uint, int> PortUseBuffers;
+        public delegate* unmanaged[Cdecl]<void*, uint, uint, uint, void*, nuint, int> PortSetIo;
+        public delegate* unmanaged[Cdecl]<void*, uint, uint, int> PortReuseBuffer;
+        public delegate* unmanaged[Cdecl]<void*, int> Process;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaDeviceMethods
+    {
+        public uint Version;
+        public delegate* unmanaged[Cdecl]<void*, SpaHook*, SpaDeviceEvents*, void*, int> AddListener;
+        public delegate* unmanaged[Cdecl]<void*, int, int> Sync;
+        public delegate* unmanaged[Cdecl]<void*, int, uint, uint, uint, SpaPod*, int> EnumParams;
+        public delegate* unmanaged[Cdecl]<void*, uint, uint, SpaPod*, int> SetParam;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaParamInfo
+    {
+        public uint Id;
+        public uint Flags;
+        public uint User;
+        public int Seq;
+        public uint Padding0;
+        public uint Padding1;
+        public uint Padding2;
+        public uint Padding3;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaNodeInfo
+    {
+        public uint MaxInputPorts;
+        public uint MaxOutputPorts;
+        public ulong ChangeMask;
+        public ulong Flags;
+        public IntPtr Props;
+        public SpaParamInfo* Params;
+        public uint ParamCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaDeviceInfo
+    {
+        public uint Version;
+        public ulong ChangeMask;
+        public ulong Flags;
+        public IntPtr Props;
+        public SpaParamInfo* Params;
+        public uint ParamCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaDeviceObjectInfo
+    {
+        public uint Version;
+        public IntPtr Type;
+        public IntPtr FactoryName;
+        public ulong ChangeMask;
+        public ulong Flags;
+        public IntPtr Props;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaPortInfo
+    {
+        public ulong ChangeMask;
+        public ulong Flags;
+        public SpaFraction Rate;
+        public IntPtr Props;
+        public SpaParamInfo* Params;
+        public uint ParamCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaResultNodeParams
+    {
+        public uint Id;
+        public uint Index;
+        public uint Next;
+        public SpaPod* Param;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaMeta
+    {
+        public uint Type;
+        public uint Size;
+        public void* Data;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaChunk
+    {
+        public uint Offset;
+        public uint Size;
+        public int Stride;
+        public int Flags;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -258,11 +433,56 @@ internal static unsafe partial class PipeWireNative
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct SpaChunk
+    internal struct SpaBuffer
     {
+        public uint MetaCount;
+        public uint DataCount;
+        public SpaMeta* Metas;
+        public SpaData* Datas;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaMetaHeader
+    {
+        public uint Flags;
         public uint Offset;
-        public uint Size;
-        public int Stride;
-        public int Flags;
+        public long Pts;
+        public long DtsOffset;
+        public ulong Seq;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SpaIoBuffers
+    {
+        public int Status;
+        public uint BufferId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PwCoreEvents
+    {
+        public uint Version;
+        public IntPtr Info;
+        public delegate* unmanaged[Cdecl]<void*, uint, int, void> Done;
+        public IntPtr Ping;
+        public delegate* unmanaged[Cdecl]<void*, uint, int, int, byte*, void> Error;
+        public IntPtr RemoveId;
+        public IntPtr BoundId;
+        public IntPtr AddMem;
+        public IntPtr RemoveMem;
+        public IntPtr BoundProps;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PwStreamControl
+    {
+        public IntPtr Name;
+        public uint Flags;
+        public float Default;
+        public float Min;
+        public float Max;
+        public float* Values;
+        public uint NValues;
+        public uint MaxValues;
     }
 }

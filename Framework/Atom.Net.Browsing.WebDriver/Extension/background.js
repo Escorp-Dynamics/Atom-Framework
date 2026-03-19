@@ -101,25 +101,40 @@ function arrayBufferToBase64(buffer) {
     return btoa(binary);
 }
 
+/**
+ * Кодирует строку в UTF-8 base64.
+ * @param {string} value
+ * @returns {string}
+ */
+function stringToBase64(value) {
+    return arrayBufferToBase64(new TextEncoder().encode(value).buffer);
+}
 
-// ─── Утилита: выполнение кода в MAIN world ────────────────────
+
+// ─── Утилита: выполнение кода в указанном world ───────────────
 
 /**
- * Выполняет JS-код в контексте MAIN world страницы.
- * MV3: chrome.scripting.executeScript с world: "MAIN".
+ * Выполняет JS-код в контексте указанного world страницы.
+ * MV3: chrome.scripting.executeScript с явным world.
  * MV2: chrome.tabs.executeScript → <script> tag + DOM bridge.
  * CSP-заголовки снимаются в onHeadersReceived для корректной работы MV2.
  * @param {number} tabId
  * @param {string} code — JS-код для выполнения
  * @param {boolean} [allFrames=false]
+ * @param {"MAIN"|"ISOLATED"} [world="MAIN"]
+ * @param {number | null} [frameId=null]
  * @returns {Promise<Array<{s: string, v: string}>>}
  */
-function evalInMainWorld(tabId, code, allFrames) {
+function evalInWorld(tabId, code, allFrames, world = "MAIN", frameId = null) {
     if (browser.scripting?.executeScript) {
-        // MV3: нативный MAIN world.
+        // MV3: нативный executeScript в нужном world.
+        const target = typeof frameId === "number"
+            ? { tabId, frameIds: [frameId] }
+            : (allFrames ? { tabId, allFrames: true } : { tabId });
+
         return browser.scripting.executeScript({
-            target: allFrames ? { tabId, allFrames: true } : { tabId },
-            world: "MAIN",
+            target,
+            world,
             func: async (c) => {
                 try {
                     let r = (0, eval)(c);
@@ -166,7 +181,14 @@ function evalInMainWorld(tabId, code, allFrames) {
         'el.remove();return{s:"err",v:"MAIN world injection blocked (CSP?)"}' +
         '})(' + JSON.stringify(code) + ')';
 
-    return browser.tabs.executeScript(tabId, { code: wrapper, allFrames: !!allFrames })
+    const executeOptions = { code: wrapper };
+    if (typeof frameId === "number") {
+        executeOptions.frameId = frameId;
+    } else {
+        executeOptions.allFrames = !!allFrames;
+    }
+
+    return browser.tabs.executeScript(tabId, executeOptions)
         .then(results => {
             const r = (results || [])[0];
             if (r?.s !== "async") return results || [];
@@ -182,6 +204,7 @@ function evalInMainWorld(tabId, code, allFrames) {
                             'if(!e)return null;var j=e.getAttribute("data-r");' +
                             'if(!j)return null;e.remove();' +
                             'try{return JSON.parse(j)}catch(x){return{s:"err",v:"Bridge parse error"}}})()',
+                        ...(typeof frameId === "number" ? { frameId } : {}),
                     }).then(res => {
                         if (done) return;
                         const pr = (res || [])[0];
@@ -199,11 +222,93 @@ function evalInMainWorld(tabId, code, allFrames) {
                     done = true;
                     browser.tabs.executeScript(tabId, {
                         code: '(function(){var e=document.getElementById("' + elId + '");if(e)e.remove()})()',
+                        ...(typeof frameId === "number" ? { frameId } : {}),
                     }).catch(() => { });
                     resolve([{ s: "err", v: "Async eval timeout (30s)" }]);
                 }, 30000);
             });
         });
+}
+
+async function executeScriptInFramesWithMetadata(tabId, code, world) {
+    const frameInfos = await getAllFramesForTab(tabId).catch(() => null);
+
+    if (!Array.isArray(frameInfos) || frameInfos.length === 0) {
+        const results = await evalInWorld(tabId, code, true, world);
+        return (results ?? []).map((result, index) => ({
+            ordinal: index,
+            status: result?.s || "err",
+            value: result?.s === "ok" ? result.v : null,
+            error: result?.s === "ok" ? null : (result?.v || "Script execution failed."),
+        }));
+    }
+
+    return Promise.all(frameInfos.map(async (frameInfo, index) => {
+        try {
+            const result = await evalInWorld(tabId, code, false, world, frameInfo.frameId);
+            const first = Array.isArray(result) ? result[0] : result;
+            return {
+                ordinal: index,
+                frameId: frameInfo.frameId,
+                parentFrameId: frameInfo.parentFrameId,
+                url: frameInfo.url || "",
+                errorOccurred: frameInfo.errorOccurred || false,
+                status: first?.s || "err",
+                value: first?.s === "ok" ? first.v : null,
+                error: first?.s === "ok" ? null : (first?.v || "Script execution failed."),
+            };
+        } catch (error) {
+            return {
+                ordinal: index,
+                frameId: frameInfo.frameId,
+                parentFrameId: frameInfo.parentFrameId,
+                url: frameInfo.url || "",
+                errorOccurred: frameInfo.errorOccurred || false,
+                status: "err",
+                value: null,
+                error: error?.message || String(error),
+            };
+        }
+    }));
+}
+
+function getAllFramesForTab(tabId) {
+    return new Promise((resolve, reject) => {
+        if (!browser.webNavigation?.getAllFrames) {
+            resolve(null);
+            return;
+        }
+
+        let settled = false;
+        const finishResolve = (value) => {
+            if (settled) return;
+            settled = true;
+            resolve(value);
+        };
+        const finishReject = (error) => {
+            if (settled) return;
+            settled = true;
+            reject(error);
+        };
+
+        try {
+            const maybePromise = browser.webNavigation.getAllFrames({ tabId }, (frames) => {
+                const lastError = browser.runtime?.lastError;
+                if (lastError) {
+                    finishReject(new Error(lastError.message));
+                    return;
+                }
+
+                finishResolve(frames || []);
+            });
+
+            if (maybePromise && typeof maybePromise.then === "function") {
+                maybePromise.then(finishResolve).catch(finishReject);
+            }
+        } catch (error) {
+            finishReject(error);
+        }
+    });
 }
 
 
@@ -291,14 +396,17 @@ function injectContentScript(tabId) {
  * Ожидает появления порта для вкладки (content.js подключился).
  * @param {number} tabId
  * @param {number} timeoutMs — максимальное время ожидания в мс.
+ * @param {browser.runtime.Port | undefined} [previousPort] — если задан, ожидание завершится только после появления нового порта.
  * @returns {Promise<void>}
  */
-function waitForPort(tabId, timeoutMs) {
-    if (tabPorts.has(tabId)) return Promise.resolve();
+function waitForPort(tabId, timeoutMs, previousPort) {
+    const currentPort = tabPorts.get(tabId);
+    if (currentPort && (!previousPort || currentPort !== previousPort)) return Promise.resolve();
     return new Promise((resolve) => {
         const start = Date.now();
         const check = () => {
-            if (tabPorts.has(tabId)) { resolve(); return; }
+            const nextPort = tabPorts.get(tabId);
+            if (nextPort && (!previousPort || nextPort !== previousPort)) { resolve(); return; }
             if (Date.now() - start > timeoutMs) { resolve(); return; }
             setTimeout(check, 50);
         };
@@ -410,13 +518,25 @@ browser.runtime.onConnect.addListener((port) => {
         commandQueues.delete(tabId);
     }
 
+    const ctx = tabContexts.get(tabId);
+    if (ctx) {
+        port.postMessage({
+            id: `__internal_apply_ctx__${Date.now()}`,
+            command: "ApplyContext",
+            payload: buildApplyContextPayload(ctx, ctx.contextId || `ctx_${tabId}`),
+        });
+    }
+
     port.onMessage.addListener((msg) => {
         if (msg.action === "response") {
+            if (typeof msg.id === "string" && msg.id.startsWith("__internal_apply_ctx__")) {
+                return;
+            }
             forwardResponseToBridge(tabId, msg.id, msg.status, msg.payload, msg.error);
         } else if (msg.action === "event") {
             sendEvent(tabId, msg.event, msg.data);
         } else if (msg.action === "executeInMain") {
-            evalInMainWorld(tabId, msg.script).then((results) => {
+            evalInWorld(tabId, msg.script).then((results) => {
                 const r = results?.[0];
                 port.postMessage({
                     action: "mainWorldResult",
@@ -499,10 +619,10 @@ function connectTab(tabId) {
  */
 function disconnectTab(tabId) {
     const ws = tabSockets.get(tabId);
-    if (!ws) return;
 
     tabSockets.delete(tabId);
     tabCompositeIds.delete(tabId);
+    interceptEnabled.delete(tabId);
     interceptPatterns.delete(tabId);
 
     // Очистка контекста изоляции.
@@ -514,7 +634,7 @@ function disconnectTab(tabId) {
         tabContexts.delete(tabId);
     }
 
-    if (ws.readyState === WebSocket.OPEN) {
+    if (ws?.readyState === WebSocket.OPEN) {
         ws.close(1000, "Вкладка закрыта.");
     }
 }
@@ -805,7 +925,12 @@ function handleExecuteScript(senderTabId, message) {
         return;
     }
 
-    evalInMainWorld(senderTabId, script).then((results) => {
+    if (message.payload?.shadowHostElementId) {
+        queueCommand(senderTabId, message.id, "ExecuteScript", message.payload);
+        return;
+    }
+
+    evalInWorld(senderTabId, script).then((results) => {
         const r = results?.[0];
         if (r?.s === "ok") sendResponse(senderTabId, message.id, "Ok", r.v);
         else sendResponse(senderTabId, message.id, "Error", null, r?.v || "Script execution failed.");
@@ -822,12 +947,24 @@ function handleExecuteScript(senderTabId, message) {
  */
 function handleExecuteScriptInFrames(senderTabId, message) {
     const script = message.payload?.script;
+    const world = message.payload?.world === "ISOLATED" ? "ISOLATED" : "MAIN";
+    const includeMetadata = message.payload?.includeMetadata === true;
+    const frameId = Number.isInteger(message.payload?.frameId) ? message.payload.frameId : null;
     if (!script) {
         sendResponse(senderTabId, message.id, "Error", null, "script не указан.");
         return;
     }
 
-    evalInMainWorld(senderTabId, script, true).then((results) => {
+    if (includeMetadata) {
+        executeScriptInFramesWithMetadata(senderTabId, script, world).then((results) => {
+            sendResponse(senderTabId, message.id, "Ok", results);
+        }).catch((err) => {
+            sendResponse(senderTabId, message.id, "Error", null, err.message);
+        });
+        return;
+    }
+
+    evalInWorld(senderTabId, script, frameId === null, world, frameId).then((results) => {
         const values = (results ?? []).map((r) =>
             r?.s === "ok" ? r.v : { __error: r?.v || "Script execution failed." }
         );
@@ -845,6 +982,7 @@ function handleExecuteScriptInFrames(senderTabId, message) {
 function handleNavigate(senderTabId, message) {
     const url = message.payload?.url;
     const bodyFulfillUrl = message.payload?.bodyFulfillUrl;
+    const previousPort = tabPorts.get(senderTabId);
     if (!url) {
         sendResponse(senderTabId, message.id, "Error", null, "url не указан.");
         return;
@@ -866,7 +1004,7 @@ function handleNavigate(senderTabId, message) {
         browser.tabs.onUpdated.removeListener(onUpdated);
         // После навигации content.js уничтожается и пере-inject'ится на новой странице.
         // Ждём восстановления порта, чтобы последующие команды не попали в пустоту.
-        await waitForPort(senderTabId, 5000);
+        await waitForPort(senderTabId, 5000, previousPort);
         sendResponse(senderTabId, message.id, "Ok", null);
     };
 
@@ -1118,7 +1256,13 @@ function handleSetTabContext(tabId, message) {
     }
 
     // Отправляем настройки контекста в content.js для MAIN world инъекции.
-    queueCommand(tabId, message.id + "_ctx", "ApplyContext", {
+    queueCommand(tabId, message.id + "_ctx", "ApplyContext", buildApplyContextPayload(settings, contextId));
+
+    sendResponse(tabId, message.id, "Ok", null);
+}
+
+function buildApplyContextPayload(settings, contextId) {
+    return {
         contextId,
         userAgent: settings.userAgent || null,
         locale: settings.locale || null,
@@ -1132,14 +1276,15 @@ function handleSetTabContext(tabId, message) {
         geolocation: settings.geolocation || null,
         allowedFonts: settings.allowedFonts || null,
         audioNoise: settings.audioNoise ?? false,
-        hardwareConcurrency: settings.hardwareConcurrency || null,
-        deviceMemory: settings.deviceMemory || null,
+        hardwareConcurrency: settings.hardwareConcurrency ?? null,
+        deviceMemory: settings.deviceMemory ?? null,
         batteryProtection: settings.batteryProtection ?? false,
         permissionsProtection: settings.permissionsProtection ?? false,
         clientHints: settings.clientHints || null,
         networkInfo: settings.networkInfo || null,
         speechVoices: settings.speechVoices || null,
         mediaDevicesProtection: settings.mediaDevicesProtection ?? false,
+        virtualMediaDevices: settings.virtualMediaDevices || null,
         webglParams: settings.webglParams || null,
         doNotTrack: settings.doNotTrack ?? null,
         globalPrivacyControl: settings.globalPrivacyControl ?? null,
@@ -1231,9 +1376,7 @@ function handleSetTabContext(tabId, message) {
         webCodecsProtection: settings.webCodecsProtection ?? false,
         navigationApiProtection: settings.navigationApiProtection ?? false,
         screenCaptureProtection: settings.screenCaptureProtection ?? false,
-    });
-
-    sendResponse(tabId, message.id, "Ok", null);
+    };
 }
 
 /**
@@ -1510,7 +1653,14 @@ if (browser.webRequest?.onBeforeRequest) {
                 const response = JSON.parse(xhr.responseText);
 
                 if (response.action === "abort") return { cancel: true };
-                if (response.action === "fulfill") return { redirectUrl: response.url };
+                if (response.action === "fulfill") {
+                    if (details.type === "main_frame" && response.url) {
+                        pendingBodyOverrides.set(details.tabId, response.url);
+                        bodyOverrideScriptBlock.add(details.tabId);
+                        return {};
+                    }
+                    return { redirectUrl: response.url };
+                }
                 if (response.action === "continue") {
                     if (response.headers) {
                         pendingHeaderOverrides.set(String(details.requestId), response.headers);

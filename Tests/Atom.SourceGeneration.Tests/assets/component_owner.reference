@@ -20,6 +20,7 @@ public partial class TestFactory : IComponentOwner<TestFactory>
 
     void OnComponentDetached(object? sender, ComponentEventArgs args)
     {
+        if (sender is IComponent component) component.Detached -= OnComponentDetached;
         if (args.Component is not null) components.Remove(args.Component);
     }
 
@@ -33,7 +34,7 @@ public partial class TestFactory : IComponentOwner<TestFactory>
     public bool TryGet<T>(out T? component) where T : IComponent
     {
         component = (T?)components.FirstOrDefault(x => x is T);
-        return components is null;
+        return component is not null;
     }
 
     /// <inheritdoc/>
@@ -62,6 +63,7 @@ public partial class TestFactory : IComponentOwner<TestFactory>
 
         component.Detached += OnComponentDetached;
         component.AttachTo(this);
+        components.Add(component);
 
         return this;
     }
@@ -101,5 +103,5 @@ public partial class TestFactory : IComponentOwner<TestFactory>
     }
 
     /// <inheritdoc/>
-    public bool IsSupported<T>() where T : IComponent => typeof(T).FullName is "Atom.Tests.Component1" or "Atom.Tests.Component2";
+    public bool IsSupported<T>() where T : IComponent => typeof(Atom.Tests.ITestComponent).IsAssignableFrom(typeof(T));
 }

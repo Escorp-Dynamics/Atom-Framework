@@ -1,9 +1,13 @@
-﻿using System.Diagnostics;
+﻿﻿﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Atom;
+using Atom.Media;
 using Atom.Net.Browsing;
 using Atom.Net.Browsing.WebDriver;
+using Atom.Net.Browsing.WebDriver.Protocol;
 
 namespace Tests;
 
@@ -252,7 +256,100 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             Assert.That(threw, Is.True, "Несуществующая функция должна бросить BridgeException.");
         }
 
-        [TestCase(TestName = "Edge-cases: пустой скрипт, undefined, null, типы"), Order(6)]
+        [TestCase(TestName = "ClickElementAsync выполняет page-local click по selector"), Order(6)]
+        public async Task ClickElementApiTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '<button id="api-button">Click</button>';
+                document.documentElement.dataset.elementClickCount = '0';
+                document.getElementById('api-button').addEventListener('click', () => {
+                    document.documentElement.dataset.elementClickCount = String(Number(document.documentElement.dataset.elementClickCount || '0') + 1);
+                });
+            """);
+
+            await page.ClickElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#api-button",
+            });
+
+            var clickCount = (await page.ExecuteAsync("document.documentElement.dataset.elementClickCount"))?.ToString();
+            Assert.That(clickCount, Is.EqualTo("1"), "Selector-based page click должен диспатчить element-oriented click.");
+        }
+
+        [TestCase(TestName = "FocusElementAsync устанавливает фокус по selector"), Order(7)]
+        public async Task FocusElementApiTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '<input id="focus-target" />';
+            """);
+
+            await page.FocusElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Id,
+                Value = "focus-target",
+            });
+
+            var activeId = (await page.ExecuteAsync("document.activeElement?.id || ''"))?.ToString();
+            Assert.That(activeId, Is.EqualTo("focus-target"), "Selector-based focus должен устанавливать activeElement.");
+        }
+
+        [TestCase(TestName = "TypeElementAsync вводит текст по selector"), Order(8)]
+        public async Task TypeElementApiTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '<input id="type-target" />';
+            """);
+
+            await page.TypeElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Id,
+                Value = "type-target",
+            }, "hello");
+
+            var value = (await page.ExecuteAsync("document.getElementById('type-target')?.value || ''"))?.ToString();
+            Assert.That(value, Is.EqualTo("hello"), "Selector-based type должен обновлять value у input-элемента.");
+        }
+
+        [TestCase(TestName = "CheckElementAsync отмечает checkbox по selector"), Order(9)]
+        public async Task CheckElementApiTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '<input id="check-target" type="checkbox" />';
+            """);
+
+            await page.CheckElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Id,
+                Value = "check-target",
+            });
+
+            var isChecked = (await page.ExecuteAsync("document.getElementById('check-target')?.checked ? 'true' : 'false'"))?.ToString();
+            Assert.That(isChecked, Is.EqualTo("true"), "Selector-based check должен переводить checkbox в checked state.");
+        }
+
+        [TestCase(TestName = "HoverElementAsync диспатчит hover по selector"), Order(10)]
+        public async Task HoverElementApiTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '<div id="hover-target" style="width:120px;height:40px"></div>';
+                document.documentElement.dataset.hoverCount = '0';
+                document.getElementById('hover-target').addEventListener('mouseover', () => {
+                    document.documentElement.dataset.hoverCount = String(Number(document.documentElement.dataset.hoverCount || '0') + 1);
+                });
+            """);
+
+            await page.HoverElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Id,
+                Value = "hover-target",
+            });
+
+            var hoverCount = (await page.ExecuteAsync("document.documentElement.dataset.hoverCount || '0'"))?.ToString();
+            Assert.That(hoverCount, Is.EqualTo("1"), "Selector-based hover должен диспатчить mouseover по элементу.");
+        }
+
+        [TestCase(TestName = "Edge-cases: пустой скрипт, undefined, null, типы"), Order(11)]
         public async Task ScriptEdgeCasesTest()
         {
             // Пустая строка — eval('') возвращает undefined → пустая строка.
@@ -876,6 +973,30 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             Assert.That(shadow, Is.Null, "Элемент без shadow root → null.");
         }
 
+        [TestCase(TestName = "ShadowRoot: OpenShadowRootAsync на closed shadow root → null"), Order(2)]
+        public async Task OpenShadowRootClosedShadowReturnsNullTest()
+        {
+            await page.ExecuteAsync("""
+                document.body.innerHTML = '';
+                var host = document.createElement('div');
+                host.id = 'sr-closed';
+                document.body.appendChild(host);
+                host.attachShadow({mode: 'closed'}).innerHTML = '<p>Closed</p>';
+            """);
+
+            var host = await page.FindElementAsync(new ElementSelector
+            {
+                Strategy = ElementSelectorStrategy.Css,
+                Value = "#sr-closed",
+            });
+
+            Assert.That(host, Is.Not.Null);
+
+            var shadow = await host!.OpenShadowRootAsync();
+
+            Assert.That(shadow, Is.Null, "Closed shadow root не должен открываться без page-side инжекта и обходов.");
+        }
+
         [TestCase(TestName = "ShadowRoot: FindElementAsync в теневом дереве"), Order(3)]
         public async Task FindElementInsideShadowTest()
         {
@@ -1263,6 +1384,7 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             await page.SetRequestInterceptionAsync(true);
 
             const string customBody = "<html><body><h1 id='fulfill-marker'>Intercepted!</h1></body></html>";
+            var url = new Uri("https://httpbin.org/html");
             AsyncEventHandler<WebDriverPage, InterceptedRequestEventArgs> handler = (_, e) =>
             {
                 if (e.ResourceType == "main_frame")
@@ -1285,12 +1407,13 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
 
             try
             {
-                var url = new Uri("https://example.com/fulfill-test");
                 await page.NavigateAsync(url);
                 await Task.Delay(500);
 
                 var content = await page.GetContentAsync();
+                var currentUrl = await page.GetUrlAsync();
                 Assert.That(content, Does.Contain("Intercepted!"), "Ответ подменён кастомным HTML.");
+                Assert.That(currentUrl, Is.EqualTo(url), "Навигация должна сохранить исходный URL при fulfill main_frame.");
             }
             finally
             {
@@ -1431,11 +1554,12 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             await page.SetRequestInterceptionAsync(true);
 
             const string fulfillBody = "<html><body><h1 id='redirected'>Redirected!</h1></body></html>";
+            var redirectedUrl = new Uri("https://httpbin.org/anything/redirected-page");
             AsyncEventHandler<WebDriverPage, InterceptedRequestEventArgs> handler = (_, e) =>
             {
                 if (e.ResourceType == "main_frame" && e.Url.Contains("original-page"))
                 {
-                    e.Redirect(new Uri("https://example.com/redirected-page"));
+                    e.Redirect(redirectedUrl);
                 }
                 else if (e.ResourceType == "main_frame" && e.Url.Contains("redirected-page"))
                 {
@@ -1456,13 +1580,16 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
 
             try
             {
-                var url = new Uri("https://example.com/original-page");
+                var url = new Uri("https://httpbin.org/anything/original-page");
                 await page.NavigateAsync(url);
                 await Task.Delay(500);
 
                 var content = await page.GetContentAsync();
+                var currentUrl = await page.GetUrlAsync();
                 Assert.That(content, Does.Contain("Redirected!"),
                     "Redirect перенаправил запрос, и подменённый ответ отображён.");
+                Assert.That(currentUrl, Is.EqualTo(redirectedUrl),
+                    "После redirect навигация должна остаться на конечном URL.");
             }
             finally
             {
@@ -1529,10 +1656,13 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             await Task.Delay(500);
 
             var result = await page.ExecuteAsync("document.getElementById('marker')?.textContent ?? 'not-found'");
+            var currentUrl = await page.GetUrlAsync();
             var text = result?.GetString();
 
             Assert.That(text, Is.EqualTo("BODY_OVERRIDE_OK"),
                 "Страница должна содержать подставленный HTML, а не ответ сервера.");
+            Assert.That(currentUrl, Is.EqualTo(url),
+                "Body override должен сохранять адрес навигации.");
             logger.WriteLine(LogKind.Default, $"BodyOverride: marker text = {text}");
         }
 
@@ -1560,6 +1690,7 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             return browser.GetPage(result.TabId)
                 ?? throw new BridgeException($"Страница {result.TabId} не найдена после подключения.");
         }
+
     }
 
     /// <summary>
@@ -4127,13 +4258,13 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             Assert.That(turnstileToken, Is.Not.Null.And.Not.Empty, "Turnstile token должен быть получен.");
         }
 
-        [TestCase(TestName = "Turnstile auto-click с isTrusted spoofing"), Order(59)]
-        public async Task TurnstileInteractiveAutoClickTest()
+        [TestCase(TestName = "Turnstile checkbox click в iframe даёт verification token"), Order(59)]
+        public async Task TurnstileCheckboxClickInFrameTest()
         {
             var tab = await browser.OpenIsolatedTabAsync();
 
-            // Тестовый ключ 3x — принудительный интерактивный challenge.
-            // shadow-intercept.js авто-кликает мгновенно при регистрации CF обработчиков.
+            // Тестовый visible-сайткей Cloudflare. Клик по чекбоксу должен привести
+            // к появлению verification token без legacy auto-click инъекций.
             const string turnstileHtml = """
                 <!DOCTYPE html>
                 <html>
@@ -4142,7 +4273,7 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
                     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
                 </head>
                 <body>
-                    <div class="cf-turnstile" data-sitekey="3x00000000000000000000FF"></div>
+                    <div class="cf-turnstile" data-sitekey="1x00000000000000000000AA"></div>
                 </body>
                 </html>
                 """;
@@ -4150,7 +4281,12 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             var targetUrl = new Uri($"http://127.0.0.1:{browser.BridgePort}/blank?ts=1");
             await tab.NavigateAsync(targetUrl, new NavigationSettings { Body = turnstileHtml });
 
-            // shadow-intercept.js сам кликает — просто ждём токен.
+            var initialDiagnostics = await CaptureTurnstileFrameDiagnosticsAsync(tab);
+            logger.WriteLine(LogKind.Default, $"turnstile initial diagnostics={initialDiagnostics}");
+
+            var clickResult = await ClickTurnstileCheckboxInFramesAsync(tab, TimeSpan.FromSeconds(20));
+            logger.WriteLine(LogKind.Default, $"turnstile checkbox click result={clickResult}");
+
             using var tokenCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             string? turnstileToken = null;
 
@@ -4171,18 +4307,24 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             }
 
             logger.WriteLine(LogKind.Default, $"turnstile token={turnstileToken?[..Math.Min(turnstileToken?.Length ?? 0, 40)]}");
-            Assert.That(turnstileToken, Is.Not.Null.And.Not.Empty, "Turnstile token должен быть получен (auto-click через isTrusted Proxy).");
+            Assert.That(turnstileToken, Is.Not.Null.And.Not.Empty, $"Turnstile token должен быть получен после явного checkbox click. click={clickResult}, diagnostics={initialDiagnostics}");
         }
 
-        [TestCase(TestName = "Turnstile через body override на внешнем HTTPS-домене"), Order(60)]
+        [TestCase(TestName = "Turnstile real-site key через body override на внешнем HTTPS-домене"), Order(60)]
+        [Explicit("Manual exploratory scenario: real Turnstile sitekey does not produce a deterministic verification token in automated runs. Use the external HTTPS test-sitekey test for stable interception coverage.")]
         public async Task TurnstileRealSitekeyTest()
         {
-            var tab = await browser.OpenIsolatedTabAsync();
+            await using var turnstileBrowser = await LaunchTurnstileBrowserAsync();
+            var tab = await turnstileBrowser.OpenIsolatedTabAsync(settings: CreateTurnstileRealSiteContextSettings());
+            var preNavigationFingerprint = await WaitForFingerprintSnapshotAsync(
+                tab,
+                snapshot => ReadFingerprintNumber(snapshot, "hardwareConcurrency") == 8
+                    && ReadFingerprintNumber(snapshot, "deviceMemory") == 8,
+                TimeSpan.FromSeconds(3));
 
             // Подменяем содержимое страницы visa.vfsglobal.com на наш HTML с Turnstile.
             var replaceHtml = await File.ReadAllTextAsync(
                 Path.Combine(TestContext.CurrentContext.TestDirectory, "assets", "replace.html"));
-
             var targetUrl = new Uri("https://visa.vfsglobal.com/ind/en/pol/login");
             await tab.NavigateAsync(targetUrl, new NavigationSettings { Body = replaceHtml });
 
@@ -4196,6 +4338,13 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
             // Title из подменённого HTML.
             var title = (await tab.ExecuteAsync("document.title"))?.ToString();
             Assert.That(title, Is.EqualTo("Turnstile Zero"), "Body override должен заменить документ.");
+
+            var postOverrideFingerprint = await CaptureFingerprintSnapshotAsync(tab);
+            var fingerprintDiff = DescribeFingerprintDelta(preNavigationFingerprint, postOverrideFingerprint);
+
+            logger.WriteLine(LogKind.Default, $"turnstile fingerprint before={preNavigationFingerprint}");
+            logger.WriteLine(LogKind.Default, $"turnstile fingerprint after={postOverrideFingerprint}");
+            logger.WriteLine(LogKind.Default, $"turnstile fingerprint diff={fingerprintDiff}");
 
             // Ждём появления Turnstile виджета (до 15 секунд).
             using var widgetCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -4218,9 +4367,133 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
 
             Assert.That(sitekey, Is.Not.Null.And.Not.Empty, "На странице должен быть Turnstile виджет с data-sitekey.");
 
+            var initialWidgetState = await WaitForTurnstileWidgetStateAsync(
+                tab,
+                state => state?["hasApi"]?.GetValue<bool>() == true
+                    && state?["widgetId"] is not null
+                    && string.Equals(state?["renderReady"]?.GetValue<string>(), "true", StringComparison.Ordinal),
+                TimeSpan.FromSeconds(15));
+            string? executeResult = null;
+
+            var initialFrameMapping = await CaptureTurnstileFrameMappingAsync(tab);
+            var initialDiagnostics = await CaptureTurnstileFrameDiagnosticsAsync(tab);
+            var initialIsolatedDiagnostics = await CaptureTurnstileFrameDiagnosticsAsync(tab, isolatedWorld: true);
+            var initialScreenshotProbe = await CaptureTurnstileScreenshotProbeAsync(tab, initialDiagnostics).ConfigureAwait(false);
+            var initialFrameMappingSummary = CompactDiagnosticValue(initialFrameMapping);
+            var initialDiagnosticsSummary = CompactDiagnosticValue(initialDiagnostics);
+            var initialIsolatedDiagnosticsSummary = CompactDiagnosticValue(initialIsolatedDiagnostics);
+            var initialScreenshotProbeSummary = CompactDiagnosticValue(initialScreenshotProbe);
+            logger.WriteLine(LogKind.Default, $"turnstile real-site widget state before click={initialWidgetState}");
+            logger.WriteLine(LogKind.Default, $"turnstile real-site execute result={executeResult}");
+            logger.WriteLine(LogKind.Default, $"turnstile real-site input capabilities={tab.InputCapabilities}");
+            logger.WriteLine(LogKind.Default, $"turnstile real-site initial frame mapping={initialFrameMappingSummary}");
+            logger.WriteLine(LogKind.Default, $"turnstile real-site initial diagnostics={initialDiagnosticsSummary}");
+            logger.WriteLine(LogKind.Default, $"turnstile real-site initial isolated diagnostics={initialIsolatedDiagnosticsSummary}");
+            logger.WriteLine(LogKind.Default, $"turnstile real-site initial screenshot probe={initialScreenshotProbeSummary}");
+
+            string? clickResult = null;
+
+            var topPageOverlayClick = await ClickTurnstileOverlayFromTopPageAsync(tab, PagePointClickOptions.PreferParallel, CancellationToken.None).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(topPageOverlayClick))
+                logger.WriteLine(LogKind.Default, $"turnstile real-site top-page overlay click={topPageOverlayClick}");
+
+            if (string.IsNullOrWhiteSpace(topPageOverlayClick))
+            {
+                var topPageHostClick = await ClickTurnstileHostFromTopPageAsync(tab, PagePointClickOptions.PreferParallel, CancellationToken.None).ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(topPageHostClick))
+                    logger.WriteLine(LogKind.Default, $"turnstile real-site top-page host click={topPageHostClick}");
+            }
+
+            clickResult = topPageOverlayClick;
+            logger.WriteLine(LogKind.Default, $"turnstile real-site click result={clickResult}");
+
+            var preTargetedFrameMapping = await CaptureTurnstileFrameMappingAsync(tab);
+            var challengeFrameId = FindChallengeFrameId(preTargetedFrameMapping);
+            string? challengeFrameMainProbeBefore = null;
+            string? challengeFrameIsolatedProbeBefore = null;
+            string? challengeFrameResourceProbeBefore = null;
+            string? challengeFrameTrustProbeBefore = null;
+            string? challengeFrameDirectClick = null;
+            string? challengeFrameTrustProbeAfterDirectClick = null;
+            string? challengeFrameActivationKeys = null;
+            string? challengeFrameTrustProbeAfterActivationKeys = null;
+            string? challengeFrameMainProbeAfter = null;
+            string? challengeFrameIsolatedProbeAfter = null;
+            string? challengeFrameResourceProbeAfter = null;
+            string? challengeFrameLifecycleTrace = null;
+            string challengeFrameMainProbeBeforeSummary = "<not-captured>";
+            string challengeFrameIsolatedProbeBeforeSummary = "<not-captured>";
+            string challengeFrameResourceProbeBeforeSummary = "<not-captured>";
+            string challengeFrameTrustProbeBeforeSummary = "<not-captured>";
+            string challengeFrameDirectClickSummary = "<not-captured>";
+            string challengeFrameTrustProbeAfterDirectClickSummary = "<not-captured>";
+            string challengeFrameActivationKeysSummary = "<not-captured>";
+            string challengeFrameTrustProbeAfterActivationKeysSummary = "<not-captured>";
+            string challengeFrameMainProbeAfterSummary = "<not-captured>";
+            string challengeFrameIsolatedProbeAfterSummary = "<not-captured>";
+            string challengeFrameResourceProbeAfterSummary = "<not-captured>";
+            string challengeFrameLifecycleTraceSummary = "<not-captured>";
+
+            logger.WriteLine(LogKind.Default, $"turnstile real-site pre-targeted frame mapping={preTargetedFrameMapping}");
+            logger.WriteLine(LogKind.Default, $"turnstile real-site challenge frame id={challengeFrameId}");
+
+            if (challengeFrameId is int frameId)
+            {
+                challengeFrameMainProbeBefore = await CaptureChallengeFrameProbeAsync(tab, frameId, isolatedWorld: false).ConfigureAwait(false);
+                challengeFrameIsolatedProbeBefore = await CaptureChallengeFrameProbeAsync(tab, frameId, isolatedWorld: true).ConfigureAwait(false);
+                challengeFrameResourceProbeBefore = await CaptureChallengeFrameResourceProbeAsync(tab, frameId, isolatedWorld: false).ConfigureAwait(false);
+                challengeFrameTrustProbeBefore = await CaptureChallengeFrameTrustProbeAsync(tab, frameId, isolatedWorld: false).ConfigureAwait(false);
+                challengeFrameDirectClick = await ClickChallengeFrameDirectAsync(tab, frameId, isolatedWorld: false).ConfigureAwait(false);
+                challengeFrameTrustProbeAfterDirectClick = await CaptureChallengeFrameTrustProbeAsync(tab, frameId, isolatedWorld: false).ConfigureAwait(false);
+                challengeFrameActivationKeys = await PressChallengeFrameActivationKeysAsync(tab, frameId, isolatedWorld: false).ConfigureAwait(false);
+                challengeFrameTrustProbeAfterActivationKeys = await CaptureChallengeFrameTrustProbeAsync(tab, frameId, isolatedWorld: false).ConfigureAwait(false);
+                await Task.Delay(350).ConfigureAwait(false);
+                challengeFrameMainProbeAfter = await CaptureChallengeFrameProbeAsync(tab, frameId, isolatedWorld: false).ConfigureAwait(false);
+                challengeFrameIsolatedProbeAfter = await CaptureChallengeFrameProbeAsync(tab, frameId, isolatedWorld: true).ConfigureAwait(false);
+                challengeFrameResourceProbeAfter = await CaptureChallengeFrameResourceProbeAsync(tab, frameId, isolatedWorld: false).ConfigureAwait(false);
+                challengeFrameLifecycleTrace = await CaptureChallengeFrameLifecycleTraceAsync(
+                    tab,
+                    frameId,
+                    TimeSpan.FromSeconds(3),
+                    TimeSpan.FromMilliseconds(250)).ConfigureAwait(false);
+
+                challengeFrameMainProbeBeforeSummary = CompactDiagnosticValue(challengeFrameMainProbeBefore);
+                challengeFrameIsolatedProbeBeforeSummary = CompactDiagnosticValue(challengeFrameIsolatedProbeBefore);
+                challengeFrameResourceProbeBeforeSummary = CompactDiagnosticValue(challengeFrameResourceProbeBefore);
+                challengeFrameTrustProbeBeforeSummary = SummarizeTurnstileTrustProbe(challengeFrameTrustProbeBefore);
+                challengeFrameDirectClickSummary = SummarizeChallengeFrameDirectClick(challengeFrameDirectClick);
+                challengeFrameTrustProbeAfterDirectClickSummary = SummarizeTurnstileTrustProbe(challengeFrameTrustProbeAfterDirectClick);
+                challengeFrameActivationKeysSummary = SummarizeChallengeFrameActivationKeys(challengeFrameActivationKeys);
+                challengeFrameTrustProbeAfterActivationKeysSummary = SummarizeTurnstileTrustProbe(challengeFrameTrustProbeAfterActivationKeys);
+                challengeFrameMainProbeAfterSummary = CompactDiagnosticValue(challengeFrameMainProbeAfter);
+                challengeFrameIsolatedProbeAfterSummary = CompactDiagnosticValue(challengeFrameIsolatedProbeAfter);
+                challengeFrameResourceProbeAfterSummary = CompactDiagnosticValue(challengeFrameResourceProbeAfter);
+                challengeFrameLifecycleTraceSummary = CompactDiagnosticValue(challengeFrameLifecycleTrace);
+
+                logger.WriteLine(LogKind.Default, $"turnstile real-site challenge frame main probe before={challengeFrameMainProbeBeforeSummary}");
+                logger.WriteLine(LogKind.Default, $"turnstile real-site challenge frame isolated probe before={challengeFrameIsolatedProbeBeforeSummary}");
+                logger.WriteLine(LogKind.Default, $"turnstile real-site challenge frame resource probe before={challengeFrameResourceProbeBeforeSummary}");
+                logger.WriteLine(LogKind.Default, $"turnstile real-site challenge frame trust probe before={challengeFrameTrustProbeBeforeSummary}");
+                logger.WriteLine(LogKind.Default, $"turnstile real-site challenge frame direct click={challengeFrameDirectClickSummary}");
+                logger.WriteLine(LogKind.Default, $"turnstile real-site challenge frame trust probe after direct click={challengeFrameTrustProbeAfterDirectClickSummary}");
+                logger.WriteLine(LogKind.Default, $"turnstile real-site challenge frame activation keys={challengeFrameActivationKeysSummary}");
+                logger.WriteLine(LogKind.Default, $"turnstile real-site challenge frame trust probe after activation keys={challengeFrameTrustProbeAfterActivationKeysSummary}");
+                logger.WriteLine(LogKind.Default, $"turnstile real-site challenge frame main probe after={challengeFrameMainProbeAfterSummary}");
+                logger.WriteLine(LogKind.Default, $"turnstile real-site challenge frame isolated probe after={challengeFrameIsolatedProbeAfterSummary}");
+                logger.WriteLine(LogKind.Default, $"turnstile real-site challenge frame resource probe after={challengeFrameResourceProbeAfterSummary}");
+                logger.WriteLine(LogKind.Default, $"turnstile real-site challenge frame lifecycle trace={challengeFrameLifecycleTraceSummary}");
+            }
+
             // Ожидаем Turnstile token.
             using var tokenCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             string? turnstileToken = null;
+            string? turnstileError = null;
+            string? turnstileExpired = null;
+            string? turnstileTimeout = null;
+            string? turnstileUnsupported = null;
+            string? turnstileEvents = null;
+            var fallbackAttempted = false;
+            var tokenWaitStartedAt = DateTime.UtcNow;
 
             while (!tokenCts.IsCancellationRequested)
             {
@@ -4244,17 +4517,3522 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
                     break;
                 }
 
+                turnstileError = (await tab.ExecuteAsync(
+                    "document.documentElement.dataset.tsError || ''",
+                    tokenCts.Token))?.ToString();
+                turnstileExpired = (await tab.ExecuteAsync(
+                    "document.documentElement.dataset.tsExpired || ''",
+                    tokenCts.Token))?.ToString();
+                turnstileTimeout = (await tab.ExecuteAsync(
+                    "document.documentElement.dataset.tsTimeout || ''",
+                    tokenCts.Token))?.ToString();
+                turnstileUnsupported = (await tab.ExecuteAsync(
+                    "document.documentElement.dataset.tsUnsupported || ''",
+                    tokenCts.Token))?.ToString();
+                turnstileEvents = (await tab.ExecuteAsync(
+                    "JSON.stringify(window.__tsEvents || [])",
+                    tokenCts.Token))?.ToString();
+
+                if (!string.IsNullOrEmpty(turnstileError))
+                    break;
+
+                if (!fallbackAttempted && DateTime.UtcNow - tokenWaitStartedAt >= TimeSpan.FromSeconds(4))
+                {
+                    var retryTopPageOverlayKeys = await PressTurnstileOverlayKeysFromTopPageAsync(
+                        tab,
+                        PagePointClickOptions.PreferParallel,
+                        PageKeyPressOptions.PreferParallel,
+                        tokenCts.Token).ConfigureAwait(false);
+                    if (!string.IsNullOrWhiteSpace(retryTopPageOverlayKeys))
+                        logger.WriteLine(LogKind.Default, $"turnstile real-site fallback top-page overlay keys={retryTopPageOverlayKeys}");
+
+                    fallbackAttempted = true;
+                }
+
+                try
+                {
+                    await Task.Delay(500, tokenCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+
+            var postClickFrameMapping = await CaptureTurnstileFrameMappingAsync(tab);
+            var postClickDiagnostics = await CaptureTurnstileFrameDiagnosticsAsync(tab);
+            var postClickIsolatedDiagnostics = await CaptureTurnstileFrameDiagnosticsAsync(tab, isolatedWorld: true);
+            var postClickScreenshotProbe = await CaptureTurnstileScreenshotProbeAsync(tab, postClickDiagnostics).ConfigureAwait(false);
+            var postClickWidgetState = await CaptureTurnstileWidgetStateAsync(tab);
+            var turnstileEventsSummary = CompactDiagnosticValue(turnstileEvents);
+            var postClickFrameMappingSummary = CompactDiagnosticValue(postClickFrameMapping);
+            var postClickDiagnosticsSummary = CompactDiagnosticValue(postClickDiagnostics);
+            var postClickIsolatedDiagnosticsSummary = CompactDiagnosticValue(postClickIsolatedDiagnostics);
+            var postClickScreenshotProbeSummary = CompactDiagnosticValue(postClickScreenshotProbe);
+
+            logger.WriteLine(LogKind.Default, $"turnstile token={turnstileToken?[..Math.Min(turnstileToken?.Length ?? 0, 60)]}");
+            logger.WriteLine(LogKind.Default, $"turnstile error={turnstileError}");
+            logger.WriteLine(LogKind.Default, $"turnstile expired={turnstileExpired}");
+            logger.WriteLine(LogKind.Default, $"turnstile timeout={turnstileTimeout}");
+            logger.WriteLine(LogKind.Default, $"turnstile unsupported={turnstileUnsupported}");
+            logger.WriteLine(LogKind.Default, $"turnstile events={turnstileEventsSummary}");
+            logger.WriteLine(LogKind.Default, $"turnstile real-site widget state after click={postClickWidgetState}");
+            logger.WriteLine(LogKind.Default, $"turnstile real-site post-click frame mapping={postClickFrameMappingSummary}");
+            logger.WriteLine(LogKind.Default, $"turnstile real-site post-click diagnostics={postClickDiagnosticsSummary}");
+            logger.WriteLine(LogKind.Default, $"turnstile real-site post-click isolated diagnostics={postClickIsolatedDiagnosticsSummary}");
+            logger.WriteLine(LogKind.Default, $"turnstile real-site post-click screenshot probe={postClickScreenshotProbeSummary}");
+
+            if (!string.IsNullOrEmpty(turnstileError))
+            {
+                Assert.Fail(
+                    $"Turnstile завершился error-callback. code={turnstileError}, expired={turnstileExpired}, timeout={turnstileTimeout}, unsupported={turnstileUnsupported}, events={turnstileEventsSummary}, diagnostics={initialDiagnosticsSummary}, isolatedDiagnostics={initialIsolatedDiagnosticsSummary}, initialScreenshotProbe={initialScreenshotProbeSummary}, challengeFrameId={challengeFrameId}, challengeFrameMainProbeBefore={challengeFrameMainProbeBeforeSummary}, challengeFrameIsolatedProbeBefore={challengeFrameIsolatedProbeBeforeSummary}, challengeFrameResourceProbeBefore={challengeFrameResourceProbeBeforeSummary}, challengeFrameTrustProbeBefore={challengeFrameTrustProbeBeforeSummary}, challengeFrameDirectClick={challengeFrameDirectClickSummary}, challengeFrameTrustProbeAfterDirectClick={challengeFrameTrustProbeAfterDirectClickSummary}, challengeFrameActivationKeys={challengeFrameActivationKeysSummary}, challengeFrameTrustProbeAfterActivationKeys={challengeFrameTrustProbeAfterActivationKeysSummary}, challengeFrameMainProbeAfter={challengeFrameMainProbeAfterSummary}, challengeFrameIsolatedProbeAfter={challengeFrameIsolatedProbeAfterSummary}, challengeFrameResourceProbeAfter={challengeFrameResourceProbeAfterSummary}, challengeFrameLifecycleTrace={challengeFrameLifecycleTraceSummary}, postClickDiagnostics={postClickDiagnosticsSummary}, postClickIsolatedDiagnostics={postClickIsolatedDiagnosticsSummary}, postClickScreenshotProbe={postClickScreenshotProbeSummary}, before={preNavigationFingerprint}, after={postOverrideFingerprint}, diff={fingerprintDiff}");
+            }
+
+            Assert.That(
+                turnstileToken,
+                Is.Not.Null.And.Not.Empty,
+                $"Turnstile token должен быть получен через body override после явного click. click={clickResult}, error={turnstileError}, expired={turnstileExpired}, timeout={turnstileTimeout}, unsupported={turnstileUnsupported}, events={turnstileEventsSummary}, diagnostics={initialDiagnosticsSummary}, isolatedDiagnostics={initialIsolatedDiagnosticsSummary}, initialScreenshotProbe={initialScreenshotProbeSummary}, challengeFrameId={challengeFrameId}, challengeFrameMainProbeBefore={challengeFrameMainProbeBeforeSummary}, challengeFrameIsolatedProbeBefore={challengeFrameIsolatedProbeBeforeSummary}, challengeFrameResourceProbeBefore={challengeFrameResourceProbeBeforeSummary}, challengeFrameTrustProbeBefore={challengeFrameTrustProbeBeforeSummary}, challengeFrameDirectClick={challengeFrameDirectClickSummary}, challengeFrameTrustProbeAfterDirectClick={challengeFrameTrustProbeAfterDirectClickSummary}, challengeFrameActivationKeys={challengeFrameActivationKeysSummary}, challengeFrameTrustProbeAfterActivationKeys={challengeFrameTrustProbeAfterActivationKeysSummary}, challengeFrameMainProbeAfter={challengeFrameMainProbeAfterSummary}, challengeFrameIsolatedProbeAfter={challengeFrameIsolatedProbeAfterSummary}, challengeFrameResourceProbeAfter={challengeFrameResourceProbeAfterSummary}, challengeFrameLifecycleTrace={challengeFrameLifecycleTraceSummary}, postClickDiagnostics={postClickDiagnosticsSummary}, postClickIsolatedDiagnostics={postClickIsolatedDiagnosticsSummary}, postClickScreenshotProbe={postClickScreenshotProbeSummary}, before={preNavigationFingerprint}, after={postOverrideFingerprint}, diff={fingerprintDiff}");
+        }
+
+        [TestCase(TestName = "Turnstile click на внешнем HTTPS-домене перехватывает verification result"), Order(60)]
+        public async Task TurnstileTestSitekeyOnExternalHttpsTest()
+        {
+            var tab = await browser.OpenIsolatedTabAsync(settings: new TabContextSettings
+            {
+                HardwareConcurrency = 4,
+                DeviceMemory = 8,
+            });
+
+            var replaceHtml = await File.ReadAllTextAsync(
+                Path.Combine(TestContext.CurrentContext.TestDirectory, "assets", "replace.html"));
+            replaceHtml = replaceHtml.Replace(
+                "0x4AAAAAABhlz7Ei4byodYjs",
+                "1x00000000000000000000AA",
+                StringComparison.Ordinal);
+
+            var targetUrl = new Uri("https://visa.vfsglobal.com/ind/en/pol/login");
+            await tab.NavigateAsync(targetUrl, new NavigationSettings { Body = replaceHtml });
+
+            var title = (await tab.ExecuteAsync("document.title"))?.ToString();
+            Assert.That(title, Is.EqualTo("Turnstile Zero"), "Body override должен заменить документ.");
+
+            var initialDiagnostics = await CaptureTurnstileFrameDiagnosticsAsync(tab);
+            var executeResult = await ExecuteTurnstileWidgetAsync(tab, CancellationToken.None);
+            logger.WriteLine(LogKind.Default, $"turnstile test-sitekey initial diagnostics={initialDiagnostics}");
+            logger.WriteLine(LogKind.Default, $"turnstile test-sitekey execute result={executeResult}");
+
+            var clickResult = await ClickTurnstileCheckboxInFramesAsync(tab, TimeSpan.FromSeconds(20));
+            logger.WriteLine(LogKind.Default, $"turnstile test-sitekey click result={clickResult}");
+
+            using var tokenCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            string? turnstileToken = null;
+            string? turnstileError = null;
+            string? turnstileEvents = null;
+            string? turnstileResponseInput = null;
+
+            while (!tokenCts.IsCancellationRequested)
+            {
+                var token = (await tab.ExecuteAsync(
+                    "document.querySelector('[name=\"cf-turnstile-response\"]')?.value || document.documentElement.dataset.tsToken || document.documentElement.dataset.tsResponseInput || ''",
+                    tokenCts.Token))?.ToString();
+
+                if (!string.IsNullOrEmpty(token))
+                {
+                    turnstileToken = token;
+                    break;
+                }
+
+                turnstileResponseInput = (await tab.ExecuteAsync(
+                    "document.documentElement.dataset.tsResponseInput || ''",
+                    tokenCts.Token))?.ToString();
+                turnstileError = (await tab.ExecuteAsync(
+                    "document.documentElement.dataset.tsError || ''",
+                    tokenCts.Token))?.ToString();
+                turnstileEvents = (await tab.ExecuteAsync(
+                    "JSON.stringify(window.__tsEvents || [])",
+                    tokenCts.Token))?.ToString();
+
+                if (!string.IsNullOrEmpty(turnstileError))
+                    break;
+
                 await Task.Delay(500, tokenCts.Token);
             }
 
-            logger.WriteLine(LogKind.Default, $"turnstile token={turnstileToken?[..Math.Min(turnstileToken?.Length ?? 0, 60)]}");
-            Assert.That(turnstileToken, Is.Not.Null.And.Not.Empty, "Turnstile token должен быть получен через body override.");
+            if (!string.IsNullOrEmpty(turnstileToken))
+            {
+                using var interceptionCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+
+                while (!interceptionCts.IsCancellationRequested)
+                {
+                    turnstileResponseInput = (await tab.ExecuteAsync(
+                        "document.documentElement.dataset.tsResponseInput || ''",
+                        interceptionCts.Token))?.ToString();
+                    turnstileEvents = (await tab.ExecuteAsync(
+                        "JSON.stringify(window.__tsEvents || [])",
+                        interceptionCts.Token))?.ToString();
+
+                    if (string.Equals(turnstileResponseInput, turnstileToken, StringComparison.Ordinal)
+                        && !string.IsNullOrWhiteSpace(turnstileEvents)
+                        && turnstileEvents.Contains("\"type\":\"response-input\"", StringComparison.Ordinal))
+                    {
+                        break;
+                    }
+
+                    await Task.Delay(250, interceptionCts.Token);
+                }
+            }
+
+            logger.WriteLine(LogKind.Default, $"turnstile test-sitekey token={turnstileToken?[..Math.Min(turnstileToken?.Length ?? 0, 60)]}");
+            logger.WriteLine(LogKind.Default, $"turnstile test-sitekey response-input={turnstileResponseInput?[..Math.Min(turnstileResponseInput?.Length ?? 0, 60)]}");
+            logger.WriteLine(LogKind.Default, $"turnstile test-sitekey error={turnstileError}");
+            logger.WriteLine(LogKind.Default, $"turnstile test-sitekey events={turnstileEvents}");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    turnstileToken,
+                    Is.Not.Null.And.Not.Empty,
+                    $"Cloudflare test sitekey на внешнем origin должен выдать token после checkbox click. click={clickResult}, error={turnstileError}, events={turnstileEvents}, diagnostics={initialDiagnostics}");
+                Assert.That(
+                    turnstileResponseInput,
+                    Is.EqualTo(turnstileToken),
+                    $"Перехваченный hidden input token должен совпадать с итоговым verification token. click={clickResult}, error={turnstileError}, events={turnstileEvents}, diagnostics={initialDiagnostics}");
+                Assert.That(turnstileEvents, Does.Contain("\"type\":\"response-input\""), "Должно быть зафиксировано изменение hidden input с verification result.");
+            });
+        }
+
+        [TestCase(TestName = "Turnstile real-site manual click snapshot без anti-detect"), Order(61)]
+        [Explicit("Manual interactive scenario: requires a human to click the Turnstile widget.")]
+        public async Task TurnstileRealSitekeyManualClickPlainProfileTest()
+        {
+            var tab = await browser.OpenIsolatedTabAsync();
+            var preNavigationFingerprint = await CaptureFingerprintSnapshotAsync(tab);
+
+            var replaceHtml = await File.ReadAllTextAsync(
+                Path.Combine(TestContext.CurrentContext.TestDirectory, "assets", "replace.html"));
+            replaceHtml = replaceHtml.Replace(
+                "</head>",
+                """
+                <script>
+                    (function () {
+                        const manualMessage = { __atomDisableTurnstileAutoClick: true };
+                        const broadcastManualMode = function () {
+                            for (const frame of document.querySelectorAll('iframe')) {
+                                try {
+                                    frame.contentWindow?.postMessage(manualMessage, '*');
+                                } catch {
+                                }
+                            }
+                        };
+
+                        const observer = new MutationObserver(broadcastManualMode);
+                        observer.observe(document.documentElement, { childList: true, subtree: true });
+
+                        setInterval(broadcastManualMode, 50);
+                        window.addEventListener('load', broadcastManualMode);
+                        broadcastManualMode();
+                    })();
+                </script>
+                </head>
+                """,
+                StringComparison.Ordinal);
+
+            var targetUrl = new Uri("https://visa.vfsglobal.com/ind/en/pol/login");
+            await tab.NavigateAsync(targetUrl, new NavigationSettings { Body = replaceHtml });
+
+            var title = (await tab.ExecuteAsync("document.title"))?.ToString();
+            Assert.That(title, Is.EqualTo("Turnstile Zero"), "Body override должен заменить документ.");
+
+            var initialDiagnostics = await CaptureTurnstileFrameDiagnosticsAsync(tab);
+
+            logger.WriteLine(LogKind.Default, $"manual turnstile initial diagnostics={initialDiagnostics}");
+            logger.WriteLine(LogKind.Default, "manual turnstile: ready for user click, waiting up to 10 minutes");
+
+            using var tokenCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+            string? turnstileToken = null;
+            string? turnstileError = null;
+            string? turnstileExpired = null;
+            string? turnstileTimeout = null;
+            string? turnstileUnsupported = null;
+            string? turnstileEvents = null;
+
+            while (!tokenCts.IsCancellationRequested)
+            {
+                var token = (await tab.ExecuteAsync(
+                    "document.querySelector('[name=\"cf-turnstile-response\"]')?.value || ''",
+                    tokenCts.Token))?.ToString();
+
+                if (!string.IsNullOrEmpty(token))
+                {
+                    turnstileToken = token;
+                    break;
+                }
+
+                var cbTok = (await tab.ExecuteAsync(
+                    "document.documentElement.dataset.tsToken || ''",
+                    tokenCts.Token))?.ToString();
+                if (!string.IsNullOrEmpty(cbTok))
+                {
+                    turnstileToken = cbTok;
+                    break;
+                }
+
+                turnstileError = (await tab.ExecuteAsync(
+                    "document.documentElement.dataset.tsError || ''",
+                    tokenCts.Token))?.ToString();
+                turnstileExpired = (await tab.ExecuteAsync(
+                    "document.documentElement.dataset.tsExpired || ''",
+                    tokenCts.Token))?.ToString();
+                turnstileTimeout = (await tab.ExecuteAsync(
+                    "document.documentElement.dataset.tsTimeout || ''",
+                    tokenCts.Token))?.ToString();
+                turnstileUnsupported = (await tab.ExecuteAsync(
+                    "document.documentElement.dataset.tsUnsupported || ''",
+                    tokenCts.Token))?.ToString();
+                turnstileEvents = (await tab.ExecuteAsync(
+                    "JSON.stringify(window.__tsEvents || [])",
+                    tokenCts.Token))?.ToString();
+
+                if (!string.IsNullOrEmpty(turnstileError))
+                    break;
+
+                await Task.Delay(500, tokenCts.Token);
+            }
+
+            var postInteractionFingerprint = await CaptureFingerprintSnapshotAsync(tab);
+            var fingerprintDiff = DescribeFingerprintDelta(preNavigationFingerprint, postInteractionFingerprint);
+
+            logger.WriteLine(LogKind.Default, $"manual turnstile before={preNavigationFingerprint}");
+            logger.WriteLine(LogKind.Default, $"manual turnstile after={postInteractionFingerprint}");
+            logger.WriteLine(LogKind.Default, $"manual turnstile diff={fingerprintDiff}");
+            logger.WriteLine(LogKind.Default, $"manual turnstile token={turnstileToken?[..Math.Min(turnstileToken?.Length ?? 0, 60)]}");
+            logger.WriteLine(LogKind.Default, $"manual turnstile error={turnstileError}");
+            logger.WriteLine(LogKind.Default, $"manual turnstile expired={turnstileExpired}");
+            logger.WriteLine(LogKind.Default, $"manual turnstile timeout={turnstileTimeout}");
+            logger.WriteLine(LogKind.Default, $"manual turnstile unsupported={turnstileUnsupported}");
+            logger.WriteLine(LogKind.Default, $"manual turnstile events={turnstileEvents}");
+            logger.WriteLine(LogKind.Default, $"manual turnstile diagnostics={initialDiagnostics}");
+
+            Assert.That(
+                turnstileToken,
+                Is.Not.Null.And.Not.Empty,
+                $"Manual real-site Turnstile не выдал token. error={turnstileError}, expired={turnstileExpired}, timeout={turnstileTimeout}, unsupported={turnstileUnsupported}, events={turnstileEvents}, diagnostics={initialDiagnostics}, before={preNavigationFingerprint}, after={postInteractionFingerprint}, diff={fingerprintDiff}");
+        }
+
+        [TestCase(TestName = "Обычная и isolated вкладки без контекста дают одинаковый HTTPS fingerprint"), Order(62)]
+        public async Task PlainHttpsFingerprintMatchesRegularAndIsolatedTabsTest()
+        {
+            var targetUrl = new Uri("https://httpbin.org/html");
+
+            var regularTab = await browser.OpenTabAsync();
+            var isolatedTab = await browser.OpenIsolatedTabAsync();
+
+            await regularTab.NavigateAsync(targetUrl);
+            await isolatedTab.NavigateAsync(targetUrl);
+
+            var regularSnapshot = await CaptureFingerprintSnapshotAsync(regularTab);
+            var isolatedSnapshot = await CaptureFingerprintSnapshotAsync(isolatedTab);
+            var diff = DescribeFingerprintDelta(regularSnapshot, isolatedSnapshot);
+
+            var regularHardware = ReadFingerprintNumber(regularSnapshot, "hardwareConcurrency");
+            var isolatedHardware = ReadFingerprintNumber(isolatedSnapshot, "hardwareConcurrency");
+            var regularMemory = ReadFingerprintNumber(regularSnapshot, "deviceMemory");
+            var isolatedMemory = ReadFingerprintNumber(isolatedSnapshot, "deviceMemory");
+
+            logger.WriteLine(LogKind.Default, $"plain https regular={regularSnapshot}");
+            logger.WriteLine(LogKind.Default, $"plain https isolated={isolatedSnapshot}");
+            logger.WriteLine(LogKind.Default, $"plain https regular-vs-isolated diff={diff}");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(isolatedHardware, Is.EqualTo(regularHardware),
+                    $"Isolated вкладка без контекста не должна менять hardwareConcurrency относительно обычной вкладки. diff={diff}");
+                Assert.That(isolatedMemory, Is.EqualTo(regularMemory),
+                    $"Isolated вкладка без контекста не должна менять deviceMemory относительно обычной вкладки. diff={diff}");
+            });
+        }
+
+        [TestCase(TestName = "Целевой VFS URL без body override даёт одинаковый fingerprint в обычной и isolated вкладках"), Order(63)]
+        public async Task TargetUrlFingerprintMatchesRegularAndIsolatedTabsTest()
+        {
+            var targetUrl = new Uri("https://visa.vfsglobal.com/ind/en/pol/login");
+
+            var regularTab = await browser.OpenTabAsync();
+            var isolatedTab = await browser.OpenIsolatedTabAsync();
+
+            await regularTab.NavigateAsync(targetUrl);
+            await isolatedTab.NavigateAsync(targetUrl);
+
+            var regularSnapshot = await CaptureFingerprintSnapshotAsync(regularTab);
+            var isolatedSnapshot = await CaptureFingerprintSnapshotAsync(isolatedTab);
+            var diff = DescribeFingerprintDelta(regularSnapshot, isolatedSnapshot);
+
+            var regularHardware = ReadFingerprintNumber(regularSnapshot, "hardwareConcurrency");
+            var isolatedHardware = ReadFingerprintNumber(isolatedSnapshot, "hardwareConcurrency");
+            var regularMemory = ReadFingerprintNumber(regularSnapshot, "deviceMemory");
+            var isolatedMemory = ReadFingerprintNumber(isolatedSnapshot, "deviceMemory");
+
+            logger.WriteLine(LogKind.Default, $"target regular={regularSnapshot}");
+            logger.WriteLine(LogKind.Default, $"target isolated={isolatedSnapshot}");
+            logger.WriteLine(LogKind.Default, $"target regular-vs-isolated diff={diff}");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(isolatedHardware, Is.EqualTo(regularHardware),
+                    $"На целевом URL isolated вкладка без контекста не должна менять hardwareConcurrency относительно обычной вкладки. diff={diff}");
+                Assert.That(isolatedMemory, Is.EqualTo(regularMemory),
+                    $"На целевом URL isolated вкладка без контекста не должна менять deviceMemory относительно обычной вкладки. diff={diff}");
+            });
+        }
+
+        [TestCase(TestName = "ApplyContext сохраняет hardwareConcurrency и deviceMemory после навигации"), Order(64)]
+        public async Task ApplyContextPersistsAcrossNavigationTest()
+        {
+            var expectedHardwareConcurrency = 4;
+            var expectedDeviceMemory = 8d;
+
+            var tab = await browser.OpenIsolatedTabAsync(settings: new TabContextSettings
+            {
+                HardwareConcurrency = expectedHardwareConcurrency,
+                DeviceMemory = expectedDeviceMemory,
+            });
+
+            var beforeSnapshot = await WaitForFingerprintSnapshotAsync(
+                tab,
+                snapshot => ReadFingerprintNumber(snapshot, "hardwareConcurrency") == expectedHardwareConcurrency
+                    && ReadFingerprintNumber(snapshot, "deviceMemory") == expectedDeviceMemory,
+                TimeSpan.FromSeconds(3));
+
+            await tab.NavigateAsync(new Uri("https://httpbin.org/html"));
+
+            var afterSnapshot = await CaptureFingerprintSnapshotAsync(tab);
+            var diff = DescribeFingerprintDelta(beforeSnapshot, afterSnapshot);
+
+            var beforeHardware = ReadFingerprintNumber(beforeSnapshot, "hardwareConcurrency");
+            var afterHardware = ReadFingerprintNumber(afterSnapshot, "hardwareConcurrency");
+            var beforeMemory = ReadFingerprintNumber(beforeSnapshot, "deviceMemory");
+            var afterMemory = ReadFingerprintNumber(afterSnapshot, "deviceMemory");
+
+            logger.WriteLine(LogKind.Default, $"applycontext before={beforeSnapshot}");
+            logger.WriteLine(LogKind.Default, $"applycontext after={afterSnapshot}");
+            logger.WriteLine(LogKind.Default, $"applycontext diff={diff}");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(beforeHardware, Is.EqualTo(expectedHardwareConcurrency), $"До навигации hardwareConcurrency должен быть {expectedHardwareConcurrency}. before={beforeSnapshot}");
+                Assert.That(afterHardware, Is.EqualTo(expectedHardwareConcurrency), $"После навигации hardwareConcurrency должен оставаться {expectedHardwareConcurrency}. diff={diff}");
+                Assert.That(beforeMemory, Is.EqualTo(expectedDeviceMemory), $"До навигации deviceMemory должен быть {expectedDeviceMemory}. before={beforeSnapshot}");
+                Assert.That(afterMemory, Is.EqualTo(expectedDeviceMemory), $"После навигации deviceMemory должен оставаться {expectedDeviceMemory}. diff={diff}");
+            });
+        }
+
+        private static async Task<string?> CaptureFingerprintSnapshotAsync(WebDriverPage tab)
+        {
+            return (await tab.ExecuteAsync(
+                "(async () => {" +
+                "const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;" +
+                "const canvas = document.createElement('canvas');" +
+                "const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');" +
+                "const debugInfo = gl && gl.getExtension ? gl.getExtension('WEBGL_debug_renderer_info') : null;" +
+                "const frameSrcs = Array.from(document.querySelectorAll('iframe')).map(frame => frame.getAttribute('src') || frame.src || '');" +
+                "const notificationPermission = typeof Notification !== 'undefined' ? Notification.permission : null;" +
+                "const permissionsQuery = async (name) => { try { if (!navigator.permissions?.query) return null; const status = await navigator.permissions.query({ name }); return status?.state ?? null; } catch { return null; } };" +
+                "const storageEstimate = async () => { try { return await navigator.storage?.estimate?.(); } catch { return null; } };" +
+                "const highEntropyHints = async () => { try { if (!navigator.userAgentData?.getHighEntropyValues) return null; return await navigator.userAgentData.getHighEntropyValues(['platformVersion','architecture','bitness','model','uaFullVersion','fullVersionList']); } catch { return null; } };" +
+                "const notificationQuery = await permissionsQuery('notifications');" +
+                "const geolocationQuery = await permissionsQuery('geolocation');" +
+                "const storageInfo = await storageEstimate();" +
+                "const uaHighEntropy = await highEntropyHints();" +
+                "const speechVoicesCount = (() => { try { return typeof speechSynthesis !== 'undefined' ? speechSynthesis.getVoices().length : null; } catch { return null; } })();" +
+                "const snapshot = {" +
+                "href: location.href," +
+                "origin: location.origin," +
+                "readyState: document.readyState," +
+                "title: document.title," +
+                "webdriver: navigator.webdriver ?? null," +
+                "userAgent: navigator.userAgent," +
+                "language: navigator.language ?? null," +
+                "languages: Array.from(navigator.languages || [])," +
+                "platform: navigator.platform ?? null," +
+                "vendor: navigator.vendor ?? null," +
+                "hardwareConcurrency: navigator.hardwareConcurrency ?? null," +
+                "deviceMemory: navigator.deviceMemory ?? null," +
+                "maxTouchPoints: navigator.maxTouchPoints ?? null," +
+                "cookieEnabled: navigator.cookieEnabled ?? null," +
+                "pdfViewerEnabled: navigator.pdfViewerEnabled ?? null," +
+                "pluginsLength: navigator.plugins?.length ?? null," +
+                "mimeTypesLength: navigator.mimeTypes?.length ?? null," +
+                "hasChromeObject: typeof window.chrome !== 'undefined'," +
+                "hasUserAgentData: typeof navigator.userAgentData !== 'undefined'," +
+                "userAgentDataMobile: navigator.userAgentData?.mobile ?? null," +
+                "userAgentDataPlatform: navigator.userAgentData?.platform ?? null," +
+                "userAgentDataBrands: navigator.userAgentData?.brands?.map(x => `${x.brand}/${x.version}`) ?? []," +
+                "userAgentDataLowEntropy: navigator.userAgentData?.toJSON ? JSON.stringify(navigator.userAgentData.toJSON()) : null," +
+                "userAgentDataHighEntropy: uaHighEntropy ? JSON.stringify(uaHighEntropy) : null," +
+                "timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? null," +
+                "timezoneOffset: new Date().getTimezoneOffset()," +
+                "intlLocale: Intl.NumberFormat().resolvedOptions().locale ?? null," +
+                "vendorSub: navigator.vendorSub ?? null," +
+                "productSub: navigator.productSub ?? null," +
+                "screenWidth: screen.width ?? null," +
+                "screenHeight: screen.height ?? null," +
+                "availWidth: screen.availWidth ?? null," +
+                "availHeight: screen.availHeight ?? null," +
+                "colorDepth: screen.colorDepth ?? null," +
+                "pixelDepth: screen.pixelDepth ?? null," +
+                "devicePixelRatio: window.devicePixelRatio ?? null," +
+                "outerWidth: window.outerWidth ?? null," +
+                "outerHeight: window.outerHeight ?? null," +
+                "innerWidth: window.innerWidth ?? null," +
+                "innerHeight: window.innerHeight ?? null," +
+                "networkEffectiveType: connection?.effectiveType ?? null," +
+                "networkRtt: connection?.rtt ?? null," +
+                "networkDownlink: connection?.downlink ?? null," +
+                "networkSaveData: connection?.saveData ?? null," +
+                "prefersDark: matchMedia('(prefers-color-scheme: dark)').matches," +
+                "prefersReducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches," +
+                "notificationPermission: notificationPermission," +
+                "permissionsNotification: notificationQuery," +
+                "permissionsGeolocation: geolocationQuery," +
+                "localStorageLength: (() => { try { return localStorage.length; } catch { return -1; } })()," +
+                "sessionStorageLength: (() => { try { return sessionStorage.length; } catch { return -1; } })()," +
+                "storageQuotaEstimate: storageInfo?.quota ?? null," +
+                "storageUsageEstimate: storageInfo?.usage ?? null," +
+                "speechVoicesCount: speechVoicesCount," +
+                "crossOriginIsolated: window.crossOriginIsolated ?? null," +
+                "webglVendor: debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : null," +
+                "webglRenderer: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : null," +
+                "webglVersion: gl ? gl.getParameter(gl.VERSION) : null," +
+                "iframeCount: document.querySelectorAll('iframe').length," +
+                "challengeIframeCount: document.querySelectorAll('iframe[src*=\"challenges.cloudflare.com\"]').length," +
+                "challengeIframeSrc: document.querySelector('iframe[src*=\"challenges.cloudflare.com\"]')?.src || null," +
+                "frameSrcs: frameSrcs," +
+                "responseInputPresent: !!document.querySelector('[name=\"cf-turnstile-response\"]')," +
+                "responseInputLength: (document.querySelector('[name=\"cf-turnstile-response\"]')?.value || '').length" +
+                "}; return JSON.stringify(snapshot); })()"))?.ToString();
+        }
+
+            private static async Task<string?> CaptureTurnstileWidgetStateAsync(WebDriverPage tab)
+            {
+                return (await tab.ExecuteAsync(
+                "(() => JSON.stringify(typeof window.__tsGetWidgetState === 'function' ? window.__tsGetWidgetState() : null))()"))?.ToString();
+            }
+
+            private static async Task<string?> ExecuteTurnstileWidgetAsync(WebDriverPage tab, CancellationToken cancellationToken)
+            {
+                using var executeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                executeCts.CancelAfter(TimeSpan.FromSeconds(15));
+
+                string? lastResult = null;
+
+                while (!executeCts.IsCancellationRequested)
+                {
+                    lastResult = (await tab.ExecuteAsync(
+                        "(() => {" +
+                        "const state = typeof window.__tsGetWidgetState === 'function' ? window.__tsGetWidgetState() : null;" +
+                        "const ready = !!state?.hasApi && state?.widgetId != null && state?.renderReady === 'true';" +
+                        "const executed = ready && typeof window.__tsExecute === 'function' ? window.__tsExecute() : false;" +
+                        "const nextState = typeof window.__tsGetWidgetState === 'function' ? window.__tsGetWidgetState() : state;" +
+                        "return JSON.stringify({ ready, executed, state: nextState });" +
+                        "})()",
+                        executeCts.Token))?.ToString();
+
+                    if (!string.IsNullOrWhiteSpace(lastResult))
+                    {
+                        try
+                        {
+                            var root = JsonNode.Parse(lastResult);
+                            if (root?["executed"]?.GetValue<bool>() == true)
+                                return lastResult;
+                        }
+                        catch
+                        {
+                        }
+                    }
+
+                    try
+                    {
+                        await Task.Delay(100, executeCts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
+
+                return lastResult;
+            }
+
+        private static async Task<string?> WaitForFingerprintSnapshotAsync(
+            WebDriverPage tab,
+            Func<string?, bool> predicate,
+            TimeSpan timeout)
+        {
+            var deadline = DateTime.UtcNow + timeout;
+            string? lastSnapshot = null;
+
+            while (DateTime.UtcNow < deadline)
+            {
+                lastSnapshot = await CaptureFingerprintSnapshotAsync(tab);
+                if (predicate(lastSnapshot))
+                    return lastSnapshot;
+
+                await Task.Delay(50);
+            }
+
+            return lastSnapshot;
+        }
+
+        private static async Task<string?> WaitForTurnstileWidgetStateAsync(
+            WebDriverPage tab,
+            Func<JsonNode?, bool> predicate,
+            TimeSpan timeout)
+        {
+            var deadline = DateTime.UtcNow + timeout;
+            string? lastState = null;
+
+            while (DateTime.UtcNow < deadline)
+            {
+                lastState = await CaptureTurnstileWidgetStateAsync(tab);
+
+                if (!string.IsNullOrWhiteSpace(lastState))
+                {
+                    try
+                    {
+                        if (predicate(JsonNode.Parse(lastState)))
+                            return lastState;
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                await Task.Delay(100);
+            }
+
+            return lastState;
+        }
+
+        private static string DescribeFingerprintDelta(string? beforeJson, string? afterJson)
+        {
+            if (string.IsNullOrWhiteSpace(beforeJson) || string.IsNullOrWhiteSpace(afterJson))
+                return "before-or-after-missing";
+
+            JsonNode? beforeNode;
+            JsonNode? afterNode;
+
+            try
+            {
+                beforeNode = JsonNode.Parse(beforeJson);
+                afterNode = JsonNode.Parse(afterJson);
+            }
+            catch
+            {
+                return "fingerprint-parse-failed";
+            }
+
+            if (beforeNode is not JsonObject beforeObj || afterNode is not JsonObject afterObj)
+                return "fingerprint-not-object";
+
+            var delta = new JsonArray();
+            foreach (var key in beforeObj.Select(kvp => kvp.Key).Union(afterObj.Select(kvp => kvp.Key)).OrderBy(key => key))
+            {
+                var beforeValue = beforeObj[key]?.ToJsonString() ?? "null";
+                var afterValue = afterObj[key]?.ToJsonString() ?? "null";
+                if (!string.Equals(beforeValue, afterValue, StringComparison.Ordinal))
+                {
+                    delta.Add(new JsonObject
+                    {
+                        ["field"] = key,
+                        ["before"] = beforeObj[key]?.DeepClone(),
+                        ["after"] = afterObj[key]?.DeepClone(),
+                    });
+                }
+            }
+
+            return delta.ToJsonString();
+        }
+
+        private static async Task<string> ClickTurnstileCheckboxInFramesAsync(WebDriverPage tab, TimeSpan timeout)
+        {
+            using var cts = new CancellationTokenSource(timeout);
+            string lastResult = "no-results";
+            DateTime? hostClickObservedAt = null;
+            DateTime? cloudflareFallbackObservedAt = null;
+
+            while (!cts.IsCancellationRequested)
+            {
+                var results = await tab.ExecuteInAllFramesAsync(
+                    """
+                    (() => {
+                        function queryDeep(root, selectors) {
+                            const queue = [root];
+                            while (queue.length > 0) {
+                                const current = queue.shift();
+                                if (!current?.querySelectorAll) {
+                                    continue;
+                                }
+
+                                for (const selector of selectors) {
+                                    const found = current.querySelector(selector);
+                                    if (found) {
+                                        return found;
+                                    }
+                                }
+
+                                for (const element of current.querySelectorAll('*')) {
+                                    if (element.shadowRoot) {
+                                        queue.push(element.shadowRoot);
+                                    }
+                                }
+                            }
+
+                            return null;
+                        }
+
+                        function collectDeep(root, selectors, limit = 24) {
+                            const queue = [root];
+                            const results = [];
+                            const seen = new Set();
+
+                            while (queue.length > 0 && results.length < limit) {
+                                const current = queue.shift();
+                                if (!current?.querySelectorAll) {
+                                    continue;
+                                }
+
+                                for (const selector of selectors) {
+                                    const matches = current.querySelectorAll(selector);
+                                    for (const match of matches) {
+                                        if (match instanceof Element && !seen.has(match)) {
+                                            seen.add(match);
+                                            results.push(match);
+                                            if (results.length >= limit) {
+                                                return results;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                for (const element of current.querySelectorAll('*')) {
+                                    if (element.shadowRoot) {
+                                        queue.push(element.shadowRoot);
+                                    }
+                                }
+                            }
+
+                            return results;
+                        }
+
+                        function isVisible(element) {
+                            if (!(element instanceof Element)) {
+                                return false;
+                            }
+
+                            const style = window.getComputedStyle(element);
+                            if (!style || style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none') {
+                                return false;
+                            }
+
+                            const rect = element.getBoundingClientRect();
+
+                                                    function getCloudflareHotspotPoints(width, height) {
+                                                        const safeWidth = Math.max(width || 0, 1);
+                                                        const safeHeight = Math.max(height || 0, 1);
+                                                        const points = [];
+                                                        const seen = new Set();
+
+                                                        function pushPoint(x, y) {
+                                                            const clampedX = Math.min(Math.max(x, 8), Math.max(safeWidth - 8, 8));
+                                                            const clampedY = Math.min(Math.max(y, 8), Math.max(safeHeight - 8, 8));
+                                                            const key = `${Math.round(clampedX)}:${Math.round(clampedY)}`;
+                                                            if (!seen.has(key)) {
+                                                                seen.add(key);
+                                                                points.push([clampedX, clampedY]);
+                                                            }
+                                                        }
+
+                                                        for (const x of [28, 34, 40, 46, 52, 58]) {
+                                                            for (const y of [22, 28, 34, 40, 46]) {
+                                                                pushPoint(x, y);
+                                                            }
+                                                        }
+
+                                                        for (const [column, row] of [
+                                                            [0.08, 0.24],
+                                                            [0.1, 0.3],
+                                                            [0.12, 0.36],
+                                                            [0.14, 0.42],
+                                                            [0.16, 0.48],
+                                                            [0.18, 0.54],
+                                                            [0.2, 0.42],
+                                                            [0.22, 0.36],
+                                                        ]) {
+                                                            pushPoint(safeWidth * column, safeHeight * row);
+                                                        }
+
+                                                        return points;
+                                                    }
+                            return rect.width > 0 && rect.height > 0;
+                        }
+
+                        function normalizeTarget(element) {
+                            if (!(element instanceof Element)) {
+                                return null;
+                            }
+
+                            return element.closest?.([
+                                '[role="checkbox"]',
+                                'input[type="checkbox"]',
+                                '[data-action="verify"]',
+                                'label',
+                                'button',
+                                'a',
+                                '[tabindex]',
+                                '[class*="checkbox"]',
+                                '[class*="mark"]',
+                                '[class*="ctp"]',
+                            ].join(',')) || element;
+                        }
+
+                        function targetKindOf(element, cloudflareFrame) {
+                            if (!(element instanceof Element)) {
+                                return cloudflareFrame ? 'cloudflare-frame' : 'unknown';
+                            }
+
+                            if (cloudflareFrame && (element === document.body || element === document.documentElement)) {
+                                return 'cloudflare-body-fallback';
+                            }
+
+                            if (element.matches?.('input[type="checkbox"]')) {
+                                return 'checkbox';
+                            }
+
+                            if (element.getAttribute?.('role') === 'checkbox') {
+                                return 'role-checkbox';
+                            }
+
+                            if (element.matches?.('[data-action="verify"]')) {
+                                return 'verify-action';
+                            }
+
+                            if (element.matches?.('label, button, a')) {
+                                return element.tagName.toLowerCase();
+                            }
+
+                            return cloudflareFrame ? 'cloudflare-candidate' : 'host';
+                        }
+
+                        function scoreCandidate(element, cloudflareFrame, pointX, pointY, source) {
+                            const target = normalizeTarget(element);
+                            if (!(target instanceof Element)) {
+                                return null;
+                            }
+
+                            const allowBodyFallback = cloudflareFrame
+                                && source === 'cloudflare-body-fallback'
+                                && (target === document.body || target === document.documentElement);
+
+                            if (!allowBodyFallback && (target === document.body || target === document.documentElement)) {
+                                return null;
+                            }
+
+                            const rect = target.getBoundingClientRect();
+                            const allowCollapsedHost = !cloudflareFrame && source === 'host' && rect.width > 0;
+                            if (!isVisible(target) && !allowCollapsedHost) {
+                                return null;
+                            }
+
+                            const className = (typeof target.className === 'string' ? target.className : '').toLowerCase();
+                            const role = (target.getAttribute?.('role') || '').toLowerCase();
+                            const dataAction = (target.getAttribute?.('data-action') || '').toLowerCase();
+                            const ariaLabel = (target.getAttribute?.('aria-label') || '').toLowerCase();
+                            const tabIndex = target.tabIndex ?? -1;
+                            let score = source === 'hit-test' ? 30 : 10;
+
+                            if (target.matches?.('input[type="checkbox"]')) {
+                                score += 240;
+                            }
+
+                            if (role === 'checkbox') {
+                                score += 220;
+                            }
+
+                            if (dataAction === 'verify') {
+                                score += 180;
+                            }
+
+                            if (target.matches?.('label')) {
+                                score += 140;
+                            }
+
+                            if (target.matches?.('button, a')) {
+                                score += 120;
+                            }
+
+                            if (target.matches?.('[tabindex]') || tabIndex >= 0) {
+                                score += 80;
+                            }
+
+                            if (target.matches?.('[class*="checkbox"], [class*="mark"], [class*="ctp"]')) {
+                                score += 110;
+                            }
+
+                            if (className.includes('checkbox') || className.includes('verify') || className.includes('mark') || className.includes('ctp')) {
+                                score += 60;
+                            }
+
+                            if (ariaLabel.includes('checkbox') || ariaLabel.includes('verify') || ariaLabel.includes('human')) {
+                                score += 60;
+                            }
+
+                            if (typeof target.onclick === 'function' || typeof target.onmousedown === 'function') {
+                                score += 40;
+                            }
+
+                            if (rect.width >= 18 && rect.height >= 18) {
+                                score += 20;
+                            }
+
+                            if (allowCollapsedHost) {
+                                score += 40;
+                            }
+
+                            if (allowBodyFallback) {
+                                score += 25;
+                            }
+
+                            if (cloudflareFrame) {
+                                score += 100;
+
+                                const viewportWidth = Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0, rect.right || 0);
+                                const viewportHeight = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0, rect.bottom || 0);
+                                const hotspotX = Math.min(Math.max(40, 8), Math.max(viewportWidth - 8, 8));
+                                const hotspotY = Math.min(Math.max(34, 8), Math.max(viewportHeight - 8, 8));
+                                const rectCenterX = rect.width > 0 ? rect.left + rect.width / 2 : pointX;
+                                const rectCenterY = rect.height > 0 ? rect.top + rect.height / 2 : pointY;
+                                const deltaX = Math.abs(rectCenterX - hotspotX);
+                                const deltaY = Math.abs(rectCenterY - hotspotY);
+
+                                if (deltaX <= 24) {
+                                    score += 120;
+                                } else if (deltaX <= 56) {
+                                    score += 70;
+                                } else if (deltaX <= 96) {
+                                    score += 35;
+                                }
+
+                                if (deltaY <= 18) {
+                                    score += 90;
+                                } else if (deltaY <= 36) {
+                                    score += 50;
+                                } else if (deltaY <= 64) {
+                                    score += 20;
+                                }
+
+                                if (rect.left <= Math.max(viewportWidth * 0.32, 96)) {
+                                    score += 40;
+                                }
+
+                                if (rect.width >= 14 && rect.width <= 96 && rect.height >= 14 && rect.height <= 96) {
+                                    score += 35;
+                                }
+                            }
+
+                            return {
+                                target,
+                                score,
+                                pointX: Number.isFinite(pointX) ? pointX : rect.left + rect.width / 2,
+                                pointY: Number.isFinite(pointY) ? pointY : (rect.height > 0 ? rect.top + rect.height / 2 : rect.top + 24),
+                                source,
+                            };
+                        }
+
+                        function pushCandidate(bucket, candidate) {
+                            if (!candidate?.target) {
+                                return;
+                            }
+
+                            const key = [candidate.target.tagName, candidate.target.id || '', candidate.target.className || '', candidate.source].join('|');
+                            const existing = bucket.get(key);
+                            if (!existing || candidate.score > existing.score) {
+                                bucket.set(key, candidate);
+                            }
+                        }
+
+                        function collectHitTestCandidates(bucket, cloudflareFrame) {
+                            const width = Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0);
+                            const height = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0);
+                            if (width <= 0 || height <= 0) {
+                                return;
+                            }
+
+                            if (cloudflareFrame) {
+                                for (const [pointX, pointY] of getCloudflareHotspotPoints(width, height)) {
+                                    const stack = document.elementsFromPoint(pointX, pointY) || [];
+
+                                    for (const element of stack.slice(0, 8)) {
+                                        const candidate = scoreCandidate(element, true, pointX, pointY, 'cloudflare-hotspot');
+                                        if (candidate) {
+                                            pushCandidate(bucket, candidate);
+                                        }
+                                    }
+                                }
+                            }
+
+                            const columns = cloudflareFrame ? [0.2, 0.35, 0.5, 0.65, 0.8] : [0.3, 0.5, 0.7];
+                            const rows = cloudflareFrame ? [0.18, 0.3, 0.42, 0.54, 0.66, 0.78] : [0.35, 0.5, 0.65];
+
+                            for (const row of rows) {
+                                for (const column of columns) {
+                                    const pointX = width * column;
+                                    const pointY = height * row;
+                                    const stack = document.elementsFromPoint(pointX, pointY) || [];
+
+                                    for (const element of stack.slice(0, 6)) {
+                                        const candidate = scoreCandidate(element, cloudflareFrame, pointX, pointY, 'hit-test');
+                                        if (candidate) {
+                                            pushCandidate(bucket, candidate);
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (cloudflareFrame && bucket.size === 0) {
+                                for (const [pointX, pointY] of getCloudflareHotspotPoints(width, height)) {
+                                    const candidate = scoreCandidate(document.body || document.documentElement, true, pointX, pointY, 'cloudflare-body-fallback');
+                                    if (candidate) {
+                                        pushCandidate(bucket, candidate);
+                                    }
+                                }
+                            }
+                        }
+
+                        try {
+                            const isCloudflareFrame = location.href.includes('challenges.cloudflare.com');
+                            const checkbox = queryDeep(document, ['input[type="checkbox"]']);
+                            const roleCheckbox = queryDeep(document, ['[role="checkbox"]']);
+                            const host = queryDeep(document, ['.cf-turnstile']);
+                            const renderedWidgetMarker = queryDeep(document, [
+                                '[name="cf-turnstile-response"]',
+                                'iframe',
+                                'input[type="checkbox"]',
+                                '[role="checkbox"]',
+                                '.ctp-checkbox-label',
+                                '.ctp-checkbox-container',
+                                '[data-action="verify"]',
+                                '[class*="checkbox"]',
+                                '[class*="mark"]',
+                            ]);
+                            const selectors = [
+                                '[role="checkbox"]',
+                                'input[type="checkbox"]',
+                                'label',
+                                '.ctp-checkbox-label',
+                                '.ctp-checkbox-container',
+                                '[data-action="verify"]',
+                                '[class*="checkbox"]',
+                                '[class*="mark"]',
+                                '[class*="ctp"]',
+                                '[tabindex]',
+                                'button',
+                            ];
+                            const candidateBucket = new Map();
+
+                            for (const explicitElement of collectDeep(document, selectors, isCloudflareFrame ? 48 : 24)) {
+                                const rect = explicitElement.getBoundingClientRect();
+                                const candidate = scoreCandidate(
+                                    explicitElement,
+                                    isCloudflareFrame,
+                                    rect.left + rect.width / 2,
+                                    rect.top + rect.height / 2,
+                                    'explicit');
+                                if (candidate) {
+                                    pushCandidate(candidateBucket, candidate);
+                                }
+                            }
+
+                            if (checkbox instanceof Element) {
+                                const rect = checkbox.getBoundingClientRect();
+                                pushCandidate(candidateBucket, scoreCandidate(checkbox, isCloudflareFrame, rect.left + rect.width / 2, rect.top + rect.height / 2, 'checkbox'));
+                            }
+
+                            if (roleCheckbox instanceof Element) {
+                                const rect = roleCheckbox.getBoundingClientRect();
+                                pushCandidate(candidateBucket, scoreCandidate(roleCheckbox, isCloudflareFrame, rect.left + rect.width / 2, rect.top + rect.height / 2, 'role-checkbox'));
+                            }
+
+                            if (renderedWidgetMarker instanceof Element) {
+                                const rect = renderedWidgetMarker.getBoundingClientRect();
+                                pushCandidate(candidateBucket, scoreCandidate(renderedWidgetMarker, isCloudflareFrame, rect.left + rect.width / 2, rect.top + rect.height / 2, 'widget-marker'));
+                            }
+
+                            if (host instanceof Element) {
+                                const rect = host.getBoundingClientRect();
+                                pushCandidate(candidateBucket, scoreCandidate(
+                                    host,
+                                    isCloudflareFrame,
+                                    rect.left + rect.width / 2,
+                                    rect.height > 0 ? rect.top + rect.height / 2 : rect.top + 24,
+                                    'host'));
+                            }
+
+                            collectHitTestCandidates(candidateBucket, isCloudflareFrame);
+
+                            const bestCandidate = Array.from(candidateBucket.values()).sort((left, right) => right.score - left.score)[0] || null;
+                            if (!bestCandidate) {
+                                return JSON.stringify({
+                                    found: false,
+                                    href: location.href,
+                                    title: document.title,
+                                    isCloudflareFrame,
+                                    renderedWidget: !!renderedWidgetMarker,
+                                    candidateCount: candidateBucket.size,
+                                    html: (document.body?.innerHTML || '').slice(0, 400),
+                                });
+                            }
+
+                            const target = bestCandidate.target;
+                            if (typeof target.scrollIntoView === 'function') {
+                                target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+                            }
+
+                            const rect = target.getBoundingClientRect();
+                            const centerX = Number.isFinite(bestCandidate.pointX)
+                                ? bestCandidate.pointX
+                                : (rect.width > 0 ? rect.left + rect.width / 2 : window.innerWidth / 2);
+                            const centerY = Number.isFinite(bestCandidate.pointY)
+                                ? bestCandidate.pointY
+                                : (rect.height > 0 ? rect.top + rect.height / 2 : window.innerHeight / 2);
+                            const eventSequence = [
+                                ['pointerover', 0],
+                                ['mouseover', 0],
+                                ['pointerenter', 0],
+                                ['mouseenter', 0],
+                                ['pointermove', 0],
+                                ['mousemove', 0],
+                                ['pointerdown', 1],
+                                ['mousedown', 1],
+                                ['pointerup', 0],
+                                ['mouseup', 0],
+                                ['click', 0],
+                            ];
+
+                            const interactionPoints = targetKindOf(target, isCloudflareFrame) === 'cloudflare-body-fallback'
+                                ? (() => {
+                                    const width = Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0, rect.width || 0);
+                                    const height = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0, rect.height || 0);
+                                    const points = getCloudflareHotspotPoints(width, height);
+                                    points.push([width * 0.3, height * 0.5]);
+                                    return points;
+                                })()
+                                : [[centerX, centerY]];
+
+                            const dispatchTargets = targetKindOf(target, isCloudflareFrame) === 'cloudflare-body-fallback'
+                                ? Array.from(new Set([
+                                    window,
+                                    document,
+                                    document.documentElement,
+                                    document.body,
+                                    target,
+                                ].filter(Boolean)))
+                                : [target];
+
+                            for (const [pointX, pointY] of interactionPoints) {
+                                for (const dispatchTarget of dispatchTargets) {
+                                    for (const [type, buttons] of eventSequence) {
+                                        const init = {
+                                            bubbles: type !== 'mouseenter' && type !== 'pointerenter',
+                                            cancelable: true,
+                                            composed: true,
+                                            clientX: pointX,
+                                            clientY: pointY,
+                                            button: 0,
+                                            buttons,
+                                        };
+
+                                        if (type.startsWith('pointer')) {
+                                            dispatchTarget.dispatchEvent(new PointerEvent(type, {
+                                                ...init,
+                                                pointerId: 1,
+                                                pointerType: 'mouse',
+                                                isPrimary: true,
+                                            }));
+                                        } else {
+                                            dispatchTarget.dispatchEvent(new MouseEvent(type, init));
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (typeof target.focus === 'function') {
+                                target.focus({ preventScroll: true });
+                            }
+
+                            if (target.matches?.('label') && target.control && typeof target.control.click === 'function') {
+                                target.control.click();
+                            }
+
+                            if (typeof target.click === 'function') {
+                                target.click();
+                            }
+
+                            return JSON.stringify({
+                                found: true,
+                                clicked: true,
+                                href: location.href,
+                                title: document.title,
+                                isCloudflareFrame,
+                                targetKind: targetKindOf(target, isCloudflareFrame),
+                                tagName: target.tagName || null,
+                                className: target.className || null,
+                                targetScore: bestCandidate.score,
+                                targetSource: bestCandidate.source,
+                                targetPointX: centerX,
+                                targetPointY: centerY,
+                                checked: checkbox?.checked ?? null,
+                                ariaChecked: target.getAttribute?.('aria-checked') ?? checkbox?.getAttribute?.('aria-checked') ?? null,
+                            });
+                        } catch (error) {
+                            return JSON.stringify({
+                                found: false,
+                                clicked: false,
+                                href: location.href,
+                                error: error?.message || String(error),
+                            });
+                        }
+                    })()
+                    """,
+                    cts.Token).ConfigureAwait(false);
+
+                if (results is JsonElement arr && arr.ValueKind == JsonValueKind.Array)
+                {
+                    string? bestClickedResult = null;
+                    var bestClickedScore = int.MinValue;
+                    var anyCloudflareFrameSeen = false;
+
+                    foreach (var item in arr.EnumerateArray())
+                    {
+                        if (item.ValueKind != JsonValueKind.String)
+                            continue;
+
+                        var value = item.GetString();
+                        if (string.IsNullOrWhiteSpace(value))
+                            continue;
+
+                        lastResult = value;
+
+                        JsonNode? parsed;
+                        try
+                        {
+                            parsed = JsonNode.Parse(value);
+                        }
+                        catch
+                        {
+                            continue;
+                        }
+
+                        if (parsed?["isCloudflareFrame"]?.GetValue<bool>() == true)
+                            anyCloudflareFrameSeen = true;
+
+                        if (parsed?["clicked"]?.GetValue<bool>() == true)
+                        {
+                            var score = 0;
+                            if (parsed?["isCloudflareFrame"]?.GetValue<bool>() == true)
+                                score += 100;
+
+                            var targetKind = parsed?["targetKind"]?.GetValue<string>();
+                            if (string.Equals(targetKind, "checkbox", StringComparison.Ordinal))
+                                score += 30;
+                            else if (string.Equals(targetKind, "role-checkbox", StringComparison.Ordinal))
+                                score += 20;
+                            else if (string.Equals(targetKind, "frame-fallback", StringComparison.Ordinal)
+                                || string.Equals(targetKind, "cloudflare-body-fallback", StringComparison.Ordinal))
+                                score += 10;
+
+                            if (score > bestClickedScore)
+                            {
+                                bestClickedScore = score;
+                                bestClickedResult = value;
+                            }
+                        }
+                    }
+
+                    if (bestClickedResult is not null)
+                    {
+                        JsonNode? bestClickedParsed = null;
+                        try
+                        {
+                            bestClickedParsed = JsonNode.Parse(bestClickedResult);
+                        }
+                        catch
+                        {
+                        }
+
+                        var bestTargetKind = bestClickedParsed?["targetKind"]?.GetValue<string>();
+                        var bestIsCloudflare = bestClickedParsed?["isCloudflareFrame"]?.GetValue<bool>() == true;
+
+                        if (bestIsCloudflare)
+                        {
+                            if (string.Equals(bestTargetKind, "cloudflare-body-fallback", StringComparison.Ordinal))
+                            {
+                                cloudflareFallbackObservedAt ??= DateTime.UtcNow;
+                                if (DateTime.UtcNow - cloudflareFallbackObservedAt < TimeSpan.FromSeconds(2))
+                                {
+                                    lastResult = bestClickedResult;
+                                }
+                                else
+                                {
+                                    return bestClickedResult;
+                                }
+                            }
+                            else
+                            {
+                                return bestClickedResult;
+                            }
+                        }
+
+                        if (string.Equals(bestTargetKind, "host", StringComparison.Ordinal))
+                        {
+                            hostClickObservedAt ??= DateTime.UtcNow;
+
+                            if (anyCloudflareFrameSeen)
+                            {
+                                lastResult = bestClickedResult;
+                            }
+                            else if (DateTime.UtcNow - hostClickObservedAt >= TimeSpan.FromSeconds(8))
+                            {
+                                return bestClickedResult;
+                            }
+                        }
+                        else
+                        {
+                            return bestClickedResult;
+                        }
+                    }
+                }
+
+                try
+                {
+                    await Task.Delay(250, cts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+
+            return lastResult;
+        }
+
+        private async Task<WebDriverBrowser> LaunchTurnstileBrowserAsync()
+        {
+            var (browserPath, extensionPath) = FindChromiumBrowser();
+            var arguments = new List<string> { "--no-sandbox", "--disable-features=Translate" };
+
+            var launchedBrowser = await WebDriverBrowser.LaunchAsync(browserPath, extensionPath, arguments: arguments).ConfigureAwait(false);
+
+            try
+            {
+                await WaitForFirstTabAsync(launchedBrowser).ConfigureAwait(false);
+                logger.WriteLine(LogKind.Default, $"turnstile trusted browser args={string.Join(' ', arguments)} display={Environment.GetEnvironmentVariable("DISPLAY")} session={Environment.GetEnvironmentVariable("XDG_SESSION_TYPE")}");
+                return launchedBrowser;
+            }
+            catch
+            {
+                await launchedBrowser.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        private static TabContextSettings CreateTurnstileRealSiteContextSettings()
+        {
+            return new TabContextSettings
+            {
+                UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+                Locale = "en-US",
+                Languages = ["en-US", "en"],
+                Platform = "Win32",
+                Timezone = "America/New_York",
+                Screen = new ScreenSettings
+                {
+                    Width = 1920,
+                    Height = 1080,
+                    ColorDepth = 24,
+                },
+                WebGL = new WebGLSettings
+                {
+                    Vendor = "Google Inc. (Intel)",
+                    Renderer = "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                },
+                CanvasNoise = true,
+                AudioNoise = true,
+                WebRtcPolicy = "disable",
+                BatteryProtection = true,
+                PermissionsProtection = true,
+                HardwareConcurrency = 8,
+                DeviceMemory = 8,
+                AllowedFonts = ["Arial", "Verdana", "Helvetica", "Times New Roman", "Courier New", "Georgia"],
+                ClientHints = new ClientHintsSettings
+                {
+                    Platform = "Windows",
+                    PlatformVersion = "10.0.0",
+                    Mobile = false,
+                    Architecture = "x86",
+                    Bitness = "64",
+                    Model = "",
+                    Brands = [new("Not:A-Brand", "99"), new("Chromium", "145"), new("Google Chrome", "145")],
+                    FullVersionList = [new("Not:A-Brand", "99.0.0.0"), new("Chromium", "145.0.0.0"), new("Google Chrome", "145.0.0.0")],
+                },
+                NetworkInfo = new NetworkInfoSettings(),
+                SpeechVoices =
+                [
+                    new SpeechVoiceSettings { Name = "Microsoft David", Lang = "en-US" },
+                    new SpeechVoiceSettings { Name = "Microsoft Zira", Lang = "en-US" },
+                ],
+                MediaDevicesProtection = true,
+                IntlSpoofing = true,
+                ColorScheme = "light",
+                WebGLNoise = true,
+                PluginSpoofing = true,
+                MaxTouchPoints = 0,
+                VisibilityStateOverride = "visible",
+            };
+        }
+
+        private static async Task<string?> CaptureTurnstileFrameDiagnosticsAsync(WebDriverPage tab, bool isolatedWorld = false)
+        {
+            var results = isolatedWorld
+                ? await tab.ExecuteInAllFramesIsolatedAsync(
+                """
+                (() => {
+                    function rectInfo(element) {
+                        if (!element) {
+                            return null;
+                        }
+
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
+                            centerX: rect.width > 0 ? rect.left + rect.width / 2 : rect.left,
+                            centerY: rect.height > 0 ? rect.top + rect.height / 2 : rect.top,
+                        };
+                    }
+
+                    function describeElement(element) {
+                        if (!element) {
+                            return null;
+                        }
+
+                        return {
+                            tagName: element.tagName || '',
+                            id: element.id || '',
+                            className: typeof element.className === 'string' ? element.className : '',
+                            role: element.getAttribute?.('role') || '',
+                        };
+                    }
+
+                    function describeChildren(root, limit) {
+                        if (!root?.children) {
+                            return [];
+                        }
+
+                        return Array.from(root.children)
+                            .slice(0, limit)
+                            .map(describeElement)
+                            .filter(Boolean);
+                    }
+
+                    function sampleArea(rect, label, columns, rows) {
+                        if (!rect || rect.width <= 0 || rect.height <= 0) {
+                            return [];
+                        }
+
+                        const samples = [];
+                        for (const rowRatio of rows) {
+                            for (const columnRatio of columns) {
+                                const x = rect.left + rect.width * columnRatio;
+                                const y = rect.top + rect.height * rowRatio;
+                                samples.push({
+                                    label,
+                                    x,
+                                    y,
+                                    rowRatio,
+                                    columnRatio,
+                                    stack: (document.elementsFromPoint(x, y) || []).slice(0, 5).map(describeElement).filter(Boolean),
+                                });
+                            }
+                        }
+
+                        return samples;
+                    }
+
+                    const host = document.querySelector('.cf-turnstile');
+                    const hostRect = rectInfo(host);
+                    const viewportRect = {
+                        left: 0,
+                        top: 0,
+                        width: Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0),
+                        height: Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0),
+                    };
+                    const belowHostRect = hostRect
+                        ? {
+                            left: hostRect.left,
+                            top: hostRect.top + hostRect.height,
+                            width: Math.max(hostRect.width, 280),
+                            height: Math.max(hostRect.height * 1.6, 120),
+                        }
+                        : null;
+
+                    return JSON.stringify({
+                        world: 'ISOLATED',
+                        href: location.href,
+                        title: document.title,
+                        readyState: document.readyState,
+                        iframeCount: document.querySelectorAll('iframe').length,
+                        challengeIframeCount: document.querySelectorAll('iframe[src*="challenges.cloudflare.com"]').length,
+                        hasTurnstileHost: !!host,
+                        hasCheckbox: !!document.querySelector('input[type="checkbox"]'),
+                        hasRoleCheckbox: !!document.querySelector('[role="checkbox"]'),
+                        viewportRect,
+                        documentElementRect: rectInfo(document.documentElement),
+                        bodyRect: rectInfo(document.body),
+                        bodyChildElementCount: document.body?.childElementCount || 0,
+                        bodyNodeCount: document.body?.childNodes?.length || 0,
+                        bodyChildren: describeChildren(document.body, 12),
+                        documentChildren: describeChildren(document.documentElement, 12),
+                        bodyTextSnippet: (document.body?.textContent || '').trim().slice(0, 300),
+                        hostRect,
+                        hostHtmlSnippet: (host?.innerHTML || '').slice(0, 700),
+                        hostHitSamples: sampleArea(hostRect, 'host', [0.16, 0.28, 0.44, 0.62], [0.3, 0.5, 0.7]),
+                        belowHostHitSamples: sampleArea(belowHostRect, 'below-host', [0.12, 0.28, 0.44, 0.62, 0.8], [0.12, 0.32, 0.52, 0.72]),
+                        viewportHitSamples: sampleArea(viewportRect, 'viewport', [0.08, 0.16, 0.24, 0.36, 0.5, 0.64, 0.78, 0.9], [0.1, 0.22, 0.34, 0.5, 0.66, 0.82]),
+                        documentHtmlSnippet: (document.documentElement?.outerHTML || '').slice(0, 700),
+                        bodySnippet: (document.body?.innerHTML || '').slice(0, 500)
+                    });
+                })()
+                """).ConfigureAwait(false)
+                : await tab.ExecuteInAllFramesAsync(
+                """
+                (() => {
+                    function rectInfo(element) {
+                        if (!element) {
+                            return null;
+                        }
+
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
+                            centerX: rect.width > 0 ? rect.left + rect.width / 2 : rect.left,
+                            centerY: rect.height > 0 ? rect.top + rect.height / 2 : rect.top,
+                        };
+                    }
+
+                    function describeElement(element) {
+                        if (!element) {
+                            return null;
+                        }
+
+                        return {
+                            tagName: element.tagName || '',
+                            id: element.id || '',
+                            className: typeof element.className === 'string' ? element.className : '',
+                            role: element.getAttribute?.('role') || '',
+                        };
+                    }
+
+                    function describeChildren(root, limit) {
+                        if (!root?.children) {
+                            return [];
+                        }
+
+                        return Array.from(root.children)
+                            .slice(0, limit)
+                            .map(describeElement)
+                            .filter(Boolean);
+                    }
+
+                    function sampleArea(rect, label, columns, rows) {
+                        if (!rect || rect.width <= 0 || rect.height <= 0) {
+                            return [];
+                        }
+
+                        const samples = [];
+                        for (const rowRatio of rows) {
+                            for (const columnRatio of columns) {
+                                const x = rect.left + rect.width * columnRatio;
+                                const y = rect.top + rect.height * rowRatio;
+                                samples.push({
+                                    label,
+                                    x,
+                                    y,
+                                    rowRatio,
+                                    columnRatio,
+                                    stack: (document.elementsFromPoint(x, y) || []).slice(0, 5).map(describeElement).filter(Boolean),
+                                });
+                            }
+                        }
+
+                        return samples;
+                    }
+
+                    const host = document.querySelector('.cf-turnstile');
+                    const hostRect = rectInfo(host);
+                    const viewportRect = {
+                        left: 0,
+                        top: 0,
+                        width: Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0),
+                        height: Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0),
+                    };
+                    const belowHostRect = hostRect
+                        ? {
+                            left: hostRect.left,
+                            top: hostRect.top + hostRect.height,
+                            width: Math.max(hostRect.width, 280),
+                            height: Math.max(hostRect.height * 1.6, 120),
+                        }
+                        : null;
+
+                    return JSON.stringify({
+                        href: location.href,
+                        title: document.title,
+                        readyState: document.readyState,
+                        iframeCount: document.querySelectorAll('iframe').length,
+                        challengeIframeCount: document.querySelectorAll('iframe[src*="challenges.cloudflare.com"]').length,
+                        hasTurnstileHost: !!host,
+                        hasCheckbox: !!document.querySelector('input[type="checkbox"]'),
+                        hasRoleCheckbox: !!document.querySelector('[role="checkbox"]'),
+                        viewportRect,
+                        documentElementRect: rectInfo(document.documentElement),
+                        bodyRect: rectInfo(document.body),
+                        bodyChildElementCount: document.body?.childElementCount || 0,
+                        bodyNodeCount: document.body?.childNodes?.length || 0,
+                        bodyChildren: describeChildren(document.body, 12),
+                        documentChildren: describeChildren(document.documentElement, 12),
+                        bodyTextSnippet: (document.body?.textContent || '').trim().slice(0, 300),
+                        hostRect,
+                        hostHtmlSnippet: (host?.innerHTML || '').slice(0, 700),
+                        hostHitSamples: sampleArea(hostRect, 'host', [0.16, 0.28, 0.44, 0.62], [0.3, 0.5, 0.7]),
+                        belowHostHitSamples: sampleArea(belowHostRect, 'below-host', [0.12, 0.28, 0.44, 0.62, 0.8], [0.12, 0.32, 0.52, 0.72]),
+                        viewportHitSamples: sampleArea(viewportRect, 'viewport', [0.08, 0.16, 0.24, 0.36, 0.5, 0.64, 0.78, 0.9], [0.1, 0.22, 0.34, 0.5, 0.66, 0.82]),
+                        documentHtmlSnippet: (document.documentElement?.outerHTML || '').slice(0, 700),
+                        bodySnippet: (document.body?.innerHTML || '').slice(0, 500)
+                    });
+                })()
+                """).ConfigureAwait(false);
+
+            if (results is not JsonElement arr || arr.ValueKind != JsonValueKind.Array)
+                return null;
+
+            var diagnostics = arr.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString())
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .ToArray();
+
+            if (diagnostics.Length == 0)
+                return "[]";
+
+            return "[" + string.Join(",", diagnostics.Select(static diagnostic => "\"" + diagnostic!
+                .Replace("\\", "\\\\", StringComparison.Ordinal)
+                .Replace("\"", "\\\"", StringComparison.Ordinal)
+                .Replace("\r", "\\r", StringComparison.Ordinal)
+                .Replace("\n", "\\n", StringComparison.Ordinal)
+                + "\"")) + "]";
+        }
+
+        private static async Task<string?> CaptureTurnstileFrameMappingAsync(WebDriverPage tab)
+        {
+            var topPageIframesJson = (await tab.ExecuteAsync(
+                """
+                (() => {
+                    function describeIframe(iframe, index) {
+                        const rect = iframe.getBoundingClientRect();
+                        return {
+                            index,
+                            src: iframe.src || '',
+                            title: iframe.title || '',
+                            name: iframe.name || '',
+                            id: iframe.id || '',
+                            className: typeof iframe.className === 'string' ? iframe.className : '',
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
+                            isChallenge: (iframe.src || '').includes('challenges.cloudflare.com'),
+                        };
+                    }
+
+                    return JSON.stringify({
+                        href: location.href,
+                        title: document.title,
+                        iframeCount: document.querySelectorAll('iframe').length,
+                        iframes: Array.from(document.querySelectorAll('iframe')).map(describeIframe),
+                    });
+                })()
+                """).ConfigureAwait(false))?.ToString();
+
+            var resultNode = new JsonObject();
+
+            if (!string.IsNullOrWhiteSpace(topPageIframesJson))
+            {
+                try
+                {
+                    resultNode["topPage"] = JsonNode.Parse(topPageIframesJson);
+                }
+                catch
+                {
+                    resultNode["topPageRaw"] = topPageIframesJson;
+                }
+            }
+
+            var mainWorldResponse = await tab.SendBridgeCommandAsync(
+                BridgeCommand.ExecuteScriptInFrames,
+                new JsonObject
+                {
+                    ["script"] =
+                    """
+                    (() => JSON.stringify({
+                        href: location.href,
+                        title: document.title,
+                        readyState: document.readyState,
+                        isTop: window === window.top,
+                        isCloudflareFrame: location.href.includes('challenges.cloudflare.com'),
+                        iframeCount: document.querySelectorAll('iframe').length,
+                        challengeIframeCount: document.querySelectorAll('iframe[src*="challenges.cloudflare.com"]').length,
+                        bodyTextSnippet: (document.body?.textContent || '').trim().slice(0, 180),
+                        htmlSnippet: (document.documentElement?.outerHTML || '').slice(0, 220)
+                    }))()
+                    """,
+                    ["includeMetadata"] = true,
+                }).ConfigureAwait(false);
+
+            var isolatedWorldResponse = await tab.SendBridgeCommandAsync(
+                BridgeCommand.ExecuteScriptInFrames,
+                new JsonObject
+                {
+                    ["script"] =
+                    """
+                    (() => JSON.stringify({
+                        href: location.href,
+                        title: document.title,
+                        readyState: document.readyState,
+                        isTop: window === window.top,
+                        isCloudflareFrame: location.href.includes('challenges.cloudflare.com'),
+                        iframeCount: document.querySelectorAll('iframe').length,
+                        challengeIframeCount: document.querySelectorAll('iframe[src*="challenges.cloudflare.com"]').length,
+                        bodyTextSnippet: (document.body?.textContent || '').trim().slice(0, 180),
+                        htmlSnippet: (document.documentElement?.outerHTML || '').slice(0, 220)
+                    }))()
+                    """,
+                    ["includeMetadata"] = true,
+                    ["world"] = "ISOLATED",
+                }).ConfigureAwait(false);
+
+            resultNode["mainWorldBridgeStatus"] = mainWorldResponse.Status?.ToString();
+            resultNode["mainWorldBridgeError"] = mainWorldResponse.Error;
+            resultNode["isolatedWorldBridgeStatus"] = isolatedWorldResponse.Status?.ToString();
+            resultNode["isolatedWorldBridgeError"] = isolatedWorldResponse.Error;
+
+            if (mainWorldResponse.Payload is JsonElement mainFrameArray)
+            {
+                resultNode["mainWorldPayloadKind"] = mainFrameArray.ValueKind.ToString();
+
+                if (mainFrameArray.ValueKind == JsonValueKind.Array)
+                {
+                    try
+                    {
+                        resultNode["mainWorldExecutedFrames"] = JsonNode.Parse(mainFrameArray.GetRawText());
+                    }
+                    catch
+                    {
+                        resultNode["mainWorldExecutedFramesRaw"] = mainFrameArray.GetRawText();
+                    }
+                }
+                else
+                {
+                    resultNode["mainWorldPayloadRaw"] = mainFrameArray.GetRawText();
+                }
+            }
+
+            if (isolatedWorldResponse.Payload is JsonElement isolatedFrameArray)
+            {
+                resultNode["isolatedWorldPayloadKind"] = isolatedFrameArray.ValueKind.ToString();
+
+                if (isolatedFrameArray.ValueKind == JsonValueKind.Array)
+                {
+                    try
+                    {
+                        resultNode["isolatedWorldExecutedFrames"] = JsonNode.Parse(isolatedFrameArray.GetRawText());
+                    }
+                    catch
+                    {
+                        resultNode["isolatedWorldExecutedFramesRaw"] = isolatedFrameArray.GetRawText();
+                    }
+                }
+                else
+                {
+                    resultNode["isolatedWorldPayloadRaw"] = isolatedFrameArray.GetRawText();
+                }
+            }
+
+            return resultNode.ToJsonString();
+        }
+
+        private static async Task<string?> WaitForChallengeIframeAsync(WebDriverPage tab, TimeSpan timeout)
+        {
+            var deadline = DateTime.UtcNow + timeout;
+
+            while (DateTime.UtcNow < deadline)
+            {
+                var frameSrc = (await tab.ExecuteAsync(
+                    """
+                    (() => {
+                        const queue = [document];
+                        while (queue.length > 0) {
+                            const current = queue.shift();
+                            if (!current?.querySelectorAll) {
+                                continue;
+                            }
+
+                            const iframe = current.querySelector('iframe[src*="challenges.cloudflare.com"]');
+                            if (iframe?.src) {
+                                return iframe.src;
+                            }
+
+                            for (const element of current.querySelectorAll('*')) {
+                                if (element.shadowRoot) {
+                                    queue.push(element.shadowRoot);
+                                }
+                            }
+                        }
+
+                        return '';
+                    })()
+                    """).ConfigureAwait(false))?.ToString();
+
+                if (!string.IsNullOrWhiteSpace(frameSrc))
+                    return frameSrc;
+
+                await Task.Delay(250).ConfigureAwait(false);
+            }
+
+            return null;
+        }
+
+        private static async Task<string?> ClickTurnstileHostFromTopPageAsync(
+            WebDriverPage tab,
+            PagePointClickOptions clickOptions,
+            CancellationToken cancellationToken)
+        {
+            var hostRectJson = (await tab.ExecuteAsync(
+                """
+                (() => {
+                    function queryDeep(root, selector) {
+                        const queue = [root];
+
+                        while (queue.length > 0) {
+                            const current = queue.shift();
+                            if (!current?.querySelectorAll) {
+                                continue;
+                            }
+
+                            const element = current.querySelector(selector);
+                            if (element instanceof Element) {
+                                return element;
+                            }
+
+                            for (const child of current.querySelectorAll('*')) {
+                                if (child.shadowRoot) {
+                                    queue.push(child.shadowRoot);
+                                }
+                            }
+                        }
+
+                        return null;
+                    }
+
+                    const host = queryDeep(document, '.cf-turnstile');
+                    if (!(host instanceof Element)) {
+                        return '';
+                    }
+
+                    const rect = host.getBoundingClientRect();
+                    return JSON.stringify({
+                        found: true,
+                        left: rect.left,
+                        top: rect.top,
+                        width: rect.width,
+                        height: rect.height,
+                    });
+                })()
+                """,
+                cancellationToken).ConfigureAwait(false))?.ToString();
+
+            if (string.IsNullOrWhiteSpace(hostRectJson))
+                return null;
+
+            JsonNode? hostRect;
+            try
+            {
+                hostRect = JsonNode.Parse(hostRectJson);
+            }
+            catch
+            {
+                return null;
+            }
+
+            if (hostRect?["found"]?.GetValue<bool>() != true)
+                return null;
+
+            var left = hostRect["left"]?.GetValue<double>() ?? 0;
+            var top = hostRect["top"]?.GetValue<double>() ?? 0;
+            var width = hostRect["width"]?.GetValue<double>() ?? 0;
+            var height = hostRect["height"]?.GetValue<double>() ?? 0;
+
+            if (width <= 0 || height <= 0)
+                return hostRectJson;
+
+            var clickPoints = new (double X, double Y)[]
+            {
+                (0.12, 0.50),
+                (0.16, 0.50),
+                (0.20, 0.50),
+                (0.24, 0.50),
+                (0.16, 0.34),
+                (0.16, 0.66),
+            };
+
+            foreach (var point in clickPoints)
+            {
+                await tab.ClickPointAsync(
+                    left + (width * point.X),
+                    top + (height * point.Y),
+                    clickOptions,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            hostRect["clickPreference"] = clickOptions.Preference.ToString();
+            return hostRect.ToJsonString();
+        }
+
+        private static async Task<string?> ClickChallengeIframeFromTopPageAsync(WebDriverPage tab, CancellationToken cancellationToken)
+        {
+            var iframeRectJson = (await tab.ExecuteAsync(
+                """
+                (() => {
+                    function queryDeep(root, selector) {
+                        const queue = [root];
+
+                        while (queue.length > 0) {
+                            const current = queue.shift();
+                            if (!current?.querySelectorAll) {
+                                continue;
+                            }
+
+                            const iframe = current.querySelector(selector);
+                            if (iframe instanceof HTMLIFrameElement) {
+                                return iframe;
+                            }
+
+                            for (const element of current.querySelectorAll('*')) {
+                                if (element.shadowRoot) {
+                                    queue.push(element.shadowRoot);
+                                }
+                            }
+                        }
+
+                        return null;
+                    }
+
+                    const iframe = queryDeep(document, 'iframe[src*="challenges.cloudflare.com"]');
+                    if (!(iframe instanceof HTMLIFrameElement)) {
+                        return '';
+                    }
+
+                    const rect = iframe.getBoundingClientRect();
+                    return JSON.stringify({
+                        found: true,
+                        left: rect.left,
+                        top: rect.top,
+                        width: rect.width,
+                        height: rect.height,
+                    });
+                })()
+                """,
+                cancellationToken).ConfigureAwait(false))?.ToString();
+
+            if (string.IsNullOrWhiteSpace(iframeRectJson))
+                return null;
+
+            JsonNode? iframeRect;
+            try
+            {
+                iframeRect = JsonNode.Parse(iframeRectJson);
+            }
+            catch
+            {
+                return null;
+            }
+
+            if (iframeRect?["found"]?.GetValue<bool>() != true)
+                return null;
+
+            var left = iframeRect["left"]?.GetValue<double>() ?? 0;
+            var top = iframeRect["top"]?.GetValue<double>() ?? 0;
+            var width = iframeRect["width"]?.GetValue<double>() ?? 0;
+            var height = iframeRect["height"]?.GetValue<double>() ?? 0;
+
+            if (width <= 0 || height <= 0)
+                return iframeRectJson;
+
+            var clickPoints = new (double X, double Y)[]
+            {
+                (0.12, 0.5),
+                (0.16, 0.5),
+                (0.2, 0.5),
+                (0.24, 0.5),
+                (0.12, 0.34),
+                (0.16, 0.34),
+                (0.12, 0.66),
+                (0.16, 0.66),
+                (0.3, 0.5),
+            };
+
+            foreach (var point in clickPoints)
+            {
+                await tab.ClickPointAsync(
+                    left + (width * point.X),
+                    top + (height * point.Y),
+                    PagePointClickOptions.PreferParallel,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            return iframeRectJson;
+        }
+
+        private static async Task<string?> ClickTurnstileOverlayFromTopPageAsync(
+            WebDriverPage tab,
+            PagePointClickOptions clickOptions,
+            CancellationToken cancellationToken)
+        {
+            var overlayJson = (await tab.ExecuteAsync(
+                """
+                (() => {
+                    function queryDeep(root, selector) {
+                        const queue = [root];
+
+                        while (queue.length > 0) {
+                            const current = queue.shift();
+                            if (!current?.querySelectorAll) {
+                                continue;
+                            }
+
+                            const element = current.querySelector(selector);
+                            if (element instanceof Element) {
+                                return element;
+                            }
+
+                            for (const child of current.querySelectorAll('*')) {
+                                if (child.shadowRoot) {
+                                    queue.push(child.shadowRoot);
+                                }
+                            }
+                        }
+
+                        return null;
+                    }
+
+                    function describeElement(element) {
+                        if (!(element instanceof Element)) {
+                            return null;
+                        }
+
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            tagName: element.tagName || '',
+                            id: element.id || '',
+                            className: typeof element.className === 'string' ? element.className : '',
+                            role: element.getAttribute?.('role') || '',
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
+                        };
+                    }
+
+                    function elementAncestors(element, maxDepth) {
+                        const result = [];
+                        let current = element;
+
+                        while (current instanceof Element && result.length < maxDepth) {
+                            result.push(current);
+                            current = current.parentElement;
+                        }
+
+                        return result;
+                    }
+
+                    const host = queryDeep(document, '.cf-turnstile');
+                    if (!(host instanceof Element)) {
+                        return '';
+                    }
+
+                    const rect = host.getBoundingClientRect();
+                    if (!(rect.width > 0) || !(rect.height > 0)) {
+                        return JSON.stringify({ found: true, host: describeElement(host), clicked: false, reason: 'empty-host-rect' });
+                    }
+
+                    const sampleRatios = [
+                        [0.12, 0.34],
+                        [0.16, 0.34],
+                        [0.12, 0.5],
+                        [0.16, 0.5],
+                        [0.2, 0.5],
+                        [0.24, 0.5],
+                        [0.3, 0.5],
+                        [0.12, 0.66],
+                        [0.16, 0.66],
+                    ];
+                    const eventSequence = [
+                        ['pointerover', 0],
+                        ['mouseover', 0],
+                        ['pointerenter', 0],
+                        ['mouseenter', 0],
+                        ['pointermove', 0],
+                        ['mousemove', 0],
+                        ['pointerdown', 1],
+                        ['mousedown', 1],
+                        ['pointerup', 0],
+                        ['mouseup', 0],
+                        ['click', 0],
+                    ];
+                    const sampleResults = [];
+
+                    for (const [columnRatio, rowRatio] of sampleRatios) {
+                        const pointX = rect.left + (rect.width * columnRatio);
+                        const pointY = rect.top + (rect.height * rowRatio);
+                        const stack = (document.elementsFromPoint(pointX, pointY) || []).filter((entry) => entry instanceof Element);
+                        const overlay = stack.find((entry) => entry !== host && entry !== document.body && entry !== document.documentElement) || stack[0] || host;
+                        const dispatchTargets = Array.from(new Set([
+                            ...elementAncestors(overlay, 4),
+                            host,
+                            document.body,
+                            document.documentElement,
+                            document,
+                            window,
+                        ].filter(Boolean)));
+
+                        for (const dispatchTarget of dispatchTargets) {
+                            for (const [type, buttons] of eventSequence) {
+                                const init = {
+                                    bubbles: type !== 'mouseenter' && type !== 'pointerenter',
+                                    cancelable: true,
+                                    composed: true,
+                                    clientX: pointX,
+                                    clientY: pointY,
+                                    button: 0,
+                                    buttons,
+                                };
+
+                                if (type.startsWith('pointer')) {
+                                    dispatchTarget.dispatchEvent(new PointerEvent(type, {
+                                        ...init,
+                                        pointerId: 1,
+                                        pointerType: 'mouse',
+                                        isPrimary: true,
+                                    }));
+                                } else {
+                                    dispatchTarget.dispatchEvent(new MouseEvent(type, init));
+                                }
+                            }
+                        }
+
+                        if (overlay instanceof HTMLElement) {
+                            overlay.focus?.({ preventScroll: true });
+                            overlay.click?.();
+                        }
+
+                        if (host instanceof HTMLElement && host !== overlay) {
+                            host.focus?.({ preventScroll: true });
+                            host.click?.();
+                        }
+
+                        sampleResults.push({
+                            columnRatio,
+                            rowRatio,
+                            pointX,
+                            pointY,
+                            overlay: describeElement(overlay),
+                            stack: stack.slice(0, 5).map(describeElement).filter(Boolean),
+                        });
+                    }
+
+                    return JSON.stringify({
+                        found: true,
+                        host: describeElement(host),
+                        sampleResults,
+                    });
+                })()
+                """,
+                cancellationToken).ConfigureAwait(false))?.ToString();
+
+            if (string.IsNullOrWhiteSpace(overlayJson))
+                return null;
+
+            JsonNode? overlayNode;
+            try
+            {
+                overlayNode = JsonNode.Parse(overlayJson);
+            }
+            catch
+            {
+                return overlayJson;
+            }
+
+            if (overlayNode?["found"]?.GetValue<bool>() != true)
+                return overlayJson;
+
+            if (overlayNode["sampleResults"] is not JsonArray sampleResults)
+                return overlayJson;
+
+            foreach (var sampleResult in sampleResults)
+            {
+                var pointX = sampleResult?["pointX"]?.GetValue<double>() ?? double.NaN;
+                var pointY = sampleResult?["pointY"]?.GetValue<double>() ?? double.NaN;
+
+                if (double.IsNaN(pointX) || double.IsNaN(pointY))
+                    continue;
+
+                await tab.ClickPointAsync(
+                    pointX,
+                    pointY,
+                    clickOptions,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            overlayNode["clicked"] = true;
+            overlayNode["clickPreference"] = clickOptions.Preference.ToString();
+            return overlayNode.ToJsonString();
+        }
+
+        private static async Task<string?> PressTurnstileOverlayKeysFromTopPageAsync(
+            WebDriverPage tab,
+            PagePointClickOptions pointClickOptions,
+            PageKeyPressOptions keyPressOptions,
+            CancellationToken cancellationToken)
+        {
+            var overlayJson = (await tab.ExecuteAsync(
+                """
+                (() => {
+                    function queryDeep(root, selector) {
+                        const queue = [root];
+
+                        while (queue.length > 0) {
+                            const current = queue.shift();
+                            if (!current?.querySelectorAll) {
+                                continue;
+                            }
+
+                            const element = current.querySelector(selector);
+                            if (element instanceof Element) {
+                                return element;
+                            }
+
+                            for (const child of current.querySelectorAll('*')) {
+                                if (child.shadowRoot) {
+                                    queue.push(child.shadowRoot);
+                                }
+                            }
+                        }
+
+                        return null;
+                    }
+
+                    function describeElement(element) {
+                        if (!(element instanceof Element)) {
+                            return null;
+                        }
+
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            tagName: element.tagName || '',
+                            id: element.id || '',
+                            className: typeof element.className === 'string' ? element.className : '',
+                            role: element.getAttribute?.('role') || '',
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
+                        };
+                    }
+
+                    function dispatchKey(target, key, code, keyCode) {
+                        if (!target?.dispatchEvent) {
+                            return false;
+                        }
+
+                        target.focus?.({ preventScroll: true });
+
+                        const eventInit = {
+                            key,
+                            code,
+                            keyCode,
+                            which: keyCode,
+                            charCode: keyCode,
+                            bubbles: true,
+                            cancelable: true,
+                            composed: true,
+                        };
+
+                        target.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+                        target.dispatchEvent(new KeyboardEvent('keypress', eventInit));
+                        target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+                        return true;
+                    }
+
+                    const host = queryDeep(document, '.cf-turnstile');
+                    if (!(host instanceof Element)) {
+                        return '';
+                    }
+
+                    const rect = host.getBoundingClientRect();
+                    const pointX = rect.left + (rect.width * 0.16);
+                    const pointY = rect.top + (rect.height * 0.5);
+                    const stack = (document.elementsFromPoint(pointX, pointY) || []).filter((entry) => entry instanceof Element);
+                    const overlay = stack.find((entry) => entry !== host && entry !== document.body && entry !== document.documentElement) || stack[0] || host;
+                    const targets = Array.from(new Set([
+                        overlay,
+                        host,
+                        document.activeElement,
+                        document.body,
+                        document.documentElement,
+                    ].filter(Boolean)));
+                    const actions = [];
+
+                    for (const target of targets) {
+                        actions.push({
+                            target: describeElement(target),
+                            space: dispatchKey(target, ' ', 'Space', 32),
+                            enter: dispatchKey(target, 'Enter', 'Enter', 13),
+                        });
+                    }
+
+                    return JSON.stringify({
+                        found: true,
+                        host: describeElement(host),
+                        overlay: describeElement(overlay),
+                        activeElement: describeElement(document.activeElement),
+                        actions,
+                        pointX,
+                        pointY,
+                    });
+                })()
+                """,
+                cancellationToken).ConfigureAwait(false))?.ToString();
+
+            if (string.IsNullOrWhiteSpace(overlayJson))
+                return null;
+
+            JsonNode? overlayNode;
+            try
+            {
+                overlayNode = JsonNode.Parse(overlayJson);
+            }
+            catch
+            {
+                return overlayJson;
+            }
+
+            if (overlayNode?["found"]?.GetValue<bool>() != true)
+                return overlayJson;
+
+            var pointX = overlayNode["pointX"]?.GetValue<double>() ?? double.NaN;
+            var pointY = overlayNode["pointY"]?.GetValue<double>() ?? double.NaN;
+
+            if (!double.IsNaN(pointX) && !double.IsNaN(pointY))
+            {
+                await tab.ClickPointAsync(
+                    pointX,
+                    pointY,
+                    pointClickOptions,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            await tab.KeyPressAsync(" ", keyPressOptions, cancellationToken).ConfigureAwait(false);
+            await tab.KeyPressAsync("Enter", keyPressOptions, cancellationToken).ConfigureAwait(false);
+
+            overlayNode["browserLevelKeyPress"] = new JsonArray(" ", "Enter");
+            overlayNode["pointClickPreference"] = pointClickOptions.Preference.ToString();
+            overlayNode["keyPressPreference"] = keyPressOptions.Preference.ToString();
+            return overlayNode.ToJsonString();
+        }
+
+        private static int? FindChallengeFrameId(string? frameMappingJson)
+        {
+            if (string.IsNullOrWhiteSpace(frameMappingJson))
+                return null;
+
+            try
+            {
+                var node = JsonNode.Parse(frameMappingJson);
+                foreach (var propertyName in new[] { "mainWorldExecutedFrames", "isolatedWorldExecutedFrames" })
+                {
+                    if (node?[propertyName] is not JsonArray frames)
+                        continue;
+
+                    foreach (var frame in frames)
+                    {
+                        var url = frame?["url"]?.GetValue<string>();
+                        if (string.IsNullOrWhiteSpace(url) || !url.Contains("challenges.cloudflare.com", StringComparison.Ordinal))
+                            continue;
+
+                        if (frame?["frameId"] is JsonNode frameIdNode)
+                            return frameIdNode.GetValue<int>();
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private readonly record struct ScreenshotRegion(int Left, int Top, int Width, int Height);
+
+        private static async Task<string?> CaptureTurnstileScreenshotProbeAsync(WebDriverPage tab, string? diagnosticsJson)
+        {
+            if (!TryReadTurnstileHostRegion(diagnosticsJson, out var hostRegion))
+                return null;
+
+            var screenshotDataUrl = await tab.CaptureScreenshotAsync().ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(screenshotDataUrl))
+                return null;
+
+            return AnalyzePngScreenshot(screenshotDataUrl, hostRegion, padding: 16);
+        }
+
+        private static bool TryReadTurnstileHostRegion(string? diagnosticsJson, out ScreenshotRegion region)
+        {
+            region = default;
+
+            if (string.IsNullOrWhiteSpace(diagnosticsJson))
+                return false;
+
+            try
+            {
+                if (JsonNode.Parse(diagnosticsJson) is not JsonArray diagnostics)
+                    return false;
+
+                foreach (var item in diagnostics)
+                {
+                    JsonNode? diagnosticNode = item;
+                    if (item is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var diagnosticText) && !string.IsNullOrWhiteSpace(diagnosticText))
+                        diagnosticNode = JsonNode.Parse(diagnosticText);
+
+                    var hostRect = diagnosticNode?["hostRect"];
+                    if (hostRect is null)
+                        continue;
+
+                    var left = (int)Math.Round(hostRect["left"]?.GetValue<double>() ?? 0);
+                    var top = (int)Math.Round(hostRect["top"]?.GetValue<double>() ?? 0);
+                    var width = (int)Math.Round(hostRect["width"]?.GetValue<double>() ?? 0);
+                    var height = (int)Math.Round(hostRect["height"]?.GetValue<double>() ?? 0);
+
+                    if (width <= 0 || height <= 0)
+                        continue;
+
+                    region = new ScreenshotRegion(left, top, width, height);
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            return false;
+        }
+
+        private static string? AnalyzePngScreenshot(string screenshotDataUrl, ScreenshotRegion hostRegion, int padding)
+        {
+            const string Prefix = "data:image/png;base64,";
+            var base64 = screenshotDataUrl.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)
+                ? screenshotDataUrl[Prefix.Length..]
+                : screenshotDataUrl;
+
+            byte[] pngBytes;
+            try
+            {
+                pngBytes = Convert.FromBase64String(base64);
+            }
+            catch
+            {
+                return null;
+            }
+
+            if (!TryReadPngSize(pngBytes, out var screenshotWidth, out var screenshotHeight)
+                || screenshotWidth <= 0
+                || screenshotHeight <= 0)
+            {
+                return null;
+            }
+
+            using var codec = new PngCodec();
+            codec.InitializeDecoder(new ImageCodecParameters(screenshotWidth, screenshotHeight, VideoPixelFormat.Rgba32));
+
+            using var buffer = new VideoFrameBuffer(screenshotWidth, screenshotHeight, VideoPixelFormat.Rgba32);
+            var frame = buffer.AsFrame();
+            if (codec.Decode(pngBytes, ref frame) != CodecResult.Success)
+                return null;
+
+            var cropLeft = Math.Max(0, hostRegion.Left - padding);
+            var cropTop = Math.Max(0, hostRegion.Top - padding);
+            var cropRight = Math.Min(screenshotWidth, hostRegion.Left + hostRegion.Width + padding);
+            var cropBottom = Math.Min(screenshotHeight, hostRegion.Top + hostRegion.Height + padding);
+            var cropWidth = cropRight - cropLeft;
+            var cropHeight = cropBottom - cropTop;
+
+            if (cropWidth <= 0 || cropHeight <= 0)
+                return null;
+
+            var packed = frame.PackedData;
+            var data = packed.Data;
+            var stride = packed.Stride;
+
+            long sumLuma = 0;
+            long sumLumaSq = 0;
+            long sumNeighborHorizontal = 0;
+            long sumNeighborVertical = 0;
+            var horizontalPairs = 0;
+            var verticalPairs = 0;
+            var opaquePixels = 0;
+            var quantizedColors = new Dictionary<int, int>();
+            var sampleGrid = new JsonArray();
+
+            static int Quantize(byte red, byte green, byte blue) => ((red >> 4) << 8) | ((green >> 4) << 4) | (blue >> 4);
+            static string Hex(byte red, byte green, byte blue, byte alpha) => $"#{red:X2}{green:X2}{blue:X2}{alpha:X2}";
+
+            for (var y = cropTop; y < cropBottom; y++)
+            {
+                var rowOffset = (y * stride) + (cropLeft * 4);
+                for (var x = cropLeft; x < cropRight; x++)
+                {
+                    var pixelOffset = rowOffset + ((x - cropLeft) * 4);
+                    var red = data[pixelOffset];
+                    var green = data[pixelOffset + 1];
+                    var blue = data[pixelOffset + 2];
+                    var alpha = data[pixelOffset + 3];
+                    var luma = (red * 2126L + green * 7152L + blue * 722L) / 10000L;
+
+                    sumLuma += luma;
+                    sumLumaSq += luma * luma;
+                    if (alpha >= 250)
+                        opaquePixels++;
+
+                    var quantized = Quantize(red, green, blue);
+                    quantizedColors.TryGetValue(quantized, out var colorCount);
+                    quantizedColors[quantized] = colorCount + 1;
+
+                    if (x + 1 < cropRight)
+                    {
+                        var rightOffset = pixelOffset + 4;
+                        var rightLuma = (data[rightOffset] * 2126L + data[rightOffset + 1] * 7152L + data[rightOffset + 2] * 722L) / 10000L;
+                        sumNeighborHorizontal += Math.Abs(luma - rightLuma);
+                        horizontalPairs++;
+                    }
+
+                    if (y + 1 < cropBottom)
+                    {
+                        var bottomOffset = pixelOffset + stride;
+                        var bottomLuma = (data[bottomOffset] * 2126L + data[bottomOffset + 1] * 7152L + data[bottomOffset + 2] * 722L) / 10000L;
+                        sumNeighborVertical += Math.Abs(luma - bottomLuma);
+                        verticalPairs++;
+                    }
+                }
+            }
+
+            var pixelCount = cropWidth * cropHeight;
+            if (pixelCount <= 0)
+                return null;
+
+            foreach (var rowRatio in new[] { 0.2, 0.5, 0.8 })
+            {
+                foreach (var columnRatio in new[] { 0.12, 0.2, 0.35, 0.5, 0.65, 0.8 })
+                {
+                    var sampleX = Math.Clamp(hostRegion.Left + (int)Math.Round(hostRegion.Width * columnRatio), 0, screenshotWidth - 1);
+                    var sampleY = Math.Clamp(hostRegion.Top + (int)Math.Round(hostRegion.Height * rowRatio), 0, screenshotHeight - 1);
+                    var sampleOffset = (sampleY * stride) + (sampleX * 4);
+                    var red = data[sampleOffset];
+                    var green = data[sampleOffset + 1];
+                    var blue = data[sampleOffset + 2];
+                    var alpha = data[sampleOffset + 3];
+
+                    sampleGrid.Add(new JsonObject
+                    {
+                        ["columnRatio"] = columnRatio,
+                        ["rowRatio"] = rowRatio,
+                        ["x"] = sampleX,
+                        ["y"] = sampleY,
+                        ["rgba"] = Hex(red, green, blue, alpha),
+                    });
+                }
+            }
+
+            var meanLuma = (double)sumLuma / pixelCount;
+            var variance = Math.Max(0, ((double)sumLumaSq / pixelCount) - (meanLuma * meanLuma));
+            var topColors = quantizedColors
+                .OrderByDescending(static pair => pair.Value)
+                .Take(8)
+                .Select(static pair => new JsonObject
+                {
+                    ["rgb12"] = $"0x{pair.Key:X3}",
+                    ["count"] = pair.Value,
+                });
+
+            return new JsonObject
+            {
+                ["screenshotWidth"] = screenshotWidth,
+                ["screenshotHeight"] = screenshotHeight,
+                ["hostRect"] = new JsonObject
+                {
+                    ["left"] = hostRegion.Left,
+                    ["top"] = hostRegion.Top,
+                    ["width"] = hostRegion.Width,
+                    ["height"] = hostRegion.Height,
+                },
+                ["cropRect"] = new JsonObject
+                {
+                    ["left"] = cropLeft,
+                    ["top"] = cropTop,
+                    ["width"] = cropWidth,
+                    ["height"] = cropHeight,
+                },
+                ["pixelCount"] = pixelCount,
+                ["opaquePixelRatio"] = Math.Round((double)opaquePixels / pixelCount, 4),
+                ["quantizedColorCount"] = quantizedColors.Count,
+                ["meanLuma"] = Math.Round(meanLuma, 2),
+                ["lumaStdDev"] = Math.Round(Math.Sqrt(variance), 2),
+                ["avgHorizontalNeighborDelta"] = Math.Round(horizontalPairs > 0 ? (double)sumNeighborHorizontal / horizontalPairs : 0, 2),
+                ["avgVerticalNeighborDelta"] = Math.Round(verticalPairs > 0 ? (double)sumNeighborVertical / verticalPairs : 0, 2),
+                ["topQuantizedColors"] = new JsonArray(topColors.ToArray()),
+                ["sampleGrid"] = sampleGrid,
+            }.ToJsonString();
+        }
+
+        private static bool TryReadPngSize(ReadOnlySpan<byte> pngBytes, out int width, out int height)
+        {
+            width = 0;
+            height = 0;
+
+            if (pngBytes.Length < 24)
+                return false;
+
+            var pngSignature = new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 };
+            if (!pngBytes[..8].SequenceEqual(pngSignature))
+                return false;
+
+            width = BinaryPrimitives.ReadInt32BigEndian(pngBytes[16..20]);
+            height = BinaryPrimitives.ReadInt32BigEndian(pngBytes[20..24]);
+            return width > 0 && height > 0;
+        }
+
+        private static async Task<string?> ExecuteScriptInSpecificFrameAsync(WebDriverPage tab, int frameId, string script, bool isolatedWorld)
+        {
+            var response = await tab.SendBridgeCommandAsync(
+                BridgeCommand.ExecuteScriptInFrames,
+                new JsonObject
+                {
+                    ["script"] = script,
+                    ["frameId"] = frameId,
+                    ["world"] = isolatedWorld ? "ISOLATED" : "MAIN",
+                }).ConfigureAwait(false);
+
+            var resultNode = new JsonObject
+            {
+                ["frameId"] = frameId,
+                ["world"] = isolatedWorld ? "ISOLATED" : "MAIN",
+                ["bridgeStatus"] = response.Status?.ToString(),
+                ["bridgeError"] = response.Error,
+            };
+
+            if (response.Payload is JsonElement payload)
+            {
+                resultNode["payloadKind"] = payload.ValueKind.ToString();
+
+                if (payload.ValueKind == JsonValueKind.Array)
+                {
+                    try
+                    {
+                        resultNode["payload"] = JsonNode.Parse(payload.GetRawText());
+                    }
+                    catch
+                    {
+                        resultNode["payloadRaw"] = payload.GetRawText();
+                    }
+
+                    if (payload.GetArrayLength() > 0)
+                    {
+                        var first = payload[0];
+                        if (first.ValueKind == JsonValueKind.String)
+                        {
+                            var firstValue = first.GetString();
+                            if (!string.IsNullOrWhiteSpace(firstValue))
+                            {
+                                try
+                                {
+                                    resultNode["scriptResult"] = JsonNode.Parse(firstValue);
+                                }
+                                catch
+                                {
+                                    resultNode["scriptResultRaw"] = firstValue;
+                                }
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    resultNode["payloadRaw"] = payload.GetRawText();
+                }
+            }
+
+            return resultNode.ToJsonString();
+        }
+
+        private static Task<string?> CaptureChallengeFrameProbeAsync(WebDriverPage tab, int frameId, bool isolatedWorld)
+        {
+            return ExecuteScriptInSpecificFrameAsync(
+                tab,
+                frameId,
+                """
+                (() => {
+                    function describeElement(element) {
+                        if (!(element instanceof Element)) {
+                            return null;
+                        }
+
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            tagName: element.tagName || '',
+                            id: element.id || '',
+                            className: typeof element.className === 'string' ? element.className : '',
+                            role: element.getAttribute?.('role') || '',
+                            ariaLabel: element.getAttribute?.('aria-label') || '',
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
+                        };
+                    }
+
+                    const width = Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0);
+                    const height = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0);
+                    const sampleRatios = [
+                        [0.12, 0.34],
+                        [0.16, 0.34],
+                        [0.2, 0.34],
+                        [0.12, 0.5],
+                        [0.16, 0.5],
+                        [0.2, 0.5],
+                        [0.24, 0.5],
+                        [0.12, 0.66],
+                        [0.16, 0.66],
+                        [0.2, 0.66],
+                        [0.3, 0.5],
+                    ];
+
+                    return JSON.stringify({
+                        href: location.href,
+                        title: document.title,
+                        readyState: document.readyState,
+                        viewportWidth: width,
+                        viewportHeight: height,
+                        activeElement: describeElement(document.activeElement),
+                        checkbox: describeElement(document.querySelector('input[type="checkbox"]')),
+                        roleCheckbox: describeElement(document.querySelector('[role="checkbox"]')),
+                        verifyAction: describeElement(document.querySelector('[data-action="verify"]')),
+                        bodyTextSnippet: (document.body?.textContent || '').trim().slice(0, 220),
+                        bodyHtmlSnippet: (document.body?.innerHTML || '').slice(0, 500),
+                        points: sampleRatios.map(([columnRatio, rowRatio]) => {
+                            const x = width * columnRatio;
+                            const y = height * rowRatio;
+                            return {
+                                columnRatio,
+                                rowRatio,
+                                x,
+                                y,
+                                elementFromPoint: describeElement(document.elementFromPoint(x, y)),
+                                stack: (document.elementsFromPoint(x, y) || []).slice(0, 6).map(describeElement).filter(Boolean),
+                            };
+                        }),
+                    });
+                })()
+                """,
+                isolatedWorld);
+        }
+
+        private static Task<string?> ClickChallengeFrameDirectAsync(WebDriverPage tab, int frameId, bool isolatedWorld)
+        {
+            return ExecuteScriptInSpecificFrameAsync(
+                tab,
+                frameId,
+                """
+                (() => {
+                    function describeElement(element) {
+                        if (!(element instanceof Element)) {
+                            return null;
+                        }
+
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            tagName: element.tagName || '',
+                            id: element.id || '',
+                            className: typeof element.className === 'string' ? element.className : '',
+                            role: element.getAttribute?.('role') || '',
+                            ariaLabel: element.getAttribute?.('aria-label') || '',
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
+                        };
+                    }
+
+                    const width = Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0);
+                    const height = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0);
+                    const sampleRatios = [
+                        [0.12, 0.34],
+                        [0.16, 0.34],
+                        [0.2, 0.34],
+                        [0.12, 0.5],
+                        [0.16, 0.5],
+                        [0.2, 0.5],
+                        [0.24, 0.5],
+                        [0.12, 0.66],
+                        [0.16, 0.66],
+                        [0.2, 0.66],
+                    ];
+                    const eventSequence = [
+                        ['pointerover', 0],
+                        ['mouseover', 0],
+                        ['pointerenter', 0],
+                        ['mouseenter', 0],
+                        ['pointermove', 0],
+                        ['mousemove', 0],
+                        ['pointerdown', 1],
+                        ['mousedown', 1],
+                        ['pointerup', 0],
+                        ['mouseup', 0],
+                        ['click', 0],
+                    ];
+                    const sampleResults = [];
+
+                    for (const [columnRatio, rowRatio] of sampleRatios) {
+                        const x = width * columnRatio;
+                        const y = height * rowRatio;
+                        const stack = (document.elementsFromPoint(x, y) || []).filter((entry) => entry instanceof Element);
+                        const primary = stack[0] || document.body || document.documentElement;
+                        const dispatchTargets = Array.from(new Set([
+                            primary,
+                            document.body,
+                            document.documentElement,
+                            document,
+                            window,
+                        ].filter(Boolean)));
+
+                        for (const dispatchTarget of dispatchTargets) {
+                            for (const [type, buttons] of eventSequence) {
+                                const init = {
+                                    bubbles: type !== 'mouseenter' && type !== 'pointerenter',
+                                    cancelable: true,
+                                    composed: true,
+                                    clientX: x,
+                                    clientY: y,
+                                    button: 0,
+                                    buttons,
+                                };
+
+                                if (type.startsWith('pointer')) {
+                                    dispatchTarget.dispatchEvent(new PointerEvent(type, {
+                                        ...init,
+                                        pointerId: 1,
+                                        pointerType: 'mouse',
+                                        isPrimary: true,
+                                    }));
+                                } else {
+                                    dispatchTarget.dispatchEvent(new MouseEvent(type, init));
+                                }
+                            }
+                        }
+
+                        if (primary instanceof HTMLElement) {
+                            primary.focus?.({ preventScroll: true });
+                            primary.click?.();
+                        }
+
+                        sampleResults.push({
+                            columnRatio,
+                            rowRatio,
+                            x,
+                            y,
+                            primary: describeElement(primary),
+                            stack: stack.slice(0, 6).map(describeElement).filter(Boolean),
+                        });
+                    }
+
+                    return JSON.stringify({
+                        href: location.href,
+                        title: document.title,
+                        readyState: document.readyState,
+                        viewportWidth: width,
+                        viewportHeight: height,
+                        activeElement: describeElement(document.activeElement),
+                        checkbox: describeElement(document.querySelector('input[type="checkbox"]')),
+                        roleCheckbox: describeElement(document.querySelector('[role="checkbox"]')),
+                        verifyAction: describeElement(document.querySelector('[data-action="verify"]')),
+                        bodyHtmlSnippet: (document.body?.innerHTML || '').slice(0, 500),
+                        sampleResults,
+                    });
+                })()
+                """,
+                isolatedWorld);
+        }
+
+        private static Task<string?> PressChallengeFrameActivationKeysAsync(WebDriverPage tab, int frameId, bool isolatedWorld)
+        {
+            return ExecuteScriptInSpecificFrameAsync(
+                tab,
+                frameId,
+                """
+                (() => {
+                    function describeElement(element) {
+                        if (!(element instanceof Element)) {
+                            return null;
+                        }
+
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            tagName: element.tagName || '',
+                            id: element.id || '',
+                            className: typeof element.className === 'string' ? element.className : '',
+                            role: element.getAttribute?.('role') || '',
+                            ariaLabel: element.getAttribute?.('aria-label') || '',
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
+                        };
+                    }
+
+                    function dispatchKey(target, key, code, keyCode) {
+                        if (!target?.dispatchEvent) {
+                            return false;
+                        }
+
+                        target.focus?.({ preventScroll: true });
+
+                        const eventInit = {
+                            key,
+                            code,
+                            keyCode,
+                            which: keyCode,
+                            charCode: keyCode,
+                            bubbles: true,
+                            cancelable: true,
+                            composed: true,
+                        };
+
+                        target.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+                        target.dispatchEvent(new KeyboardEvent('keypress', eventInit));
+                        target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+                        return true;
+                    }
+
+                    const targets = Array.from(new Set([
+                        document.activeElement,
+                        document.body,
+                        document.documentElement,
+                    ].filter(Boolean)));
+                    const actions = [];
+
+                    for (const target of targets) {
+                        actions.push({
+                            target: describeElement(target),
+                            space: dispatchKey(target, ' ', 'Space', 32),
+                            enter: dispatchKey(target, 'Enter', 'Enter', 13),
+                        });
+                    }
+
+                    return JSON.stringify({
+                        href: location.href,
+                        title: document.title,
+                        readyState: document.readyState,
+                        activeElement: describeElement(document.activeElement),
+                        actions,
+                    });
+                })()
+                """,
+                isolatedWorld);
+        }
+
+        private static Task<string?> CaptureChallengeFrameTrustProbeAsync(WebDriverPage tab, int frameId, bool isolatedWorld)
+        {
+            return ExecuteScriptInSpecificFrameAsync(
+                tab,
+                frameId,
+                """
+                (() => {
+                    function describeElement(element) {
+                        if (!(element instanceof Element)) {
+                            return null;
+                        }
+
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            tagName: element.tagName || '',
+                            id: element.id || '',
+                            className: typeof element.className === 'string' ? element.className : '',
+                            role: element.getAttribute?.('role') || '',
+                            ariaLabel: element.getAttribute?.('aria-label') || '',
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
+                        };
+                    }
+
+                    const stateKey = '__atomTurnstileTrustProbe';
+                    const targetTypes = ['pointerdown', 'mousedown', 'mouseup', 'click', 'keydown', 'keyup', 'focus'];
+
+                    if (!window[stateKey]) {
+                        const state = { events: [] };
+                        const recordEvent = (event) => {
+                            try {
+                                state.events.push({
+                                    type: event?.type || '',
+                                    isTrusted: !!event?.isTrusted,
+                                    detail: typeof event?.detail === 'number' ? event.detail : null,
+                                    key: typeof event?.key === 'string' ? event.key : '',
+                                    code: typeof event?.code === 'string' ? event.code : '',
+                                    pointerType: typeof event?.pointerType === 'string' ? event.pointerType : '',
+                                    target: describeElement(event?.target),
+                                    activeElement: describeElement(document.activeElement),
+                                    userActivationActive: !!navigator.userActivation?.isActive,
+                                    userActivationHasBeenActive: !!navigator.userActivation?.hasBeenActive,
+                                    ts: Date.now(),
+                                });
+
+                                if (state.events.length > 32) {
+                                    state.events.splice(0, state.events.length - 32);
+                                }
+                            } catch {
+                            }
+                        };
+
+                        for (const type of targetTypes) {
+                            document.addEventListener(type, recordEvent, true);
+                        }
+
+                        window[stateKey] = state;
+                    }
+
+                    const state = window[stateKey];
+                    return JSON.stringify({
+                        href: location.href,
+                        title: document.title,
+                        readyState: document.readyState,
+                        userActivationSupported: !!navigator.userActivation,
+                        userActivationActive: !!navigator.userActivation?.isActive,
+                        userActivationHasBeenActive: !!navigator.userActivation?.hasBeenActive,
+                        activeElement: describeElement(document.activeElement),
+                        events: Array.isArray(state?.events) ? state.events.slice(-16) : [],
+                    });
+                })()
+                """,
+                isolatedWorld);
+        }
+
+        private static string SummarizeTurnstileTrustProbe(string? probe)
+        {
+            if (string.IsNullOrWhiteSpace(probe))
+                return CompactDiagnosticValue(probe);
+
+            try
+            {
+                var root = UnwrapFrameScriptResultObject(probe);
+                if (root is null)
+                    return CompactDiagnosticValue(probe);
+
+                var activeElement = SummarizeTurnstileProbeElement(root["activeElement"]);
+                var events = root["events"] as JsonArray;
+                var eventNodes = events?.ToArray() ?? Array.Empty<JsonNode?>();
+                var eventCount = eventNodes.Length;
+                var trustedCount = eventNodes.Count(static node => GetJsonBoolean(node?["isTrusted"]));
+                var eventTypes = eventNodes
+                    .Select(static node => GetJsonString(node?["type"]))
+                    .Where(static value => !string.IsNullOrWhiteSpace(value))
+                    .Cast<string>()
+                    .GroupBy(static value => value, StringComparer.Ordinal)
+                    .Select(static group => $"{group.Key}:{group.Count()}")
+                    .ToArray();
+                var recentEvents = eventNodes
+                    .Select(SummarizeTurnstileProbeEvent)
+                    .Where(static value => !string.IsNullOrWhiteSpace(value))
+                    .Cast<string>()
+                    .ToArray();
+
+                if (recentEvents.Length > 4)
+                    recentEvents = recentEvents[^4..];
+
+                return string.Join(
+                    "; ",
+                    [
+                        $"ready={GetJsonString(root["readyState"]) ?? "?"}",
+                        $"activation={GetJsonBoolean(root["userActivationActive"])}/{GetJsonBoolean(root["userActivationHasBeenActive"])}",
+                        $"active={activeElement}",
+                        $"events={eventCount}",
+                        $"trusted={trustedCount}",
+                        $"types=[{string.Join(", ", eventTypes)}]",
+                        $"last=[{string.Join(", ", recentEvents)}]",
+                    ]);
+            }
+            catch (JsonException)
+            {
+                return CompactDiagnosticValue(probe);
+            }
+        }
+
+        private static string SummarizeChallengeFrameDirectClick(string? result)
+        {
+            if (string.IsNullOrWhiteSpace(result))
+                return CompactDiagnosticValue(result);
+
+            try
+            {
+                var root = UnwrapFrameScriptResultObject(result);
+                if (root is null)
+                    return CompactDiagnosticValue(result);
+
+                var sampleResults = root["sampleResults"] as JsonArray;
+                var primaryHits = (sampleResults?.ToArray() ?? Array.Empty<JsonNode?>())
+                    .Select(static node => SummarizeTurnstileProbeElement(node?["primary"]))
+                    .Where(static value => !string.IsNullOrWhiteSpace(value))
+                    .GroupBy(static value => value, StringComparer.Ordinal)
+                    .Select(static group => $"{group.Key}:{group.Count()}")
+                    .ToArray();
+
+                return string.Join(
+                    "; ",
+                    [
+                        $"ready={GetJsonString(root["readyState"]) ?? "?"}",
+                        $"active={SummarizeTurnstileProbeElement(root["activeElement"])}",
+                        $"checkbox={SummarizeTurnstileProbeElement(root["checkbox"])}",
+                        $"roleCheckbox={SummarizeTurnstileProbeElement(root["roleCheckbox"])}",
+                        $"verify={SummarizeTurnstileProbeElement(root["verifyAction"])}",
+                        $"samples={sampleResults?.Count ?? 0}",
+                        $"primary=[{string.Join(", ", primaryHits)}]",
+                    ]);
+            }
+            catch (JsonException)
+            {
+                return CompactDiagnosticValue(result);
+            }
+        }
+
+        private static string SummarizeChallengeFrameActivationKeys(string? result)
+        {
+            if (string.IsNullOrWhiteSpace(result))
+                return CompactDiagnosticValue(result);
+
+            try
+            {
+                var root = UnwrapFrameScriptResultObject(result);
+                if (root is null)
+                    return CompactDiagnosticValue(result);
+
+                var actionSummaries = (root["actions"] as JsonArray)?.ToArray()
+                    .Select(static node =>
+                    {
+                        if (node is not JsonObject action)
+                            return null;
+
+                        return $"{SummarizeTurnstileProbeElement(action["target"])}(space={GetJsonBoolean(action["space"])}, enter={GetJsonBoolean(action["enter"])})";
+                    })
+                    .Where(static value => !string.IsNullOrWhiteSpace(value))
+                    .Cast<string>()
+                    .ToArray() ?? Array.Empty<string>();
+
+                return string.Join(
+                    "; ",
+                    [
+                        $"ready={GetJsonString(root["readyState"]) ?? "?"}",
+                        $"active={SummarizeTurnstileProbeElement(root["activeElement"])}",
+                        $"actions=[{string.Join(", ", actionSummaries)}]",
+                    ]);
+            }
+            catch (JsonException)
+            {
+                return CompactDiagnosticValue(result);
+            }
+        }
+
+        private static JsonObject? UnwrapFrameScriptResultObject(string probe)
+        {
+            if (JsonNode.Parse(probe) is not JsonObject wrapper)
+                return null;
+
+            if (wrapper["scriptResult"] is JsonObject scriptResultObject)
+                return scriptResultObject;
+
+            if (wrapper["scriptResult"] is JsonValue scriptResultValue)
+            {
+                var scriptResultText = GetJsonString(scriptResultValue);
+                if (!string.IsNullOrWhiteSpace(scriptResultText) && JsonNode.Parse(scriptResultText) is JsonObject parsedScriptResult)
+                    return parsedScriptResult;
+            }
+
+            return wrapper;
+        }
+
+        private static string SummarizeTurnstileProbeEvent(JsonNode? eventNode)
+        {
+            if (eventNode is not JsonObject eventObject)
+                return "?";
+
+            var eventType = GetJsonString(eventObject["type"]) ?? "?";
+            var trust = GetJsonBoolean(eventObject["isTrusted"]) ? "t" : "u";
+            var target = SummarizeTurnstileProbeElement(eventObject["target"]);
+            var key = GetJsonString(eventObject["key"]);
+
+            if (!string.IsNullOrWhiteSpace(key))
+                return $"{eventType}:{trust}@{target} key={CompactDiagnosticValue(key, 24)}";
+
+            return $"{eventType}:{trust}@{target}";
+        }
+
+        private static string SummarizeTurnstileProbeElement(JsonNode? elementNode)
+        {
+            if (elementNode is not JsonObject elementObject)
+                return "<none>";
+
+            var tagName = GetJsonString(elementObject["tagName"]);
+            var id = GetJsonString(elementObject["id"]);
+            var role = GetJsonString(elementObject["role"]);
+            var ariaLabel = GetJsonString(elementObject["ariaLabel"]);
+
+            var summary = string.IsNullOrWhiteSpace(tagName) ? "element" : tagName.ToUpperInvariant();
+
+            if (!string.IsNullOrWhiteSpace(id))
+                summary += $"#{CompactDiagnosticValue(id, 32)}";
+
+            if (!string.IsNullOrWhiteSpace(role))
+                summary += $"[{CompactDiagnosticValue(role, 32)}]";
+            else if (!string.IsNullOrWhiteSpace(ariaLabel))
+                summary += $"[{CompactDiagnosticValue(ariaLabel, 32)}]";
+
+            return summary;
+        }
+
+        private static string CompactDiagnosticValue(string? value, int maxLength = 280)
+        {
+            if (value is null)
+                return "<null>";
+
+            if (string.IsNullOrWhiteSpace(value))
+                return "<empty>";
+
+            var compact = string.Join(' ', value.Replace('\r', ' ').Replace('\n', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries));
+
+            if (compact.Length <= maxLength)
+                return compact;
+
+            return compact[..(maxLength - 3)] + "...";
+        }
+
+        private static bool GetJsonBoolean(JsonNode? node)
+        {
+            try
+            {
+                return node?.GetValue<bool>() == true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string? GetJsonString(JsonNode? node)
+        {
+            try
+            {
+                return node?.GetValue<string>();
+            }
+            catch
+            {
+                return node?.ToString();
+            }
+        }
+
+        private static Task<string?> CaptureChallengeFrameResourceProbeAsync(WebDriverPage tab, int frameId, bool isolatedWorld)
+        {
+            return ExecuteScriptInSpecificFrameAsync(
+                tab,
+                frameId,
+                """
+                (() => {
+                    function clip(value, maxLength = 220) {
+                        if (typeof value !== 'string') {
+                            return '';
+                        }
+
+                        return value.slice(0, maxLength);
+                    }
+
+                    function describeElement(element) {
+                        if (!(element instanceof Element)) {
+                            return null;
+                        }
+
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            tagName: element.tagName || '',
+                            id: element.id || '',
+                            className: typeof element.className === 'string' ? element.className : '',
+                            role: element.getAttribute?.('role') || '',
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
+                        };
+                    }
+
+                    const resourceEntries = (performance.getEntriesByType?.('resource') || []).slice(-16).map((entry) => ({
+                        name: clip(entry.name, 260),
+                        initiatorType: entry.initiatorType || '',
+                        transferSize: entry.transferSize || 0,
+                        encodedBodySize: entry.encodedBodySize || 0,
+                        decodedBodySize: entry.decodedBodySize || 0,
+                        duration: Number.isFinite(entry.duration) ? Math.round(entry.duration * 100) / 100 : 0,
+                    }));
+
+                    return JSON.stringify({
+                        href: location.href,
+                        title: document.title,
+                        readyState: document.readyState,
+                        visibilityState: document.visibilityState,
+                        scriptCount: document.scripts.length,
+                        linkCount: document.querySelectorAll('link').length,
+                        styleCount: document.querySelectorAll('style').length,
+                        imageCount: document.images.length,
+                        iframeCount: document.querySelectorAll('iframe').length,
+                        rootChildren: Array.from(document.documentElement?.children || []).map(describeElement).filter(Boolean),
+                        scripts: Array.from(document.scripts || []).slice(0, 12).map((script) => ({
+                            src: clip(script.src || '', 260),
+                            type: clip(script.type || '', 80),
+                            async: !!script.async,
+                            defer: !!script.defer,
+                            textLength: script.textContent?.length || 0,
+                        })),
+                        links: Array.from(document.querySelectorAll('link')).slice(0, 12).map((link) => ({
+                            rel: clip(link.rel || '', 80),
+                            href: clip(link.href || '', 260),
+                            as: clip(link.as || '', 80),
+                        })),
+                        stylesheets: Array.from(document.styleSheets || []).slice(0, 12).map((sheet) => ({
+                            href: clip(sheet.href || '', 260),
+                            ruleCount: (() => {
+                                try {
+                                    return sheet.cssRules?.length || 0;
+                                } catch {
+                                    return -1;
+                                }
+                            })(),
+                        })),
+                        bodyInnerHtmlLength: document.body?.innerHTML?.length || 0,
+                        bodyTextLength: document.body?.textContent?.trim()?.length || 0,
+                        activeElement: describeElement(document.activeElement),
+                        lastResourceEntries: resourceEntries,
+                    });
+                })()
+                """,
+                isolatedWorld);
+        }
+
+        private static async Task<string?> CaptureChallengeFrameLifecycleTraceAsync(
+            WebDriverPage tab,
+            int frameId,
+            TimeSpan duration,
+            TimeSpan interval)
+        {
+            var deadline = DateTime.UtcNow + duration;
+            var snapshots = new JsonArray();
+
+            while (DateTime.UtcNow < deadline)
+            {
+                var snapshot = await CaptureChallengeFrameSurfaceSnapshotAsync(tab, frameId, isolatedWorld: false).ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(snapshot))
+                {
+                    try
+                    {
+                        snapshots.Add(JsonNode.Parse(snapshot));
+                    }
+                    catch
+                    {
+                        snapshots.Add(snapshot);
+                    }
+                }
+
+                var remaining = deadline - DateTime.UtcNow;
+                if (remaining <= TimeSpan.Zero)
+                    break;
+
+                await Task.Delay(remaining < interval ? remaining : interval).ConfigureAwait(false);
+            }
+
+            return snapshots.ToJsonString();
+        }
+
+        private static async Task<string?> CaptureChallengeFrameSurfaceSnapshotAsync(WebDriverPage tab, int frameId, bool isolatedWorld)
+        {
+            var response = await ExecuteScriptInSpecificFrameAsync(
+                tab,
+                frameId,
+                """
+                (() => {
+                    function rectInfo(element) {
+                        if (!(element instanceof Element)) {
+                            return null;
+                        }
+
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
+                        };
+                    }
+
+                    function compactStyle(style) {
+                        if (!style) {
+                            return null;
+                        }
+
+                        return {
+                            display: style.display,
+                            visibility: style.visibility,
+                            opacity: style.opacity,
+                            pointerEvents: style.pointerEvents,
+                            cursor: style.cursor,
+                            backgroundImage: style.backgroundImage,
+                            backgroundColor: style.backgroundColor,
+                            transform: style.transform,
+                            content: style.content,
+                        };
+                    }
+
+                    function describeElement(element) {
+                        if (!(element instanceof Element)) {
+                            return null;
+                        }
+
+                        return {
+                            tagName: element.tagName || '',
+                            id: element.id || '',
+                            className: typeof element.className === 'string' ? element.className : '',
+                            role: element.getAttribute?.('role') || '',
+                            tabIndex: element.tabIndex ?? -1,
+                        };
+                    }
+
+                    const width = Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0);
+                    const height = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0);
+                    const body = document.body;
+                    const html = document.documentElement;
+                    const samplePoint = {
+                        x: width * 0.16,
+                        y: height * 0.5,
+                    };
+
+                    return JSON.stringify({
+                        ts: Date.now(),
+                        href: location.href,
+                        title: document.title,
+                        readyState: document.readyState,
+                        viewportWidth: width,
+                        viewportHeight: height,
+                        bodyRect: rectInfo(body),
+                        htmlRect: rectInfo(html),
+                        bodyChildElementCount: body?.childElementCount || 0,
+                        bodyInnerHtmlLength: body?.innerHTML?.length || 0,
+                        bodyTextLength: body?.textContent?.trim()?.length || 0,
+                        roleElementCount: document.querySelectorAll('[role]').length,
+                        ariaElementCount: document.querySelectorAll('[aria-label], [aria-labelledby], [aria-describedby], [aria-hidden]').length,
+                        focusableCount: document.querySelectorAll('a[href], button, input, select, textarea, [tabindex]').length,
+                        animationCount: document.getAnimations?.().length || 0,
+                        bodyStyle: compactStyle(body ? getComputedStyle(body) : null),
+                        htmlStyle: compactStyle(html ? getComputedStyle(html) : null),
+                        bodyBeforeStyle: compactStyle(body ? getComputedStyle(body, '::before') : null),
+                        bodyAfterStyle: compactStyle(body ? getComputedStyle(body, '::after') : null),
+                        htmlBeforeStyle: compactStyle(html ? getComputedStyle(html, '::before') : null),
+                        htmlAfterStyle: compactStyle(html ? getComputedStyle(html, '::after') : null),
+                        activeElement: describeElement(document.activeElement),
+                        firstRoleElement: describeElement(document.querySelector('[role]')),
+                        firstFocusableElement: describeElement(document.querySelector('a[href], button, input, select, textarea, [tabindex]')),
+                        samplePoint,
+                        elementFromPoint: describeElement(document.elementFromPoint(samplePoint.x, samplePoint.y)),
+                        stackAtSamplePoint: (document.elementsFromPoint(samplePoint.x, samplePoint.y) || []).slice(0, 6).map(describeElement).filter(Boolean),
+                    });
+                })()
+                """,
+                isolatedWorld).ConfigureAwait(false);
+
+            if (string.IsNullOrWhiteSpace(response))
+                return null;
+
+            try
+            {
+                var node = JsonNode.Parse(response);
+                return node?["scriptResult"]?.ToJsonString() ?? response;
+            }
+            catch
+            {
+                return response;
+            }
+        }
+
+        private static double? ReadFingerprintNumber(string? snapshotJson, string propertyName)
+        {
+            if (string.IsNullOrWhiteSpace(snapshotJson))
+                return null;
+
+            try
+            {
+                var node = JsonNode.Parse(snapshotJson);
+                return node?[propertyName]?.GetValue<double>();
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private async Task<WebDriverPage> WaitForFirstTabAsync()
         {
+            return await WaitForFirstTabAsync(browser).ConfigureAwait(false);
+        }
+
+        private static async Task<WebDriverPage> WaitForFirstTabAsync(WebDriverBrowser activeBrowser)
+        {
             var tcs = new TaskCompletionSource<TabConnectedEventArgs>();
-            browser.TabConnected += (_, e) =>
+            activeBrowser.TabConnected += (_, e) =>
             {
                 tcs.TrySetResult(e);
                 return ValueTask.CompletedTask;
@@ -4262,11 +8040,11 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-            if (browser.ConnectionCount > 0)
-                return browser.GetAllPages().First();
+            if (activeBrowser.ConnectionCount > 0)
+                return activeBrowser.GetAllPages().First();
 
             var result = await tcs.Task.WaitAsync(cts.Token);
-            var page = browser.GetPage(result.TabId)
+            var page = activeBrowser.GetPage(result.TabId)
                 ?? throw new BridgeException($"Страница {result.TabId} не найдена.");
 
             using var warmupCts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
@@ -4275,5 +8053,18 @@ public class WebDriverTests(ILogger logger) : BenchmarkTests<WebDriverTests>(log
 
             return page;
         }
+
+        private static double? ReadDouble(JsonNode? node, string propertyName)
+        {
+            try
+            {
+                return node?[propertyName]?.GetValue<double>();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
     }
 }

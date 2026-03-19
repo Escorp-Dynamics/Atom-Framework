@@ -8,3 +8,4 @@
 **/TestResults
 TestResult.xml
 **/*.pem
+.github/instructions/

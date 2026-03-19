@@ -242,6 +242,36 @@ public class VirtualCameraTests(ILogger logger) : BenchmarkTests<VirtualCameraTe
             await VirtualCamera.CreateAsync(settings: null!));
     }
 
+    [TestCase(0, 480, 30, TestName = "CreateAsync: Width <= 0 выбрасывает ArgumentOutOfRangeException")]
+    [TestCase(640, 0, 30, TestName = "CreateAsync: Height <= 0 выбрасывает ArgumentOutOfRangeException")]
+    [TestCase(640, 480, 0, TestName = "CreateAsync: FrameRate <= 0 выбрасывает ArgumentOutOfRangeException")]
+    public void CreateAsyncInvalidNumericSettingsThrow(int width, int height, int frameRate)
+    {
+        var settings = new VirtualCameraSettings
+        {
+            Width = width,
+            Height = height,
+            FrameRate = frameRate,
+        };
+
+        Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await VirtualCamera.CreateAsync(settings));
+    }
+
+    [TestCase(TestName = "CreateAsync: PixelFormat Unknown выбрасывает ArgumentException")]
+    public void CreateAsyncUnknownPixelFormatThrows()
+    {
+        var settings = new VirtualCameraSettings
+        {
+            Width = 640,
+            Height = 480,
+            PixelFormat = VideoPixelFormat.Unknown,
+        };
+
+        Assert.ThrowsAsync<ArgumentException>(async () =>
+            await VirtualCamera.CreateAsync(settings));
+    }
+
     // --- CameraControlType enum ---
 
     [TestCase(TestName = "CameraControlType: все 8 значений определены")]

@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Runtime.CompilerServices;
 
@@ -59,11 +59,19 @@ internal abstract class HttpsConnection : IHttpsConnection
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public abstract void Dispose();
+    public void Dispose()
+    {
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public abstract ValueTask DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        await DisposeAsyncCore().ConfigureAwait(false);
+        GC.SuppressFinalize(this);
+    }
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -96,4 +104,15 @@ internal abstract class HttpsConnection : IHttpsConnection
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public abstract void StartDrain();
+
+    /// <summary>
+    /// Освобождение ресурсов синхронным путём.
+    /// </summary>
+    /// <param name="disposing">Указывает, освобождаются ли управляемые ресурсы.</param>
+    protected abstract void Dispose(bool disposing);
+
+    /// <summary>
+    /// Освобождение ресурсов асинхронным путём.
+    /// </summary>
+    protected virtual ValueTask DisposeAsyncCore() => ValueTask.CompletedTask;
 }

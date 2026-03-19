@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Diagnostics;
 using Atom.Net.Browsing.WebDriver.Protocol;
 
 namespace Atom.Net.Browsing.WebDriver;
@@ -14,7 +15,9 @@ namespace Atom.Net.Browsing.WebDriver;
 /// </remarks>
 public sealed class WebDriverPage : IWebPage
 {
+
     private readonly TabChannel channel;
+    private readonly PageInputBackendSelector inputBackendSelector;
     private bool isDisposed;
 
     /// <summary>
@@ -29,6 +32,9 @@ public sealed class WebDriverPage : IWebPage
 
     /// <inheritdoc />
     public IFrame MainFrame { get; }
+
+    /// <inheritdoc />
+    public PageInputCapabilities InputCapabilities => inputBackendSelector.Capabilities;
 
     /// <inheritdoc />
     public IEnumerable<IFrame> Frames => MainFrame.Frames;
@@ -63,13 +69,10 @@ public sealed class WebDriverPage : IWebPage
     /// </summary>
     internal Func<InterceptedRequestFulfillment, string>? RegisterFulfillment { get; set; }
 
-    /// <summary>
-    /// Инициализирует новый экземпляр <see cref="WebDriverPage"/>.
-    /// </summary>
-    /// <param name="channel">Канал связи с вкладкой.</param>
-    internal WebDriverPage(TabChannel channel)
+    internal WebDriverPage(TabChannel channel, Process? _)
     {
         this.channel = channel;
+        inputBackendSelector = PageInputBackendFactory.Create(ExecuteAsync);
         MainFrame = new WebDriverFrame(channel);
         channel.EventReceived += OnChannelEvent;
     }
@@ -130,6 +133,93 @@ public sealed class WebDriverPage : IWebPage
             BridgeCommand.Navigate,
             payload,
             cancellationToken).ConfigureAwait(false);
+
+        if (settings.Body is not null)
+            await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public ValueTask ClickPointAsync(double viewportX, double viewportY, PagePointClickOptions options, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(isDisposed, this);
+        return inputBackendSelector.ClickPointAsync(viewportX, viewportY, options, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask ClickElementAsync(ElementSelector selector, PageElementClickOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(selector);
+        ObjectDisposedException.ThrowIf(isDisposed, this);
+
+        return inputBackendSelector.ClickElementAsync(selector, options.ScrollIntoView, cancellationToken);
+    }
+
+    /// <inheritdoc cref="IWebPage.ClickElementAsync(ElementSelector, CancellationToken)"/>
+    public ValueTask ClickElementAsync(ElementSelector selector, CancellationToken cancellationToken)
+        => ClickElementAsync(selector, PageElementClickOptions.Default, cancellationToken);
+
+    /// <inheritdoc cref="IWebPage.ClickElementAsync(ElementSelector, PageElementClickOptions)"/>
+    public ValueTask ClickElementAsync(ElementSelector selector, PageElementClickOptions options)
+        => ClickElementAsync(selector, options, CancellationToken.None);
+
+    /// <inheritdoc cref="IWebPage.ClickElementAsync(ElementSelector)"/>
+    public ValueTask ClickElementAsync(ElementSelector selector)
+        => ClickElementAsync(selector, PageElementClickOptions.Default, CancellationToken.None);
+
+    /// <inheritdoc />
+    public ValueTask FocusElementAsync(ElementSelector selector, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(selector);
+        ObjectDisposedException.ThrowIf(isDisposed, this);
+        return inputBackendSelector.FocusElementAsync(selector, scrollIntoView: true, cancellationToken);
+    }
+
+    /// <inheritdoc cref="IWebPage.FocusElementAsync(ElementSelector)"/>
+    public ValueTask FocusElementAsync(ElementSelector selector)
+        => FocusElementAsync(selector, CancellationToken.None);
+
+    /// <inheritdoc />
+    public ValueTask HoverElementAsync(ElementSelector selector, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(selector);
+        ObjectDisposedException.ThrowIf(isDisposed, this);
+        return inputBackendSelector.HoverElementAsync(selector, scrollIntoView: true, cancellationToken);
+    }
+
+    /// <inheritdoc cref="IWebPage.HoverElementAsync(ElementSelector)"/>
+    public ValueTask HoverElementAsync(ElementSelector selector)
+        => HoverElementAsync(selector, CancellationToken.None);
+
+    /// <inheritdoc />
+    public ValueTask TypeElementAsync(ElementSelector selector, string text, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(selector);
+        ArgumentException.ThrowIfNullOrEmpty(text);
+        ObjectDisposedException.ThrowIf(isDisposed, this);
+        return inputBackendSelector.TypeElementAsync(selector, text, scrollIntoView: true, cancellationToken);
+    }
+
+    /// <inheritdoc cref="IWebPage.TypeElementAsync(ElementSelector, string)"/>
+    public ValueTask TypeElementAsync(ElementSelector selector, string text)
+        => TypeElementAsync(selector, text, CancellationToken.None);
+
+    /// <inheritdoc />
+    public ValueTask CheckElementAsync(ElementSelector selector, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(selector);
+        ObjectDisposedException.ThrowIf(isDisposed, this);
+        return inputBackendSelector.CheckElementAsync(selector, scrollIntoView: true, cancellationToken);
+    }
+
+    /// <inheritdoc cref="IWebPage.CheckElementAsync(ElementSelector)"/>
+    public ValueTask CheckElementAsync(ElementSelector selector)
+        => CheckElementAsync(selector, CancellationToken.None);
+
+    /// <inheritdoc />
+    public ValueTask KeyPressAsync(string key, PageKeyPressOptions options, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(isDisposed, this);
+        return inputBackendSelector.KeyPressAsync(key, options, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -155,6 +245,61 @@ public sealed class WebDriverPage : IWebPage
         var response = await channel.SendCommandAsync(
             BridgeCommand.ExecuteScriptInFrames,
             new JsonObject { ["script"] = script },
+            cancellationToken).ConfigureAwait(false);
+
+        return response.Payload is JsonElement el ? el : null;
+    }
+
+    /// <summary>
+    /// Выполняет JavaScript-код во всех фреймах вкладки в isolated world расширения.
+    /// Нужен для диагностики случаев, когда MAIN world и page DOM могут отличаться.
+    /// </summary>
+    /// <param name="script">Код JavaScript для выполнения.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Массив результатов из каждого фрейма.</returns>
+    public async ValueTask<JsonElement?> ExecuteInAllFramesIsolatedAsync(string script, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(isDisposed, this);
+
+        var response = await channel.SendCommandAsync(
+            BridgeCommand.ExecuteScriptInFrames,
+            new JsonObject
+            {
+                ["script"] = script,
+                ["world"] = "ISOLATED",
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        return response.Payload is JsonElement el ? el : null;
+    }
+
+    /// <summary>
+    /// Выполняет JavaScript-код во всех фреймах вкладки и возвращает metadata фреймов вместе с результатами.
+    /// Нужен для диагностики frame mapping, особенно для cross-origin challenge iframe.
+    /// </summary>
+    /// <param name="script">Код JavaScript для выполнения.</param>
+    /// <param name="isolatedWorld"><see langword="true"/>, чтобы выполнить код в isolated world расширения.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Массив объектов с frame metadata и результатом выполнения.</returns>
+    public async ValueTask<JsonElement?> ExecuteInAllFramesWithMetadataAsync(
+        string script,
+        bool isolatedWorld = false,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(isDisposed, this);
+
+        var payload = new JsonObject
+        {
+            ["script"] = script,
+            ["includeMetadata"] = true,
+        };
+
+        if (isolatedWorld)
+            payload["world"] = "ISOLATED";
+
+        var response = await channel.SendCommandAsync(
+            BridgeCommand.ExecuteScriptInFrames,
+            payload,
             cancellationToken).ConfigureAwait(false);
 
         return response.Payload is JsonElement el ? el : null;

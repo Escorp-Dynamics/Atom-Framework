@@ -5,17 +5,21 @@
     <LangVersion>preview</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <EnableNUnitRunner>true</EnableNUnitRunner>
+    <OutputType>Exe</OutputType>
 
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
 
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
     <TrimMode>link</TrimMode>
     <RunSettingsFilePath>$(MSBuildProjectDirectory)/default.runsettings</RunSettingsFilePath>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="*" />
+    <PackageReference Include="NUnit" Version="*" />
     <PackageReference Include="coverlet.collector" Version="*">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
@@ -28,6 +32,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../Framework/Atom.Media.Audio/Atom.Media.Audio.csproj" />
+    <ProjectReference Include="../../Framework/Atom.Media.Video/Atom.Media.Video.csproj" />
     <ProjectReference
       Include="../../Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj" />
     <ProjectReference Include="../Atom.Tests/Atom.Tests.csproj" />
@@ -42,6 +48,14 @@
 
   <ItemGroup>
     <Content Include="assets/**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../Atom.Media.Tests/assets/test.mp4" Link="assets/test.mp4"
+      CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../Atom.Media.Tests/assets/test.webm" Link="assets/test.webm"
+      CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../Atom.Media.Tests/assets/test.png" Link="assets/test.png"
+      CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../Atom.Media.Tests/assets/test.webp" Link="assets/test.webp"
+      CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

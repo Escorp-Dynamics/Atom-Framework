@@ -303,8 +303,8 @@ public sealed class WebDriverBrowser : IWebBrowser
         var discoveryUrl = settings.StartUrl?.AbsoluteUri
             ?? $"http://127.0.0.1:{bridge.Port.ToString(CultureInfo.InvariantCulture)}/";
 
-        var extraArgs = BuildContextArguments(settings);
         var isFirefox = IsFirefoxBrowser(browserPath);
+        var extraArgs = BuildContextArguments(settings);
 
         if (isFirefox)
             PatchManifestForFirefox(localExtensionPath);
@@ -355,7 +355,7 @@ public sealed class WebDriverBrowser : IWebBrowser
             }
 
             var result = await tcs.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
-            return GetPage(result.TabId) ?? new WebDriverPage(result.Channel);
+            return GetPage(result.TabId) ?? CreatePage(result.Channel);
         }
         finally
         {
@@ -432,7 +432,7 @@ public sealed class WebDriverBrowser : IWebBrowser
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
         var channel = await bridge.WaitForTabAsync(tabId, cancellationToken).ConfigureAwait(false);
-        return new WebDriverPage(channel);
+        return CreatePage(channel);
     }
 
     /// <summary>
@@ -501,7 +501,6 @@ public sealed class WebDriverBrowser : IWebBrowser
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
-        // Открываем вкладку на about:blank, чтобы настроить изоляцию ДО загрузки целевой страницы.
         var page = await OpenTabAsync(url: null, cancellationToken).ConfigureAwait(false);
 
         if (settings is not null)
@@ -599,6 +598,9 @@ public sealed class WebDriverBrowser : IWebBrowser
 
         if (settings.MediaDevicesProtection)
             payload["mediaDevicesProtection"] = true;
+
+        if (settings.VirtualMediaDevices is not null)
+            payload["virtualMediaDevices"] = BuildVirtualMediaDevicesNode(settings.VirtualMediaDevices);
 
         if (settings.WebGLParams is not null)
             payload["webglParams"] = BuildWebGLParamsNode(settings.WebGLParams);
@@ -980,6 +982,22 @@ public sealed class WebDriverBrowser : IWebBrowser
         return node;
     }
 
+    internal static JsonObject BuildVirtualMediaDevicesNode(VirtualMediaDevicesSettings settings)
+    {
+        return new JsonObject
+        {
+            ["audioInputEnabled"] = settings.AudioInputEnabled,
+            ["videoInputEnabled"] = settings.VideoInputEnabled,
+            ["audioOutputEnabled"] = settings.AudioOutputEnabled,
+            ["audioInputLabel"] = settings.AudioInputLabel,
+            ["audioInputBrowserDeviceId"] = settings.AudioInputBrowserDeviceId,
+            ["videoInputLabel"] = settings.VideoInputLabel,
+            ["videoInputBrowserDeviceId"] = settings.VideoInputBrowserDeviceId,
+            ["audioOutputLabel"] = settings.AudioOutputLabel,
+            ["groupId"] = settings.GroupId,
+        };
+    }
+
     /// <summary>
     /// Закрывает вкладку по идентификатору через расширение.
     /// </summary>
@@ -990,11 +1008,9 @@ public sealed class WebDriverBrowser : IWebBrowser
         ArgumentNullException.ThrowIfNull(tabId);
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
-        // Составной ID имеет формат "windowId:rawTabId" — Chrome API нужен числовой rawTabId.
         var colonIndex = tabId.IndexOf(':', StringComparison.Ordinal);
         var rawTabId = colonIndex >= 0 ? tabId[(colonIndex + 1)..] : tabId;
 
-        // Отправляем через канал, отличный от закрываемой вкладки, чтобы получить ответ.
         await SendViaAnyChannelAsync(
             Protocol.BridgeCommand.CloseTab,
             new JsonObject { ["tabId"] = rawTabId },
@@ -1145,7 +1161,7 @@ public sealed class WebDriverBrowser : IWebBrowser
             var result = await tcs.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
 
             var existingPage = GetPage(result.TabId);
-            return existingPage ?? new WebDriverPage(result.Channel);
+            return existingPage ?? CreatePage(result.Channel);
         }
         finally
         {
@@ -1178,10 +1194,7 @@ public sealed class WebDriverBrowser : IWebBrowser
         var windowId = ExtractWindowId(e.TabId);
         var window = windows.GetOrAdd(windowId, static id => new WebDriverWindow(id));
 #pragma warning disable CA2000 // Страница передаётся в window.AddPage и будет диспозирована через окно.
-        var page = new WebDriverPage(e.Channel)
-        {
-            RegisterFulfillment = bridge.RegisterFulfillment,
-        };
+        var page = CreatePage(e.Channel);
 #pragma warning restore CA2000
         page.Disposing += OnPageDisposing;
         window.AddPage(page);
@@ -1243,10 +1256,17 @@ public sealed class WebDriverBrowser : IWebBrowser
         return separatorIndex >= 0 ? tabId[..separatorIndex] : "default";
     }
 
+    private WebDriverPage CreatePage(TabChannel channel)
+    {
+        return new WebDriverPage(channel, browserProcess)
+        {
+            RegisterFulfillment = bridge.RegisterFulfillment,
+        };
+    }
+
     /// <summary>
     /// Модифицирует manifest.json скопированного расширения для совместимости с Firefox:
-    /// добавляет <c>browser_specific_settings.gecko</c>, убирает <c>persistent</c>,
-    /// удаляет content_script для shadow-intercept-loader и <c>web_accessible_resources</c>.
+    /// добавляет <c>browser_specific_settings.gecko</c> и убирает <c>persistent</c>.
     /// </summary>
     private static void PatchManifestForFirefox(string extensionDir)
     {
@@ -1267,31 +1287,9 @@ public sealed class WebDriverBrowser : IWebBrowser
         if (manifest["background"] is JsonObject bg)
             bg.Remove("persistent");
 
-        // 3. Удаляем content_script для shadow-intercept-loader.js.
-        if (manifest["content_scripts"] is JsonArray contentScripts)
-        {
-            for (var i = contentScripts.Count - 1; i >= 0; i--)
-            {
-                var js = contentScripts[i]?["js"]?.AsArray();
-                if (js is not null && js.Any(j => string.Equals(j?.GetValue<string>(), "shadow-intercept-loader.js", StringComparison.Ordinal)))
-                {
-                    contentScripts.RemoveAt(i);
-                    break;
-                }
-            }
-        }
-
-        // 4. Убираем web_accessible_resources (не нужны без shadow-intercept-loader).
-        manifest.Remove("web_accessible_resources");
-
-        // 5. Записываем обратно.
+        // 3. Записываем обратно.
         var options = new JsonSerializerOptions { WriteIndented = true };
         File.WriteAllText(manifestPath, manifest.ToJsonString(options));
-
-        // 6. Удаляем файл shadow-intercept-loader.js (Firefox его не использует).
-        var loaderPath = Path.Combine(extensionDir, "shadow-intercept-loader.js");
-        if (File.Exists(loaderPath))
-            File.Delete(loaderPath);
     }
 
     private static bool IsFirefoxBrowser(string browserPath)
@@ -1371,7 +1369,8 @@ public sealed class WebDriverBrowser : IWebBrowser
         string discoveryUrl,
         IEnumerable<string>? extraArguments)
     {
-        List<string> args =
+        var args = NormalizeChromiumLaunchArguments(extraArguments);
+        args.InsertRange(0,
         [
             $"--user-data-dir={userDataDir}",
             "--no-first-run",
@@ -1379,10 +1378,7 @@ public sealed class WebDriverBrowser : IWebBrowser
             "--disable-background-timer-throttling",
             "--disable-features=msEdgeFRE,msEdgeFREOnboarding,msEdgeNewTabPage",
             "--extension-manifest-v2-availability=2",
-        ];
-
-        if (extraArguments is not null)
-            args.AddRange(extraArguments);
+        ]);
 
         // Discovery URL передаётся как аргумент запуска, чтобы браузер открыл
         // его в первом табе. Это необходимо для Chrome, где service worker
@@ -1391,6 +1387,78 @@ public sealed class WebDriverBrowser : IWebBrowser
         args.Add(discoveryUrl);
 
         return string.Join(' ', args);
+    }
+
+    internal static List<string> NormalizeChromiumLaunchArguments(IEnumerable<string>? extraArguments)
+    {
+        List<string> args =
+        [
+        ];
+
+        if (extraArguments is not null)
+        {
+            args.AddRange(extraArguments);
+        }
+
+        EnsureChromiumPipeWireCameraSupport(args);
+
+        return args;
+    }
+
+    internal static void MergeChromiumEnabledFeature(List<string> args, string featureName)
+    {
+        const string enableFeaturesPrefix = "--enable-features=";
+
+        var enabledFeatures = new List<string>();
+        for (var index = args.Count - 1; index >= 0; index--)
+        {
+            var argument = args[index];
+            if (!argument.StartsWith(enableFeaturesPrefix, StringComparison.Ordinal))
+                continue;
+
+            enabledFeatures.AddRange(argument[enableFeaturesPrefix.Length..]
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            args.RemoveAt(index);
+        }
+
+        if (!enabledFeatures.Contains(featureName, StringComparer.Ordinal))
+            enabledFeatures.Add(featureName);
+
+        args.Add(enableFeaturesPrefix + string.Join(',', enabledFeatures.Distinct(StringComparer.Ordinal)));
+    }
+
+    private static void EnsureChromiumPipeWireCameraSupport(List<string> args)
+    {
+        if (!OperatingSystem.IsLinux())
+            return;
+
+        if (!string.Equals(Environment.GetEnvironmentVariable("XDG_SESSION_TYPE"), "wayland", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        const string featureName = "WebRtcPipeWireCamera";
+        const string disableFeaturesPrefix = "--disable-features=";
+        const string ozonePlatformPrefix = "--ozone-platform=";
+        const string ozonePlatformHintPrefix = "--ozone-platform-hint=";
+
+        if (!args.Exists(static argument => argument.StartsWith(ozonePlatformPrefix, StringComparison.Ordinal)
+            || argument.StartsWith(ozonePlatformHintPrefix, StringComparison.Ordinal)))
+        {
+            args.Add("--ozone-platform-hint=auto");
+        }
+
+        foreach (var argument in args)
+        {
+            if (!argument.StartsWith(disableFeaturesPrefix, StringComparison.Ordinal))
+                continue;
+
+            var disabledFeatures = argument[disableFeaturesPrefix.Length..]
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (disabledFeatures.Contains(featureName, StringComparer.Ordinal))
+                return;
+        }
+
+        MergeChromiumEnabledFeature(args, featureName);
     }
 
     /// <summary>

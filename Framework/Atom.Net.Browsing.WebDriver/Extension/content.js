@@ -31,10 +31,41 @@ function sendMessageAsync(message) {
     const elementRegistry = new Map();
     let elementIdCounter = 0;
 
-    /** @type {Map<string, string>} cr_X → hostElementId */
-    const closedElementToHost = new Map();
-    /** @type {Map<string, Set<string>>} hostElementId → Set<cr_X> */
-    const closedHostElements = new Map();
+    /** @type {Map<string, (value: {status: string, value?: string, error?: string}) => void>} */
+    const pendingMainWorldRequests = new Map();
+    let mainWorldRequestCounter = 0;
+    const port = browser.runtime.connect();
+
+    port.onMessage.addListener(async (msg) => {
+        // Ответ от background.js на executeInMainWorld запрос.
+        if (msg.action === "mainWorldResult") {
+            const resolve = pendingMainWorldRequests.get(msg.requestId);
+            if (resolve) {
+                pendingMainWorldRequests.delete(msg.requestId);
+                resolve(msg);
+            }
+            return;
+        }
+
+        try {
+            const result = await handleCommand(msg.id, msg.command, msg.payload);
+            port.postMessage({
+                action: "response",
+                id: msg.id,
+                status: result.status,
+                payload: result.payload,
+                error: result.error,
+            });
+        } catch (err) {
+            port.postMessage({
+                action: "response",
+                id: msg.id,
+                status: "Error",
+                payload: null,
+                error: err.message || String(err),
+            });
+        }
+    });
 
     // Проверяем, является ли текущая страница discovery-эндпоинтом BridgeServer.
     if (isDiscoveryPage()) {
@@ -67,6 +98,14 @@ function sendMessageAsync(message) {
     // Инициируем подключение к мосту и получаем tabId.
     const connectResult = await sendMessageAsync({ action: "connect" });
     const myTabId = connectResult?.tabId;
+
+    // После каждой навигации content script стартует заново.
+    // Повторно подтягиваем и применяем tab context, чтобы override-ы не терялись
+    // на новом документе до выполнения пользовательских сценариев.
+    const persistedContext = await sendMessageAsync({ action: "getContext" });
+    if (persistedContext) {
+        await cmdApplyContext(persistedContext);
+    }
 
     // Body override: если background.js вернул HTML для подмены, заменяем содержимое.
     // Внешние скрипты оригинальной страницы заблокированы через webRequest.onBeforeRequest,
@@ -110,53 +149,6 @@ function sendMessageAsync(message) {
             parent.appendChild(script);
         }
     }
-
-    // ─── Персистентный порт для мгновенной доставки команд (push) ─
-
-    const port = browser.runtime.connect({ name: `tab-${myTabId}` });
-
-    // ─── Порт-based запрос к background.js для выполнения в MAIN world ─
-    const pendingMainWorldRequests = new Map();
-    let mainWorldRequestCounter = 0;
-
-    function executeInMainWorld(script) {
-        return new Promise((resolve) => {
-            const requestId = ++mainWorldRequestCounter;
-            pendingMainWorldRequests.set(requestId, resolve);
-            port.postMessage({ action: "executeInMain", requestId, script });
-        });
-    }
-
-    port.onMessage.addListener(async (msg) => {
-        // Ответ от background.js на executeInMainWorld запрос.
-        if (msg.action === "mainWorldResult") {
-            const resolve = pendingMainWorldRequests.get(msg.requestId);
-            if (resolve) {
-                pendingMainWorldRequests.delete(msg.requestId);
-                resolve(msg);
-            }
-            return;
-        }
-
-        try {
-            const result = await handleCommand(msg.id, msg.command, msg.payload);
-            port.postMessage({
-                action: "response",
-                id: msg.id,
-                status: result.status,
-                payload: result.payload,
-                error: result.error,
-            });
-        } catch (err) {
-            port.postMessage({
-                action: "response",
-                id: msg.id,
-                status: "Error",
-                payload: null,
-                error: err.message || String(err),
-            });
-        }
-    });
 
     // ─── Forwarding DOM-событий ──────────────────────────────────
 
@@ -211,17 +203,11 @@ function sendMessageAsync(message) {
             case "WaitForElement":
                 return cmdWaitForElement(payload);
 
-            case "EmulateInput":
-                return cmdEmulateInput(payload);
-
             case "ApplyContext":
                 return cmdApplyContext(payload);
 
             case "CheckShadowRoot":
                 return cmdCheckShadowRoot(payload);
-
-            case "CleanupClosedShadow":
-                return cmdCleanupClosedShadow(payload);
 
             default:
                 return error(`Неизвестная команда: ${command}`);
@@ -231,9 +217,12 @@ function sendMessageAsync(message) {
     // ─── Реализация команд ──────────────────────────────────────
 
     async function cmdExecuteScript(payload) {
+        const scriptBody = JSON.stringify(normalizeScriptBody(payload.script));
+
         if (payload.shadowHostElementId) {
             const host = elementRegistry.get(payload.shadowHostElementId);
             if (!host) return error("Shadow host element not found.");
+            if (!host.shadowRoot) return error("Open shadow root not found.");
 
             const markerId = `asr${++elementIdCounter}`;
             host.setAttribute("data-atom-sr", markerId);
@@ -242,9 +231,9 @@ function sendMessageAsync(message) {
                 const wrappedScript =
                     `(function(){var h=document.querySelector('[data-atom-sr="${markerId}"]');` +
                     `if(!h)return null;h.removeAttribute('data-atom-sr');` +
-                    `var shadowRoot=h.__capturedShadowRoot||h.shadowRoot;` +
+                    `var shadowRoot=h.shadowRoot;` +
                     `if(!shadowRoot)return null;` +
-                    `return(function(shadowRoot){${payload.script}})(shadowRoot);})()`;
+                    `return (function(){${JSON.parse(scriptBody)}})();})()`;
 
                 const result = await executeInMainWorld(wrappedScript);
                 if (result?.status === "ok") return ok(result.value ?? null);
@@ -254,17 +243,13 @@ function sendMessageAsync(message) {
             }
         }
 
-        const result = await executeInMainWorld(payload.script);
+        const wrappedScript = `(function(){${JSON.parse(scriptBody)}})()`;
+        const result = await executeInMainWorld(wrappedScript);
         if (result?.status === "ok") return ok(result.value ?? null);
         return error(result?.error || "Script execution failed.");
     }
 
     async function cmdFindElement(payload) {
-        if (payload.shadowHostElementId && payload.closedShadow)
-            return closedShadowFind(payload.shadowHostElementId, true, payload.strategy, payload.value, false);
-        if (payload.parentElementId?.startsWith("cr_"))
-            return closedShadowFind(payload.parentElementId, false, payload.strategy, payload.value, false);
-
         const root = resolveRoot(payload);
         if (root === undefined) return error("Root element not found.");
 
@@ -276,11 +261,6 @@ function sendMessageAsync(message) {
     }
 
     async function cmdFindElements(payload) {
-        if (payload.shadowHostElementId && payload.closedShadow)
-            return closedShadowFind(payload.shadowHostElementId, true, payload.strategy, payload.value, true);
-        if (payload.parentElementId?.startsWith("cr_"))
-            return closedShadowFind(payload.parentElementId, false, payload.strategy, payload.value, true);
-
         const root = resolveRoot(payload);
         if (root === undefined) return error("Root element not found.");
 
@@ -290,9 +270,6 @@ function sendMessageAsync(message) {
     }
 
     async function cmdElementAction(payload) {
-        if (payload.elementId?.startsWith("cr_"))
-            return closedElementAction(payload);
-
         const el = elementRegistry.get(payload.elementId);
         if (!el) return { status: "NotFound", payload: null, error: "Элемент не найден в реестре." };
 
@@ -357,9 +334,6 @@ function sendMessageAsync(message) {
     }
 
     async function cmdGetElementProperty(payload) {
-        if (payload.elementId?.startsWith("cr_"))
-            return closedElementGetProperty(payload);
-
         const el = elementRegistry.get(payload.elementId);
         if (!el) return { status: "NotFound", payload: null, error: "Элемент не найден в реестре." };
 
@@ -375,9 +349,6 @@ function sendMessageAsync(message) {
     }
 
     async function cmdWaitForElement(payload) {
-        if (payload.shadowHostElementId && payload.closedShadow)
-            return waitInClosedShadow(payload);
-
         const timeout = payload.timeoutMs || 10000;
         const root = resolveRoot(payload);
         if (root === undefined) return Promise.resolve(error("Root element not found."));
@@ -413,255 +384,7 @@ function sendMessageAsync(message) {
         const el = elementRegistry.get(payload.elementId);
         if (!el) return { status: "NotFound", payload: null, error: "Element not found." };
         if (el.shadowRoot) return ok("open");
-
-        // Проверяем closed shadow root через MAIN world.
-        const markerId = `asr${++elementIdCounter}`;
-        el.setAttribute("data-atom-sr", markerId);
-        try {
-            const r = await executeInMainWorld(
-                `(function(){var h=document.querySelector('[data-atom-sr="${markerId}"]');` +
-                `return h&&!!h.__capturedShadowRoot?'closed':'false';})()`
-            );
-            if (r?.status === "ok" && r.value === "closed") return ok("closed");
-        } finally {
-            el.removeAttribute("data-atom-sr");
-        }
         return ok("false");
-    }
-
-    async function cmdCleanupClosedShadow(payload) {
-        const hostId = payload.hostElementId;
-        const ids = closedHostElements.get(hostId);
-        if (!ids || ids.size === 0) return ok(null);
-
-        const idsJson = JSON.stringify([...ids]);
-        await executeInMainWorld(
-            `(function(){var cr=window.__atomCR;if(!cr)return;` +
-            `var ids=${idsJson};for(var i=0;i<ids.length;i++)cr.m.delete(ids[i]);})()`
-        );
-
-        for (const id of ids) closedElementToHost.delete(id);
-        closedHostElements.delete(hostId);
-        return ok(null);
-    }
-
-    // ─── Closed Shadow Root Helpers ────────────────────────────
-
-    /**
-     * Найти элемент(ы) внутри closed/open shadow root через MAIN world.
-     * @param {string} hostOrParentId — elementId хоста (isHost=true) или cr_-ID родителя (isHost=false)
-     * @param {boolean} isHost — true = shadow host; false = cr_-элемент-родитель
-     * @param {string} strategy    — стратегия поиска (Css, Id, Name, TagName, XPath, Text)
-     * @param {string} value       — значение селектора
-     * @param {boolean} multiple   — true = findAll, false = findSingle
-     */
-    async function closedShadowFind(hostOrParentId, isHost, strategy, value, multiple) {
-        let markerId, cleanupFn;
-
-        if (isHost) {
-            const host = elementRegistry.get(hostOrParentId);
-            if (!host) return error("Shadow host element not found.");
-
-            markerId = `asr${++elementIdCounter}`;
-            host.setAttribute("data-atom-sr", markerId);
-            host.setAttribute("data-atom-strat", strategy);
-            host.setAttribute("data-atom-val", value);
-            cleanupFn = () => {
-                host.removeAttribute("data-atom-sr");
-                host.removeAttribute("data-atom-strat");
-                host.removeAttribute("data-atom-val");
-            };
-        } else {
-            markerId = `__acr${++elementIdCounter}`;
-            const marker = document.createElement("span");
-            marker.id = markerId;
-            marker.setAttribute("data-acr-parent", hostOrParentId);
-            marker.setAttribute("data-acr-strat", strategy);
-            marker.setAttribute("data-acr-val", value);
-            marker.style.display = "none";
-            document.documentElement.appendChild(marker);
-            cleanupFn = () => marker.remove();
-        }
-
-        const safeMarker = JSON.stringify(markerId);
-        const resolveCode = isHost
-            ? `var h=document.querySelector('[data-atom-sr='+${safeMarker}+']');` +
-            `if(!h)return'null';` +
-            `var root=h.__capturedShadowRoot||h.shadowRoot;` +
-            `var strat=h.getAttribute('data-atom-strat');` +
-            `var val=h.getAttribute('data-atom-val');`
-            : `var mk=document.getElementById(${safeMarker});` +
-            `if(!mk)return'null';` +
-            `var root=window.__atomCR.m.get(mk.getAttribute('data-acr-parent'));` +
-            `var strat=mk.getAttribute('data-acr-strat');` +
-            `var val=mk.getAttribute('data-acr-val');`;
-
-        const findFns =
-            `function f1(s,v,r){switch(s){` +
-            `case'Css':return r.querySelector(v);` +
-            `case'Id':return r.getElementById?r.getElementById(v):r.querySelector('#'+CSS.escape(v));` +
-            `case'Name':return r.querySelector('[name=\"'+CSS.escape(v)+'\"]');` +
-            `case'TagName':return r.querySelector(v);` +
-            `case'XPath':return document.evaluate(v,r,null,9,null).singleNodeValue;` +
-            `case'Text':{var w=document.createTreeWalker(r,NodeFilter.SHOW_TEXT);` +
-            `while(w.nextNode()){if(w.currentNode.textContent?.trim()===v)return w.currentNode.parentElement;}return null;}` +
-            `default:return null;}}` +
-            `function fN(s,v,r){switch(s){` +
-            `case'Css':return[...r.querySelectorAll(v)];` +
-            `case'Id':{var e=f1(s,v,r);return e?[e]:[];}` +
-            `case'Name':return[...r.querySelectorAll('[name=\"'+CSS.escape(v)+'\"]')];` +
-            `case'TagName':return[...r.querySelectorAll(v)];` +
-            `case'XPath':{var x=document.evaluate(v,r,null,7,null);var a=[];` +
-            `for(var i=0;i<x.snapshotLength;i++)a.push(x.snapshotItem(i));return a;}` +
-            `case'Text':{var rs=[];var w=document.createTreeWalker(r,NodeFilter.SHOW_TEXT);` +
-            `while(w.nextNode()){if(w.currentNode.textContent?.trim()===v&&w.currentNode.parentElement)rs.push(w.currentNode.parentElement);}return rs;}` +
-            `default:return[];}}`;
-
-        const resultCode = multiple
-            ? `var els=fN(strat,val,root);var ids=[];` +
-            `for(var i=0;i<els.length;i++){var id='cr_'+(++window.__atomCR.c);window.__atomCR.m.set(id,els[i]);ids.push(id);}` +
-            `return JSON.stringify(ids);`
-            : `var el=f1(strat,val,root);if(!el)return'null';` +
-            `var id='cr_'+(++window.__atomCR.c);window.__atomCR.m.set(id,el);return id;`;
-
-        const script =
-            `(function(){window.__atomCR=window.__atomCR||{m:new Map(),c:0};` +
-            resolveCode + `if(!root)return'null';` + findFns + resultCode + `})()`;
-
-        const rootHost = isHost ? hostOrParentId : (closedElementToHost.get(hostOrParentId) ?? hostOrParentId);
-
-        function trackIds(ids) {
-            for (const id of ids) {
-                closedElementToHost.set(id, rootHost);
-                let set = closedHostElements.get(rootHost);
-                if (!set) { set = new Set(); closedHostElements.set(rootHost, set); }
-                set.add(id);
-            }
-        }
-
-        try {
-            const result = await executeInMainWorld(script);
-            if (result?.status !== "ok" || !result.value || result.value === "null") {
-                return multiple ? ok([]) : { status: "NotFound", payload: null, error: null };
-            }
-            if (multiple) {
-                let ids;
-                try { ids = JSON.parse(result.value); } catch { return ok([]); }
-                trackIds(ids);
-                return ok(ids);
-            }
-            trackIds([result.value]);
-            return ok(result.value);
-        } finally {
-            cleanupFn();
-        }
-    }
-
-    /**
-     * Выполнить действие над cr_-элементом через MAIN world.
-     */
-    async function closedElementAction(payload) {
-        const crId = payload.elementId;
-        const val = JSON.stringify(payload.value || "");
-
-        let actionCode;
-        switch (payload.action) {
-            case "Click": actionCode = "el.click()"; break;
-            case "DoubleClick": actionCode = "el.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))"; break;
-            case "Type": actionCode = `el.focus();el.value=${val};el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))`; break;
-            case "Clear": actionCode = "el.value='';el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))"; break;
-            case "Hover": actionCode = "el.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));el.dispatchEvent(new MouseEvent('mouseenter',{bubbles:true}))"; break;
-            case "Focus": actionCode = "el.focus()"; break;
-            case "ScrollIntoView": actionCode = "el.scrollIntoView({behavior:'smooth',block:'center'})"; break;
-            case "Select": actionCode = `if(el.tagName==='SELECT'){el.value=${val};el.dispatchEvent(new Event('change',{bubbles:true}))}`; break;
-            case "Check": actionCode = "if('checked' in el){el.checked=!el.checked;el.dispatchEvent(new Event('change',{bubbles:true}))}"; break;
-            default: return error(`Неизвестное действие: ${payload.action}`);
-        }
-
-        const safeCrId = JSON.stringify(crId);
-        const script =
-            `(function(){var el=window.__atomCR?.m?.get(${safeCrId});` +
-            `if(!el)return'__cr_not_found__';` +
-            `${actionCode};return'ok';})()`;
-
-        const result = await executeInMainWorld(script);
-        if (result?.value === "__cr_not_found__")
-            return { status: "NotFound", payload: null, error: "Closed shadow element not found." };
-        return ok(null);
-    }
-
-    /**
-     * Прочитать свойство/атрибут cr_-элемента через MAIN world.
-     */
-    async function closedElementGetProperty(payload) {
-        const crId = payload.elementId;
-        const propName = JSON.stringify(payload.propertyName);
-        const safeCrId = JSON.stringify(crId);
-
-        const script =
-            `(function(){var el=window.__atomCR?.m?.get(${safeCrId});` +
-            `if(!el)return'__cr_not_found__';` +
-            `var v=el[${propName}];` +
-            `if(v===undefined)v=el.getAttribute(${propName});` +
-            `return v!=null?String(v):null;})()`;
-
-        const result = await executeInMainWorld(script);
-        if (result?.value === "__cr_not_found__")
-            return { status: "NotFound", payload: null, error: "Closed shadow element not found." };
-
-        const val = result?.status === "ok" ? result.value : null;
-        return ok(val === "null" ? null : val);
-    }
-
-    /**
-     * Ожидание элемента внутри closed shadow DOM через поллинг MAIN world.
-     */
-    async function waitInClosedShadow(payload) {
-        const timeout = payload.timeoutMs || 10000;
-        const deadline = Date.now() + timeout;
-
-        while (Date.now() < deadline) {
-            const result = await closedShadowFind(
-                payload.shadowHostElementId, true, payload.strategy, payload.value, false);
-
-            if (result.status === "Ok" && result.payload) return result;
-
-            await new Promise((r) => setTimeout(r, 100));
-        }
-
-        return { status: "Timeout", payload: null, error: "Элемент не появился в течение таймаута." };
-    }
-
-    // ───────────────────────────────────────────────────────────
-
-    function cmdEmulateInput(payload) {
-        const target = payload.elementId ? elementRegistry.get(payload.elementId) : document.activeElement;
-        if (!target) return Promise.resolve(error("Целевой элемент не найден."));
-
-        if (payload.type === "keyboard") {
-            for (const char of payload.text || "") {
-                target.dispatchEvent(new KeyboardEvent("keydown", { key: char, bubbles: true }));
-                target.dispatchEvent(new KeyboardEvent("keypress", { key: char, bubbles: true }));
-
-                if ("value" in target) {
-                    target.value += char;
-                    target.dispatchEvent(new Event("input", { bubbles: true }));
-                }
-
-                target.dispatchEvent(new KeyboardEvent("keyup", { key: char, bubbles: true }));
-            }
-        } else if (payload.type === "mouse") {
-            const rect = target.getBoundingClientRect();
-            const x = payload.x ?? (rect.left + rect.width / 2);
-            const y = payload.y ?? (rect.top + rect.height / 2);
-
-            target.dispatchEvent(new MouseEvent("mousemove", { clientX: x, clientY: y, bubbles: true }));
-            target.dispatchEvent(new MouseEvent("mousedown", { clientX: x, clientY: y, bubbles: true }));
-            target.dispatchEvent(new MouseEvent("mouseup", { clientX: x, clientY: y, bubbles: true }));
-            target.dispatchEvent(new MouseEvent("click", { clientX: x, clientY: y, bubbles: true }));
-        }
-
-        return Promise.resolve(ok(null));
     }
 
     // ─── Изоляция контекста (MAIN world injection) ──────────────
@@ -693,7 +416,6 @@ function sendMessageAsync(message) {
             overrides.push(`Object.defineProperty(navigator,'language',{get(){return ${JSON.stringify(locale)}}});`);
         }
 
-        // navigator.webdriver = false (anti-detection).
         overrides.push(`Object.defineProperty(navigator,'webdriver',{get(){return false}});`);
 
         // ── Storage isolation (localStorage, sessionStorage) ─
@@ -733,12 +455,11 @@ function sendMessageAsync(message) {
         }
 
         // ── Timezone override ────────────────────────────────
-        // ── Timezone override ──────────────────────────────
         if (payload.timezone) {
             overrides.push(buildTimezoneOverride(payload.timezone));
         }
 
-        // ── Geolocation override ─────────────────────────
+        // ── Geolocation override ─────────────────────────────
         if (payload.geolocation) {
             overrides.push(buildGeolocationOverride(payload.geolocation));
         }
@@ -787,7 +508,9 @@ function sendMessageAsync(message) {
         }
 
         // ── MediaDevices override ────────────────────────
-        if (payload.mediaDevicesProtection) {
+        if (payload.virtualMediaDevices) {
+            overrides.push(buildVirtualMediaDevicesOverride(payload.virtualMediaDevices, contextId || 'default'));
+        } else if (payload.mediaDevicesProtection) {
             overrides.push(buildMediaDevicesOverride());
         }
 
@@ -1232,10 +955,7 @@ function sendMessageAsync(message) {
         if (overrides.length === 0) return ok(null);
 
         const script = overrides.join('\n');
-        const result = await sendMessageAsync({
-            action: "executeInMain",
-            script,
-        });
+        const result = await executeInMainWorld(script);
         if (result?.status === "ok") return ok(null);
         return error(result?.error || "Context application failed.");
     }
@@ -1709,6 +1429,61 @@ function sendMessageAsync(message) {
             `navigator.mediaDevices.enumerateDevices=function(){return Promise.resolve(fakeDevices)}` +
             `}` +
             `})();`;
+    }
+
+    /**
+    * Добавляет tab-local alias-устройства и маршрутизирует getUserMedia
+    * на реальные browser-visible устройства, которыми управляет C# сторона.
+    * Предпочитает явные browser deviceId, label используется только как fallback.
+     * @param {object} settings
+     * @param {string} contextId
+     * @returns {string}
+     */
+    function buildVirtualMediaDevicesOverride(settings, contextId) {
+        const lines = [];
+        lines.push(`(function(){`);
+        lines.push(`if(!navigator.mediaDevices)return;`);
+        lines.push(`var config=${JSON.stringify(settings)};`);
+        lines.push(`var contextId=${JSON.stringify(contextId)};`);
+        lines.push(`var groupId=config.groupId||('atom-virtual-group-'+contextId);`);
+        lines.push(`var audioDeviceId='atom-virtual-audio-'+contextId;`);
+        lines.push(`var videoDeviceId='atom-virtual-video-'+contextId;`);
+        lines.push(`var outputDeviceId='atom-virtual-output-'+contextId;`);
+        lines.push(`var originalEnumerate=navigator.mediaDevices.enumerateDevices?navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices):null;`);
+        lines.push(`var originalGetUserMedia=navigator.mediaDevices.getUserMedia?navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices):null;`);
+        lines.push(`var originalLegacyGetUserMedia=(navigator.getUserMedia||navigator.webkitGetUserMedia||navigator.mozGetUserMedia);`);
+        lines.push(`var resolvedNativeDeviceIds={audioinput:config.audioInputBrowserDeviceId||null,videoinput:config.videoInputBrowserDeviceId||null};`);
+        lines.push(`var syntheticTrackLabels=typeof WeakMap!=='undefined'?new WeakMap():null;`);
+        lines.push(`if(typeof MediaStreamTrack!=='undefined'&&!MediaStreamTrack.prototype.__atomVirtualLabelPatched){try{var originalTrackLabelDescriptor=Object.getOwnPropertyDescriptor(MediaStreamTrack.prototype,'label');if(originalTrackLabelDescriptor&&typeof originalTrackLabelDescriptor.get==='function'){Object.defineProperty(MediaStreamTrack.prototype,'label',{configurable:true,get:function(){if(syntheticTrackLabels&&syntheticTrackLabels.has(this))return syntheticTrackLabels.get(this);return originalTrackLabelDescriptor.get.call(this);}});Object.defineProperty(MediaStreamTrack.prototype,'__atomVirtualLabelPatched',{value:true,configurable:true});}}catch(_){}}`);
+        lines.push(`function normalizeLabel(value){return typeof value==='string'?value.trim().toLowerCase():'';}`);
+        lines.push(`function labelForKind(kind){if(kind==='audioinput')return config.audioInputLabel||'';if(kind==='videoinput')return config.videoInputLabel||'';if(kind==='audiooutput')return config.audioOutputLabel||'';return '';}`);
+        lines.push(`function enabledForKind(kind){if(kind==='audioinput')return config.audioInputEnabled!==false;if(kind==='videoinput')return config.videoInputEnabled!==false;if(kind==='audiooutput')return config.audioOutputEnabled===true;return false;}`);
+        lines.push(`function configuredBrowserDeviceId(kind){if(kind==='audioinput')return config.audioInputBrowserDeviceId||null;if(kind==='videoinput')return config.videoInputBrowserDeviceId||null;return null;}`);
+        lines.push(`function makeDevice(deviceId,kind,label){return {deviceId:deviceId,kind:kind,label:label,groupId:groupId,toJSON:function(){return {deviceId:this.deviceId,kind:this.kind,label:this.label,groupId:this.groupId};}};}`);
+        lines.push(`function buildDevices(){var devices=[];if(config.audioInputEnabled!==false)devices.push(makeDevice(audioDeviceId,'audioinput',config.audioInputLabel||''));if(config.videoInputEnabled!==false)devices.push(makeDevice(videoDeviceId,'videoinput',config.videoInputLabel||''));if(config.audioOutputEnabled===true)devices.push(makeDevice(outputDeviceId,'audiooutput',config.audioOutputLabel||''));return devices;}`);
+        lines.push(`function resolveRequestedDeviceId(value){if(value==null)return null;if(typeof value==='string')return value;if(Array.isArray(value)){for(var index=0;index<value.length;index+=1){var nested=resolveRequestedDeviceId(value[index]);if(nested!=null)return nested;}return null;}if(value.exact!=null)return Array.isArray(value.exact)?value.exact[0]:value.exact;if(value.ideal!=null)return Array.isArray(value.ideal)?value.ideal[0]:value.ideal;if(value.deviceId!=null)return resolveRequestedDeviceId(value.deviceId);if(value.sourceId!=null)return resolveRequestedDeviceId(value.sourceId);if(value.mandatory&&typeof value.mandatory==='object'){var mandatoryId=resolveRequestedDeviceId(value.mandatory.deviceId);if(mandatoryId!=null)return mandatoryId;mandatoryId=resolveRequestedDeviceId(value.mandatory.sourceId);if(mandatoryId!=null)return mandatoryId;}if(Array.isArray(value.optional)){for(var optionalIndex=0;optionalIndex<value.optional.length;optionalIndex+=1){var optionalId=resolveRequestedDeviceId(value.optional[optionalIndex]);if(optionalId!=null)return optionalId;}}return null;}`);
+        lines.push(`function wantsRequestedKind(requested,enabled,aliasDeviceId){if(!enabled||requested===false||requested==null)return false;if(requested===true)return true;if(typeof requested!=='object')return !!requested;var requestedId=resolveRequestedDeviceId(requested);return requestedId==null||requestedId==='default'||requestedId===aliasDeviceId;}`);
+        lines.push(`function explicitlyRequestedAlias(requested,aliasDeviceId){if(requested===false||requested==null||requested===true||typeof requested!=='object')return false;return resolveRequestedDeviceId(requested)===aliasDeviceId;}`);
+        lines.push(`function cloneConstraint(value){if(value==null||value===true||value===false)return value;try{return JSON.parse(JSON.stringify(value));}catch(_){return value;}}`);
+        lines.push(`function removeDeviceSelectors(target){if(!target||typeof target!=='object')return target;delete target.deviceId;delete target.sourceId;if(target.mandatory&&typeof target.mandatory==='object'){delete target.mandatory.deviceId;delete target.mandatory.sourceId;}if(Array.isArray(target.optional)){target.optional=target.optional.map(function(item){if(item&&typeof item==='object'){delete item.deviceId;delete item.sourceId;}return item;});}return target;}`);
+        lines.push(`function buildNativeConstraint(requested,nativeDeviceId){if(requested===false||requested==null)return requested;if(requested===true)return nativeDeviceId?{deviceId:{exact:nativeDeviceId}}:true;if(typeof requested!=='object')return requested;var copy=removeDeviceSelectors(cloneConstraint(requested));if(nativeDeviceId)copy.deviceId={exact:nativeDeviceId};return copy;}`);
+        lines.push(`function resolveRequestedNumber(value,fallback){var number=Number(value);return Number.isFinite(number)&&number>0?number:fallback;}`);
+        lines.push(`function resolveVideoSetting(requested,key,fallback){if(requested==null||requested===true||requested===false||typeof requested!=='object')return fallback;var descriptor=requested[key];if(descriptor==null)return fallback;if(typeof descriptor==='number'||typeof descriptor==='string')return resolveRequestedNumber(descriptor,fallback);if(Array.isArray(descriptor)){for(var index=0;index<descriptor.length;index+=1){var nested=resolveVideoSetting({value:descriptor[index]},'value',fallback);if(nested!==fallback)return nested;}return fallback;}if(typeof descriptor==='object'){if(descriptor.exact!=null)return resolveRequestedNumber(Array.isArray(descriptor.exact)?descriptor.exact[0]:descriptor.exact,fallback);if(descriptor.ideal!=null)return resolveRequestedNumber(Array.isArray(descriptor.ideal)?descriptor.ideal[0]:descriptor.ideal,fallback);if(descriptor.min!=null)return resolveRequestedNumber(descriptor.min,fallback);if(descriptor.max!=null)return resolveRequestedNumber(descriptor.max,fallback);}return fallback;}`);
+        lines.push(`function mergeStreams(primary,secondary){if(!primary)return secondary;if(!secondary)return primary;var combined=new MediaStream();primary.getTracks().forEach(function(track){combined.addTrack(track);});secondary.getTracks().forEach(function(track){combined.addTrack(track);});return combined;}`);
+        lines.push(`function createSyntheticVideoStream(requested){var width=Math.max(2,Math.round(resolveVideoSetting(requested,'width',640)));var height=Math.max(2,Math.round(resolveVideoSetting(requested,'height',480)));var frameRate=Math.min(60,Math.max(1,resolveVideoSetting(requested,'frameRate',30)));var canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;var context=canvas.getContext('2d');var rafId=0;var startedAt=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();function drawFrame(){if(!context)return;var now=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();var elapsed=(now-startedAt)/1000;context.fillStyle='#0f172a';context.fillRect(0,0,width,height);context.fillStyle='#38bdf8';context.fillRect(0,0,width,height*0.18);context.fillStyle='#e2e8f0';context.fillRect(width*0.08,height*0.24,width*0.84,height*0.52);context.fillStyle='#0f172a';context.font=Math.max(18,Math.floor(height*0.08))+'px sans-serif';context.fillText(config.videoInputLabel||'Virtual Camera',Math.max(12,Math.floor(width*0.06)),Math.max(28,Math.floor(height*0.14)));context.fillStyle='#2563eb';var pulseWidth=Math.max(24,Math.floor(width*0.18));var travel=Math.max(1,width-pulseWidth-Math.floor(width*0.12));var offset=(Math.sin(elapsed*2.1)+1)*0.5*travel;context.fillRect(Math.floor(width*0.06+offset),Math.floor(height*0.68),pulseWidth,Math.max(12,Math.floor(height*0.08)));rafId=typeof requestAnimationFrame==='function'?requestAnimationFrame(drawFrame):setTimeout(drawFrame,Math.max(16,Math.floor(1000/frameRate)));}drawFrame();if(typeof canvas.captureStream!=='function')throw new DOMException('Synthetic video stream is unavailable','NotSupportedError');var stream=canvas.captureStream(frameRate);var track=stream&&typeof stream.getVideoTracks==='function'?stream.getVideoTracks()[0]||null:null;if(track&&syntheticTrackLabels){try{syntheticTrackLabels.set(track,config.videoInputLabel||'');}catch(_){}}if(track&&typeof track.stop==='function'){var originalStop=track.stop.bind(track);track.stop=function(){if(rafId){if(typeof cancelAnimationFrame==='function')cancelAnimationFrame(rafId);else clearTimeout(rafId);}return originalStop();};}return stream;}`);
+        lines.push(`function findNativeDeviceByLabel(devices,kind){var expected=normalizeLabel(labelForKind(kind));if(!expected)return null;for(var index=0;index<devices.length;index+=1){var device=devices[index];if(device&&device.kind===kind&&normalizeLabel(device.label)===expected)return device;}return null;}`);
+        lines.push(`function assignResolvedDeviceIds(devices,kinds){if(kinds.audioinput&&enabledForKind('audioinput')&&!resolvedNativeDeviceIds.audioinput){resolvedNativeDeviceIds.audioinput=configuredBrowserDeviceId('audioinput');if(!resolvedNativeDeviceIds.audioinput){var audioDevice=findNativeDeviceByLabel(devices,'audioinput');if(audioDevice&&audioDevice.deviceId)resolvedNativeDeviceIds.audioinput=audioDevice.deviceId;}}if(kinds.videoinput&&enabledForKind('videoinput')&&!resolvedNativeDeviceIds.videoinput){resolvedNativeDeviceIds.videoinput=configuredBrowserDeviceId('videoinput');if(!resolvedNativeDeviceIds.videoinput){var videoDevice=findNativeDeviceByLabel(devices,'videoinput');if(videoDevice&&videoDevice.deviceId)resolvedNativeDeviceIds.videoinput=videoDevice.deviceId;}}}`);
+        lines.push(`function stopStream(stream){if(stream&&typeof stream.getTracks==='function'){stream.getTracks().forEach(function(track){try{track.stop();}catch(_){return null;}});}}`);
+        lines.push(`function enumerateNativeDevices(){return originalEnumerate?originalEnumerate().catch(function(){return []; }):Promise.resolve([]);}`);
+        lines.push(`async function resolveNativeDevices(kinds){var devices=await enumerateNativeDevices();assignResolvedDeviceIds(devices,kinds);if((!kinds.audioinput||resolvedNativeDeviceIds.audioinput)&&(!kinds.videoinput||resolvedNativeDeviceIds.videoinput))return resolvedNativeDeviceIds;if(!originalGetUserMedia)return resolvedNativeDeviceIds;var warmupConstraints={};if(kinds.audioinput&&enabledForKind('audioinput')&&!resolvedNativeDeviceIds.audioinput)warmupConstraints.audio=true;if(kinds.videoinput&&enabledForKind('videoinput')&&!resolvedNativeDeviceIds.videoinput)warmupConstraints.video=true;if(!warmupConstraints.audio&&!warmupConstraints.video)return resolvedNativeDeviceIds;var warmupStream=null;try{warmupStream=await originalGetUserMedia(warmupConstraints);}catch(_){return resolvedNativeDeviceIds;}finally{stopStream(warmupStream);}devices=await enumerateNativeDevices();assignResolvedDeviceIds(devices,kinds);return resolvedNativeDeviceIds;}`);
+        lines.push(`navigator.mediaDevices.enumerateDevices=function(){return Promise.resolve(buildDevices());};`);
+        lines.push(`navigator.mediaDevices.getUserMedia=function(constraints){var request=(constraints&&typeof constraints==='object')?constraints:{};var wantsAudio=wantsRequestedKind(request.audio,config.audioInputEnabled!==false,audioDeviceId);var wantsVideo=wantsRequestedKind(request.video,config.videoInputEnabled!==false,videoDeviceId);if(!wantsAudio&&!wantsVideo){if(originalGetUserMedia)return originalGetUserMedia(constraints);if(originalLegacyGetUserMedia)return new Promise(function(resolve,reject){originalLegacyGetUserMedia.call(navigator,constraints,resolve,reject);});return Promise.reject(new DOMException('Requested device not found','NotFoundError'));}return resolveNativeDevices({audioinput:wantsAudio,videoinput:wantsVideo}).then(function(resolved){var audioAliasExplicit=wantsAudio&&explicitlyRequestedAlias(request.audio,audioDeviceId);var videoAliasExplicit=wantsVideo&&explicitlyRequestedAlias(request.video,videoDeviceId);if(audioAliasExplicit&&!resolved.audioinput)throw new DOMException('Configured audio input is unavailable','NotFoundError');var canUseAudio=wantsAudio&&!!resolved.audioinput;var canUseVideo=wantsVideo&&!!resolved.videoinput;var useSyntheticVideo=wantsVideo&&!resolved.videoinput;if(wantsAudio&&!canUseAudio&&!audioAliasExplicit&&request.audio!==true&&request.audio!==undefined&&request.audio!==null)canUseAudio=true;if(wantsVideo&&!canUseVideo&&!videoAliasExplicit&&request.video!==true&&request.video!==undefined&&request.video!==null)canUseVideo=true;var nativeConstraints={};if(canUseAudio)nativeConstraints.audio=buildNativeConstraint(request.audio,resolved.audioinput);if(canUseVideo)nativeConstraints.video=buildNativeConstraint(request.video,resolved.videoinput);if(nativeConstraints.audio==null&&nativeConstraints.video==null){if(useSyntheticVideo)return Promise.resolve(createSyntheticVideoStream(request.video));if(originalGetUserMedia)return originalGetUserMedia(constraints);throw new DOMException('Requested device not found','NotFoundError');}if(!originalGetUserMedia){if(useSyntheticVideo)return Promise.resolve(createSyntheticVideoStream(request.video));throw new DOMException('getUserMedia is unavailable','NotSupportedError');}return originalGetUserMedia(nativeConstraints).then(function(nativeStream){if(!useSyntheticVideo)return nativeStream;return mergeStreams(nativeStream,createSyntheticVideoStream(request.video));},function(error){if(useSyntheticVideo&&!canUseAudio)return createSyntheticVideoStream(request.video);throw error;});});};`);
+        lines.push(`function bridgeLegacyGetUserMedia(constraints,success,error){navigator.mediaDevices.getUserMedia(constraints).then(function(stream){if(typeof success==='function')success(stream);}).catch(function(err){if(typeof error==='function')error(err);});}`);
+        lines.push(`try{Object.defineProperty(navigator,'getUserMedia',{configurable:true,writable:true,value:bridgeLegacyGetUserMedia});}catch(_){navigator.getUserMedia=bridgeLegacyGetUserMedia;}`);
+        lines.push(`try{Object.defineProperty(navigator,'webkitGetUserMedia',{configurable:true,writable:true,value:bridgeLegacyGetUserMedia});}catch(_){navigator.webkitGetUserMedia=bridgeLegacyGetUserMedia;}`);
+        lines.push(`try{Object.defineProperty(navigator,'mozGetUserMedia',{configurable:true,writable:true,value:bridgeLegacyGetUserMedia});}catch(_){navigator.mozGetUserMedia=bridgeLegacyGetUserMedia;}`);
+        lines.push(`})();`);
+        return lines.join('\n');
     }
 
     /**
@@ -2857,6 +2632,25 @@ function sendMessageAsync(message) {
     }
 
     /**
+     * Приводит пользовательский скрипт к телу функции для new Function(...).
+     * Поддерживает как явный `return ...`, так и простые выражения вроде `document.title`.
+     * @param {string | null | undefined} script
+     * @returns {string}
+     */
+    function normalizeScriptBody(script) {
+        const source = String(script ?? "").trim();
+        if (!source) {
+            return "return undefined;";
+        }
+
+        if (/^return\b/.test(source) || /[;\n\r]/.test(source)) {
+            return source;
+        }
+
+        return `return (${source});`;
+    }
+
+    /**
      * @param {string} text
      * @param {Document|ShadowRoot|Element} root
      * @returns {Element|null}
@@ -2917,6 +2711,40 @@ function sendMessageAsync(message) {
 
     function error(message) {
         return { status: "Error", payload: null, error: message };
+    }
+
+    /**
+     * Выполняет код в MAIN world страницы через persistent port background.js.
+     * @param {string} script
+     * @returns {Promise<{status: string, value?: string, error?: string}>}
+     */
+    function executeInMainWorld(script) {
+        const requestId = `mw_${Date.now()}_${++mainWorldRequestCounter}`;
+
+        return new Promise((resolve) => {
+            const timeoutId = setTimeout(() => {
+                if (!pendingMainWorldRequests.has(requestId)) return;
+                pendingMainWorldRequests.delete(requestId);
+                resolve({ status: "err", error: "MAIN world execution timeout." });
+            }, 30000);
+
+            pendingMainWorldRequests.set(requestId, (result) => {
+                clearTimeout(timeoutId);
+                resolve(result);
+            });
+
+            try {
+                port.postMessage({
+                    action: "executeInMain",
+                    requestId,
+                    script,
+                });
+            } catch (err) {
+                clearTimeout(timeoutId);
+                pendingMainWorldRequests.delete(requestId);
+                resolve({ status: "err", error: err.message || String(err) });
+            }
+        });
     }
 
     /**

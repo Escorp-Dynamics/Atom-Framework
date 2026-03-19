@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 
 #pragma warning disable CA2254 // Для тестов можно использовать шаблоны напрямую
 #pragma warning disable CA1848 // Для тестов используем методы LoggerExtensions
@@ -12,7 +12,6 @@ namespace Atom.Debug.Logging.Tests;
 public class ScopeContextTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTests<ScopeContextTests>(logger)
 {
     private StringWriter? consoleOutput;
-    private TextWriter? originalConsoleOutput;
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="ScopeContextTests"/>.
@@ -25,9 +24,7 @@ public class ScopeContextTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchma
     [SetUp]
     public void SetUp()
     {
-        originalConsoleOutput = Console.Out;
         consoleOutput = new StringWriter();
-        Console.SetOut(consoleOutput);
     }
 
     /// <summary>
@@ -36,7 +33,6 @@ public class ScopeContextTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchma
     [TearDown]
     public void TearDown()
     {
-        Console.SetOut(originalConsoleOutput!);
         consoleOutput?.Dispose();
     }
 
@@ -47,6 +43,7 @@ public class ScopeContextTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchma
     public async Task BeginScopeTest()
     {
         using var logger = new ConsoleLogger("Test")
+        { Writer = consoleOutput! }
             .WithoutTime()
             .WithoutDate()
             .WithoutStyling();
@@ -69,6 +66,7 @@ public class ScopeContextTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchma
     public async Task NestedScopeTest()
     {
         using var logger = new ConsoleLogger("Test")
+        { Writer = consoleOutput! }
             .WithoutTime()
             .WithoutDate()
             .WithoutStyling();

@@ -48,6 +48,7 @@
 	<ItemGroup>
 		<!-- Логирование и метрики для диагностики кодеков -->
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="*" />
+		<PackageReference Include="SixLabors.ImageSharp" Version="*" />
 	</ItemGroup>
 
 	<ItemGroup>

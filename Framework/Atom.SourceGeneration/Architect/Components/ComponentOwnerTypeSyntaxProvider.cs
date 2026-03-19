@@ -1,4 +1,4 @@
-#pragma warning disable CA2263
+﻿#pragma warning disable CA2263
 
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
@@ -48,7 +48,7 @@ public class ComponentOwnerTypeSyntaxProvider : TypeSyntaxProvider
 
         return matches.Length is 0
             ? "true"
-            : $"typeof(T).FullName is \"{string.Join("\" or \"", matches)}\"";
+            : string.Join(" || ", matches.Select(static match => $"typeof({match}).IsAssignableFrom(typeof(T))"));
     }
 
     private static ClassEntity CreateOwnerClass(string entityName, string supportedCondition)
@@ -73,66 +73,78 @@ public class ComponentOwnerTypeSyntaxProvider : TypeSyntaxProvider
 
     private static IEnumerable<MethodMember> CreateOwnerMethods(string entityName, string supportedCondition)
     {
-        yield return MethodMember.Create("OnComponentDetached", AccessModifier.Private)
-            .WithArgument(MethodArgumentMember.Create("sender")
-                .WithComment("Источник события"))
-            .WithArgument(MethodArgumentMember.Create("args")
-                .WithType<ComponentEventArgs>(withNullable: default)
-                .WithComment("Новый владелец компонента"))
-            .WithCode("if (args.Component is not null) components.Remove(args.Component)");
-
-        yield return MethodMember.Create("Has", AccessModifier.Public)
-            .WithComment(InheritdocComment)
-            .WithArgument(MethodArgumentMember.Create("component").WithType("T"))
-            .WithCode("components.Contains(component)")
-            .WithGeneric("T", "IComponent")
-            .WithType<bool>();
-
-        yield return MethodMember.Create("Has", AccessModifier.Public)
-            .WithComment(InheritdocComment)
-            .WithCode("components.Any(x => x is T)")
-            .WithGeneric("T", "IComponent")
-            .WithType<bool>();
-
-        yield return MethodMember.Create("TryGet", AccessModifier.Public)
-            .WithComment(InheritdocComment)
-            .WithArgument(MethodArgumentMember.Create("component").WithType("T?").AsOut())
-            .WithCode(@"component = (T?)components.FirstOrDefault(x => x is T);
-                return components is null")
-            .WithGeneric("T", "IComponent")
-            .WithType<bool>();
-
-        yield return MethodMember.Create("Get", AccessModifier.Public)
-            .WithComment(InheritdocComment)
-            .WithCode("TryGet<T>(out var component) && component is not null ? component : throw new NotSupportedException(\"Не найдено ни одного подходящего компонента\")")
-            .WithGeneric("T", "IComponent")
-            .WithType("T");
-
-        yield return MethodMember.Create("TryGetAll", AccessModifier.Public)
-            .WithComment(InheritdocComment)
-            .WithArgument(MethodArgumentMember.Create("components").WithType("IEnumerable<T>").AsOut())
-            .WithCode(@"components = this.components.OfType<T>();
-                return components.Any()")
-            .WithGeneric("T", "IComponent")
-            .WithType<bool>();
-
-        yield return MethodMember.Create("GetAll", AccessModifier.Public)
-            .WithComment(InheritdocComment)
-            .WithCode("TryGetAll<T>(out var items) ? items : throw new NotSupportedException(\"Не найдено ни одного подходящего компонента\")")
-            .WithGeneric("T", "IComponent")
-            .WithType("IEnumerable<T>");
-
+        yield return CreateOnComponentDetachedMethod();
+        yield return CreateHasSpecificMethod();
+        yield return CreateHasAnyMethod();
+        yield return CreateTryGetMethod();
+        yield return CreateGetMethod();
+        yield return CreateTryGetAllMethod();
+        yield return CreateGetAllMethod();
         yield return CreateUseExistingMethod(entityName);
         yield return CreateUseFromPoolMethod(entityName);
         yield return CreateUnUseSpecificMethod(entityName);
         yield return CreateUnUseAllMethod(entityName);
 
-        yield return MethodMember.Create("IsSupported", AccessModifier.Public)
-            .WithComment(InheritdocComment)
-            .WithCode(supportedCondition)
-            .WithGeneric("T", "IComponent")
-            .WithType<bool>();
+        yield return CreateIsSupportedMethod(supportedCondition);
     }
+
+    private static MethodMember CreateOnComponentDetachedMethod() => MethodMember.Create("OnComponentDetached", AccessModifier.Private)
+        .WithArgument(MethodArgumentMember.Create("sender")
+            .WithComment("Источник события"))
+        .WithArgument(MethodArgumentMember.Create("args")
+            .WithType<ComponentEventArgs>(withNullable: default)
+            .WithComment("Новый владелец компонента"))
+        .WithCode("""
+            if (sender is IComponent component) component.Detached -= OnComponentDetached;
+            if (args.Component is not null) components.Remove(args.Component);
+        """);
+
+    private static MethodMember CreateHasSpecificMethod() => MethodMember.Create("Has", AccessModifier.Public)
+        .WithComment(InheritdocComment)
+        .WithArgument(MethodArgumentMember.Create("component").WithType("T"))
+        .WithCode("components.Contains(component)")
+        .WithGeneric("T", "IComponent")
+        .WithType<bool>();
+
+    private static MethodMember CreateHasAnyMethod() => MethodMember.Create("Has", AccessModifier.Public)
+        .WithComment(InheritdocComment)
+        .WithCode("components.Any(x => x is T)")
+        .WithGeneric("T", "IComponent")
+        .WithType<bool>();
+
+    private static MethodMember CreateTryGetMethod() => MethodMember.Create("TryGet", AccessModifier.Public)
+        .WithComment(InheritdocComment)
+        .WithArgument(MethodArgumentMember.Create("component").WithType("T?").AsOut())
+        .WithCode(@"component = (T?)components.FirstOrDefault(x => x is T);
+            return component is not null")
+        .WithGeneric("T", "IComponent")
+        .WithType<bool>();
+
+    private static MethodMember CreateGetMethod() => MethodMember.Create("Get", AccessModifier.Public)
+        .WithComment(InheritdocComment)
+        .WithCode("TryGet<T>(out var component) && component is not null ? component : throw new NotSupportedException(\"Не найдено ни одного подходящего компонента\")")
+        .WithGeneric("T", "IComponent")
+        .WithType("T");
+
+    private static MethodMember CreateTryGetAllMethod() => MethodMember.Create("TryGetAll", AccessModifier.Public)
+        .WithComment(InheritdocComment)
+        .WithArgument(MethodArgumentMember.Create("components").WithType("IEnumerable<T>").AsOut())
+        .WithCode(@"components = this.components.OfType<T>();
+            return components.Any()")
+        .WithGeneric("T", "IComponent")
+        .WithType<bool>();
+
+    private static MethodMember CreateGetAllMethod() => MethodMember.Create("GetAll", AccessModifier.Public)
+        .WithComment(InheritdocComment)
+        .WithCode("TryGetAll<T>(out var items) ? items : throw new NotSupportedException(\"Не найдено ни одного подходящего компонента\")")
+        .WithGeneric("T", "IComponent")
+        .WithType("IEnumerable<T>");
+
+    private static MethodMember CreateIsSupportedMethod(string supportedCondition) => MethodMember.Create("IsSupported", AccessModifier.Public)
+        .WithComment(InheritdocComment)
+        .WithCode(supportedCondition)
+        .WithGeneric("T", "IComponent")
+        .WithType<bool>();
 
     private static MethodMember CreateUseExistingMethod(string entityName) => MethodMember.Create("Use", AccessModifier.Public)
         .WithComment(InheritdocComment)
@@ -148,6 +160,7 @@ public class ComponentOwnerTypeSyntaxProvider : TypeSyntaxProvider
 
             component.Detached += OnComponentDetached;
             component.AttachTo(this);
+            components.Add(component);
 
             return this
         """)

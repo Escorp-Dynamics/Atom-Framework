@@ -1,10 +1,10 @@
 # Atom.Net.Browsing.WebDriver
 
-Драйвер браузера через WebSocket-мост и расширение-коннектор. В отличие от Selenium/Puppeteer не использует CDP — связь идёт через расширение браузера, что делает драйвер неотличимым от реального пользователя для систем антидетекта.
+Драйвер браузера через WebSocket-мост и расширение-коннектор. В отличие от Selenium/Puppeteer не использует CDP: связь идёт через расширение браузера, а page input выполняется tab-local внутри самой страницы без debugger API, что делает драйвер неотличимым от реального пользователя для систем антидетекта.
 
 ## Архитектура
 
-```
+```text
 .NET (WebDriverBrowser)
   │
   ├── BridgeServer (HTTP + WebSocket)
@@ -25,7 +25,7 @@ Extension (background.js)
 ## Поддерживаемые браузеры
 
 | Браузер | Статус | Примечания |
-|---------|--------|------------|
+| ------- | ------ | ---------- |
 | Brave | ✅ | Полная поддержка |
 | Opera | ✅ | Полная поддержка |
 | Vivaldi | ✅ | Полная поддержка |
@@ -39,7 +39,7 @@ Extension (background.js)
 ### Интерфейсы (`Atom.Net.Browsing`)
 
 | Интерфейс | Назначение |
-|-----------|------------|
+| --------- | ---------- |
 | `IDomContext` | DOM-операции: `ExecuteAsync`, `FindElementAsync`, `GetTitleAsync`, `GetUrlAsync`, `GetContentAsync` |
 | `IWebPage` | Страница: `NavigateAsync`, `CaptureScreenshotAsync`, cookies, `MainFrame` |
 | `IFrame` | Фрейм: `Id`, `Name`, `Source`, наследует `IDomContext` |
@@ -48,13 +48,45 @@ Extension (background.js)
 ### Реализации (`Atom.Net.Browsing.WebDriver`)
 
 | Класс | Назначение |
-|-------|------------|
+| ----- | ---------- |
 | `WebDriverBrowser` | Точка входа: `LaunchAsync`, `OpenTabAsync`, `CloseTabAsync` |
 | `WebDriverPage` | Страница вкладки, делегирует DOM-операции к `MainFrame` |
 | `WebDriverFrame` | Выполняет DOM-команды через `TabChannel` |
 | `WebDriverElement` | Элемент DOM с действиями через расширение |
 | `BridgeServer` | HTTP/WebSocket-сервер моста |
 | `TabChannel` | Изолированный WebSocket-канал вкладки |
+
+### Page-local input
+
+Для пользовательского ввода драйвер использует tab-local page-side backend, а не `browser.debugger` / CDP. Это важно для anti-detect и для параллельной работы нескольких вкладок: у каждой вкладки свой канал и своё выполнение input-скриптов, без глобальной сериализации через foreground cursor или shared debugger session.
+
+Поддерживаются два класса API:
+
+- selector-oriented: `ClickElementAsync`, `FocusElementAsync`, `HoverElementAsync`, `TypeElementAsync`, `CheckElementAsync`
+- viewport/key-oriented: `ClickPointAsync`, `KeyPressAsync`
+
+Все эти операции выполняются через JavaScript в page context и synthetic DOM events. Это значит:
+
+- point click и key press больше не зависят от debugger/CDP
+- input остаётся headless-safe и parallel-safe
+- поведение согласовано между обычными и isolated tabs
+
+При этом synthetic page-side input не может сделать событие trusted на уровне браузера/ОС. Для real-site anti-bot сценариев, где важны `isTrusted` и реальный user activation, нужен отдельный native backend. Его проектирование описано в [TRUSTED_INPUT_DESIGN.md](TRUSTED_INPUT_DESIGN.md).
+
+Внутри драйвера уже добавлен минимальный skeleton под Linux X11/XTest detection, но он пока не активирует trusted input capability: до реализации native window discovery и viewport-to-screen mapping runtime продолжает честно объявлять trusted input недоступным.
+
+Пример:
+
+```csharp
+await page.ClickElementAsync(new ElementSelector
+{
+    Strategy = ElementSelectorStrategy.Css,
+    Value = "#login-button",
+});
+
+await page.ClickPointAsync(320, 240);
+await page.KeyPressAsync("Enter");
+```
 
 ## Быстрый старт
 
@@ -100,12 +132,23 @@ var result = await page.ExecuteAsync("return document.cookie");
 
 Полифилл `const browser = globalThis.browser ?? globalThis.chrome;` обеспечивает кроссбраузерность API.
 
+## Перехват запросов
+
+`SetRequestInterceptionAsync(true)` включает перехват запросов на уровне расширения. Базовые сценарии `Continue`, `Abort`, фильтрация по URL-паттернам и модификация заголовков работают через `webRequest`.
+
+### Main-frame fulfill
+
+- Для `main_frame` fulfill во время навигации расширение использует body override без смены адреса. URL навигации сохраняется исходным, а кастомный HTML подставляется после загрузки через content-script.
+- Поскольку CDP/debugger API намеренно не используются, это не является true network-level fulfill: исходный navigation request может успеть дойти до origin до подмены DOM.
+
+Это ограничение важно учитывать в антибот-сценариях, где критично именно отсутствие сетевого запроса к origin.
+
 ## Изоляция контекстов
 
 Два уровня изоляции:
 
 | Уровень | Метод | Изоляция | Когда использовать |
-|---------|-------|----------|-------------------|
+| ------- | ----- | -------- | ----------------- |
 | **Процесс** | `CreateContextAsync` | Отдельный процесс + профиль (OS-level) | Полная изоляция: прокси, cookies, кэш, сетевой стек |
 | **Расширение** | `OpenIsolatedTabAsync` | Одно окно, изоляция через расширение | Лёгкие параллельные сессии без накладных расходов на процесс |
 
@@ -160,7 +203,7 @@ var ua = await page.ExecuteAsync("navigator.userAgent");
 ### `TabContextSettings`
 
 | Свойство | Тип | Описание |
-|----------|-----|----------|
+| -------- | --- | -------- |
 | `Proxy` | `string?` | URL прокси: `http://`, `https://`, `socks4://`, `socks5://` |
 | `UserAgent` | `string?` | Подмена `navigator.userAgent` + HTTP-заголовок `User-Agent` |
 | `Locale` | `string?` | Подмена `navigator.language` |
@@ -182,6 +225,7 @@ var ua = await page.ExecuteAsync("navigator.userAgent");
 | `NetworkInfo` | `NetworkInfoSettings?` | Подмена `navigator.connection` (effectiveType, rtt, downlink, saveData) |
 | `SpeechVoices` | `IReadOnlyList<SpeechVoiceSettings>?` | Подмена `speechSynthesis.getVoices()` фиксированным набором |
 | `MediaDevicesProtection` | `bool` | `enumerateDevices()` → стандартный набор (1 audio in/out, 1 video) |
+| `VirtualMediaDevices` | `VirtualMediaDevicesSettings?` | Tab-local alias `enumerateDevices()` + routed `getUserMedia()` к browser-visible audio/video устройствам; для стабильности предпочтительны явные `AudioInputBrowserDeviceId` / `VideoInputBrowserDeviceId`, audio output пока только alias-экспозиция без sink routing |
 | `WebGLParams` | `WebGLParamsSettings?` | Расширенные параметры WebGL (`MAX_TEXTURE_SIZE` и др.) |
 | `DoNotTrack` | `string?` | Значение `navigator.doNotTrack` (`"1"` / `"0"`) |
 | `GlobalPrivacyControl` | `bool?` | Значение `navigator.globalPrivacyControl` |
@@ -279,7 +323,7 @@ var ua = await page.ExecuteAsync("navigator.userAgent");
 #### `ClientHintsSettings`
 
 | Свойство | Тип | Описание |
-|----------|-----|----------|
+| -------- | --- | -------- |
 | `Brands` | `IReadOnlyList<ClientHintBrand>?` | Список брендов (бренд + версия) |
 | `FullVersionList` | `IReadOnlyList<ClientHintBrand>?` | Полный список для `getHighEntropyValues()` |
 | `Platform` | `string?` | Платформа (`"Windows"`, `"Linux"`, `"macOS"`) |
@@ -292,11 +336,48 @@ var ua = await page.ExecuteAsync("navigator.userAgent");
 #### `NetworkInfoSettings`
 
 | Свойство | Тип | Описание |
-|----------|-----|----------|
+| -------- | --- | -------- |
 | `EffectiveType` | `string` | Тип соединения (`"4g"`, `"3g"`, `"2g"`) — по умолчанию `"4g"` |
 | `Rtt` | `double` | Round-trip time, мс — по умолчанию `50` |
 | `Downlink` | `double` | Пропускная способность, Мбит/с — по умолчанию `10.0` |
 | `SaveData` | `bool` | Режим экономии трафика |
+
+#### `VirtualMediaDevicesSettings`
+
+`VirtualMediaDevices` не синтезирует media tracks в content script. Он публикует tab-local alias устройства в `enumerateDevices()` и маршрутизирует `getUserMedia()` к уже существующим browser-visible audio/video устройствам, заданным со стороны C#.
+
+Пример:
+
+```csharp
+var tab = await browser.OpenIsolatedTabAsync(settings: new TabContextSettings
+{
+    VirtualMediaDevices = new VirtualMediaDevicesSettings
+    {
+        AudioInputLabel = "Virtual Mic A",
+        AudioInputBrowserDeviceId = "browser-visible-audio-device-id",
+        VideoInputLabel = "Virtual Cam A",
+        VideoInputBrowserDeviceId = "browser-visible-video-device-id",
+        AudioOutputEnabled = true,
+        AudioOutputLabel = "Virtual Speakers A",
+    },
+});
+```
+
+Если `AudioInputBrowserDeviceId` или `VideoInputBrowserDeviceId` не заданы, драйвер пытается разрешить native устройство по label. Для стабильного routing в GUI/browser E2E сценариях предпочтительнее передавать явный browser-visible `deviceId`.
+
+| Свойство | Тип | Описание |
+| -------- | --- | -------- |
+| `AudioInputEnabled` | `bool` | Публиковать alias виртуального микрофона |
+| `AudioInputLabel` | `string` | Label alias микрофона в `enumerateDevices()` |
+| `AudioInputBrowserDeviceId` | `string?` | Явный browser-visible `MediaDeviceInfo.deviceId` для маршрутизации микрофона |
+| `VideoInputEnabled` | `bool` | Публиковать alias виртуальной камеры |
+| `VideoInputLabel` | `string` | Label alias камеры в `enumerateDevices()` |
+| `VideoInputBrowserDeviceId` | `string?` | Явный browser-visible `MediaDeviceInfo.deviceId` для маршрутизации камеры |
+| `AudioOutputEnabled` | `bool` | Публиковать alias audio output устройства в `enumerateDevices()` |
+| `AudioOutputLabel` | `string` | Label alias output устройства |
+| `GroupId` | `string?` | Общий `groupId` для alias устройств; по умолчанию генерируется из tab context |
+
+Ограничение: audio output сейчас ограничен alias-экспозицией в `enumerateDevices()` и не выполняет реальный sink routing.
 
 #### `CreateAntiDetectProfile`
 
@@ -317,7 +398,7 @@ SpeechVoices, MediaDevices protection, DoNotTrack.
 #### `SpeechVoiceSettings`
 
 | Свойство | Тип | Описание |
-|----------|-----|----------|
+| -------- | --- | -------- |
 | `Name` | `string` | Имя голоса (`"Microsoft David"`) |
 | `Lang` | `string` | Язык BCP 47 (`"en-US"`) |
 | `LocalService` | `bool` | Локальный голос (по умолчанию `true`) |
@@ -325,7 +406,7 @@ SpeechVoices, MediaDevices protection, DoNotTrack.
 #### `WebGLParamsSettings`
 
 | Свойство | Тип | Описание |
-|----------|-----|----------|
+| -------- | --- | -------- |
 | `MaxTextureSize` | `int?` | `MAX_TEXTURE_SIZE` |
 | `MaxRenderbufferSize` | `int?` | `MAX_RENDERBUFFER_SIZE` |
 | `MaxViewportDims` | `IReadOnlyList<int>?` | `MAX_VIEWPORT_DIMS` (2 элемента) |
@@ -336,7 +417,7 @@ SpeechVoices, MediaDevices protection, DoNotTrack.
 ### Матрица возможностей: Chromium vs Firefox
 
 | Возможность | Chromium (MV3) | Firefox (MV2) |
-|-------------|:--------------:|:-------------:|
+| ----------- | :------------: | :-----------: |
 | User-Agent (HTTP) | `declarativeNetRequest` | `webRequest.onBeforeSendHeaders` |
 | User-Agent (JS) | MAIN world injection | MAIN world injection |
 | Cookies (Set-Cookie capture) | `webRequest.onHeadersReceived` (non-blocking, extraHeaders) | `webRequest.onHeadersReceived` (blocking) |
@@ -363,6 +444,7 @@ SpeechVoices, MediaDevices protection, DoNotTrack.
 | Network Information | `navigator.connection` override | `navigator.connection` override |
 | Speech Synthesis | `speechSynthesis.getVoices()` override | `speechSynthesis.getVoices()` override |
 | Media Devices | `enumerateDevices()` fake set | `enumerateDevices()` fake set |
+| Virtual Media Devices | Tab-local alias `enumerateDevices()` + routed `getUserMedia()` к browser-visible audio/video устройствам; audio output alias-only | Tab-local alias `enumerateDevices()` + routed `getUserMedia()` к browser-visible audio/video устройствам; audio output alias-only |
 | WebGL params | `getParameter()` patch (MAX_TEXTURE_SIZE и др.) | `getParameter()` patch |
 | Do Not Track | `navigator.doNotTrack` override | `navigator.doNotTrack` override |
 | Global Privacy Control | `navigator.globalPrivacyControl` override | `navigator.globalPrivacyControl` override |

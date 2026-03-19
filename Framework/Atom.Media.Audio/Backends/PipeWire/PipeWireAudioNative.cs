@@ -17,8 +17,11 @@ internal static unsafe partial class PipeWireAudioNative
 
     internal const int PW_DIRECTION_OUTPUT = 1;
     internal const uint PW_ID_ANY = 0xFFFFFFFF;
+    internal const int PW_STREAM_FLAG_AUTOCONNECT = 1 << 0;
+    internal const int PW_STREAM_FLAG_INACTIVE = 1 << 1;
     internal const int PW_STREAM_FLAG_MAP_BUFFERS = 1 << 2;
     internal const int PW_STREAM_FLAG_DRIVER = 1 << 3;
+    internal const int PW_STREAM_FLAG_RT_PROCESS = 1 << 4;
     internal const uint PW_VERSION_STREAM_EVENTS = 2;
 
     // Состояния PipeWire stream

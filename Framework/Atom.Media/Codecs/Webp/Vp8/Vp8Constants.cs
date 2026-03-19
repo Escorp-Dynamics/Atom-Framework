@@ -70,13 +70,22 @@ internal static class Vp8Constants
 
     // ── Prediction mode trees (RFC 6386 §8.2, §11) ───────────────
 
-    /// <summary>Y mode tree for keyframes (Section 11.2).</summary>
+    /// <summary>General intra Y mode tree (used outside keyframe-specific coding).</summary>
     public static ReadOnlySpan<sbyte> YModeTree =>
     [
         -DcPred, 2,
         -VPred, 4,
         -HPred, 6,
         -TmPred, -BPred
+    ];
+
+    /// <summary>Keyframe Y mode tree (RFC 6386 modemv_data.h kf_y_mode_tree).</summary>
+    public static ReadOnlySpan<sbyte> KfYModeTree =>
+    [
+        -BPred, 2,
+        4, 6,
+        -DcPred, -VPred,
+        -HPred, -TmPred
     ];
 
     /// <summary>UV mode tree (Section 11.3).</summary>

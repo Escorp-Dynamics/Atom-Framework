@@ -186,6 +186,8 @@ mic.ControlChanged += (sender, args) =>
 | `Model` | Модель | `device.product.name` |
 | `SerialNumber` | Серийный номер | `device.serial` |
 | `Description` | Краткое описание | `node.nick` |
+| `UsbVendorId` | USB VID устройства | `device.vendor.id` |
+| `UsbProductId` | USB PID устройства | `device.product.id` |
 | `DeviceId` | ID для связки с камерой | `device.id` + `node.group` |
 
 ## Архитектура

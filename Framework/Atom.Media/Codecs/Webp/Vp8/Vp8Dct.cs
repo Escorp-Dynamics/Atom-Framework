@@ -33,12 +33,12 @@ internal static class Vp8Dct
             var a = input[i] + input[8 + i];
             var b = input[i] - input[8 + i];
 
-            var t1 = (input[4 + i] * Vp8Constants.SinPI8Sqrt2 >> 16) + (input[4 + i] < 0 ? -1 : 0);
+            var t1 = input[4 + i] * Vp8Constants.SinPI8Sqrt2 >> 16;
             var t2 = input[12 + i] + (input[12 + i] * Vp8Constants.CosPI8Sqrt2Minus1 >> 16);
             var c = t1 - t2;
 
             t1 = input[4 + i] + (input[4 + i] * Vp8Constants.CosPI8Sqrt2Minus1 >> 16);
-            t2 = (input[12 + i] * Vp8Constants.SinPI8Sqrt2 >> 16) + (input[12 + i] < 0 ? -1 : 0);
+            t2 = input[12 + i] * Vp8Constants.SinPI8Sqrt2 >> 16;
             var d = t1 + t2;
 
             temp[i] = a + d;
@@ -54,12 +54,12 @@ internal static class Vp8Dct
             var a = temp[row] + temp[row + 2];
             var b = temp[row] - temp[row + 2];
 
-            var t1 = (temp[row + 1] * Vp8Constants.SinPI8Sqrt2 >> 16) + (temp[row + 1] < 0 ? -1 : 0);
+            var t1 = temp[row + 1] * Vp8Constants.SinPI8Sqrt2 >> 16;
             var t2 = temp[row + 3] + (temp[row + 3] * Vp8Constants.CosPI8Sqrt2Minus1 >> 16);
             var c = t1 - t2;
 
             t1 = temp[row + 1] + (temp[row + 1] * Vp8Constants.CosPI8Sqrt2Minus1 >> 16);
-            t2 = (temp[row + 3] * Vp8Constants.SinPI8Sqrt2 >> 16) + (temp[row + 3] < 0 ? -1 : 0);
+            t2 = temp[row + 3] * Vp8Constants.SinPI8Sqrt2 >> 16;
             var d = t1 + t2;
 
             var outOff = i * stride;

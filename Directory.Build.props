@@ -1,0 +1,7 @@
+<Project>
+    <PropertyGroup Condition="'$(IsTestProject)' == 'true'">
+        <EnableNUnitRunner>true</EnableNUnitRunner>
+        <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+        <OutputType>Exe</OutputType>
+    </PropertyGroup>
+</Project>

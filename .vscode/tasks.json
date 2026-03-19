@@ -1,54 +1,2216 @@
 {
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "label": "build (debug)",
-      "command": "dotnet",
-      "type": "process",
-      "args": [
-        "build",
-        "${workspaceFolder}/Atom.slnx",
-        "/property:GenerateFullPaths=true",
-        "/consoleloggerparameters:NoSummary;ForceNoAlign"
-      ],
-      "problemMatcher": "$msCompile"
-    },
-    {
-      "label": "build (release)",
-      "command": "dotnet",
-      "type": "process",
-      "args": [
-        "build",
-        "${workspaceFolder}/Atom.slnx",
-        "/property:GenerateFullPaths=true",
-        "/consoleloggerparameters:NoSummary;ForceNoAlign",
-        "/p:Configuration=Release"
-      ],
-      "problemMatcher": "$msCompile"
-    },
-    {
-      "label": "publish",
-      "command": "dotnet",
-      "type": "process",
-      "args": [
-        "publish",
-        "${workspaceFolder}/Atom.slnx",
-        "/property:GenerateFullPaths=true",
-        "/consoleloggerparameters:NoSummary;ForceNoAlign"
-      ],
-      "problemMatcher": "$msCompile"
-    },
-    {
-      "label": "watch",
-      "command": "dotnet",
-      "type": "process",
-      "args": [
-        "watch",
-        "run",
-        "--project",
-        "${workspaceFolder}/Atom.slnx"
-      ],
-      "problemMatcher": "$msCompile"
-    }
-  ]
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "build (debug)",
+			"command": "dotnet",
+			"type": "process",
+			"args": [
+				"build",
+				"${workspaceFolder}/Atom.slnx",
+				"/property:GenerateFullPaths=true",
+				"/consoleloggerparameters:NoSummary;ForceNoAlign"
+			],
+			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "build (release)",
+			"command": "dotnet",
+			"type": "process",
+			"args": [
+				"build",
+				"${workspaceFolder}/Atom.slnx",
+				"/property:GenerateFullPaths=true",
+				"/consoleloggerparameters:NoSummary;ForceNoAlign",
+				"/p:Configuration=Release"
+			],
+			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "test (debug)",
+			"command": "dotnet",
+			"type": "process",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"problemMatcher": "$msCompile",
+			"group": "test"
+		},
+		{
+			"label": "publish",
+			"command": "dotnet",
+			"type": "process",
+			"args": [
+				"publish",
+				"${workspaceFolder}/Atom.slnx",
+				"/property:GenerateFullPaths=true",
+				"/consoleloggerparameters:NoSummary;ForceNoAlign"
+			],
+			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "watch",
+			"command": "dotnet",
+			"type": "process",
+			"args": [
+				"watch",
+				"run",
+				"--project",
+				"${workspaceFolder}/Atom.slnx"
+			],
+			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "test webdriver fingerprint parity",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"Name~Обычная и isolated вкладки без контекста дают одинаковый HTTPS fingerprint",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test webdriver fingerprint parity method",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~PlainHttpsFingerprintMatchesRegularAndIsolatedTabsTest",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test webdriver target parity method",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~TargetUrlFingerprintMatchesRegularAndIsolatedTabsTest",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test webdriver page-local input",
+			"type": "process",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~HoverElementApiTest|FullyQualifiedName~TurnstileTestSitekeyOnExternalHttpsTest",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test webdriver mictests pipewire method",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~MicTestsDetectsVirtualMicrophoneStream",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify webdriver page-local input quoted",
+			"type": "process",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~HoverElementApiTest|FullyQualifiedName~TurnstileTestSitekeyOnExternalHttpsTest",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify turnstile external single",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~TurnstileTestSitekeyOnExternalHttpsTest",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test virtual media browser device ids",
+			"type": "process",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~IsolatedTabVirtualMediaDevicesExposeAudioAndVideo|FullyQualifiedName~IsolatedTabsKeepVirtualMediaSeparated",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test virtual media after content fix",
+			"type": "shell",
+			"command": "dotnet test Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter 'FullyQualifiedName~IsolatedTabVirtualMediaDevicesExposeAudioAndVideo|FullyQualifiedName~IsolatedTabsKeepVirtualMediaSeparated|FullyQualifiedName~WebcamTestsDetectsVirtualCameraStream' --logger 'console;verbosity=minimal'",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test virtual media after contract trim",
+			"type": "shell",
+			"command": "dotnet test Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter 'FullyQualifiedName~IsolatedTabVirtualMediaDevicesExposeAudioAndVideo|FullyQualifiedName~IsolatedTabsKeepVirtualMediaSeparated|FullyQualifiedName~WebcamTestsDetectsVirtualCameraStream' --logger 'console;verbosity=minimal'",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test virtual media devices cleanup",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"Name~VirtualMediaDevices|Name~virtual microphone",
+				"-p:TreatWarningsAsErrors=false",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test browser media visibility class",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~BrowserMediaVisibilityTests",
+				"-p:TreatWarningsAsErrors=false",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test prefertrusted selector fallback",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~PageInputBackendSelectorTests",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "retest browser media visibility class",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~BrowserMediaVisibilityTests",
+				"-p:TreatWarningsAsErrors=false",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test explicit camera webdriver",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~WebcamTestsDetectsVirtualCameraStream|FullyQualifiedName~ChromiumEnumeratesPipeWireVirtualCamera",
+				"-p:TreatWarningsAsErrors=false",
+				"--",
+				"NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test explicit webcamtests camera",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~WebcamTestsDetectsVirtualCameraStream",
+				"-p:TreatWarningsAsErrors=false",
+				"--",
+				"NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test explicit enumerate camera",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ChromiumEnumeratesPipeWireVirtualCamera",
+				"-p:TreatWarningsAsErrors=false",
+				"--",
+				"NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test virtual camera e2e visibility",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Media.Video.Tests/Atom.Media.Video.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~CameraVisibleInGStreamerDeviceMonitor|FullyQualifiedName~CameraNodeHasVideoSourceClassification",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test virtual camera gst monitor",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Media.Video.Tests/Atom.Media.Video.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~CameraVisibleInGStreamerDeviceMonitor",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test virtual camera classification",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Media.Video.Tests/Atom.Media.Video.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~CameraNodeHasVideoSourceClassification",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test virtual camera classification after source",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Media.Video.Tests/Atom.Media.Video.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~CameraNodeHasVideoSourceClassification",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test chromium enumerate camera after source",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ChromiumEnumeratesPipeWireVirtualCamera",
+				"-p:TreatWarningsAsErrors=false",
+				"--",
+				"NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "browser media virtual camera regression",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~IsolatedTabVirtualMediaDevicesExposeAudioAndVideo|FullyQualifiedName~WebcamTestsDetectsVirtualCameraStream",
+				"--logger",
+				"console;verbosity=minimal",
+				"--",
+				"NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium camera launch profile matrix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ChromiumEnumeratesPipeWireVirtualCameraAcrossLaunchProfiles",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium camera launch profile matrix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ChromiumEnumeratesPipeWireVirtualCameraAcrossLaunchProfiles",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium camera default method",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ChromiumEnumeratesPipeWireVirtualCamera",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium camera exact default",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName=Tests.BrowserMediaVisibilityTests.ChromiumEnumeratesPipeWireVirtualCamera",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium camera exact default",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName=Tests.BrowserMediaVisibilityTests.ChromiumEnumeratesPipeWireVirtualCamera",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium camera exact default",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName=Tests.BrowserMediaVisibilityTests.ChromiumEnumeratesPipeWireVirtualCamera",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium pipewire camera test",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ChromiumEnumeratesPipeWireVirtualCamera",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium pipewire camera test",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ChromiumEnumeratesPipeWireVirtualCamera",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium pipewire camera exact test",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName=Tests.BrowserMediaVisibilityTests.ChromiumEnumeratesPipeWireVirtualCamera",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium pipewire camera exact test",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName=Tests.BrowserMediaVisibilityTests.ChromiumEnumeratesPipeWireVirtualCamera",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium pipewire camera exact test",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName=Tests.BrowserMediaVisibilityTests.ChromiumEnumeratesPipeWireVirtualCamera",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium pipewire camera matrix test",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName=Tests.BrowserMediaVisibilityTests.ChromiumEnumeratesPipeWireVirtualCameraAcrossLaunchProfiles",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium pipewire camera exact test",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName=Tests.BrowserMediaVisibilityTests.ChromiumEnumeratesPipeWireVirtualCamera",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "raw chromium pipewire camera matrix test",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName=Tests.BrowserMediaVisibilityTests.ChromiumEnumeratesPipeWireVirtualCameraAcrossLaunchProfiles",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "run page-local webdriver tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~HoverElementApiTest|FullyQualifiedName~TurnstileTestSitekeyOnExternalHttpsTest",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test webdriver page-local interaction api",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ClickElementApiTest|FullyQualifiedName~TypeElementApiTest|FullyQualifiedName~CheckElementApiTest|FullyQualifiedName~HoverElementApiTest",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test webdriver page-local interaction api quoted",
+			"type": "shell",
+			"command": "dotnet test Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter 'FullyQualifiedName~ClickElementApiTest|FullyQualifiedName~TypeElementApiTest|FullyQualifiedName~CheckElementApiTest|FullyQualifiedName~HoverElementApiTest' --logger 'console;verbosity=minimal'",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test webdriver page-local interaction api quoted rerun",
+			"type": "shell",
+			"command": "dotnet test Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter 'FullyQualifiedName~ClickElementApiTest|FullyQualifiedName~TypeElementApiTest|FullyQualifiedName~CheckElementApiTest|FullyQualifiedName~HoverElementApiTest' --logger 'console;verbosity=minimal'",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test virtualcamera mediastream png",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Media.Video.Tests/Atom.Media.Video.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~StreamFromMediaStreamLoopsStillPngFrame",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "test webdriver png file stream",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"Name~PNG",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "test webdriver webp file stream",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"Name~WebP",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "test virtualcamera mediastream png rerun",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Media.Video.Tests/Atom.Media.Video.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~StreamFromMediaStreamLoopsStillPngFrame",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "test webdriver file stream method",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~WebcamTestsDetectsVirtualCameraFileStream",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "test virtualcamera mediastream png normalized",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Media.Video.Tests/Atom.Media.Video.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~StreamFromMediaStreamLoopsStillPngFrame",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "test webdriver file stream method normalized",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~WebcamTestsDetectsVirtualCameraFileStream",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "audit markets tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Tests/Atom.Web.Services.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~Atom.Web.Services.Markets.Tests",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "audit markets tests mtp",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Tests/Atom.Web.Services.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~Atom.Web.Services.Markets.Tests",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "audit markets tests mtp mode",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Tests/Atom.Web.Services.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~Atom.Web.Services.Markets.Tests",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "audit markets tests mtp no-build",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Tests/Atom.Web.Services.Tests.csproj",
+				"--no-build",
+				"--filter",
+				"FullyQualifiedName~Atom.Web.Services.Markets.Tests",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "run markets mtp tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Tests/Atom.Web.Services.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~Atom.Web.Services.Markets.Tests",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "rebuild markets mtp dependencies",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Tests/Atom.Web.Services.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~Atom.Web.Services.Markets.Tests",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "rerun markets mtp tests after serviceproxy fix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Tests/Atom.Web.Services.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~Atom.Web.Services.Markets.Tests",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "final rerun markets mtp tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Tests/Atom.Web.Services.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~Atom.Web.Services.Markets.Tests",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "markets tests without analyzers",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Tests/Atom.Web.Services.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~Atom.Web.Services.Markets.Tests",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "run dedicated markets tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "rerun dedicated markets tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "final dedicated markets tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "vp8 explicit diagnostics noticeable",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"Name~VP8 internal: снять diagnostics earliest noticeable macroblock для real test.webp",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "mtp dedicated markets tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "vp8 diagnostic earliest noticeable",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~DiagnoseFirstNoticeableMacroblockForRealWebp",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "run markets tests final",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "vp8 diagnostic via dotnet exec",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"exec",
+				"Tests/Atom.Media.Tests/bin/Debug/net10.0/Atom.Media.Tests.dll",
+				"--filter",
+				"FullyQualifiedName~DiagnoseFirstNoticeableMacroblockForRealWebp"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "run markets tests mtp fixed",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "build atom media tests mtp",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "vp8 diagnostic earliest noticeable rerun",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~DiagnoseFirstNoticeableMacroblockForRealWebp",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify dedicated markets tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "vp8 internal parity explicit",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--",
+				"--filter",
+				"FullyQualifiedName~InternalVp8DecoderMatchesReferencePixels",
+				"--output",
+				"Detailed",
+				"--no-progress",
+				"--test-parameter",
+				"NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "vp8 internal parity explicit project",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--",
+				"--filter",
+				"FullyQualifiedName~InternalVp8DecoderMatchesReferencePixels",
+				"--output",
+				"Detailed",
+				"--no-progress",
+				"--test-parameter",
+				"NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify markets test debug",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify markets test debug rerun",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "test exchange websocket base",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ExchangeWebSocketClientBaseTests",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "test exchange websocket base rerun",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ExchangeWebSocketClientBaseTests",
+				"--logger",
+				"console;verbosity=minimal"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "test exchange websocket base no analyzers",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ExchangeWebSocketClientBaseTests",
+				"--logger",
+				"console;verbosity=minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "test exchange websocket base no analyzers rerun",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ExchangeWebSocketClientBaseTests",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "test exchange websocket base final",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ExchangeWebSocketClientBaseTests",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "test exchange websocket base after reconnect fix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ExchangeWebSocketClientBaseTests",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "vp8 coeff update diagnostic",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~FindFirstDivergentMacroblockForRealWebp",
+				"--",
+				"NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "vp8 coeff update diagnostic project",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~FindFirstDivergentMacroblockForRealWebp",
+				"--",
+				"NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "test exchange websocket base after dispose fix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ExchangeWebSocketClientBaseTests",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "test exchange websocket base non-reconnect",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ExchangeWebSocketClientBaseTests&FullyQualifiedName!~ReconnectResubscribesAfterClose",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "test markets base runtime hooks",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ExchangeWebSocketClientBaseTests",
+				"--logger",
+				"console;verbosity=minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test markets base runtime hooks fixed",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ExchangeWebSocketClientBaseTests",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test markets full suite after base hooks",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "retest markets base runtime hooks narrowed",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ExchangeWebSocketClientBaseTests",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "retest markets full suite after hook surface review",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "retest base after connect collapse",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~ExchangeWebSocketClientBaseTests",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "retest full suite after connect collapse",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test bitstamp markets runtime and contracts",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~Bitstamp",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "retest bitstamp markets runtime and contracts",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~Bitstamp",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test full markets suite after bitstamp migration",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "retest bitstamp after hardening",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~Bitstamp",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test full markets suite after bitstamp hardening",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test kucoin markets runtime and contracts",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~KuCoin",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test full markets suite after kucoin migration",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "retest kucoin after hardening",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~KuCoin",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test full markets suite after kucoin hardening",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test proxies module",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Web.Services.Proxies.Tests/Atom.Web.Services.Proxies.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test proxies module fixed",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Proxies.Tests/Atom.Web.Services.Proxies.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test proxies module runnable",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Proxies.Tests/Atom.Web.Services.Proxies.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:EnableNUnitRunner=true",
+				"-p:OutputType=Exe",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test proxies module final",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Proxies.Tests/Atom.Web.Services.Proxies.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test proxies module verified",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Proxies.Tests/Atom.Web.Services.Proxies.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test proxies module pass",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Proxies.Tests/Atom.Web.Services.Proxies.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate atom media tests mtp",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify Atom.Web.Services.Tests after smoke test",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Tests/Atom.Web.Services.Tests.csproj",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "re-verify Atom.Web.Services.Tests after smoke test fix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Tests/Atom.Web.Services.Tests.csproj",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test proxy providers debug",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Proxies.Tests/Atom.Web.Services.Proxies.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "retest proxy providers debug after api switch",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Proxies.Tests/Atom.Web.Services.Proxies.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "final proxy providers debug after api switch",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Proxies.Tests/Atom.Web.Services.Proxies.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "proxy providers debug after html fallback removal",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Proxies.Tests/Atom.Web.Services.Proxies.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "proxy providers debug after file extraction",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Web.Services.Proxies.Tests/Atom.Web.Services.Proxies.Tests.csproj",
+				"--verbosity",
+				"minimal",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify h1 interim and lifetime tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore",
+				"--filter",
+				"SendAsyncSkipsInterim100ContinueAndReturnsFinalResponse|HttpsClientHandlerDoesNotReuseConnectionWhenLifetimeElapsed"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net full tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify h1 interim and lifetime tests fixed",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore",
+				"--filter",
+				"FullyQualifiedName~SendAsyncSkipsInterim100ContinueAndReturnsFinalResponse|FullyQualifiedName~HttpsClientHandlerDoesNotReuseConnectionWhenLifetimeElapsed"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net full tests fixed",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net full tests after interim lifetime fix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net full tests after pattern fix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after pool concurrency hardening",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after handler refactor",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after analyzer ownership fixes",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after lease limiter fix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after flaky concurrency removal",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests with direct limiter test",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after header limit and series stress",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after header budget object fix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after header limit analyzer fix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after 101 policy and burst stress",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after handler pool split",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after h11 parser split",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after parser include fix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after parser using cleanup",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify atom net tests after h11 io split",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "focused atom.net https tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Tests/Atom.Net.Tests.csproj",
+				"--filter",
+				"SendAsyncCanUseCustomTls12Transport|HttpClientWithHttpsClientHandlerCanSendHttps11RequestOverCustomTls"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "focused atom.net https tests quoted",
+			"type": "shell",
+			"command": "dotnet test --project Tests/Atom.Net.Tests/Atom.Net.Tests.csproj --filter 'SendAsyncCanUseCustomTls12Transport|HttpClientWithHttpsClientHandlerCanSendHttps11RequestOverCustomTls'",
+			"isBackground": false,
+			"group": "test"
+		}
+	]
 }

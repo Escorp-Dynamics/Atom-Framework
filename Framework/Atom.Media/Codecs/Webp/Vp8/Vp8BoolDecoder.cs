@@ -1,4 +1,5 @@
 ﻿using System.Runtime.CompilerServices;
+using System.Globalization;
 
 namespace Atom.Media.Codecs.Webp.Vp8;
 
@@ -6,9 +7,8 @@ namespace Atom.Media.Codecs.Webp.Vp8;
 /// VP8 Boolean Arithmetic Decoder (range coder) per RFC 6386 Section 7.3.
 /// </summary>
 /// <remarks>
-/// Exact translation of the reference decoder from RFC 6386 §20.2 (bool_decoder.h).
-/// State: range (identical to encoder's range), value (at least 8 significant bits),
-/// bit_count (# of bits shifted out of value, max 7).
+/// Exact translation of the libvpx VP8 decoder state machine from dboolhuff.c/.h.
+/// State: range, value and count mirror BOOL_DECODER in libvpx.
 /// Uses byte[] instead of ReadOnlySpan to allow storage in arrays (multiple token partitions).
 /// </remarks>
 internal struct Vp8BoolDecoder
@@ -17,33 +17,32 @@ internal struct Vp8BoolDecoder
 
     public int Pos { get; private set; }
 
-    private uint _range;    // 128 <= range <= 255 (after init)
-    private uint _value;    // contains at least 8 significant bits
-    private int _bitCount;  // # of bits shifted out of value, at most 7
+    private uint _range;
+    private uint _value;
+    private int _bitCount;
 
     /// <summary>
     /// Initializes the boolean decoder from a data span.
-    /// Per RFC 6386 §7.3: value = first 2 input bytes (big-endian), range = 255, bit_count = 0.
+    /// Mirrors RFC 6386 / bool_decoder.h: preload the first two bytes into value,
+    /// then start with range=255 and bit_count=0.
     /// </summary>
     public Vp8BoolDecoder(ReadOnlySpan<byte> data)
     {
         _data = data.ToArray();
-        Pos = 0;
         _range = 255;
+
+        if (_data.Length >= 2)
+        {
+            _value = ((uint)_data[0] << 8) | _data[1];
+            Pos = 2;
+        }
+        else
+        {
+            _value = 0;
+            Pos = _data.Length;
+        }
+
         _bitCount = 0;
-
-        // Value = first 2 input bytes, big-endian
-        _value = 0;
-
-        if (Pos < _data.Length)
-        {
-            _value = (uint)_data[Pos++] << 8;
-        }
-
-        if (Pos < _data.Length)
-        {
-            _value |= _data[Pos++];
-        }
     }
 
     /// <summary>
@@ -54,31 +53,29 @@ internal struct Vp8BoolDecoder
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int DecodeBit(int prob)
     {
-        // Split is identical to encoder's split
         var split = 1u + (((_range - 1) * (uint)prob) >> 8);
-        var bigsplit = split << 8; // SPLIT in reference code: split << 8
 
-        int bit;
+        var splitScaled = split << 8;
+        var bit = 0;
 
-        if (_value >= bigsplit) // encoded a one
+        if (_value >= splitScaled)
         {
             bit = 1;
             _range -= split;
-            _value -= bigsplit;
+            _value -= splitScaled;
         }
-        else // encoded a zero
+
+        else
         {
-            bit = 0;
             _range = split;
         }
 
-        // Shift out irrelevant value bits until range >= 128
         while (_range < 128)
         {
             _value <<= 1;
             _range <<= 1;
 
-            if (++_bitCount == 8) // shift in new bits 8 at a time
+            if (++_bitCount == 8)
             {
                 _bitCount = 0;
 
@@ -147,4 +144,11 @@ internal struct Vp8BoolDecoder
     /// Number of bytes consumed from the input so far.
     /// </summary>
     public readonly int BytesRead => Pos;
+
+    public readonly string DebugState => string.Format(CultureInfo.InvariantCulture,
+        "pos={0},count={1},range={2},value=0x{3:X16}",
+        Pos,
+        _bitCount,
+        _range,
+        _value);
 }

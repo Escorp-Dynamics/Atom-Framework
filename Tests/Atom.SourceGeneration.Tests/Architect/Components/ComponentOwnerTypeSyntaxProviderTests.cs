@@ -1,4 +1,4 @@
-using Atom.SourceGeneration.Tests;
+﻿using Atom.SourceGeneration.Tests;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Testing;
 using Microsoft.CodeAnalysis.Testing;
@@ -51,12 +51,7 @@ public class ComponentOwnerTypeSyntaxProviderTests(ILogger logger) : BenchmarkTe
         };
 
         test.ExpectedDiagnostics.Add(new DiagnosticResult("A0001", DiagnosticSeverity.Hidden)
-            .WithSpan(119, 2, 119, 36)
-            .WithMessage("Обнаружен атрибут 'ComponentOwner'")
-        );
-
-        test.ExpectedDiagnostics.Add(new DiagnosticResult("A0001", DiagnosticSeverity.Hidden)
-            .WithSpan(120, 2, 120, 36)
+            .WithSpan(121, 2, 121, 40)
             .WithMessage("Обнаружен атрибут 'ComponentOwner'")
         );
 

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Runtime.CompilerServices;
 
 namespace Atom.Net.Udp;
@@ -26,7 +26,7 @@ public readonly struct UdpSettings() : IEquatable<UdpSettings>
     public byte TimeToLive { get; init; }
 
     /// <summary>
-    /// DSCP (IPv4 TOS). 0 — не устанавливать.
+    /// DSCP для IPv4 ToS или IPv6 Traffic Class. 0 — не устанавливать.
     /// </summary>
     public byte Dscp { get; init; }
 

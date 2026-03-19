@@ -3,6 +3,8 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics.X86;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace Atom.Media;
 
@@ -70,9 +72,7 @@ public sealed partial class WebpCodec
                     return CodecResult.InvalidData;
                 }
 
-                var vp8Data = data.Slice(offset + 8, chunkSize);
-                var vp8Decoder = new Vp8Decoder();
-                return vp8Decoder.Decode(vp8Data, ref frame);
+                return DecodeLossyChunk(data, ref frame);
             }
 
             // Следующий chunk (с выравниванием)
@@ -94,6 +94,68 @@ public sealed partial class WebpCodec
         var frame = buffer.AsFrame();
         var result = Decode(data.Span, ref frame);
         return new ValueTask<CodecResult>(result);
+    }
+
+    #endregion
+
+    #region Lossy Decoding
+
+    private static CodecResult DecodeLossyChunk(ReadOnlySpan<byte> data, ref VideoFrame frame)
+    {
+        var pixelFormat = frame.PixelFormat;
+        if (pixelFormat is not (VideoPixelFormat.Rgba32 or VideoPixelFormat.Rgb24))
+        {
+            return CodecResult.UnsupportedFormat;
+        }
+
+        try
+        {
+            using var image = Image.Load<Rgba32>(data.ToArray());
+
+            if (image.Width != frame.Width || image.Height != frame.Height)
+            {
+                return CodecResult.InvalidData;
+            }
+
+            var packedData = frame.PackedData;
+            var srcPixels = new byte[image.Width * image.Height * 4];
+            image.CopyPixelDataTo(srcPixels);
+
+            for (var y = 0; y < image.Height; y++)
+            {
+                var dstRow = packedData.GetRow(y);
+                var srcOffset = y * image.Width * 4;
+
+                if (pixelFormat == VideoPixelFormat.Rgba32)
+                {
+                    srcPixels.AsSpan(srcOffset, image.Width * 4).CopyTo(dstRow);
+                    continue;
+                }
+
+                for (var x = 0; x < image.Width; x++)
+                {
+                    var srcPixelOffset = srcOffset + (x * 4);
+                    var dstOffset = x * 3;
+                    dstRow[dstOffset] = srcPixels[srcPixelOffset];
+                    dstRow[dstOffset + 1] = srcPixels[srcPixelOffset + 1];
+                    dstRow[dstOffset + 2] = srcPixels[srcPixelOffset + 2];
+                }
+            }
+
+            return CodecResult.Success;
+        }
+        catch (UnknownImageFormatException)
+        {
+            return CodecResult.InvalidData;
+        }
+        catch (InvalidImageContentException)
+        {
+            return CodecResult.InvalidData;
+        }
+        catch (NotSupportedException)
+        {
+            return CodecResult.InvalidData;
+        }
     }
 
     #endregion

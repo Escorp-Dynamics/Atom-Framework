@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using Atom.Architect.Builders;
@@ -128,73 +128,106 @@ public partial class ClientHelloBuilder : IBuilder<ReadOnlySpan<byte>, ClientHel
     {
         var span = buffer.AsSpan();
         var offset = 0;
+        var stage = "record header";
 
-        // Record Layer Header
-        span[offset++] = 0x16;
-        span[offset++] = 0x03;
-        span[offset++] = 0x03;
-        var recordLenPos = offset; offset += 2;
-
-        // Handshake Header
-        span[offset++] = 0x01;
-        var hsLenPos = offset; offset += 3;
-
-        // client_hello.legacy_version
-        span[offset++] = 0x03;
-        span[offset++] = 0x03;
-
-        // Random (32 байта) + заведём GREASE-контекст
-        Span<byte> clientRandom = stackalloc byte[32];
-        RandomNumberGenerator.Fill(clientRandom);
-        clientRandom.CopyTo(span.Slice(offset, 32));
-        offset += 32;
-
-        using (Grease.Enter(clientRandom))
+        try
         {
-            // legacy_session_id (по политике билдера, прокинутой из TlsStream)
-            if (sessionIdPolicy is SessionIdPolicy.Empty)
+            // Record Layer Header
+            span[offset++] = 0x16;
+            span[offset++] = 0x03;
+            span[offset++] = 0x03;
+            var recordLenPos = offset; offset += 2;
+
+            stage = "handshake header";
+            span[offset++] = 0x01;
+            var hsLenPos = offset; offset += 3;
+
+            stage = "legacy version";
+            span[offset++] = 0x03;
+            span[offset++] = 0x03;
+
+            stage = "client random";
+            Span<byte> clientRandom = stackalloc byte[32];
+            RandomNumberGenerator.Fill(clientRandom);
+            clientRandom.CopyTo(span.Slice(offset, 32));
+            offset += 32;
+
+            if (IsGreaseCipherSuitesEnabled)
             {
-                span[offset++] = 0x00;
+                using (Grease.Enter(clientRandom))
+                {
+                    stage = "session id";
+                    if (sessionIdPolicy is SessionIdPolicy.Empty)
+                    {
+                        span[offset++] = 0x00;
+                    }
+                    else
+                    {
+                        span[offset++] = 0x20; // 32
+                        RandomNumberGenerator.Fill(span.Slice(offset, 32));
+                        offset += 32;
+                    }
+
+                    stage = "cipher suites";
+                    var pos = cipherSuites.Count > 0 ? 1 : 0;
+                    cipherSuites.Insert(pos, Grease.CipherSuites);
+
+                    if (!cipherSuites.Contains(0x00FF)) cipherSuites.Add(0x00FF);
+                    if (useVersionFallback && !cipherSuites.Contains(0x5600)) cipherSuites.Add(0x5600);
+
+                    WriteCipherSuites(span, ref offset);
+
+                    stage = "compression methods";
+                    span[offset++] = 0x01;
+                    span[offset++] = 0x00;
+
+                    stage = "extensions";
+                    WriteExtensions(span, ref offset);
+                }
             }
             else
             {
-                span[offset++] = 0x20; // 32
-                RandomNumberGenerator.Fill(span.Slice(offset, 32));
-                offset += 32;
+                stage = "session id";
+                if (sessionIdPolicy is SessionIdPolicy.Empty)
+                {
+                    span[offset++] = 0x00;
+                }
+                else
+                {
+                    span[offset++] = 0x20; // 32
+                    RandomNumberGenerator.Fill(span.Slice(offset, 32));
+                    offset += 32;
+                }
+
+                stage = "cipher suites";
+                if (!cipherSuites.Contains(0x00FF)) cipherSuites.Add(0x00FF);
+                if (useVersionFallback && !cipherSuites.Contains(0x5600)) cipherSuites.Add(0x5600);
+
+                WriteCipherSuites(span, ref offset);
+
+                stage = "compression methods";
+                span[offset++] = 0x01;
+                span[offset++] = 0x00;
+
+                stage = "extensions";
+                WriteExtensions(span, ref offset);
             }
 
-            // cipher_suites: при необходимости вставим GREASE на 2-ю позицию (как Chromium)
-            if (IsGreaseCipherSuitesEnabled)
-            {
-                // Вставляем Grease.CipherSuites во внутренний список на позицию 1
-                var pos = cipherSuites.Count > 0 ? 1 : 0;
-                cipherSuites.Insert(pos, Grease.CipherSuites);
-            }
+            stage = "finalize lengths";
+            var handshakeLength = offset - (hsLenPos + 3);
+            span[hsLenPos + 0] = (byte)((handshakeLength >> 16) & 0xFF);
+            span[hsLenPos + 1] = (byte)((handshakeLength >> 8) & 0xFF);
+            span[hsLenPos + 2] = (byte)(handshakeLength & 0xFF);
 
-            // SCSV в конце списка (браузерный отпечаток)
-            if (!cipherSuites.Contains(0x00FF)) cipherSuites.Add(0x00FF); // TLS_EMPTY_RENEGOTIATION_INFO_SCSV
-            if (useVersionFallback && !cipherSuites.Contains(0x5600)) cipherSuites.Add(0x5600); // TLS_FALLBACK_SCSV
+            var recordLength = handshakeLength + 4;
+            BinaryPrimitives.WriteUInt16BigEndian(span[recordLenPos..], (ushort)recordLength);
 
-            WriteCipherSuites(span[offset..], ref offset);
-
-            // compression_methods
-            span[offset++] = 0x01;
-            span[offset++] = 0x00;
-
-            // extensions (каждое расширение при записи может использовать Grease.* и client_random из статического провайдера)
-            WriteExtensions(span[offset..], ref offset);
+            return span[0..offset];
         }
-
-        // финализация длин
-        var handshakeLength = offset - (hsLenPos + 3);
-        span[hsLenPos + 0] = (byte)((handshakeLength >> 16) & 0xFF);
-        span[hsLenPos + 1] = (byte)((handshakeLength >> 8) & 0xFF);
-        span[hsLenPos + 2] = (byte)(handshakeLength & 0xFF);
-
-        var recordLength = handshakeLength + 4;
-        BinaryPrimitives.WriteUInt16BigEndian(span[recordLenPos..], (ushort)recordLength);
-
-        return span[0..offset];
+        catch (Exception exception)
+        {
+            throw new InvalidOperationException($"ClientHello build failed at stage '{stage}' with offset={offset}, cipherSuites={cipherSuites.Count}, extensions={extensions.Count}.", exception);
+        }
     }
 
     /// <inheritdoc/>

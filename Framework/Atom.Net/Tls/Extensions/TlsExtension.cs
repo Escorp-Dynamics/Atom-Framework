@@ -1,6 +1,5 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using Atom.Buffers;
-using System.Diagnostics.CodeAnalysis;
 
 namespace Atom.Net.Tls.Extensions;
 
@@ -16,29 +15,9 @@ public abstract partial class TlsExtension : ITlsExtension
     public abstract int Size { get; }
 
     /// <summary>
-    /// PSK Key Exchange Modes (0x002d).
-    /// </summary>
-    public static PskKeyExchangeModesTlsExtension PskKeyExchangeModes => Rent<PskKeyExchangeModesTlsExtension>();
-
-    /// <summary>
-    ///
-    /// </summary>
-    public static PreSharedKeyTlsExtension PreSharedKey => Rent<PreSharedKeyTlsExtension>();
-
-    /// <summary>
     /// SessionTicket (0x0023).
     /// </summary>
     public static SessionTicketExtension SessionTicket => Rent<SessionTicketExtension>();
-
-    /// <summary>
-    /// Padding (0x0015).
-    /// </summary>
-    public static PaddingTlsExtension Padding => Rent<PaddingTlsExtension>();
-
-    /// <summary>
-    /// Encrypt-Then-MAC (0x0016).
-    /// </summary>
-    public static EncryptThenMacTlsExtension EncryptThenMac => Rent<EncryptThenMacTlsExtension>();
 
     /// <summary>
     /// Extended Master Secret (0x0017).
@@ -51,11 +30,6 @@ public abstract partial class TlsExtension : ITlsExtension
     public static RenegotiationInfoTlsExtension RenegotiationInfo => Rent<RenegotiationInfoTlsExtension>();
 
     /// <summary>
-    /// Record Size Limit (0x001C).
-    /// </summary>
-    public static RecordSizeLimitTlsExtension RecordSizeLimit => Rent<RecordSizeLimitTlsExtension>();
-
-    /// <summary>
     /// signature_algorithms (0x000D).
     /// </summary>
     public static SignatureAlgorithmsTlsExtension SignatureAlgorithms => Rent<SignatureAlgorithmsTlsExtension>();
@@ -66,49 +40,9 @@ public abstract partial class TlsExtension : ITlsExtension
     public static SupportedGroupsTlsExtension SupportedGroups => Rent<SupportedGroupsTlsExtension>();
 
     /// <summary>
-    /// supported_groups (0x000A).
-    /// </summary>
-    public static KeyShareTlsExtension KeyShare => Rent<KeyShareTlsExtension>();
-
-    /// <summary>
-    /// signature_algorithms_cert (0x0032).
-    /// </summary>
-    public static SignatureAlgorithmsCertTlsExtension SignatureAlgorithmsCert => Rent<SignatureAlgorithmsCertTlsExtension>();
-
-    /// <summary>
-    /// application_settings (0x00FF).
-    /// </summary>
-    public static ApplicationSettingsTlsExtension ApplicationSettings => Rent<ApplicationSettingsTlsExtension>();
-
-    /// <summary>
     /// GREASE.
     /// </summary>
     public static GreaseTlsExtension Grease => Rent<GreaseTlsExtension>();
-
-    /// <summary>
-    /// status_request (0x0005).
-    /// </summary>
-    public static StatusRequestTlsExtension StatusRequest => Rent<StatusRequestTlsExtension>();
-
-    /// <summary>
-    /// Signed Certificate Timestamp (SCT) extension placeholder.
-    /// </summary>
-    public static SignedCertificateTimestampTlsExtension SignedCertificateTimestamp => Rent<SignedCertificateTimestampTlsExtension>();
-
-    /// <summary>
-    /// delegated_credentials (0x0037).
-    /// </summary>
-    public static DelegatedCredentialsTlsExtension DelegatedCredentials => Rent<DelegatedCredentialsTlsExtension>();
-
-    /// <summary>
-    /// compress_certificate (0x001B).
-    /// </summary>
-    public static CompressCertificateTlsExtension CompressCertificate => Rent<CompressCertificateTlsExtension>();
-
-    /// <summary>
-    /// early_data (0x002A).
-    /// </summary>
-    public static EarlyDataTlsExtension EarlyData => Rent<EarlyDataTlsExtension>();
 
     /// <summary>
     /// server_name (0x0000).
@@ -138,14 +72,4 @@ public abstract partial class TlsExtension : ITlsExtension
     [Pooled]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void Reset() { }
-
-    /// <summary>
-    /// Helper to rent pooled objects for extensions when source-generated helpers are not available.
-    /// </summary>
-    public static T Rent<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>() => ObjectPool<T>.Shared.Rent();
-
-    /// <summary>
-    /// Helper to return pooled objects.
-    /// </summary>
-    public static void Return<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>(T value) => ObjectPool<T>.Shared.Return(value!);
 }

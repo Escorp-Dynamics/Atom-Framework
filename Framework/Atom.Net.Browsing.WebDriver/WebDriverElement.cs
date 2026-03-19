@@ -152,10 +152,10 @@ internal sealed class WebDriverElement(string elementId, TabChannel channel) : I
             return null;
 
         var mode = el.GetString();
-        if (mode is not ("open" or "closed"))
+        if (!string.Equals(mode, "open", StringComparison.Ordinal))
             return null;
 
-        return new WebDriverShadowRoot(elementId, channel, isClosed: string.Equals(mode, "closed", StringComparison.Ordinal));
+        return new WebDriverShadowRoot(elementId, channel);
     }
 
     /// <inheritdoc cref="IElement.OpenShadowRootAsync(CancellationToken)"/>

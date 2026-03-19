@@ -51,6 +51,16 @@ public sealed record VirtualMicrophoneSettings
     /// <summary>Описание устройства.</summary>
     public string? Description { get; init; }
 
+    /// <summary>
+    /// USB Vendor ID (VID) для эмуляции устройства.
+    /// </summary>
+    public int? UsbVendorId { get; init; }
+
+    /// <summary>
+    /// USB Product ID (PID) для эмуляции устройства.
+    /// </summary>
+    public int? UsbProductId { get; init; }
+
     /// <summary>Дополнительные PipeWire-свойства (key-value).</summary>
     public IReadOnlyDictionary<string, string>? ExtraProperties { get; init; }
 }

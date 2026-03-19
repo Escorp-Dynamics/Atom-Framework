@@ -1,4 +1,4 @@
-#pragma warning disable CA2213
+﻿#pragma warning disable CA2213
 
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
@@ -18,7 +18,7 @@ namespace Atom.Net.Tls;
 [method: MethodImpl(MethodImplOptions.AggressiveInlining)]
 public abstract class TlsStream([NotNull] NetworkStream stream, in TlsSettings settings) : Stream
 {
-    private readonly Stream stream = stream;
+    private readonly Stream transportStream = stream;
 
     /// <summary>
     /// AEAD шифр для чтения, устанавливается после handshake.
@@ -103,13 +103,17 @@ public abstract class TlsStream([NotNull] NetworkStream stream, in TlsSettings s
         {
             header.Write(buf.AsSpan());
             data.CopyTo(buf.AsMemory(5, data.Length));
-            await WriteAsync(buf.AsMemory(0, 5 + data.Length), cancellationToken).ConfigureAwait(false);
+            await transportStream.WriteAsync(buf.AsMemory(0, 5 + data.Length), cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             ArrayPool<byte>.Shared.Return(buf);
         }
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    protected ValueTask WriteTransportAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+        => transportStream.WriteAsync(data, cancellationToken);
 
     /// <summary>
     /// Читает следующую TLS-запись (заголовок+пейлоад). Возвращает пейлоад в пуловском буфере.
@@ -146,7 +150,7 @@ public abstract class TlsStream([NotNull] NetworkStream stream, in TlsSettings s
 
         while (!mem.IsEmpty)
         {
-            var got = await ReadAsync(mem, cancellationToken).ConfigureAwait(false);
+            var got = await transportStream.ReadAsync(mem, cancellationToken).ConfigureAwait(false);
             if (got <= 0) throw new InvalidOperationException("Разрыв соединения при чтении TLS");
             mem = mem[got..];
         }
@@ -154,19 +158,19 @@ public abstract class TlsStream([NotNull] NetworkStream stream, in TlsSettings s
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override int Read(Span<byte> buffer) => stream.Read(buffer);
+    public override int Read(Span<byte> buffer) => transportStream.Read(buffer);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => stream.ReadAsync(buffer, cancellationToken);
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => transportStream.ReadAsync(buffer, cancellationToken);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override void Write(ReadOnlySpan<byte> buffer) => stream.Write(buffer);
+    public override void Write(ReadOnlySpan<byte> buffer) => transportStream.Write(buffer);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => stream.WriteAsync(buffer, cancellationToken);
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => transportStream.WriteAsync(buffer, cancellationToken);
 
     /// <summary>
     /// Выполняет рукопожатие.

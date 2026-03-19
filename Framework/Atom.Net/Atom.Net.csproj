@@ -2,7 +2,8 @@
 
 	<PropertyGroup>
 		<AssemblyName>Escorp.Atom.Net</AssemblyName>
-		<NoWarn>CA1003;CA1028;CA1031;CA1711;ERP022</NoWarn>
+		<NoWarn>
+			CA1003;CA1028;CA1031;CA1711;ERP022;CS1591;RCS1138;S125;MA0007;MA0051;S3776;S907;CA2014;S3358;MA0071;S2692;MA0099;MA0078;MA0055;IDE0005;CA5398;MA0053;S1186;S1854;MA0076</NoWarn>
 
 		<PackageId>$(AssemblyName)</PackageId>
 		<Version>0.0.5</Version>
@@ -19,7 +20,6 @@
 
 	<!-- Временно отключаем незаконченные модули -->
 	<ItemGroup>
-		<Compile Remove="NetworkStream.cs" />
 		<Compile Remove="Https/Connections/**" />
 		<Compile Remove="Https/Headers/**" />
 		<Compile Remove="Https/Http11Settings.cs" />
@@ -42,9 +42,50 @@
 		<Compile Remove="Proxies/ProxyValidator.cs" />
 		<Compile Remove="Proxies/ProxyResponseMessage.cs" />
 		<Compile Remove="Quic/**" />
-		<Compile Remove="Tcp/**" />
 		<Compile Remove="Tls/**" />
-		<Compile Remove="Udp/**" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Compile Include="Https/HttpsRequestMessage.cs" />
+		<Compile Include="Https/HttpsClientHandler.cs" />
+		<Compile Include="Https/RequestKind.cs" />
+		<Compile Include="Https/Traffic.cs" />
+		<Compile Include="Https/Connections/HttpsConnection.cs" />
+		<Compile Include="Https/Connections/HttpsConnectionOptions.cs" />
+		<Compile Include="Https/Connections/Https11Connection.cs" />
+		<Compile Include="Https/Connections/Https11Connection.Parser.cs" />
+		<Compile Include="Https/Connections/Https11Connection.IO.cs" />
+		<Compile Include="Https/Connections/IHttpsConnection.cs" />
+		<Compile Include="Tls/CipherSuites.cs" />
+		<Compile Include="Tls/Grease.cs" />
+		<Compile Include="Tls/HandshakeTranscript.cs" />
+		<Compile Include="Tls/LegacySessionIdPolicy.cs" />
+		<Compile Include="Tls/NamedGroup.cs" />
+		<Compile Include="Tls/OwnerMemory.cs" />
+		<Compile Include="Tls/TlsAlertDescription.cs" />
+		<Compile Include="Tls/TlsAlertLevel.cs" />
+		<Compile Include="Tls/TlsContentType.cs" />
+		<Compile Include="Tls/TlsHandshakeType.cs" />
+		<Compile Include="Tls/TlsRecordHeader.cs" />
+		<Compile Include="Tls/TlsSettings.cs" />
+		<Compile Include="Tls/TlsStream.cs" />
+		<Compile Include="Tls/Tls12Stream.cs" />
+		<Compile Include="Tls/Aead/AesGcmAead.cs" />
+		<Compile Include="Tls/Aead/IAeadCipher.cs" />
+		<Compile Include="Tls/ClientHello/ClientHelloBuilder.cs" />
+		<Compile Include="Tls/Extensions/ITlsExtension.cs" />
+		<Compile Include="Tls/Extensions/TlsExtension.cs" />
+		<Compile Include="Tls/Extensions/AlpnTlsExtension.cs" />
+		<Compile Include="Tls/Extensions/EcPointFormatsTlsExtension.cs" />
+		<Compile Include="Tls/Extensions/ExtendedMasterSecretTlsExtension.cs" />
+		<Compile Include="Tls/Extensions/GreaseTlsExtension.cs" />
+		<Compile Include="Tls/Extensions/RenegotiationInfoTlsExtension.cs" />
+		<Compile Include="Tls/Extensions/ServerNameTlsExtension.cs" />
+		<Compile Include="Tls/Extensions/SessionTicketTlsExtension.cs" />
+		<Compile Include="Tls/Extensions/SignatureAlgorithm.cs" />
+		<Compile Include="Tls/Extensions/SignatureAlgorithmsTlsExtension.cs" />
+		<Compile Include="Tls/Extensions/SupportedGroupsTlsExtension.cs" />
+		<Compile Include="Tls/Extensions/SupportedVersionsTlsExtension.cs" />
 	</ItemGroup>
 
 	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">

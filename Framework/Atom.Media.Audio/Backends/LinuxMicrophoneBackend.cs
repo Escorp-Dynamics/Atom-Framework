@@ -32,7 +32,6 @@ internal sealed unsafe class LinuxMicrophoneBackend : IVirtualMicrophoneBackend
     private int pendingBufferSize;
     private int frameStride;
     private readonly Lock frameLock = new();
-    private volatile bool hasNewData;
     private bool isCapturing;
     private volatile string? streamError;
     private readonly Dictionary<MicrophoneControlType, MicrophoneControlRange> controlRanges = [];
@@ -145,7 +144,6 @@ internal sealed unsafe class LinuxMicrophoneBackend : IVirtualMicrophoneBackend
 
             sampleData.CopyTo(pendingBuffer);
             pendingBufferSize = sampleData.Length;
-            hasNewData = true;
         }
     }
 
@@ -244,11 +242,16 @@ internal sealed unsafe class LinuxMicrophoneBackend : IVirtualMicrophoneBackend
     private static IntPtr CreateStreamProperties(VirtualMicrophoneSettings micSettings)
     {
         var props = pw_properties_new(IntPtr.Zero);
+        var deviceName = BuildDeviceName(micSettings);
+        var nodeName = BuildNodeName(micSettings);
         _ = pw_properties_set(props, "media.type", "Audio");
         _ = pw_properties_set(props, "media.category", "Source");
         _ = pw_properties_set(props, "media.role", "Communication");
-        _ = pw_properties_set(props, "media.class", "Audio/Source/Virtual");
-        _ = pw_properties_set(props, "node.name", "atom-virtual-microphone");
+        _ = pw_properties_set(props, "media.class", "Audio/Source");
+        _ = pw_properties_set(props, "media.name", micSettings.Name);
+        _ = pw_properties_set(props, "device.name", deviceName);
+        _ = pw_properties_set(props, "node.name", nodeName);
+        _ = pw_properties_set(props, "node.nick", micSettings.Name);
         _ = pw_properties_set(props, "node.description", micSettings.Name);
         _ = pw_properties_set(props, "node.virtual", "true");
 
@@ -260,8 +263,18 @@ internal sealed unsafe class LinuxMicrophoneBackend : IVirtualMicrophoneBackend
         SetOptionalProperty(props, "device.vendor.name", micSettings.Vendor);
         SetOptionalProperty(props, "device.product.name", micSettings.Model);
         SetOptionalProperty(props, "device.serial", micSettings.SerialNumber);
-        SetOptionalProperty(props, "device.description", micSettings.Description);
+        SetOptionalProperty(props, "device.description", micSettings.Description ?? micSettings.Name);
         SetOptionalProperty(props, "device.id", micSettings.DeviceId);
+
+        if (micSettings.UsbVendorId is { } vid)
+        {
+            _ = pw_properties_set(props, "device.vendor.id", FormatUsbId(vid));
+        }
+
+        if (micSettings.UsbProductId is { } pid)
+        {
+            _ = pw_properties_set(props, "device.product.id", FormatUsbId(pid));
+        }
 
         if (micSettings.DeviceId is not null)
         {
@@ -281,10 +294,45 @@ internal sealed unsafe class LinuxMicrophoneBackend : IVirtualMicrophoneBackend
 
     private static void SetOptionalProperty(IntPtr props, string key, string? value)
     {
-        if (value is not null)
+        if (!string.IsNullOrWhiteSpace(value))
         {
             _ = pw_properties_set(props, key, value);
         }
+    }
+
+    private static string BuildDeviceName(VirtualMicrophoneSettings micSettings) =>
+        "atom.device." + BuildMetadataSlug(micSettings.DeviceId ?? micSettings.Name, "virtual-microphone");
+
+    private static string BuildNodeName(VirtualMicrophoneSettings micSettings) =>
+        "atom.microphone." + BuildMetadataSlug(micSettings.DeviceId ?? micSettings.Name, "virtual-microphone");
+
+    private static string FormatUsbId(int value) => "0x" + value.ToString("x4", CultureInfo.InvariantCulture);
+
+    private static string BuildMetadataSlug(string? value, string fallback)
+    {
+        var source = string.IsNullOrWhiteSpace(value) ? fallback : value!;
+        Span<char> buffer = stackalloc char[source.Length];
+        var length = 0;
+        var previousWasSeparator = false;
+
+        foreach (var character in source)
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                buffer[length++] = char.ToLowerInvariant(character);
+                previousWasSeparator = false;
+                continue;
+            }
+
+            if (length > 0 && !previousWasSeparator)
+            {
+                buffer[length++] = '-';
+                previousWasSeparator = true;
+            }
+        }
+
+        var slug = new string(buffer[..length]).Trim('-');
+        return slug.Length == 0 ? fallback : slug;
     }
 
     private void CreateStream(VirtualMicrophoneSettings micSettings)
@@ -332,7 +380,10 @@ internal sealed unsafe class LinuxMicrophoneBackend : IVirtualMicrophoneBackend
                 stream,
                 PW_DIRECTION_OUTPUT,
                 PW_ID_ANY,
-                PW_STREAM_FLAG_MAP_BUFFERS | PW_STREAM_FLAG_DRIVER,
+                PW_STREAM_FLAG_AUTOCONNECT |
+                PW_STREAM_FLAG_INACTIVE |
+                PW_STREAM_FLAG_MAP_BUFFERS |
+                PW_STREAM_FLAG_RT_PROCESS,
                 &podPtr,
                 1);
 
@@ -443,7 +494,7 @@ internal sealed unsafe class LinuxMicrophoneBackend : IVirtualMicrophoneBackend
             {
                 lock (frameLock)
                 {
-                    WriteChunkData(d);
+                    WriteChunkData(buf, d);
                 }
             }
         }
@@ -451,27 +502,50 @@ internal sealed unsafe class LinuxMicrophoneBackend : IVirtualMicrophoneBackend
         _ = pw_stream_queue_buffer(stream, buf);
     }
 
-    private void WriteChunkData(SpaData* d)
+    private void WriteChunkData(PwBuffer* buffer, SpaData* d)
     {
-        if (hasNewData && pendingBuffer is not null)
+        if (d->Data is null || d->Chunk is null)
         {
-            var copySize = Math.Min(pendingBufferSize, (int)d->MaxSize);
-            pendingBuffer.AsSpan(0, copySize).CopyTo(
-                new Span<byte>(d->Data, (int)d->MaxSize));
+            return;
+        }
 
-            if (d->Chunk is not null)
+        var maxBufferBytes = (int)d->MaxSize;
+        var requestedFrames = buffer is not null ? (int)buffer->Requested : 0;
+        var requestedBytes = requestedFrames > 0 && frameStride > 0
+            ? requestedFrames * frameStride
+            : maxBufferBytes;
+        var targetBytes = Math.Min(maxBufferBytes, requestedBytes);
+
+        if (targetBytes <= 0)
+        {
+            d->Chunk->Offset = 0;
+            d->Chunk->Size = 0;
+            d->Chunk->Stride = frameStride;
+            return;
+        }
+
+        var target = new Span<byte>(d->Data, targetBytes);
+
+        if (pendingBuffer is not null && pendingBufferSize > 0)
+        {
+            var copySize = Math.Min(pendingBufferSize, target.Length);
+            pendingBuffer.AsSpan(0, copySize).CopyTo(target);
+
+            if (copySize < target.Length)
             {
-                d->Chunk->Offset = 0;
-                d->Chunk->Size = (uint)copySize;
-                d->Chunk->Stride = frameStride;
+                target[copySize..].Clear();
             }
 
-            hasNewData = false;
+            d->Chunk->Offset = 0;
+            d->Chunk->Size = (uint)copySize;
+            d->Chunk->Stride = frameStride;
+            return;
         }
-        else if (d->Chunk is not null)
-        {
-            d->Chunk->Size = 0;
-        }
+
+        target.Clear();
+        d->Chunk->Offset = 0;
+        d->Chunk->Size = (uint)target.Length;
+        d->Chunk->Stride = frameStride;
     }
 
     private void CleanupNativeResources()

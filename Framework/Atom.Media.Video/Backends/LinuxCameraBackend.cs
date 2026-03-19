@@ -1,6 +1,5 @@
-﻿#pragma warning disable CA1308, S1450
+﻿#pragma warning disable CA1308, CS0067, MA0051, MA0003
 
-using System.Buffers;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -10,47 +9,30 @@ using static Atom.Media.Video.Backends.PipeWire.PipeWireNative;
 
 namespace Atom.Media.Video.Backends;
 
-/// <summary>
-/// Бэкенд виртуальной камеры для Linux через нативный PipeWire API.
-/// Создаёт PipeWire video source ноду, доступную как камера.
-/// Root-права не требуются.
-/// </summary>
-/// <remarks>
-/// Требования:
-/// <list type="bullet">
-///   <item><c>libpipewire-0.3</c> должен быть установлен.</item>
-///   <item>PipeWire daemon должен быть запущен.</item>
-/// </list>
-/// </remarks>
 [SupportedOSPlatform("linux")]
 internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
 {
     private IntPtr threadLoop;
     private IntPtr context;
     private IntPtr core;
-    private IntPtr stream;
-    private SpaHook* streamListener;
-    private PwStreamEvents* streamEvents;
     private SpaHook* coreListener;
     private PwCoreEvents* coreEvents;
-    private GCHandle selfHandle;
 
-    private byte[]? pendingFrame;
-    private int pendingFrameSize;
-    private int frameStride;
     private readonly Lock frameLock = new();
-    private volatile bool hasNewFrame;
+    private readonly ManualResetEventSlim coreSyncCompleted = new(false);
+    private GCHandle selfHandle;
+    private PipeWireExportedVideoDevice? exportedDevice;
+    private PipeWireExportedVideoSourceNode? exportedNode;
+    private byte[]? latestFrame;
     private bool isCapturing;
-    private volatile string? streamError;
-    private readonly Dictionary<CameraControlType, CameraControlRange> controlRanges = [];
+    private string? coreError;
+    private int expectedCoreSyncSeq = int.MinValue;
+    private int lastCompletedCoreSyncSeq = int.MinValue;
 
-    /// <inheritdoc/>
     public event EventHandler<CameraControlChangedEventArgs>? ControlChanged;
 
-    /// <inheritdoc/>
     public string DeviceIdentifier { get; private set; } = string.Empty;
 
-    /// <inheritdoc/>
     public bool IsCapturing => Volatile.Read(ref isCapturing);
 
     private static readonly VirtualCameraException? pipeWireInitError = TryInitPipeWire();
@@ -72,9 +54,10 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
         }
     }
 
-    /// <inheritdoc/>
     public ValueTask InitializeAsync(VirtualCameraSettings settings, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (pipeWireInitError is not null)
         {
             throw new VirtualCameraException(pipeWireInitError.Message, pipeWireInitError);
@@ -84,10 +67,11 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
 
         threadLoop = pw_thread_loop_new("atom-vcam", IntPtr.Zero);
         if (threadLoop == IntPtr.Zero)
+        {
             throw new VirtualCameraException("Не удалось создать PipeWire thread loop.");
+        }
 
         var loop = pw_thread_loop_get_loop(threadLoop);
-
         context = pw_context_new(loop, IntPtr.Zero, 0);
         if (context == IntPtr.Zero)
         {
@@ -117,7 +101,20 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
 
             selfHandle = GCHandle.Alloc(this);
             RegisterCoreListener();
-            CreateStream(settings);
+
+            exportedDevice = new PipeWireExportedVideoDevice();
+            exportedDevice.Export(core, CreateDeviceProperties(settings));
+
+            var deviceBoundId = WaitForCoreSyncAndGetDeviceBoundId();
+            var properties = CreateNodeProperties(settings, deviceBoundId);
+            exportedNode = new PipeWireExportedVideoSourceNode(settings, GetLatestFrameSnapshot);
+            exportedNode.Export(core, properties);
+
+            var nodeBoundId = WaitForCoreSync();
+            if (nodeBoundId != PW_ID_ANY)
+            {
+                exportedDevice.BindManagedObject(nodeBoundId, SPA_TYPE_INTERFACE_Node, properties);
+            }
         }
         catch
         {
@@ -132,81 +129,82 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
         return ValueTask.CompletedTask;
     }
 
-    /// <inheritdoc/>
     public ValueTask StartCaptureAsync(CancellationToken cancellationToken)
     {
-        if (stream == IntPtr.Zero)
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (exportedNode is null)
         {
-            throw new VirtualCameraException("Стрим не инициализирован.");
+            throw new VirtualCameraException("PipeWire backend не инициализирован.");
         }
 
-        ThrowIfStreamError();
-
-        pw_thread_loop_lock(threadLoop);
-
-        try
-        {
-            _ = pw_stream_set_active(stream, active: true);
-        }
-        finally
-        {
-            pw_thread_loop_unlock(threadLoop);
-        }
-
-        Volatile.Write(ref isCapturing, value: true);
+        ThrowIfCoreError();
+        exportedNode.Start();
+        Volatile.Write(ref isCapturing, true);
         return ValueTask.CompletedTask;
     }
 
-    /// <inheritdoc/>
     public void WriteFrame(ReadOnlySpan<byte> frameData)
     {
-        if (!Volatile.Read(ref isCapturing) || streamError is not null) return;
+        ThrowIfCoreError();
+
+        if (!Volatile.Read(ref isCapturing))
+        {
+            throw new VirtualCameraException("Захват не запущен.");
+        }
 
         lock (frameLock)
         {
-            if (pendingFrame is null || pendingFrame.Length < frameData.Length)
+            if (latestFrame is null || latestFrame.Length < frameData.Length)
             {
-                if (pendingFrame is not null)
-                {
-                    ArrayPool<byte>.Shared.Return(pendingFrame);
-                }
-
-                pendingFrame = ArrayPool<byte>.Shared.Rent(frameData.Length);
+                latestFrame = GC.AllocateUninitializedArray<byte>(frameData.Length);
             }
 
-            frameData.CopyTo(pendingFrame);
-            pendingFrameSize = frameData.Length;
-            hasNewFrame = true;
+            frameData.CopyTo(latestFrame);
         }
     }
 
-    /// <inheritdoc/>
     public ValueTask StopCaptureAsync(CancellationToken cancellationToken)
     {
-        Volatile.Write(ref isCapturing, value: false);
+        cancellationToken.ThrowIfCancellationRequested();
 
-        if (stream == IntPtr.Zero)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        pw_thread_loop_lock(threadLoop);
-
-        try
-        {
-            _ = pw_stream_set_active(stream, active: false);
-        }
-        finally
-        {
-            pw_thread_loop_unlock(threadLoop);
-        }
-
-        ThrowIfStreamError();
-
+        Volatile.Write(ref isCapturing, false);
+        exportedNode?.Stop();
+        ThrowIfCoreError();
         return ValueTask.CompletedTask;
     }
 
-    /// <inheritdoc/>
+    public void SetControl(CameraControlType control, float value)
+    {
+        if (exportedNode is null)
+        {
+            throw new VirtualCameraException("PipeWire backend не инициализирован.");
+        }
+
+        exportedNode.ThrowControlsNotSupported();
+    }
+
+    public float GetControl(CameraControlType control)
+    {
+        if (exportedNode is null)
+        {
+            throw new VirtualCameraException("PipeWire backend не инициализирован.");
+        }
+
+        exportedNode.ThrowControlsNotSupported();
+        return 0;
+    }
+
+    public CameraControlRange? GetControlRange(CameraControlType control)
+    {
+        if (exportedNode is null)
+        {
+            throw new VirtualCameraException("PipeWire backend не инициализирован.");
+        }
+
+        return exportedNode.GetControlRange(control);
+    }
+
     public ValueTask DisposeAsync()
     {
         CleanupNativeResources();
@@ -217,42 +215,70 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
     {
         coreEvents = (PwCoreEvents*)NativeMemory.AllocZeroed((nuint)sizeof(PwCoreEvents));
         coreEvents->Version = 0;
+        coreEvents->Done = &OnCoreDone;
         coreEvents->Error = &OnCoreError;
 
         coreListener = (SpaHook*)NativeMemory.AllocZeroed((nuint)sizeof(SpaHook));
-
         pw_core_add_listener(core, coreListener, coreEvents, (void*)GCHandle.ToIntPtr(selfHandle));
     }
 
     private void PrepareFrameBuffer(VirtualCameraSettings settings)
     {
-        frameStride = CalculateStride(settings.Width, settings.PixelFormat);
-
         var expectedFrameSize = settings.PixelFormat.CalculateFrameSize(settings.Width, settings.Height);
-        if (expectedFrameSize > 0)
+        if (expectedFrameSize <= 0)
         {
-            pendingFrame = ArrayPool<byte>.Shared.Rent(expectedFrameSize);
+            throw new VirtualCameraException("Некорректный формат или размер кадра для виртуальной камеры.");
+        }
+
+        latestFrame = GC.AllocateUninitializedArray<byte>(expectedFrameSize);
+    }
+
+    private byte[] GetLatestFrameSnapshot()
+    {
+        lock (frameLock)
+        {
+            if (latestFrame is null)
+            {
+                throw new VirtualCameraException("Буфер кадра не инициализирован.");
+            }
+
+            return latestFrame;
         }
     }
 
-    private static IntPtr CreateStreamProperties(VirtualCameraSettings cameraSettings)
+    private static IntPtr CreateNodeProperties(VirtualCameraSettings cameraSettings, uint deviceBoundId)
     {
         var props = pw_properties_new(IntPtr.Zero);
+        var deviceName = BuildDeviceName(cameraSettings);
+        var nodeName = BuildNodeName(cameraSettings);
         _ = pw_properties_set(props, "media.type", "Video");
         _ = pw_properties_set(props, "media.category", "Source");
         _ = pw_properties_set(props, "media.role", "Camera");
-        _ = pw_properties_set(props, "node.name", "atom-virtual-camera");
+        _ = pw_properties_set(props, "media.class", "Video/Source");
+        _ = pw_properties_set(props, "media.name", cameraSettings.Name);
+        _ = pw_properties_set(props, "device.api", "pipewire");
+        _ = pw_properties_set(props, "device.name", deviceName);
+        _ = pw_properties_set(props, "node.name", nodeName);
+        _ = pw_properties_set(props, "node.nick", cameraSettings.Name);
         _ = pw_properties_set(props, "node.description", cameraSettings.Name);
+        _ = pw_properties_set(props, "node.virtual", "true");
+        _ = pw_properties_set(props, "factory.mode", "split");
+        _ = pw_properties_set(props, "object.register", "true");
 
         SetOptionalProperty(props, "device.vendor.name", cameraSettings.Vendor);
         SetOptionalProperty(props, "device.product.name", cameraSettings.Model);
         SetOptionalProperty(props, "device.serial", cameraSettings.SerialNumber);
-        SetOptionalProperty(props, "device.description", cameraSettings.Description);
+        SetOptionalProperty(props, "device.description", cameraSettings.Description ?? cameraSettings.Name);
         SetOptionalProperty(props, "device.firmware.version", cameraSettings.FirmwareVersion);
-        SetOptionalProperty(props, "device.bus", cameraSettings.BusType);
-        SetOptionalProperty(props, "device.form-factor", cameraSettings.FormFactor);
-        SetOptionalProperty(props, "device.icon-name", cameraSettings.IconName);
+        SetOptionalProperty(props, "device.bus", cameraSettings.BusType ?? "virtual");
+        SetOptionalProperty(props, "device.form-factor", cameraSettings.FormFactor ?? "webcam");
+        SetOptionalProperty(props, "device.icon-name", cameraSettings.IconName ?? "camera-web");
         SetOptionalProperty(props, "device.id", cameraSettings.DeviceId);
+
+        if (deviceBoundId != PW_ID_ANY)
+        {
+            _ = pw_properties_set(props, "device.id", deviceBoundId.ToString(CultureInfo.InvariantCulture));
+        }
 
         if (cameraSettings.DeviceId is not null)
         {
@@ -261,12 +287,12 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
 
         if (cameraSettings.UsbVendorId is { } vid)
         {
-            _ = pw_properties_set(props, "device.vendor.id", vid.ToString(CultureInfo.InvariantCulture));
+            _ = pw_properties_set(props, "device.vendor.id", FormatUsbId(vid));
         }
 
         if (cameraSettings.UsbProductId is { } pid)
         {
-            _ = pw_properties_set(props, "device.product.id", pid.ToString(CultureInfo.InvariantCulture));
+            _ = pw_properties_set(props, "device.product.id", FormatUsbId(pid));
         }
 
         if (cameraSettings.ExtraProperties is { } extras)
@@ -280,59 +306,82 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
         return props;
     }
 
+    private static IntPtr CreateDeviceProperties(VirtualCameraSettings cameraSettings)
+    {
+        var props = pw_properties_new(IntPtr.Zero);
+        var deviceName = BuildDeviceName(cameraSettings);
+        _ = pw_properties_set(props, "device.api", "pipewire");
+        _ = pw_properties_set(props, "device.class", "camera");
+        _ = pw_properties_set(props, "media.class", "Video/Device");
+        _ = pw_properties_set(props, "media.name", cameraSettings.Name);
+        _ = pw_properties_set(props, "node.virtual", "true");
+        _ = pw_properties_set(props, "factory.mode", "split");
+        _ = pw_properties_set(props, "object.register", "true");
+        _ = pw_properties_set(props, "device.name", deviceName);
+        _ = pw_properties_set(props, "device.nick", cameraSettings.Name);
+
+        SetOptionalProperty(props, "device.vendor.name", cameraSettings.Vendor);
+        SetOptionalProperty(props, "device.product.name", cameraSettings.Model);
+        SetOptionalProperty(props, "device.serial", cameraSettings.SerialNumber);
+        SetOptionalProperty(props, "device.description", cameraSettings.Description ?? cameraSettings.Name);
+        SetOptionalProperty(props, "device.firmware.version", cameraSettings.FirmwareVersion);
+        SetOptionalProperty(props, "device.bus", cameraSettings.BusType ?? "virtual");
+        SetOptionalProperty(props, "device.form-factor", cameraSettings.FormFactor ?? "webcam");
+        SetOptionalProperty(props, "device.icon-name", cameraSettings.IconName ?? "camera-web");
+
+        if (cameraSettings.DeviceId is not null)
+        {
+            _ = pw_properties_set(props, "device.id", cameraSettings.DeviceId);
+            _ = pw_properties_set(props, "node.group", cameraSettings.DeviceId);
+        }
+
+        if (cameraSettings.UsbVendorId is { } vid)
+        {
+            _ = pw_properties_set(props, "device.vendor.id", FormatUsbId(vid));
+        }
+
+        if (cameraSettings.UsbProductId is { } pid)
+        {
+            _ = pw_properties_set(props, "device.product.id", FormatUsbId(pid));
+        }
+
+        if (cameraSettings.ExtraProperties is { } extras)
+        {
+            foreach (var (key, value) in extras)
+            {
+                if (key.StartsWith("device.", StringComparison.Ordinal) || key.StartsWith("object.", StringComparison.Ordinal))
+                {
+                    _ = pw_properties_set(props, key, value);
+                }
+            }
+        }
+
+        return props;
+    }
+
     private static void SetOptionalProperty(IntPtr props, string key, string? value)
     {
-        if (value is not null)
+        if (!string.IsNullOrWhiteSpace(value))
         {
             _ = pw_properties_set(props, key, value);
         }
     }
 
-    private void CreateStream(VirtualCameraSettings cameraSettings)
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void OnCoreDone(void* data, uint id, int seq)
     {
-        var props = CreateStreamProperties(cameraSettings);
-
-        stream = pw_stream_new(core, cameraSettings.Name, props);
-
-        if (stream == IntPtr.Zero)
+        var handle = GCHandle.FromIntPtr((IntPtr)data);
+        if (!handle.IsAllocated)
         {
-            throw new VirtualCameraException("Не удалось создать PipeWire stream.");
+            return;
         }
 
-        streamEvents = (PwStreamEvents*)NativeMemory.AllocZeroed((nuint)sizeof(PwStreamEvents));
-        streamEvents->Version = PW_VERSION_STREAM_EVENTS;
-        streamEvents->Process = &OnProcess;
-        streamEvents->StateChanged = &OnStateChanged;
-        streamEvents->ControlInfo = &OnControlInfo;
+        var self = (LinuxCameraBackend)handle.Target!;
+        Volatile.Write(ref self.lastCompletedCoreSyncSeq, seq);
 
-        streamListener = (SpaHook*)NativeMemory.AllocZeroed((nuint)sizeof(SpaHook));
-
-        pw_stream_add_listener(stream, streamListener, streamEvents, (void*)GCHandle.ToIntPtr(selfHandle));
-
-        Span<byte> podBuffer = stackalloc byte[256];
-        var podSize = SpaPodBuilder.BuildVideoFormatPod(
-            podBuffer,
-            cameraSettings.Width,
-            cameraSettings.Height,
-            cameraSettings.FrameRate,
-            cameraSettings.PixelFormat);
-
-        fixed (byte* podBytes = podBuffer[..podSize])
+        if (Volatile.Read(ref self.expectedCoreSyncSeq) == seq)
         {
-            var podPtr = (IntPtr)podBytes;
-            var result = pw_stream_connect(
-                stream,
-                PW_DIRECTION_OUTPUT,
-                PW_ID_ANY,
-                PW_STREAM_FLAG_MAP_BUFFERS | PW_STREAM_FLAG_DRIVER,
-                &podPtr,
-                1);
-
-            if (result < 0)
-            {
-                throw new VirtualCameraException(
-                    "Не удалось подключить PipeWire stream (код: " + result.ToString(CultureInfo.InvariantCulture) + ").");
-            }
+            self.coreSyncCompleted.Set();
         }
     }
 
@@ -340,118 +389,18 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
     private static void OnCoreError(void* data, uint id, int seq, int res, byte* message)
     {
         var handle = GCHandle.FromIntPtr((IntPtr)data);
-        if (!handle.IsAllocated) return;
+        if (!handle.IsAllocated)
+        {
+            return;
+        }
 
         var self = (LinuxCameraBackend)handle.Target!;
-
         var errorText = message is not null
             ? Marshal.PtrToStringUTF8((IntPtr)message) ?? "Unknown PipeWire daemon error"
             : "PipeWire daemon error (res=" + res.ToString(CultureInfo.InvariantCulture) + ")";
 
-        self.streamError ??= "PipeWire daemon: " + errorText;
-        Volatile.Write(ref self.isCapturing, value: false);
-    }
-
-    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static void OnStateChanged(void* data, int oldState, int newState, byte* errorMessage)
-    {
-        var handle = GCHandle.FromIntPtr((IntPtr)data);
-        if (!handle.IsAllocated) return;
-
-        var self = (LinuxCameraBackend)handle.Target!;
-
-        if (newState == PW_STREAM_STATE_ERROR)
-        {
-            var error = errorMessage is not null
-                ? Marshal.PtrToStringUTF8((IntPtr)errorMessage) ?? "Unknown PipeWire error"
-                : "PipeWire stream error";
-
-            self.streamError = error;
-            Volatile.Write(ref self.isCapturing, value: false);
-        }
-    }
-
-    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static void OnControlInfo(void* data, uint id, PwStreamControl* control)
-    {
-        var handle = GCHandle.FromIntPtr((IntPtr)data);
-        if (!handle.IsAllocated || control is null) return;
-
-        var self = (LinuxCameraBackend)handle.Target!;
-
-        if (!TryMapSpaPropToControl(id, out var controlType)) return;
-
-        var range = new CameraControlRange(control->Min, control->Max, control->Default);
-        lock (self.controlRanges)
-        {
-            self.controlRanges[controlType] = range;
-        }
-
-        if (control->NValues > 0 && control->Values is not null)
-        {
-            self.RaiseControlChanged(controlType, *control->Values, range);
-        }
-    }
-
-    private void RaiseControlChanged(CameraControlType controlType, float value, CameraControlRange range)
-    {
-        ControlChanged?.Invoke(this, new CameraControlChangedEventArgs
-        {
-            Control = controlType,
-            Value = value,
-            Range = range,
-        });
-    }
-
-    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static void OnProcess(void* data)
-    {
-        var handle = GCHandle.FromIntPtr((IntPtr)data);
-        if (!handle.IsAllocated) return;
-
-        var self = (LinuxCameraBackend)handle.Target!;
-        self.ProcessBuffer();
-    }
-
-    private void ProcessBuffer()
-    {
-        if (stream == IntPtr.Zero) return;
-
-        var buf = pw_stream_dequeue_buffer(stream);
-        if (buf is null || buf->Buffer is null) return;
-
-        if (buf->Buffer->DataCount > 0)
-        {
-            var d = &buf->Buffer->Datas[0];
-
-            if (d->Data is not null)
-            {
-                lock (frameLock)
-                {
-                    if (hasNewFrame && pendingFrame is not null)
-                    {
-                        var copySize = Math.Min(pendingFrameSize, (int)d->MaxSize);
-                        pendingFrame.AsSpan(0, copySize).CopyTo(
-                            new Span<byte>(d->Data, (int)d->MaxSize));
-
-                        if (d->Chunk is not null)
-                        {
-                            d->Chunk->Offset = 0;
-                            d->Chunk->Size = (uint)copySize;
-                            d->Chunk->Stride = frameStride;
-                        }
-
-                        hasNewFrame = false;
-                    }
-                    else if (d->Chunk is not null)
-                    {
-                        d->Chunk->Size = 0;
-                    }
-                }
-            }
-        }
-
-        _ = pw_stream_queue_buffer(stream, buf);
+        self.coreError ??= errorText;
+        Volatile.Write(ref self.isCapturing, false);
     }
 
     private void CleanupNativeResources()
@@ -460,12 +409,8 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
         {
             pw_thread_loop_lock(threadLoop);
 
-            if (stream != IntPtr.Zero)
-            {
-                _ = pw_stream_disconnect(stream);
-                pw_stream_destroy(stream);
-                stream = IntPtr.Zero;
-            }
+            exportedDevice?.DestroyExportProxy();
+            exportedNode?.DestroyExportProxy();
 
             if (core != IntPtr.Zero)
             {
@@ -486,6 +431,12 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
             threadLoop = IntPtr.Zero;
         }
 
+        exportedDevice?.Dispose();
+        exportedDevice = null;
+
+        exportedNode?.Dispose();
+        exportedNode = null;
+
         FreeNativeListeners();
 
         if (selfHandle.IsAllocated)
@@ -493,27 +444,80 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
             selfHandle.Free();
         }
 
-        if (pendingFrame is not null)
-        {
-            ArrayPool<byte>.Shared.Return(pendingFrame);
-            pendingFrame = null;
-        }
+        coreSyncCompleted.Dispose();
+        latestFrame = null;
     }
+
+    private uint WaitForCoreSyncAndGetDeviceBoundId()
+    {
+        _ = WaitForCoreSync();
+        return exportedDevice?.TryGetBoundId() ?? PW_ID_ANY;
+    }
+
+    private uint WaitForCoreSync()
+    {
+        coreSyncCompleted.Reset();
+        var seq = pw_core_sync(core, PW_ID_ANY, 0);
+        if (seq < 0)
+        {
+            return PW_ID_ANY;
+        }
+
+        Volatile.Write(ref expectedCoreSyncSeq, seq);
+        if (Volatile.Read(ref lastCompletedCoreSyncSeq) != seq)
+        {
+            pw_thread_loop_unlock(threadLoop);
+            try
+            {
+                _ = coreSyncCompleted.Wait(TimeSpan.FromMilliseconds(500));
+            }
+            finally
+            {
+                pw_thread_loop_lock(threadLoop);
+            }
+        }
+
+        Volatile.Write(ref expectedCoreSyncSeq, int.MinValue);
+        return exportedNode?.TryGetBoundId() ?? exportedDevice?.TryGetBoundId() ?? PW_ID_ANY;
+    }
+
+    private static string BuildDeviceName(VirtualCameraSettings cameraSettings) =>
+        "atom.device." + BuildMetadataSlug(cameraSettings.DeviceId ?? cameraSettings.Name, "virtual-camera");
+
+    private static string BuildNodeName(VirtualCameraSettings cameraSettings) =>
+        "atom.camera." + BuildMetadataSlug(cameraSettings.DeviceId ?? cameraSettings.Name, "virtual-camera");
+
+    private static string BuildMetadataSlug(string? value, string fallback)
+    {
+        var source = string.IsNullOrWhiteSpace(value) ? fallback : value!;
+        Span<char> buffer = stackalloc char[source.Length];
+        var length = 0;
+        var previousWasSeparator = false;
+
+        foreach (var character in source)
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                buffer[length++] = char.ToLowerInvariant(character);
+                previousWasSeparator = false;
+                continue;
+            }
+
+            if (length > 0 && !previousWasSeparator)
+            {
+                buffer[length++] = '-';
+                previousWasSeparator = true;
+            }
+        }
+
+        var slug = new string(buffer[..length]).Trim('-');
+        return slug.Length == 0 ? fallback : slug;
+    }
+
+    private static string FormatUsbId(int value) => "0x" + value.ToString("x4", CultureInfo.InvariantCulture);
 
     private void FreeNativeListeners()
     {
-        if (streamListener is not null)
-        {
-            NativeMemory.Free(streamListener);
-            streamListener = null;
-        }
-
-        if (streamEvents is not null)
-        {
-            NativeMemory.Free(streamEvents);
-            streamEvents = null;
-        }
-
         if (coreListener is not null)
         {
             NativeMemory.Free(coreListener);
@@ -527,12 +531,11 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
         }
     }
 
-    private void ThrowIfStreamError()
+    private void ThrowIfCoreError()
     {
-        var error = streamError;
-        if (error is not null)
+        if (coreError is not null)
         {
-            throw new VirtualCameraException("PipeWire stream error: " + error);
+            throw new VirtualCameraException("PipeWire error: " + coreError);
         }
     }
 
@@ -554,81 +557,6 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
             or VideoPixelFormat.Vp8 or VideoPixelFormat.Vp9 => 0,
         _ => width,
     };
-
-    /// <inheritdoc/>
-    public void SetControl(CameraControlType control, float value)
-    {
-        if (stream == IntPtr.Zero)
-        {
-            throw new VirtualCameraException("Стрим не инициализирован.");
-        }
-
-        ThrowIfStreamError();
-
-        var propId = MapControlToSpaProp(control);
-
-        pw_thread_loop_lock(threadLoop);
-        try
-        {
-            var result = pw_stream_set_control(stream, propId, nValues: 1, &value);
-            if (result < 0)
-            {
-                throw new VirtualCameraException(
-                    "Не удалось установить контрол " + control.ToString() +
-                    " (код: " + result.ToString(CultureInfo.InvariantCulture) + ").");
-            }
-        }
-        finally
-        {
-            pw_thread_loop_unlock(threadLoop);
-        }
-    }
-
-    /// <inheritdoc/>
-    public float GetControl(CameraControlType control)
-    {
-        if (stream == IntPtr.Zero)
-        {
-            throw new VirtualCameraException("Стрим не инициализирован.");
-        }
-
-        ThrowIfStreamError();
-
-        var propId = MapControlToSpaProp(control);
-
-        pw_thread_loop_lock(threadLoop);
-        try
-        {
-            var ctrl = pw_stream_get_control(stream, propId);
-            if (ctrl is null || ctrl->NValues == 0 || ctrl->Values is null)
-            {
-                throw new VirtualCameraException(
-                    "Не удалось получить контрол " + control.ToString() + ".");
-            }
-
-            return *ctrl->Values;
-        }
-        finally
-        {
-            pw_thread_loop_unlock(threadLoop);
-        }
-    }
-
-    /// <inheritdoc/>
-    public CameraControlRange? GetControlRange(CameraControlType control)
-    {
-        if (stream == IntPtr.Zero)
-        {
-            throw new VirtualCameraException("Стрим не инициализирован.");
-        }
-
-        ThrowIfStreamError();
-
-        lock (controlRanges)
-        {
-            return controlRanges.GetValueOrDefault(control);
-        }
-    }
 
     internal static uint MapControlToSpaProp(CameraControlType control) => control switch
     {

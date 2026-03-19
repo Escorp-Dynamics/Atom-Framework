@@ -42,6 +42,7 @@
 	<ItemGroup>
 		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="*" PrivateAssets="all"
 			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<PackageReference Include="Tmds.DBus.Protocol" Version="0.91.0" />
 	</ItemGroup>
 
 	<ItemGroup>

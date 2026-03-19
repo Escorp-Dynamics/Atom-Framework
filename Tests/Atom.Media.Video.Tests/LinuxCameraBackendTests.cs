@@ -105,8 +105,8 @@ public class LinuxCameraBackendTests(ILogger logger) : BenchmarkTests<LinuxCamer
         Assert.DoesNotThrow(() => backend.WriteFrame(frame));
     }
 
-    [TestCase(TestName = "WriteFrame без захвата молча игнорируется")]
-    public async Task WriteFrameWithoutCaptureIsNoop()
+    [TestCase(TestName = "WriteFrame без захвата выбрасывает VirtualCameraException")]
+    public async Task WriteFrameWithoutCaptureThrows()
     {
         await using var backend = new LinuxCameraBackend();
         var settings = new VirtualCameraSettings { Width = 4, Height = 2, PixelFormat = VideoPixelFormat.Rgb24 };
@@ -114,7 +114,9 @@ public class LinuxCameraBackendTests(ILogger logger) : BenchmarkTests<LinuxCamer
         await backend.InitializeAsync(settings, CancellationToken.None);
 
         var frame = new byte[4 * 2 * 3]; // 4x2 RGB
-        Assert.DoesNotThrow(() => backend.WriteFrame(frame));
+        Assert.That(
+            () => backend.WriteFrame(frame),
+            Throws.TypeOf<VirtualCameraException>());
     }
 
     [TestCase(TestName = "StartCapture без инициализации выбрасывает VirtualCameraException")]
@@ -124,6 +126,49 @@ public class LinuxCameraBackendTests(ILogger logger) : BenchmarkTests<LinuxCamer
 
         Assert.ThrowsAsync<VirtualCameraException>(async () =>
             await backend.StartCaptureAsync(CancellationToken.None));
+    }
+
+    [TestCase(TestName = "InitializeAsync с отменённым токеном выбрасывает OperationCanceledException")]
+    public async Task InitializeCancelledTokenThrows()
+    {
+        await using var backend = new LinuxCameraBackend();
+        var settings = new VirtualCameraSettings { Width = 320, Height = 240 };
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await backend.InitializeAsync(settings, cts.Token));
+    }
+
+    [TestCase(TestName = "StartCapture с отменённым токеном выбрасывает OperationCanceledException")]
+    public async Task StartCaptureCancelledTokenThrows()
+    {
+        await using var backend = new LinuxCameraBackend();
+        var settings = new VirtualCameraSettings { Width = 320, Height = 240 };
+
+        await backend.InitializeAsync(settings, CancellationToken.None);
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await backend.StartCaptureAsync(cts.Token));
+    }
+
+    [TestCase(TestName = "StopCapture с отменённым токеном выбрасывает OperationCanceledException")]
+    public async Task StopCaptureCancelledTokenThrows()
+    {
+        await using var backend = new LinuxCameraBackend();
+        var settings = new VirtualCameraSettings { Width = 320, Height = 240 };
+
+        await backend.InitializeAsync(settings, CancellationToken.None);
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await backend.StopCaptureAsync(cts.Token));
     }
 
     [TestCase(TestName = "Повторный DisposeAsync безопасен")]

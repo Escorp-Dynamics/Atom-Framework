@@ -76,7 +76,7 @@ public class SpaPodBuilderTests(ILogger logger) : BenchmarkTests<SpaPodBuilderTe
 
         Assert.That(prop1Key, Is.EqualTo(SPA_FORMAT_mediaType));
         Assert.That(prop1Type, Is.EqualTo(SPA_TYPE_Id));
-        Assert.That(prop1Value, Is.EqualTo(1u)); // SPA_MEDIA_TYPE_video
+        Assert.That(prop1Value, Is.EqualTo(2u)); // SPA_MEDIA_TYPE_video
 
         // Property 2: offset 16 + 24 = 40
         var prop2Key = BinaryPrimitives.ReadUInt32LittleEndian(buffer[40..]);

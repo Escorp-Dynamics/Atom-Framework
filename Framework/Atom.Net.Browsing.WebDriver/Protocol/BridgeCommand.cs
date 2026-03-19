@@ -81,11 +81,6 @@ public enum BridgeCommand
     WaitForNavigation,
 
     /// <summary>
-    /// Эмулировать устройство ввода.
-    /// </summary>
-    EmulateInput,
-
-    /// <summary>
     /// Перехватить сетевой запрос.
     /// </summary>
     InterceptRequest,
@@ -136,12 +131,7 @@ public enum BridgeCommand
     DebugPortStatus,
 
     /// <summary>
-    /// Проверить наличие теневого корня (Shadow Root) у элемента.
+    /// Проверить наличие открытого теневого корня (Shadow Root) у элемента.
     /// </summary>
     CheckShadowRoot,
-
-    /// <summary>
-    /// Очистить зарегистрированные элементы закрытого теневого корня.
-    /// </summary>
-    CleanupClosedShadow,
 }

@@ -1,0 +1,5 @@
+<Project>
+    <ItemGroup Condition="'$(IsTestProject)' == 'true'">
+        <PackageReference Remove="coverlet.collector" />
+    </ItemGroup>
+</Project>

@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 
 namespace Atom.Net.Tls;
 
@@ -83,21 +83,30 @@ public static class Grease
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IDisposable Enter(ReadOnlySpan<byte> clientHelloRandom)
     {
-        // Вычисляем детерминированный seed из 32-байтового random.
-        // Без аллокаций, простой быстрый свёрточный хеш (вариант FNV/xx).
-        var s = 2166136261u; // FNV offset basis
-
-        for (var i = 0; i < clientHelloRandom.Length; ++i)
+        try
         {
-            s ^= clientHelloRandom[i];
-            s *= 16777619u; // FNV prime
-            // Небольшая перемешка с циклическими сдвигами:
-            s = (s << 5) | (s >> 27);
+            // Вычисляем детерминированный seed из 32-байтового random.
+            // Без аллокаций, простой быстрый свёрточный хеш (вариант FNV/xx).
+            var s = 2166136261u; // FNV offset basis
+
+            unchecked
+            {
+                for (var i = 0; i < clientHelloRandom.Length; ++i)
+                {
+                    s ^= clientHelloRandom[i];
+                    s *= 16777619u; // FNV prime
+                    s = (s << 5) | (s >> 27);
+                }
+            }
+
+            if (depth is 0) seed = s;
+            ++depth;
+
+            return new Scope();
         }
-
-        if (depth is 0) seed = s;
-        ++depth;
-
-        return new Scope();
+        catch (Exception exception)
+        {
+            throw new InvalidOperationException($"Grease.Enter failed for random length {clientHelloRandom.Length} and depth {depth}.", exception);
+        }
     }
 }

@@ -17,10 +17,6 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
-	<ItemGroup>
-		<Compile Remove="Analytics/Geolocations/**" />
-	</ItemGroup>
-
 	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>

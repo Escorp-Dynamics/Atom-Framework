@@ -2,7 +2,9 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using Atom.Tests;
 using Atom.Media.Audio;
+using Atom.Media.Video;
 
 namespace Atom.Media.Audio.Tests;
 
@@ -67,11 +69,12 @@ public class VirtualMicrophoneE2ETests(ILogger logger) : BenchmarkTests<VirtualM
         await Task.Delay(millisecondsDelay: 200);
 
         var nodes = await GetPipeWireNodesAsync();
+        var expectedNodeName = BuildExpectedNodeName(settings.Name);
 
         Assert.That(
-            nodes.Any(n => n.NodeName == "atom-virtual-microphone"),
+            nodes.Any(n => n.NodeName == expectedNodeName),
             Is.True,
-            "Нода atom-virtual-microphone не найдена в PipeWire");
+            $"Нода {expectedNodeName} не найдена в PipeWire");
     }
 
     [TestCase(TestName = "E2E: нода микрофона имеет правильное описание")]
@@ -88,7 +91,7 @@ public class VirtualMicrophoneE2ETests(ILogger logger) : BenchmarkTests<VirtualM
         await Task.Delay(millisecondsDelay: 200);
 
         var nodes = await GetPipeWireNodesAsync();
-        var node = nodes.FirstOrDefault(n => n.NodeName == "atom-virtual-microphone"
+        var node = nodes.FirstOrDefault(n => n.NodeName == BuildExpectedNodeName(settings.Name)
             && n.NodeDescription == "E2E Description Mic");
 
         Assert.That(node, Is.Not.Null, "Нода с описанием 'E2E Description Mic' не найдена");
@@ -106,7 +109,7 @@ public class VirtualMicrophoneE2ETests(ILogger logger) : BenchmarkTests<VirtualM
         await Task.Delay(millisecondsDelay: 200);
 
         var nodes = await GetPipeWireNodesAsync();
-        var node = nodes.FirstOrDefault(n => n.NodeName == "atom-virtual-microphone"
+        var node = nodes.FirstOrDefault(n => n.NodeName == BuildExpectedNodeName(settings.Name)
             && n.NodeDescription == "E2E Audio Source Test");
 
         Assert.That(node, Is.Not.Null, "Нода не найдена");
@@ -130,13 +133,37 @@ public class VirtualMicrophoneE2ETests(ILogger logger) : BenchmarkTests<VirtualM
         await Task.Delay(millisecondsDelay: 200);
 
         var nodes = await GetPipeWireNodesAsync();
-        var node = nodes.FirstOrDefault(n => n.NodeName == "atom-virtual-microphone"
+        var node = nodes.FirstOrDefault(n => n.NodeName == BuildExpectedNodeName(settings.Name)
             && n.NodeDescription == "E2E Metadata Mic");
 
         Assert.That(node, Is.Not.Null, "Нода не найдена");
         Assert.That(node!.DeviceVendor, Is.EqualTo("Escorp Dynamics"));
         Assert.That(node.DeviceProduct, Is.EqualTo("Atom VMic"));
         Assert.That(node.DeviceSerial, Is.EqualTo("E2E-MIC-001"));
+    }
+
+    [TestCase(TestName = "E2E: USB VID/PID микрофона публикуются в PipeWire свойствах")]
+    public async Task MicrophoneUsbIdsPassedToPipeWire()
+    {
+        var settings = new VirtualMicrophoneSettings
+        {
+            Name = "E2E USB Mic",
+            DeviceId = "usb-mic-001",
+            UsbVendorId = 0x1d6b,
+            UsbProductId = 0x0102,
+        };
+
+        await using var mic = await VirtualMicrophone.CreateAsync(settings);
+        await Task.Delay(millisecondsDelay: 200);
+
+        var nodes = await GetPipeWireNodesAsync();
+        var node = nodes.FirstOrDefault(n => n.NodeDescription == settings.Name);
+
+        Assert.That(node, Is.Not.Null, "Нода не найдена");
+        Assert.That(node!.NodeName, Is.EqualTo("atom.microphone.usb-mic-001"));
+        Assert.That(node.NodeGroup, Is.EqualTo(settings.DeviceId));
+        Assert.That(node.DeviceVendorId, Is.EqualTo("0x1d6b"));
+        Assert.That(node.DeviceProductId, Is.EqualTo("0x0102"));
     }
 
     [TestCase(TestName = "E2E: нода латентности видна в PipeWire свойствах")]
@@ -153,7 +180,7 @@ public class VirtualMicrophoneE2ETests(ILogger logger) : BenchmarkTests<VirtualM
         await Task.Delay(millisecondsDelay: 200);
 
         var nodes = await GetPipeWireNodesAsync();
-        var node = nodes.FirstOrDefault(n => n.NodeName == "atom-virtual-microphone"
+        var node = nodes.FirstOrDefault(n => n.NodeName == BuildExpectedNodeName(settings.Name)
             && n.NodeDescription == "E2E Latency Mic");
 
         Assert.That(node, Is.Not.Null, "Нода не найдена");
@@ -226,8 +253,8 @@ public class VirtualMicrophoneE2ETests(ILogger logger) : BenchmarkTests<VirtualM
         Assert.That(mic.IsCapturing, Is.False);
     }
 
-    [TestCase(TestName = "E2E: media.class = Audio/Source/Virtual и node.virtual = true")]
-    public async Task MicrophoneHasVirtualSourceMediaClass()
+    [TestCase(TestName = "E2E: media.class = Audio/Source и node.virtual = true")]
+    public async Task MicrophoneHasSourceMediaClass()
     {
         var settings = new VirtualMicrophoneSettings { Name = "E2E MediaClass Test" };
 
@@ -238,7 +265,7 @@ public class VirtualMicrophoneE2ETests(ILogger logger) : BenchmarkTests<VirtualM
         var node = nodes.FirstOrDefault(n => n.NodeDescription == "E2E MediaClass Test");
 
         Assert.That(node, Is.Not.Null, "Нода не найдена");
-        Assert.That(node!.MediaClass, Is.EqualTo("Audio/Source/Virtual"));
+        Assert.That(node!.MediaClass, Is.EqualTo("Audio/Source"));
         Assert.That(node.NodeVirtual, Is.EqualTo("true"));
     }
 
@@ -301,9 +328,9 @@ public class VirtualMicrophoneE2ETests(ILogger logger) : BenchmarkTests<VirtualM
         var sources = await GetPactlSourceNamesAsync();
 
         Assert.That(
-            sources.Any(s => s.Contains("atom-virtual-microphone")),
+            sources.Any(s => s.Contains(BuildExpectedNodeName(settings.Name), StringComparison.Ordinal)),
             Is.True,
-            $"atom-virtual-microphone не найден среди pactl sources: [{string.Join(", ", sources)}]");
+            $"{BuildExpectedNodeName(settings.Name)} не найден среди pactl sources: [{string.Join(", ", sources)}]");
     }
 
     [TestCase(TestName = "E2E: микрофон исчезает из PulseAudio после Dispose")]
@@ -316,7 +343,7 @@ public class VirtualMicrophoneE2ETests(ILogger logger) : BenchmarkTests<VirtualM
 
         var sourcesBefore = await GetPactlSourceNamesAsync();
         Assert.That(
-            sourcesBefore.Any(s => s.Contains("atom-virtual-microphone")),
+            sourcesBefore.Any(s => s.Contains(BuildExpectedNodeName(settings.Name), StringComparison.Ordinal)),
             Is.True,
             "Микрофон не найден в pactl до Dispose");
 
@@ -325,7 +352,7 @@ public class VirtualMicrophoneE2ETests(ILogger logger) : BenchmarkTests<VirtualM
 
         var sourcesAfter = await GetPactlSourceNamesAsync();
         Assert.That(
-            sourcesAfter.Any(s => s.Contains("atom-virtual-microphone")),
+            sourcesAfter.Any(s => s.Contains(BuildExpectedNodeName(settings.Name), StringComparison.Ordinal)),
             Is.False,
             "Микрофон всё ещё виден в pactl после Dispose");
     }
@@ -423,8 +450,124 @@ public class VirtualMicrophoneE2ETests(ILogger logger) : BenchmarkTests<VirtualM
         var node = nodes.FirstOrDefault(n => n.NodeDescription == "E2E DeviceId Mic");
 
         Assert.That(node, Is.Not.Null, "Нода не найдена");
+        Assert.That(node!.NodeName, Is.EqualTo("atom.microphone.shared-device-001"));
         Assert.That(node!.DeviceId, Is.EqualTo("shared-device-001"));
         Assert.That(node.NodeGroup, Is.EqualTo("shared-device-001"));
+    }
+
+    [TestCase(TestName = "E2E: камера и микрофон с общим DeviceId публикуются как связанная пара")]
+    public async Task CameraAndMicrophoneShareDeviceGroup()
+    {
+        const string deviceId = "shared-av-001";
+
+        var cameraSettings = new VirtualCameraSettings
+        {
+            Width = 320,
+            Height = 240,
+            PixelFormat = VideoPixelFormat.Rgba32,
+            Name = "E2E Paired Camera",
+            DeviceId = deviceId,
+        };
+
+        var micSettings = new VirtualMicrophoneSettings
+        {
+            Name = "E2E Paired Mic",
+            DeviceId = deviceId,
+        };
+
+        await using var camera = await VirtualCamera.CreateAsync(cameraSettings);
+        await using var mic = await VirtualMicrophone.CreateAsync(micSettings);
+        await Task.Delay(millisecondsDelay: 300);
+
+        var nodes = await GetPipeWireNodesAsync();
+        var cameraNode = nodes.FirstOrDefault(n => n.NodeDescription == cameraSettings.Name);
+        var microphoneNode = nodes.FirstOrDefault(n => n.NodeDescription == micSettings.Name);
+
+        using var scope = Assert.EnterMultipleScope();
+        Assert.That(cameraNode, Is.Not.Null, "Нода камеры не найдена");
+        Assert.That(microphoneNode, Is.Not.Null, "Нода микрофона не найдена");
+        Assert.That(cameraNode!.NodeName, Is.EqualTo("atom.camera.shared-av-001"));
+        Assert.That(cameraNode.NodeGroup, Is.EqualTo(deviceId));
+        Assert.That(microphoneNode!.NodeName, Is.EqualTo("atom.microphone.shared-av-001"));
+        Assert.That(microphoneNode.NodeGroup, Is.EqualTo(deviceId));
+    }
+
+    [TestCase(TestName = "E2E: микрофон виден через wpctl status")]
+    public async Task MicrophoneVisibleInWpctlStatus()
+    {
+        if (!ProcessCommandHelpers.IsCommandAvailable("wpctl"))
+        {
+            Assert.Ignore("wpctl не найден.");
+        }
+
+        var settings = new VirtualMicrophoneSettings
+        {
+            Name = "E2E Wpctl Mic",
+            DeviceId = "wpctl-mic-001",
+        };
+
+        await using var mic = await VirtualMicrophone.CreateAsync(settings);
+        await Task.Delay(millisecondsDelay: 500);
+
+        var output = await ProcessCommandHelpers.RunProcessAsync("wpctl", "status -n");
+
+        Assert.That(output, Does.Contain("atom.microphone.wpctl-mic-001"));
+    }
+
+    [TestCase(TestName = "E2E: связанная camera+mic пара одновременно видна во внешних consumers")]
+    public async Task PairedCameraAndMicrophoneVisibleToConsumers()
+    {
+        if (!ProcessCommandHelpers.IsCommandAvailable("wpctl"))
+        {
+            Assert.Ignore("wpctl не найден.");
+        }
+
+        if (!ProcessCommandHelpers.IsCommandAvailable("gst-device-monitor-1.0"))
+        {
+            Assert.Ignore("gst-device-monitor-1.0 не найден.");
+        }
+
+        const string deviceId = "shared-av-consumer-001";
+
+        var cameraSettings = new VirtualCameraSettings
+        {
+            Width = 640,
+            Height = 480,
+            FrameRate = 30,
+            PixelFormat = VideoPixelFormat.Rgba32,
+            Name = "E2E Consumer Pair Camera",
+            DeviceId = deviceId,
+        };
+
+        var micSettings = new VirtualMicrophoneSettings
+        {
+            Name = "E2E Consumer Pair Mic",
+            DeviceId = deviceId,
+        };
+
+        await using var camera = await VirtualCamera.CreateAsync(cameraSettings);
+        await using var mic = await VirtualMicrophone.CreateAsync(micSettings);
+        await camera.StartCaptureAsync();
+        await mic.StartCaptureAsync();
+
+        var frame = new byte[cameraSettings.Width * cameraSettings.Height * 4];
+        Array.Fill(frame, (byte)0x60);
+        camera.WriteFrame(frame);
+
+        var samples = new byte[480 * 4];
+        FillSineTone(samples, 440.0, 48000, startSample: 0);
+        mic.WriteSamples(samples);
+
+        await Task.Delay(millisecondsDelay: 500);
+
+        var wpctlOutput = await ProcessCommandHelpers.RunProcessAsync("wpctl", "status -n");
+        var gstOutput = await ProcessCommandHelpers.RunProcessAsync("timeout", "6s gst-device-monitor-1.0 Video/Source", includeStandardError: true);
+
+        using var scope = Assert.EnterMultipleScope();
+        Assert.That(wpctlOutput, Does.Contain("atom.microphone.shared-av-consumer-001"));
+        Assert.That(gstOutput, Does.Contain("atom.camera.shared-av-consumer-001"));
+        Assert.That(gstOutput, Does.Contain("node.group = shared-av-consumer-001"));
+        Assert.That(gstOutput, Does.Contain("device.name = atom.device.shared-av-consumer-001"));
     }
 
     [TestCase(TestName = "E2E: Volume устанавливается и считывается")]
@@ -819,136 +962,14 @@ public class VirtualMicrophoneE2ETests(ILogger logger) : BenchmarkTests<VirtualM
         }
     }
 
-    private static async Task<List<PipeWireNode>> GetPipeWireNodesAsync()
+    private static Task<List<PipeWireNodeSnapshot>> GetPipeWireNodesAsync()
     {
-        using var process = new Process();
-        process.StartInfo = new ProcessStartInfo
-        {
-            FileName = "pw-dump",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-
-        process.Start();
-
-        var output = await process.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        return ParsePipeWireNodes(output);
-    }
-
-    private static List<PipeWireNode> ParsePipeWireNodes(string json)
-    {
-        var result = new List<PipeWireNode>();
-
-        using var doc = JsonDocument.Parse(json);
-
-        foreach (var element in doc.RootElement.EnumerateArray())
-        {
-            if (!element.TryGetProperty("type", out var typeEl)
-                || typeEl.GetString() != "PipeWire:Interface:Node")
-            {
-                continue;
-            }
-
-            if (!element.TryGetProperty("info", out var info)
-                || !info.TryGetProperty("props", out var props))
-            {
-                continue;
-            }
-
-            result.Add(new PipeWireNode
-            {
-                NodeId = element.TryGetProperty("id", out var idEl) ? idEl.GetInt32() : 0,
-                NodeName = GetStringProp(props, "node.name"),
-                NodeDescription = GetStringProp(props, "node.description"),
-                NodeLatency = GetStringProp(props, "node.latency"),
-                NodeGroup = GetStringProp(props, "node.group"),
-                MediaType = GetStringProp(props, "media.type"),
-                MediaCategory = GetStringProp(props, "media.category"),
-                MediaRole = GetStringProp(props, "media.role"),
-                MediaClass = GetStringProp(props, "media.class"),
-                NodeVirtual = GetStringProp(props, "node.virtual"),
-                FormatMediaType = GetEnumFormatProp(info, "mediaType"),
-                FormatMediaSubtype = GetEnumFormatProp(info, "mediaSubtype"),
-                FormatName = GetEnumFormatProp(info, "format"),
-                FormatRate = GetEnumFormatInt(info, "rate"),
-                FormatChannels = GetEnumFormatInt(info, "channels"),
-                DeviceVendor = GetStringProp(props, "device.vendor.name"),
-                DeviceProduct = GetStringProp(props, "device.product.name"),
-                DeviceSerial = GetStringProp(props, "device.serial"),
-                DeviceId = GetStringProp(props, "device.id"),
-            });
-        }
-
-        return result;
-    }
-
-    private static string? GetStringProp(JsonElement props, string key)
-    {
-        if (!props.TryGetProperty(key, out var val))
-        {
-            return null;
-        }
-
-        return val.ValueKind switch
-        {
-            JsonValueKind.String => val.GetString(),
-            JsonValueKind.Number => val.GetRawText(),
-            JsonValueKind.True => "true",
-            JsonValueKind.False => "false",
-            _ => null,
-        };
-    }
-
-    private static string? GetEnumFormatProp(JsonElement info, string key)
-    {
-        if (!info.TryGetProperty("params", out var pars)
-            || !pars.TryGetProperty("EnumFormat", out var enumFormat)
-            || enumFormat.GetArrayLength() == 0)
-        {
-            return null;
-        }
-
-        var first = enumFormat[0];
-        if (!first.TryGetProperty(key, out var val))
-        {
-            return null;
-        }
-
-        return val.ValueKind == JsonValueKind.String ? val.GetString() : val.GetRawText();
-    }
-
-    private static int? GetEnumFormatInt(JsonElement info, string key)
-    {
-        var raw = GetEnumFormatProp(info, key);
-        return raw is not null && int.TryParse(raw, out var n) ? n : null;
-    }
-
-    private static async Task<string> RunProcessAsync(string fileName, string arguments = "")
-    {
-        using var process = new Process();
-        process.StartInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = arguments,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-
-        process.Start();
-
-        var output = await process.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        return output;
+        return PipeWireSnapshotHelpers.GetNodesAsync();
     }
 
     private static async Task<List<string>> GetPactlSourceNamesAsync()
     {
-        var output = await RunProcessAsync("pactl", "list sources short");
+        var output = await ProcessCommandHelpers.RunProcessAsync("pactl", "list sources short");
         var names = new List<string>();
 
         foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -963,27 +984,34 @@ public class VirtualMicrophoneE2ETests(ILogger logger) : BenchmarkTests<VirtualM
         return names;
     }
 
-    private sealed class PipeWireNode
+    private static string BuildExpectedNodeName(string value)
     {
-        public int NodeId { get; init; }
-        public string? NodeName { get; init; }
-        public string? NodeDescription { get; init; }
-        public string? NodeLatency { get; init; }
-        public string? NodeGroup { get; init; }
-        public string? MediaType { get; init; }
-        public string? MediaCategory { get; init; }
-        public string? MediaRole { get; init; }
-        public string? MediaClass { get; init; }
-        public string? NodeVirtual { get; init; }
-        public string? FormatMediaType { get; init; }
-        public string? FormatMediaSubtype { get; init; }
-        public string? FormatName { get; init; }
-        public int? FormatRate { get; init; }
-        public int? FormatChannels { get; init; }
-        public string? DeviceVendor { get; init; }
-        public string? DeviceProduct { get; init; }
-        public string? DeviceSerial { get; init; }
-        public string? DeviceId { get; init; }
+        return "atom.microphone." + BuildExpectedSlug(value);
+    }
+
+    private static string BuildExpectedSlug(string value)
+    {
+        Span<char> buffer = stackalloc char[value.Length];
+        var length = 0;
+        var previousWasSeparator = false;
+
+        foreach (var character in value)
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                buffer[length++] = char.ToLowerInvariant(character);
+                previousWasSeparator = false;
+                continue;
+            }
+
+            if (length > 0 && !previousWasSeparator)
+            {
+                buffer[length++] = '-';
+                previousWasSeparator = true;
+            }
+        }
+
+        return new string(buffer[..length]).Trim('-');
     }
 
     private static byte[] CreateWavBytes(

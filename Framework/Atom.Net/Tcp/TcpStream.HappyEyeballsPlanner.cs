@@ -1,4 +1,4 @@
-#pragma warning disable CA2000
+﻿#pragma warning disable CA2000, MA0102
 
 using System.Net;
 using System.Net.Sockets;
@@ -100,13 +100,7 @@ public sealed partial class TcpStream : NetworkStream
         public async Task RunSchedulerAsync()
         {
             // Пропускаем уже запущенные первые попытки
-            var hadV6 = p6 > 0;
-            var hadV4 = p4 > 0;
-
-            if (hadV6 && !hadV4)
-                turnV6 = false;       // если стартовал только v6 — следующая «ступень» за v4
-            else if (!hadV6 && hadV4)
-                turnV6 = true;
+            ConfigureInitialTurn();
 
             while (!linkedCts.IsCancellationRequested)
             {
@@ -118,16 +112,31 @@ public sealed partial class TcpStream : NetworkStream
                 if (linkedCts.IsCancellationRequested) return;
 
                 // Попытка запустить следующий адрес, сохраняя чередование
-                if (!TryLaunchNext())
-                {
-                    // Если по текущему семейству адресов больше нет — попробуем другое
-                    if (!TryLaunchNext(forceOtherFamily: true)) return; // адресов больше нет
-                }
+                if (!TryLaunchNextStep()) return;
 
                 // Пауза между «ступенями», как в браузерах
                 try { await Task.Delay(stepDelay, linkedCts.Token).ConfigureAwait(false); }
                 catch (OperationCanceledException) { return; }
             }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void ConfigureInitialTurn()
+        {
+            var hadV6 = p6 > 0;
+            var hadV4 = p4 > 0;
+
+            if (hadV6 && !hadV4)
+                turnV6 = false;
+            else if (!hadV6 && hadV4)
+                turnV6 = true;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool TryLaunchNextStep()
+        {
+            if (TryLaunchNext()) return true;
+            return TryLaunchNext(forceOtherFamily: true);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -142,12 +151,16 @@ public sealed partial class TcpStream : NetworkStream
             while (Volatile.Read(ref inFlight) >= maxConc && !linkedCts.IsCancellationRequested)
             {
                 sw.SpinOnce(sleep1Threshold: 20);
-
-                if (sw.NextSpinWillYield)
-                {
-                    try { await Task.Yield(); } catch { /* страховка */ }
-                }
+                await YieldAfterSpinAsync(sw).ConfigureAwait(false);
             }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static async ValueTask YieldAfterSpinAsync(SpinWait spinWait)
+        {
+            if (!spinWait.NextSpinWillYield) return;
+
+            try { await Task.Yield(); } catch { /* страховка */ }
         }
 
         /// <summary>
@@ -213,27 +226,39 @@ public sealed partial class TcpStream : NetworkStream
                 using var attempt = owner.CreateAttemptCts(linkedCts.Token);
 
                 await s.ConnectAsync(new IPEndPoint(ip, port), attempt.Token).ConfigureAwait(false);
-
-                // Победитель
-                if (winner.TrySetResult(s))
-                {
-                    s = null;               // владение передано победителю
-                    await linkedCts.CancelAsync().ConfigureAwait(false);    // отменяем остальных
-                }
+                s = await TransferWinnerAsync(s).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 // Нормально при отмене после победителя
             }
-            catch
+            catch (SocketException ex)
             {
-                // Молча — поведение браузеров: продолжаем другие попытки
+                if (!IsExpectedConnectFailure(ex)) throw;
+                // Ожидаемый сетевой отказ одной попытки: остальные адреса продолжают гонку.
             }
             finally
             {
-                if (s is not null) { try { s.Dispose(); } catch { /* страховка */ } }
+                DisposeSocketQuietly(s);
                 Interlocked.Decrement(ref inFlight);
             }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private readonly async ValueTask<Socket?> TransferWinnerAsync(Socket socket)
+        {
+            if (!winner.TrySetResult(socket)) return socket;
+
+            await linkedCts.CancelAsync().ConfigureAwait(false);
+            return null;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void DisposeSocketQuietly(Socket? socket)
+        {
+            if (socket is null) return;
+
+            try { socket.Dispose(); } catch { /* страховка */ }
         }
     }
 }

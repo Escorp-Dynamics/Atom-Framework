@@ -1,3 +1,5 @@
+﻿#pragma warning disable MA0011, MA0074, MA0102
+
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -150,3 +152,5 @@ public struct Traffic : IEquatable<Traffic>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator !=(Traffic left, Traffic right) => !(left == right);
 }
+
+#pragma warning restore MA0011, MA0074, MA0102

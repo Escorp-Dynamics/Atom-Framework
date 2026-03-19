@@ -1,5 +1,6 @@
-﻿#pragma warning disable S109, S1854, S2325, S3776, CA1822, MA0051, IDE0017, IDE0045, IDE0047, IDE0048, MA0008, S3218, IDE0078, MA0182
+﻿#pragma warning disable S109, S1144, S1854, S2325, S3776, CA1822, MA0051, IDE0017, IDE0045, IDE0047, IDE0048, MA0008, S3218, IDE0078, MA0182
 
+using System.Runtime.CompilerServices;
 using Atom.IO;
 
 namespace Atom.Media;
@@ -77,16 +78,28 @@ internal static class H264Macroblock
         public int QpDelta;
 
         /// <summary>4×4 intra prediction modes (16 sub-blocks).</summary>
-        public unsafe fixed int Intra4x4PredMode[16];
+        public Int16Buffer Intra4x4PredMode;
 
         /// <summary>Chroma intra prediction mode.</summary>
         public int IntraChromaPredMode;
 
         /// <summary>Non-zero coefficient counts per 4×4 block (for CAVLC nC context).</summary>
-        public unsafe fixed int Nnz[24]; // 16 luma + 4 Cb + 4 Cr
+        public Int24Buffer Nnz; // 16 luma + 4 Cb + 4 Cr
 
         /// <summary>Is this an I_PCM macroblock.</summary>
         public bool IsPcm;
+    }
+
+    [InlineArray(16)]
+    internal struct Int16Buffer
+    {
+        private int _element;
+    }
+
+    [InlineArray(24)]
+    internal struct Int24Buffer
+    {
+        private int _element;
     }
 
     #endregion

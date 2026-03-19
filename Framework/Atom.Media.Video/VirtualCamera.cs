@@ -32,6 +32,8 @@ public sealed class VirtualCamera : IAsyncDisposable
     private readonly IVirtualCameraBackend backend;
     private bool isDisposed;
 
+    private int ExpectedFrameSize => Settings.PixelFormat.CalculateFrameSize(Settings.Width, Settings.Height);
+
     /// <summary>
     /// Настройки камеры.
     /// </summary>
@@ -78,6 +80,22 @@ public sealed class VirtualCamera : IAsyncDisposable
     public void WriteFrame(ReadOnlySpan<byte> frameData)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed), this);
+
+        if (frameData.IsEmpty)
+        {
+            throw new ArgumentException("Данные кадра не могут быть пустыми.", nameof(frameData));
+        }
+
+        var expectedFrameSize = ExpectedFrameSize;
+        if (expectedFrameSize > 0 && frameData.Length != expectedFrameSize)
+        {
+            throw new ArgumentException(
+                string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"Некорректный размер кадра: ожидалось {expectedFrameSize}, получено {frameData.Length}."),
+                nameof(frameData));
+        }
+
         backend.WriteFrame(frameData);
     }
 
@@ -90,6 +108,28 @@ public sealed class VirtualCamera : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(buffer);
         ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed), this);
         backend.WriteFrame(buffer.GetRawData());
+    }
+
+    /// <summary>
+    /// Записывает текущий кадр из media stream в виртуальную камеру.
+    /// </summary>
+    /// <param name="mediaStream">Медиа-поток с уже декодированным видеокадром.</param>
+    public void WriteFrame(MediaStream mediaStream)
+    {
+        ArgumentNullException.ThrowIfNull(mediaStream);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed), this);
+
+        if (mediaStream is not VideoStream videoStream)
+        {
+            throw new NotSupportedException($"VirtualCamera не поддерживает MediaStream типа '{mediaStream.StreamType}'.");
+        }
+
+        if (!videoStream.HasFrame)
+        {
+            throw new InvalidOperationException("В VideoStream ещё нет декодированного кадра.");
+        }
+
+        WriteFrame(videoStream.CurrentFrame.Span);
     }
 
     /// <summary>
@@ -132,6 +172,21 @@ public sealed class VirtualCamera : IAsyncDisposable
 
     private void WriteFrameCore(ReadOnlySpan<byte> data, string extension)
     {
+        if (string.Equals(extension, ".png", StringComparison.OrdinalIgnoreCase))
+        {
+            var streamParameters = new VideoCodecParameters
+            {
+                Width = Settings.Width,
+                Height = Settings.Height,
+                PixelFormat = Settings.PixelFormat,
+                FrameRate = Settings.FrameRate,
+            };
+
+            using var videoStream = VideoStream.FromStillImage(data, extension, streamParameters);
+            WriteFrame(videoStream);
+            return;
+        }
+
         using var codec = CreateImageCodec(extension);
         var parameters = new ImageCodecParameters(
             Settings.Width, Settings.Height, Settings.PixelFormat);
@@ -150,13 +205,32 @@ public sealed class VirtualCamera : IAsyncDisposable
     }
 
     /// <summary>
+    /// Стримит кадры из media stream в виртуальную камеру.
+    /// </summary>
+    /// <param name="mediaStream">Медиа-поток, который должен поставлять видеокадры.</param>
+    /// <param name="loop">Если true, одиночный кадр или поток воспроизводятся циклически.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    public Task StreamFromAsync(MediaStream mediaStream, bool loop = false, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(mediaStream);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed), this);
+
+        if (mediaStream is not VideoStream videoStream)
+        {
+            throw new NotSupportedException($"VirtualCamera не поддерживает MediaStream типа '{mediaStream.StreamType}'.");
+        }
+
+        return StreamFromCoreAsync(videoStream, loop, cancellationToken);
+    }
+
+    /// <summary>
     /// Стримит видео из медиафайла, покадрово декодируя и записывая в виртуальную камеру.
     /// Поддерживаемые контейнеры: MP4, MKV, WebM, AVI, MOV и другие зарегистрированные в <see cref="ContainerFactory"/>.
     /// </summary>
     /// <param name="filePath">Путь к видеофайлу.</param>
     /// <param name="loop">Если true, воспроизведение зацикливается.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
-    public async Task StreamFromAsync(string filePath, bool loop = false, CancellationToken cancellationToken = default)
+    public Task StreamFromAsync(string filePath, bool loop = false, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(filePath);
         ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed), this);
@@ -166,17 +240,7 @@ public sealed class VirtualCamera : IAsyncDisposable
             ?? throw new NotSupportedException(
                 "Формат контейнера '" + extension + "' не поддерживается.");
 
-        using var demuxer = ContainerFactory.CreateDemuxer(formatName)
-            ?? throw new NotSupportedException(
-                "Демуксер для формата '" + formatName + "' не зарегистрирован.");
-
-        if (demuxer.Open(filePath) != ContainerResult.Success)
-        {
-            throw new InvalidOperationException(
-                "Не удалось открыть файл '" + filePath + "'.");
-        }
-
-        await StreamFromCoreAsync(demuxer, loop, cancellationToken).ConfigureAwait(false);
+        return StreamFromFileCoreAsync(formatName, filePath, loop, cancellationToken);
     }
 
     /// <summary>
@@ -186,7 +250,7 @@ public sealed class VirtualCamera : IAsyncDisposable
     /// <param name="format">Формат контейнера (например, "mp4", "webm", "matroska") или расширение файла (".mp4", ".mkv").</param>
     /// <param name="loop">Если true, воспроизведение зацикливается.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
-    public async Task StreamFromAsync(Stream stream, string format, bool loop = false, CancellationToken cancellationToken = default)
+    public Task StreamFromAsync(Stream stream, string format, bool loop = false, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentException.ThrowIfNullOrEmpty(format);
@@ -196,16 +260,7 @@ public sealed class VirtualCamera : IAsyncDisposable
             ?? throw new NotSupportedException(
                 "Формат контейнера '" + format + "' не поддерживается.");
 
-        using var demuxer = ContainerFactory.CreateDemuxer(formatName)
-            ?? throw new NotSupportedException(
-                "Демуксер для формата '" + formatName + "' не зарегистрирован.");
-
-        if (demuxer.Open(stream) != ContainerResult.Success)
-        {
-            throw new InvalidOperationException("Не удалось открыть поток.");
-        }
-
-        await StreamFromCoreAsync(demuxer, loop, cancellationToken).ConfigureAwait(false);
+        return StreamFromContainerStreamCoreAsync(formatName, stream, loop, cancellationToken);
     }
 
     /// <summary>
@@ -241,97 +296,137 @@ public sealed class VirtualCamera : IAsyncDisposable
         var stream = await httpClient.GetStreamAsync(url, cancellationToken).ConfigureAwait(false);
         await using (stream.ConfigureAwait(false))
         {
-            using var demuxer = ContainerFactory.CreateDemuxer(formatName)
-                ?? throw new NotSupportedException(
-                    "Демуксер для формата '" + formatName + "' не зарегистрирован.");
-
-            if (demuxer.Open(stream) != ContainerResult.Success)
-            {
-                throw new InvalidOperationException("Не удалось открыть HTTP-поток.");
-            }
-
-            await StreamFromCoreAsync(demuxer, loop, cancellationToken).ConfigureAwait(false);
+            await StreamFromContainerStreamCoreAsync(formatName, stream, loop, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private async Task StreamFromCoreAsync(IDemuxer demuxer, bool loop, CancellationToken cancellationToken)
-    {
-        var videoStreamIndex = demuxer.BestVideoStreamIndex;
-        if (videoStreamIndex < 0)
-        {
-            throw new InvalidOperationException("Видеопоток не найден в контейнере.");
-        }
-
-        var streamInfo = demuxer.Streams[videoStreamIndex];
-        using var codec = CodecRegistry.CreateVideoCodec(streamInfo.CodecId)
-            ?? throw new NotSupportedException(
-                "Видеокодек " + streamInfo.CodecId + " не зарегистрирован.");
-
-        var decoderParams = streamInfo.VideoParameters
-            ?? new VideoCodecParameters
-            {
-                Width = Settings.Width,
-                Height = Settings.Height,
-                PixelFormat = Settings.PixelFormat,
-            };
-
-        codec.InitializeDecoder(in decoderParams)
-            .ThrowIfError("Не удалось инициализировать видеодекодер.");
-
-        using var packet = new MediaPacketBuffer();
-        using var frameBuffer = new VideoFrameBuffer(
-            Settings.Width, Settings.Height, Settings.PixelFormat);
-
-        await DecodeAndWriteFramesAsync(
-            demuxer, codec, packet, frameBuffer, videoStreamIndex, loop, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    private async Task DecodeAndWriteFramesAsync(
-        IDemuxer demuxer,
-        IVideoCodec codec,
-        MediaPacketBuffer packet,
-        VideoFrameBuffer frameBuffer,
-        int videoStreamIndex,
+    private async Task StreamFromFileCoreAsync(
+        string formatName,
+        string filePath,
         bool loop,
         CancellationToken cancellationToken)
     {
-        var frameInterval = TimeSpan.FromSeconds(1.0 / Settings.FrameRate);
-
-        while (!cancellationToken.IsCancellationRequested)
+        var videoStream = OpenVideoStreamFromFile(formatName, filePath, CreateStreamParameters());
+        await using (videoStream.ConfigureAwait(false))
         {
-            var readResult = await demuxer.ReadPacketAsync(packet, cancellationToken).ConfigureAwait(false);
+            await StreamFromCoreAsync(videoStream, loop, cancellationToken).ConfigureAwait(false);
+        }
+    }
 
-            if (readResult == ContainerResult.EndOfFile)
+    private async Task StreamFromContainerStreamCoreAsync(
+        string formatName,
+        Stream stream,
+        bool loop,
+        CancellationToken cancellationToken)
+    {
+        var videoStream = OpenVideoStreamFromStream(formatName, stream, CreateStreamParameters());
+        await using (videoStream.ConfigureAwait(false))
+        {
+            await StreamFromCoreAsync(videoStream, loop, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task StreamFromCoreAsync(VideoStream videoStream, bool loop, CancellationToken cancellationToken)
+    {
+        var effectiveFrameRate = videoStream.FrameRate;
+        if (effectiveFrameRate <= 0)
+        {
+            effectiveFrameRate = Settings.FrameRate;
+        }
+
+        if (effectiveFrameRate <= 0)
+        {
+            effectiveFrameRate = 30;
+        }
+
+        var frameInterval = TimeSpan.FromSeconds(1.0 / effectiveFrameRate);
+
+        if (videoStream.HasFrame)
+        {
+            do
             {
-                if (loop)
+                cancellationToken.ThrowIfCancellationRequested();
+                WriteFrame(videoStream);
+
+                if (!loop)
                 {
-                    demuxer.Reset();
-                    continue;
+                    break;
                 }
 
-                break;
+                await Task.Delay(frameInterval, cancellationToken).ConfigureAwait(false);
             }
+            while (true);
 
-            if (readResult != ContainerResult.Success || packet.StreamIndex != videoStreamIndex)
-            {
-                continue;
-            }
+            return;
+        }
 
-            var decodeResult = await codec.DecodeAsync(
-                packet.GetMemory(), frameBuffer, cancellationToken).ConfigureAwait(false);
-
-            if (decodeResult != CodecResult.Success)
-            {
-                continue;
-            }
-
-            ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed), this);
-            backend.WriteFrame(frameBuffer.GetRawData());
-
+        while (await videoStream.ReadNextFrameAsync(loop, cancellationToken).ConfigureAwait(false))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            WriteFrame(videoStream);
             await Task.Delay(frameInterval, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    private VideoCodecParameters CreateStreamParameters()
+        => new()
+        {
+            Width = Settings.Width,
+            Height = Settings.Height,
+            PixelFormat = Settings.PixelFormat,
+            FrameRate = Settings.FrameRate,
+        };
+
+    private static VideoStream OpenVideoStreamFromFile(string formatName, string filePath, VideoCodecParameters parameters)
+    {
+        IDemuxer? demuxer = null;
+
+        try
+        {
+            demuxer = CreateDemuxerOrThrow(formatName);
+
+            if (demuxer.Open(filePath) != ContainerResult.Success)
+            {
+                throw new InvalidOperationException("Не удалось открыть файл '" + filePath + "'.");
+            }
+
+            var videoStream = VideoStream.OpenDemuxer(demuxer, parameters);
+            demuxer = null;
+            return videoStream;
+        }
+        finally
+        {
+            demuxer?.Dispose();
+        }
+    }
+
+    private static VideoStream OpenVideoStreamFromStream(string formatName, Stream stream, VideoCodecParameters parameters)
+    {
+        IDemuxer? demuxer = null;
+
+        try
+        {
+            demuxer = CreateDemuxerOrThrow(formatName);
+
+            if (demuxer.Open(stream) != ContainerResult.Success)
+            {
+                throw new InvalidOperationException("Не удалось открыть поток.");
+            }
+
+            var videoStream = VideoStream.OpenDemuxer(demuxer, parameters);
+            demuxer = null;
+            return videoStream;
+        }
+        finally
+        {
+            demuxer?.Dispose();
+        }
+    }
+
+    private static IDemuxer CreateDemuxerOrThrow(string formatName)
+        => ContainerFactory.CreateDemuxer(formatName)
+            ?? throw new NotSupportedException(
+                "Демуксер для формата '" + formatName + "' не зарегистрирован.");
 
     /// <summary>
     /// Останавливает захват видеопотока.
@@ -413,6 +508,7 @@ public sealed class VirtualCamera : IAsyncDisposable
     public static async ValueTask<VirtualCamera> CreateAsync(VirtualCameraSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        ValidateSettings(settings);
 
         var cameraBackend = CreateBackend();
 
@@ -437,6 +533,29 @@ public sealed class VirtualCamera : IAsyncDisposable
     /// <param name="settings">Настройки камеры.</param>
     /// <returns>Инициализированный экземпляр виртуальной камеры.</returns>
     public static ValueTask<VirtualCamera> CreateAsync(VirtualCameraSettings settings) => CreateAsync(settings, CancellationToken.None);
+
+    private static void ValidateSettings(VirtualCameraSettings settings)
+    {
+        if (settings.Width < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(settings), settings.Width, "Width должен быть больше 0.");
+        }
+
+        if (settings.Height < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(settings), settings.Height, "Height должен быть больше 0.");
+        }
+
+        if (settings.FrameRate < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(settings), settings.FrameRate, "FrameRate должен быть больше 0.");
+        }
+
+        if (settings.PixelFormat == VideoPixelFormat.Unknown)
+        {
+            throw new ArgumentException("Формат пикселей Unknown не поддерживается.", nameof(settings));
+        }
+    }
 
     private static IVirtualCameraBackend CreateBackend()
     {

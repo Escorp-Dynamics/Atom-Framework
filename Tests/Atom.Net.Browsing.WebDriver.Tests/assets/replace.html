@@ -1,20 +1,235 @@
 <!DOCTYPE html>
 <html>
-    <head>
-        <title>Turnstile Zero</title>
-        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-    </head>
-    <body>
-        <div class="cf-turnstile"
-             data-sitekey="3x00000000000000000000FF"
-             data-appearance="always"
-             data-error-callback="__tsError"
-             data-callback="__tsSuccess"
-             data-expired-callback="__tsExpired"></div>
-        <script>
-            function __tsError(code) { document.documentElement.dataset.tsError = code; }
-            function __tsSuccess(token) { document.documentElement.dataset.tsToken = token; }
-            function __tsExpired() { document.documentElement.dataset.tsExpired = 'yes'; }
-        </script>
-    </body>
+
+<head>
+    <title>Turnstile Zero</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            min-height: 100%;
+            background: #f5f7fb;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 48px 24px;
+            box-sizing: border-box;
+        }
+
+        #turnstile-container {
+            position: relative;
+            display: block;
+            width: 300px;
+            min-width: 300px;
+            max-width: 300px;
+            min-height: 65px;
+            box-sizing: border-box;
+        }
+    </style>
+    <script>
+        window.__tsEvents = [];
+        window.__tsWidgetId = null;
+        window.__tsRenderAttempts = 0;
+        window.__tsRenderError = "";
+        window.__tsRenderReady = "false";
+        window.__tsExecuted = "false";
+
+        function pushTsEvent(type, value) {
+            const text = value == null ? "" : String(value);
+            window.__tsEvents.push({ type, value: text, ts: Date.now() });
+            console.log("[Turnstile]", type, text);
+        }
+
+        window.__tsOnSuccess = function (token) {
+            document.documentElement.dataset.tsToken = token || "";
+            pushTsEvent("success", token);
+        };
+
+        window.__tsOnError = function (code) {
+            document.documentElement.dataset.tsError = code == null ? "" : String(code);
+            pushTsEvent("error", code);
+        };
+
+        window.__tsOnExpired = function () {
+            document.documentElement.dataset.tsExpired = "true";
+            pushTsEvent("expired", "true");
+        };
+
+        window.__tsOnTimeout = function () {
+            document.documentElement.dataset.tsTimeout = "true";
+            pushTsEvent("timeout", "true");
+        };
+
+        window.__tsOnUnsupported = function () {
+            document.documentElement.dataset.tsUnsupported = "true";
+            pushTsEvent("unsupported", "true");
+        };
+
+        window.__tsOnBeforeInteractive = function () {
+            document.documentElement.dataset.tsBeforeInteractive = "true";
+            pushTsEvent("before-interactive", "true");
+        };
+
+        window.__tsOnAfterInteractive = function () {
+            document.documentElement.dataset.tsAfterInteractive = "true";
+            pushTsEvent("after-interactive", "true");
+        };
+
+        window.__tsGetWidgetState = function () {
+            const widgetId = window.__tsWidgetId;
+            const hasApi = !!window.turnstile;
+            const response = hasApi && widgetId != null && typeof window.turnstile.getResponse === "function"
+                ? (window.turnstile.getResponse(widgetId) || "")
+                : "";
+            const expired = hasApi && widgetId != null && typeof window.turnstile.isExpired === "function"
+                ? !!window.turnstile.isExpired(widgetId)
+                : null;
+
+            return {
+                widgetId,
+                hasApi,
+                renderAttempts: window.__tsRenderAttempts,
+                renderReady: window.__tsRenderReady,
+                renderError: window.__tsRenderError || "",
+                executed: window.__tsExecuted || "false",
+                response,
+                expired,
+                beforeInteractive: document.documentElement.dataset.tsBeforeInteractive || "",
+                afterInteractive: document.documentElement.dataset.tsAfterInteractive || "",
+                responseInput: document.documentElement.dataset.tsResponseInput || "",
+                token: document.documentElement.dataset.tsToken || "",
+                error: document.documentElement.dataset.tsError || "",
+            };
+        };
+
+        window.__tsReset = function () {
+            if (window.__tsWidgetId == null || typeof window.turnstile?.reset !== "function") {
+                return false;
+            }
+
+            window.__tsExecuted = "false";
+            document.documentElement.dataset.tsExecuted = "false";
+            window.turnstile.reset(window.__tsWidgetId);
+            pushTsEvent("reset", window.__tsWidgetId);
+            return true;
+        };
+
+        window.__tsExecute = function () {
+            const widgetId = window.__tsWidgetId;
+            if (widgetId == null || typeof window.turnstile?.execute !== "function") {
+                return false;
+            }
+
+            window.__tsExecuted = "true";
+            document.documentElement.dataset.tsExecuted = "true";
+            window.turnstile.execute(widgetId);
+            pushTsEvent("execute", widgetId);
+            return true;
+        };
+
+        (function renderTurnstileExplicitly() {
+            function tryRender() {
+                const container = document.getElementById("turnstile-container");
+                const sitekey = container?.dataset?.sitekey || "";
+
+                if (!container || !sitekey) {
+                    window.__tsRenderError = "container-or-sitekey-missing";
+                    document.documentElement.dataset.tsRenderError = window.__tsRenderError;
+                    return;
+                }
+
+                if (!window.turnstile || typeof window.turnstile.render !== "function") {
+                    window.__tsRenderAttempts += 1;
+                    if (window.__tsRenderAttempts < 200) {
+                        setTimeout(tryRender, 50);
+                    } else {
+                        window.__tsRenderError = "turnstile-api-not-ready";
+                        document.documentElement.dataset.tsRenderError = window.__tsRenderError;
+                        pushTsEvent("render-error", window.__tsRenderError);
+                    }
+                    return;
+                }
+
+                if (window.__tsWidgetId != null) {
+                    return;
+                }
+
+                try {
+                    window.__tsWidgetId = window.turnstile.render(container, {
+                        sitekey,
+                        callback: window.__tsOnSuccess,
+                        "error-callback": window.__tsOnError,
+                        "expired-callback": window.__tsOnExpired,
+                        "timeout-callback": window.__tsOnTimeout,
+                        "unsupported-callback": window.__tsOnUnsupported,
+                        "before-interactive-callback": window.__tsOnBeforeInteractive,
+                        "after-interactive-callback": window.__tsOnAfterInteractive,
+                        execution: "execute",
+                        theme: "light",
+                        language: "en-US",
+                        size: "normal",
+                        appearance: "always",
+                        retry: "auto",
+                        "refresh-timeout": "auto",
+                    });
+
+                    window.__tsRenderReady = "true";
+                    document.documentElement.dataset.tsWidgetId = String(window.__tsWidgetId);
+                    document.documentElement.dataset.tsRenderReady = "true";
+                    pushTsEvent("render", window.__tsWidgetId);
+                } catch (error) {
+                    window.__tsRenderError = error == null ? "render-failed" : String(error);
+                    document.documentElement.dataset.tsRenderError = window.__tsRenderError;
+                    pushTsEvent("render-error", window.__tsRenderError);
+                }
+            }
+
+            if (document.readyState === "loading") {
+                document.addEventListener("DOMContentLoaded", tryRender, { once: true });
+            } else {
+                tryRender();
+            }
+        })();
+
+        (function observeTurnstileResponseInput() {
+            let lastObservedToken = "";
+
+            function syncResponseInput() {
+                const input = document.querySelector('[name="cf-turnstile-response"]');
+                const token = input?.value || "";
+
+                document.documentElement.dataset.tsResponsePresent = input ? "true" : "false";
+                document.documentElement.dataset.tsResponseInput = token;
+
+                if (token && token !== lastObservedToken) {
+                    lastObservedToken = token;
+                    pushTsEvent("response-input", token);
+                }
+            }
+
+            new MutationObserver(syncResponseInput).observe(document.documentElement, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ["value"],
+            });
+
+            window.addEventListener("load", syncResponseInput);
+            setInterval(syncResponseInput, 250);
+            syncResponseInput();
+        })();
+    </script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" defer></script>
+</head>
+
+<body>
+    <div id="turnstile-container" class="cf-turnstile" data-sitekey="0x4AAAAAABhlz7Ei4byodYjs"></div>
+</body>
+
 </html>
+<!-- https://visa.vfsglobal.com/ind/en/pol/login -->

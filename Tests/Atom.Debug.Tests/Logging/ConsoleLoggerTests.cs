@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 
 #pragma warning disable CA2254 // Для тестов можно использовать шаблоны напрямую
 #pragma warning disable CA1848 // Для тестов используем методы LoggerExtensions
@@ -12,7 +12,6 @@ namespace Atom.Debug.Logging.Tests;
 public class ConsoleLoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTests<ConsoleLoggerTests>(logger)
 {
     private StringWriter? consoleOutput;
-    private TextWriter? originalConsoleOutput;
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="ConsoleLoggerTests"/>.
@@ -25,9 +24,7 @@ public class ConsoleLoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchm
     [SetUp]
     public void SetUp()
     {
-        originalConsoleOutput = Console.Out;
         consoleOutput = new StringWriter();
-        Console.SetOut(consoleOutput);
     }
 
     /// <summary>
@@ -36,7 +33,6 @@ public class ConsoleLoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchm
     [TearDown]
     public void TearDown()
     {
-        Console.SetOut(originalConsoleOutput!);
         consoleOutput?.Dispose();
     }
 
@@ -47,6 +43,7 @@ public class ConsoleLoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchm
     public async Task WithDateFormatTest()
     {
         using var logger = new ConsoleLogger("Test")
+        { Writer = consoleOutput! }
             .WithDate("yyyy-MM-dd")
             .WithoutTime()
             .WithoutStyling();
@@ -66,6 +63,7 @@ public class ConsoleLoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchm
     public async Task WithTimeFormatTest()
     {
         using var logger = new ConsoleLogger("Test")
+        { Writer = consoleOutput! }
             .WithTime("HH:mm")
             .WithoutDate()
             .WithoutStyling();
@@ -85,6 +83,7 @@ public class ConsoleLoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchm
     public async Task WithCategoryNameTest()
     {
         using var logger = new ConsoleLogger("MyCategory")
+        { Writer = consoleOutput! }
             .WithCategoryName()
             .WithoutTime()
             .WithoutDate()
@@ -105,6 +104,7 @@ public class ConsoleLoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchm
     public async Task WithoutLogLevelsTest()
     {
         using var logger = new ConsoleLogger("Test")
+        { Writer = consoleOutput! }
             .WithoutLogLevels(LogLevel.Information)
             .WithoutStyling();
 
@@ -128,6 +128,7 @@ public class ConsoleLoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchm
     public async Task WithLogLevelsTest()
     {
         using var logger = new ConsoleLogger("Test")
+        { Writer = consoleOutput! }
             .WithoutLogLevels(LogLevel.Trace, LogLevel.Debug, LogLevel.Information, LogLevel.Warning, LogLevel.Error, LogLevel.Critical)
             .WithLogLevels(LogLevel.Error)
             .WithoutStyling();
@@ -169,6 +170,7 @@ public class ConsoleLoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : Benchm
     public async Task GenericLoggerTest()
     {
         using var logger = new ConsoleLogger<ConsoleLoggerTests>()
+        { Writer = consoleOutput! }
             .WithCategoryName()
             .WithoutTime()
             .WithoutDate()

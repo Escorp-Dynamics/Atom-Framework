@@ -38,9 +38,16 @@ internal sealed class Vp8Encoder
     /// <summary>
     /// Encodes a single frame as a VP8 keyframe inside a WebP container.
     /// </summary>
-    public CodecResult Encode(in ReadOnlyVideoFrame frame, Span<byte> output, out int bytesWritten)
+    public CodecResult Encode(in ReadOnlyVideoFrame frame, Span<byte> output, out int bytesWritten) =>
+        Encode(frame, output, out bytesWritten, diagnostics: null);
+
+    /// <summary>
+    /// Encodes a single frame as a VP8 keyframe and optionally captures first-macroblock Y2 diagnostics.
+    /// </summary>
+    public CodecResult Encode(in ReadOnlyVideoFrame frame, Span<byte> output, out int bytesWritten, Vp8EncodeDiagnostics? diagnostics)
     {
         bytesWritten = 0;
+        diagnostics?.Reset();
         width = frame.Width;
         height = frame.Height;
 
@@ -88,21 +95,48 @@ internal sealed class Vp8Encoder
         var dctOut = new short[16];
         var y2Dct = new short[16];
         var y2Quant = new short[16];
+        var yQuantBlocks = new short[16 * 16];
+        var aboveYNonZero = new byte[mbWidth * 4];
+        var aboveY2NonZero = new byte[mbWidth];
+        var aboveUNonZero = new byte[mbWidth * 2];
+        var aboveVNonZero = new byte[mbWidth * 2];
 
         for (var mbY = 0; mbY < mbHeight; mbY++)
         {
+            var leftYNonZero = new byte[4];
+            byte leftY2NonZero = 0;
+            var leftUNonZero = new byte[2];
+            var leftVNonZero = new byte[2];
+
             for (var mbX = 0; mbX < mbWidth; mbX++)
             {
                 var yOff = (mbY * 16 * yStride) + (mbX * 16);
                 var uvOff = (mbY * 8 * uvStride) + (mbX * 8);
                 var hasAbove = mbY > 0;
                 var hasLeft = mbX > 0;
+                var captureCurrentMacroblock = diagnostics is not null && mbX == diagnostics.TargetMacroblockX && mbY == diagnostics.TargetMacroblockY;
+                var currentMbYNonZero = new byte[16];
+                var currentMbUNonZero = new byte[4];
+                var currentMbVNonZero = new byte[4];
 
                 // ── Choose best 16×16 Y prediction mode ──
                 var bestYMode = ChooseBest16x16Mode(yOff, hasAbove, hasLeft);
 
                 // ── Choose best 8×8 UV prediction mode ──
                 var bestUvMode = ChooseBest8x8Mode(uvOff, hasAbove, hasLeft);
+
+                if (captureCurrentMacroblock)
+                {
+                    diagnostics!.FirstMacroblockChosenYMode = bestYMode;
+                    diagnostics.FirstMacroblockChosenUvMode = bestUvMode;
+                    diagnostics.FirstMacroblockOriginalYTopLeft = yPlane[yOff];
+                    diagnostics.FirstMacroblockOriginalUTopLeft = uPlane[uvOff];
+                    diagnostics.FirstMacroblockOriginalVTopLeft = vPlane[uvOff];
+                }
+
+                // mb_no_coeff_skip is enabled in the frame header, so each macroblock must emit a skip bit.
+                // This encoder currently reconstructs/encodes every macroblock, so the bit is always "not skipped".
+                headerBd.EncodeBit(0, 128);
 
                 // Write Y mode
                 EncodeKfYMode(ref headerBd, bestYMode);
@@ -114,9 +148,17 @@ internal sealed class Vp8Encoder
                 ApplyPrediction8x8(uRec, uvStride, uvOff, hasAbove, hasLeft, bestUvMode);
                 ApplyPrediction8x8(vRec, uvStride, uvOff, hasAbove, hasLeft, bestUvMode);
 
+                if (captureCurrentMacroblock)
+                {
+                    diagnostics!.FirstMacroblockPredictedYTopLeft = yRec[yOff];
+                    diagnostics.FirstMacroblockPredictedUTopLeft = uRec[uvOff];
+                    diagnostics.FirstMacroblockPredictedVTopLeft = vRec[uvOff];
+                }
+
                 // ── Encode Y subblocks (16 × 4×4 blocks) ──
-                // Compute residuals, DCT, quantize, encode tokens, reconstruct
+                // Compute residuals and quantized AC blocks first. For non-BPred the token stream order is Y2, then 16 Y blocks.
                 Array.Clear(y2Quant);
+                Array.Clear(yQuantBlocks);
 
                 for (var by = 0; by < 4; by++)
                 {
@@ -133,23 +175,67 @@ internal sealed class Vp8Encoder
 
                         // Save DC for Y2 block
                         y2Dct[(by * 4) + bx] = dctOut[0];
+
+                        if (captureCurrentMacroblock && by == 0 && bx == 0)
+                        {
+                            diagnostics!.FirstYBlockForwardDctDc = dctOut[0];
+                        }
+
                         dctOut[0] = 0; // DC will be coded via Y2
 
                         // Quantize
                         Vp8Quantization.Quantize(dctOut, dqm.Y1DcDequant, dqm.Y1AcDequant);
 
-                        // Encode coefficients to token partition
-                        EncodeBlock(ref tokenBd, dctOut, 0, 1);
-
-                        // Reconstruct: dequant + IDCT to update yRec
-                        Vp8Quantization.Dequantize(dctOut, dqm.Y1DcDequant, dqm.Y1AcDequant);
+                        var blockIndex = (by * 4) + bx;
+                        currentMbYNonZero[blockIndex] = HasNonZeroCoefficients(dctOut, 1);
+                        for (var coefficientIndex = 0; coefficientIndex < 16; coefficientIndex++)
+                        {
+                            yQuantBlocks[(blockIndex * 16) + coefficientIndex] = dctOut[coefficientIndex];
+                        }
                     }
                 }
 
                 // ── Y2 block (Walsh-Hadamard of Y DC values) ──
+                if (captureCurrentMacroblock)
+                {
+                    Array.Copy(y2Dct, diagnostics!.FirstMacroblockY2SourceDc, 16);
+                }
+
                 Vp8Dct.ForwardWht4x4(y2Dct, y2Quant);
+
+                if (captureCurrentMacroblock)
+                {
+                    Array.Copy(y2Quant, diagnostics!.FirstMacroblockY2ForwardWht, 16);
+                }
+
                 Vp8Quantization.Quantize(y2Quant, dqm.Y2DcDequant, dqm.Y2AcDequant);
-                EncodeBlock(ref tokenBd, y2Quant, 1, 0);
+
+                if (captureCurrentMacroblock)
+                {
+                    Array.Copy(y2Quant, diagnostics!.FirstMacroblockY2Quantized, 16);
+                }
+
+                var currentMbY2NonZero = HasNonZeroCoefficients(y2Quant, 0);
+                var y2InitialContext = aboveY2NonZero[mbX] + leftY2NonZero;
+                EncodeBlock(ref tokenBd, y2Quant, 1, 0, y2InitialContext);
+
+                for (var blockIndex = 0; blockIndex < 16; blockIndex++)
+                {
+                    var by = blockIndex >> 2;
+                    var bx = blockIndex & 3;
+                    for (var coefficientIndex = 0; coefficientIndex < 16; coefficientIndex++)
+                    {
+                        dctOut[coefficientIndex] = yQuantBlocks[(blockIndex * 16) + coefficientIndex];
+                    }
+
+                    var aboveContext = by > 0
+                        ? currentMbYNonZero[((by - 1) * 4) + bx]
+                        : aboveYNonZero[(mbX * 4) + bx];
+                    var leftContext = bx > 0
+                        ? currentMbYNonZero[(by * 4) + bx - 1]
+                        : leftYNonZero[by];
+                    EncodeBlock(ref tokenBd, dctOut, 0, 1, aboveContext + leftContext);
+                }
 
                 // Reconstruct Y2 and inject DCs back
                 var y2Rec = new short[16];
@@ -157,6 +243,11 @@ internal sealed class Vp8Encoder
                 Vp8Quantization.Dequantize(y2Rec, dqm.Y2DcDequant, dqm.Y2AcDequant);
                 var y2Inv = new short[16];
                 Vp8Dct.InverseWht4x4(y2Rec, y2Inv);
+
+                if (captureCurrentMacroblock)
+                {
+                    Array.Copy(y2Inv, diagnostics!.FirstMacroblockY2InverseWht, 16);
+                }
 
                 // Now reconstruct each Y subblock with the recovered DC
                 for (var by = 0; by < 4; by++)
@@ -182,10 +273,31 @@ internal sealed class Vp8Encoder
                 }
 
                 // ── Encode U subblocks (4 × 4×4 blocks) ──
-                EncodeUvPlane(ref tokenBd, uPlane, uRec, uvStride, uvOff, ref dqm);
+                EncodeUvPlane(ref tokenBd, uPlane, uRec, uvStride, uvOff, ref dqm,
+                    aboveUNonZero, leftUNonZero, currentMbUNonZero, mbX,
+                    captureCurrentMacroblock ? diagnostics : null, isVPlane: false);
 
                 // ── Encode V subblocks (4 × 4×4 blocks) ──
-                EncodeUvPlane(ref tokenBd, vPlane, vRec, uvStride, uvOff, ref dqm);
+                EncodeUvPlane(ref tokenBd, vPlane, vRec, uvStride, uvOff, ref dqm,
+                    aboveVNonZero, leftVNonZero, currentMbVNonZero, mbX,
+                    captureCurrentMacroblock ? diagnostics : null, isVPlane: true);
+
+                for (var i = 0; i < 4; i++)
+                {
+                    aboveYNonZero[(mbX * 4) + i] = currentMbYNonZero[12 + i];
+                    leftYNonZero[i] = currentMbYNonZero[(i * 4) + 3];
+                }
+
+                aboveY2NonZero[mbX] = currentMbY2NonZero;
+                leftY2NonZero = currentMbY2NonZero;
+
+                for (var i = 0; i < 2; i++)
+                {
+                    aboveUNonZero[(mbX * 2) + i] = currentMbUNonZero[2 + i];
+                    leftUNonZero[i] = currentMbUNonZero[(i * 2) + 1];
+                    aboveVNonZero[(mbX * 2) + i] = currentMbVNonZero[2 + i];
+                    leftVNonZero[i] = currentMbVNonZero[(i * 2) + 1];
+                }
             }
         }
 
@@ -262,6 +374,15 @@ internal sealed class Vp8Encoder
 
         bytesWritten = pos;
         return CodecResult.Success;
+    }
+
+    internal static int EncodeBlockForDiagnostics(ReadOnlySpan<short> coeffs, int blockType, int firstCoeff, Span<byte> output)
+    {
+        var copy = coeffs.ToArray();
+        var encoder = new Vp8BoolEncoder(output);
+        EncodeBlock(ref encoder, copy, blockType, firstCoeff);
+        encoder.Flush();
+        return encoder.BytesWritten;
     }
 
     // ── RGBA → YUV (BT.601) conversion ──
@@ -522,7 +643,8 @@ internal sealed class Vp8Encoder
     // ── UV plane encoding ──
 
     private static void EncodeUvPlane(ref Vp8BoolEncoder tokenBd, byte[] origPlane, byte[] recPlane,
-        int stride, int baseOff, ref Vp8QuantMatrix dqm)
+        int stride, int baseOff, ref Vp8QuantMatrix dqm, byte[] aboveNonZero, byte[] leftNonZero,
+        byte[] currentMbNonZero, int mbX, Vp8EncodeDiagnostics? diagnostics, bool isVPlane)
     {
         var residual = new short[16];
         var dctOut = new short[16];
@@ -536,9 +658,44 @@ internal sealed class Vp8Encoder
                 ComputeResidual4x4(origPlane, recPlane, subOff, stride, residual);
                 Array.Clear(dctOut);
                 Vp8Dct.ForwardDct4x4(residual, dctOut, 4);
-                Vp8Quantization.Quantize(dctOut, dqm.UvDcDequant, dqm.UvAcDequant);
 
-                EncodeBlock(ref tokenBd, dctOut, 2, 0);
+                if (diagnostics is not null && by == 0 && bx == 0)
+                {
+                    if (isVPlane)
+                    {
+                        diagnostics.FirstVBlockForwardDctDc = dctOut[0];
+                    }
+                    else
+                    {
+                        diagnostics.FirstUBlockForwardDctDc = dctOut[0];
+                    }
+                }
+
+                Vp8Quantization.Quantize(dctOut, dqm.UvDcDequant, dqm.UvAcDequant);
+                currentMbNonZero[(by * 2) + bx] = HasNonZeroCoefficients(dctOut, 0);
+
+                if (diagnostics is not null && by == 0 && bx == 0)
+                {
+                    for (var coefficientIndex = 0; coefficientIndex < 16; coefficientIndex++)
+                    {
+                        if (isVPlane)
+                        {
+                            diagnostics.FirstVBlockQuantized[coefficientIndex] = dctOut[coefficientIndex];
+                        }
+                        else
+                        {
+                            diagnostics.FirstUBlockQuantized[coefficientIndex] = dctOut[coefficientIndex];
+                        }
+                    }
+                }
+
+                var aboveContext = by > 0
+                    ? currentMbNonZero[((by - 1) * 2) + bx]
+                    : aboveNonZero[(mbX * 2) + bx];
+                var leftContext = bx > 0
+                    ? currentMbNonZero[(by * 2) + bx - 1]
+                    : leftNonZero[by];
+                EncodeBlock(ref tokenBd, dctOut, 2, 0, aboveContext + leftContext);
 
                 // Reconstruct
                 Vp8Quantization.Dequantize(dctOut, dqm.UvDcDequant, dqm.UvAcDequant);
@@ -577,6 +734,9 @@ internal sealed class Vp8Encoder
         bd.EncodeBit(0, 128); // uv_dc_delta present = no
         bd.EncodeBit(0, 128); // uv_ac_delta present = no
 
+        // Keyframe reference header still carries refresh_entropy.
+        bd.EncodeBit(1, 128); // refresh_entropy = true
+
         // Coefficient probability update: no updates (use defaults)
         // Per RFC 6386 §13.4: for each [type][band][ctx][node], use CoeffUpdateProbs
         // to signal whether a new probability follows
@@ -605,10 +765,10 @@ internal sealed class Vp8Encoder
     private static void EncodeKfYMode(ref Vp8BoolEncoder bd, int mode)
     {
         // Keyframe Y mode tree: fixed probabilities [145, 156, 163, 128]
-        // Tree: DC=-0, V=-1, H=-2, TM=-3, B_PRED=-4
+        // The keyframe tree differs from the generic Y mode tree and must match RFC kf_y_mode_tree.
         ReadOnlySpan<byte> probs = [145, 156, 163, 128];
 
-        EncodeTree(ref bd, Vp8Constants.YModeTree, probs, mode);
+        EncodeTree(ref bd, Vp8Constants.KfYModeTree, probs, mode);
     }
 
     private static void EncodeKfUvMode(ref Vp8BoolEncoder bd, int mode)
@@ -687,7 +847,7 @@ internal sealed class Vp8Encoder
     /// Encodes a 4×4 block of quantized coefficients using the VP8 token system.
     /// </summary>
     private static void EncodeBlock(ref Vp8BoolEncoder bd, short[] coeffs,
-        int blockType, int firstCoeff)
+        int blockType, int firstCoeff, int initialContext = 0)
     {
         // Find last non-zero coefficient
         var last = -1;
@@ -708,7 +868,7 @@ internal sealed class Vp8Encoder
             return;
         }
 
-        var ctx = 0;
+        var ctx = initialContext;
 
         for (var i = firstCoeff; i < 16; i++)
         {
@@ -798,6 +958,20 @@ internal sealed class Vp8Encoder
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static byte HasNonZeroCoefficients(ReadOnlySpan<short> coeffs, int firstCoeff)
+    {
+        for (var i = firstCoeff; i < coeffs.Length; i++)
+        {
+            if (coeffs[i] != 0)
+            {
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+
     /// <summary>
     /// Encodes a single coefficient token using the default probability tables.
     /// This mirrors DecodeCoeffToken in the decoder.
@@ -805,23 +979,9 @@ internal sealed class Vp8Encoder
     private static void EncodeCoeffToken(ref Vp8BoolEncoder bd, int token,
         int blockType, int band, int ctx)
     {
-        // Get probability table for this context (MemoryMarshal for multidimensional array)
         var probs = MemoryMarshal.CreateReadOnlySpan(
             ref Vp8Constants.DefaultCoeffProbs[blockType, band, ctx, 0],
             Vp8Constants.EntropyNodes);
-
-        // Token tree encoding matching DecodeCoeffToken structure:
-        // prob[0]: EOB(0) vs continue(1)
-        // prob[1]: ZERO(0) vs continue(1)
-        // prob[2]: ONE(0) vs continue(1)
-        // prob[3]: small(0) vs categories(1)
-        // prob[4]: TWO(0) vs continue(1)
-        // prob[5]: THREE(0) vs FOUR(1)
-        // prob[6]: cat1-2(0) vs cat3-6(1)
-        // prob[7]: CAT1(0) vs CAT2(1)
-        // prob[8]: cat3-4(0) vs cat5-6(1)
-        // prob[9]: CAT3(0) vs CAT4(1)
-        // prob[10]: CAT5(0) vs CAT6(1)
 
         switch (token)
         {
@@ -924,5 +1084,67 @@ internal sealed class Vp8Encoder
         buf[offset + 1] = (byte)((value >> 8) & 0xFF);
         buf[offset + 2] = (byte)((value >> 16) & 0xFF);
         buf[offset + 3] = (byte)((value >> 24) & 0xFF);
+    }
+}
+
+internal sealed class Vp8EncodeDiagnostics
+{
+    public int TargetMacroblockX { get; set; }
+
+    public int TargetMacroblockY { get; set; }
+
+    public int FirstMacroblockChosenYMode { get; set; }
+
+    public int FirstMacroblockChosenUvMode { get; set; }
+
+    public byte FirstMacroblockOriginalYTopLeft { get; set; }
+
+    public byte FirstMacroblockOriginalUTopLeft { get; set; }
+
+    public byte FirstMacroblockOriginalVTopLeft { get; set; }
+
+    public byte FirstMacroblockPredictedYTopLeft { get; set; }
+
+    public byte FirstMacroblockPredictedUTopLeft { get; set; }
+
+    public byte FirstMacroblockPredictedVTopLeft { get; set; }
+
+    public short FirstYBlockForwardDctDc { get; set; }
+
+    public short FirstUBlockForwardDctDc { get; set; }
+
+    public short FirstVBlockForwardDctDc { get; set; }
+
+    public short[] FirstMacroblockY2SourceDc { get; } = new short[16];
+
+    public short[] FirstMacroblockY2ForwardWht { get; } = new short[16];
+
+    public short[] FirstMacroblockY2Quantized { get; } = new short[16];
+
+    public short[] FirstMacroblockY2InverseWht { get; } = new short[16];
+
+    public short[] FirstUBlockQuantized { get; } = new short[16];
+
+    public short[] FirstVBlockQuantized { get; } = new short[16];
+
+    public void Reset()
+    {
+        FirstMacroblockChosenYMode = 0;
+        FirstMacroblockChosenUvMode = 0;
+        FirstMacroblockOriginalYTopLeft = 0;
+        FirstMacroblockOriginalUTopLeft = 0;
+        FirstMacroblockOriginalVTopLeft = 0;
+        FirstMacroblockPredictedYTopLeft = 0;
+        FirstMacroblockPredictedUTopLeft = 0;
+        FirstMacroblockPredictedVTopLeft = 0;
+        FirstYBlockForwardDctDc = 0;
+        FirstUBlockForwardDctDc = 0;
+        FirstVBlockForwardDctDc = 0;
+        Array.Clear(FirstMacroblockY2SourceDc);
+        Array.Clear(FirstMacroblockY2ForwardWht);
+        Array.Clear(FirstMacroblockY2Quantized);
+        Array.Clear(FirstMacroblockY2InverseWht);
+        Array.Clear(FirstUBlockQuantized);
+        Array.Clear(FirstVBlockQuantized);
     }
 }

@@ -27,7 +27,7 @@
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<PackageId>$(AssemblyName)</PackageId>
 		<Version>0.0.1</Version>
-		<Authors>Yuriy Yesin, Escorp Labs, Jenya Rostov</Authors>
+		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
 		<RepositoryUrl>https://gitflic.ru/project/escorp-lab/atom</RepositoryUrl>
@@ -42,6 +42,8 @@
 	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+		<TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+		<CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
@@ -50,16 +52,18 @@
 
 	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
 		<ProjectReference Include="../Atom.Debug/Atom.Debug.csproj" />
+		<ProjectReference Include="../Atom.Net/Atom.Net.csproj" />
 		<ProjectReference Include="../Atom.Web/Atom.Web.csproj" />
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(Configuration)' == 'Release'">
-		<PackageReference Include="Escorp.Atom.Debug" Version="0.1.4" />
-		<PackageReference Include="Escorp.Atom.Web" Version="0.3.6" />
+		<PackageReference Include="Escorp.Atom.Debug" Version="*" />
+		<PackageReference Include="Escorp.Atom.Net" Version="*" />
+		<PackageReference Include="Escorp.Atom.Web" Version="*" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="0.4.6" PrivateAssets="all"
+		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="*" PrivateAssets="all"
 			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 

@@ -9,6 +9,7 @@ namespace Atom.Media.Video.Backends.PipeWire;
 internal static class SpaPodBuilder
 {
     // SPA типы
+    private const uint SPA_TYPE_Int = 4;
     private const uint SPA_TYPE_Id = 3;
     private const uint SPA_TYPE_Rectangle = 10;
     private const uint SPA_TYPE_Fraction = 11;
@@ -26,7 +27,7 @@ internal static class SpaPodBuilder
     private const uint SPA_FORMAT_VIDEO_framerate = 0x20004;
 
     // SPA Media
-    private const uint SPA_MEDIA_TYPE_video = 1;
+    private const uint SPA_MEDIA_TYPE_video = 2;
     private const uint SPA_MEDIA_SUBTYPE_raw = 1;
     private const uint SPA_MEDIA_SUBTYPE_h264 = 0x20001;
     private const uint SPA_MEDIA_SUBTYPE_mjpg = 0x20002;
@@ -41,9 +42,11 @@ internal static class SpaPodBuilder
     /// <param name="height">Высота в пикселях.</param>
     /// <param name="frameRate">Частота кадров.</param>
     /// <param name="pixelFormat">Формат пикселей Atom.</param>
+    /// <param name="paramId">SPA param id для создаваемого format pod.</param>
     /// <returns>Размер построенного pod в байтах.</returns>
     internal static int BuildVideoFormatPod(
-        Span<byte> buffer, int width, int height, int frameRate, VideoPixelFormat pixelFormat)
+        Span<byte> buffer, int width, int height, int frameRate, VideoPixelFormat pixelFormat,
+        uint paramId = SPA_PARAM_EnumFormat)
     {
         var isCompressed = pixelFormat.IsCompressed();
         var offset = 0;
@@ -61,7 +64,7 @@ internal static class SpaPodBuilder
 
         BinaryPrimitives.WriteUInt32LittleEndian(buffer[offset..], SPA_TYPE_OBJECT_Format);
         offset += 4;
-        BinaryPrimitives.WriteUInt32LittleEndian(buffer[offset..], SPA_PARAM_EnumFormat);
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer[offset..], paramId);
         offset += 4;
 
         // Property: mediaType = video
@@ -84,6 +87,61 @@ internal static class SpaPodBuilder
 
         // Property: VIDEO_framerate
         WritePropFraction(buffer, ref offset, SPA_FORMAT_VIDEO_framerate, (uint)frameRate, 1);
+
+        return offset;
+    }
+
+    internal static int BuildBuffersParamPod(Span<byte> buffer, int frameSize, int stride, int bufferCount)
+    {
+        var offset = 0;
+        var objectBodySize = 8 + (24 * 5);
+
+        WritePodHeader(buffer, ref offset, objectBodySize, SPA_TYPE_Object);
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer[offset..], PipeWireNative.SPA_TYPE_OBJECT_ParamBuffers);
+        offset += 4;
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer[offset..], PipeWireNative.SPA_PARAM_Buffers);
+        offset += 4;
+
+        WritePropInt(buffer, ref offset, PipeWireNative.SPA_PARAM_BUFFERS_buffers, bufferCount);
+        WritePropInt(buffer, ref offset, PipeWireNative.SPA_PARAM_BUFFERS_blocks, 1);
+        WritePropInt(buffer, ref offset, PipeWireNative.SPA_PARAM_BUFFERS_size, frameSize);
+        WritePropInt(buffer, ref offset, PipeWireNative.SPA_PARAM_BUFFERS_stride, stride);
+        WritePropInt(buffer, ref offset, PipeWireNative.SPA_PARAM_BUFFERS_dataType,
+            (1 << (int)PipeWireNative.SPA_DATA_MemPtr) | (1 << (int)PipeWireNative.SPA_DATA_MemFd));
+
+        return offset;
+    }
+
+    internal static int BuildMetaHeaderParamPod(Span<byte> buffer)
+    {
+        var offset = 0;
+        var objectBodySize = 8 + (24 * 2);
+
+        WritePodHeader(buffer, ref offset, objectBodySize, SPA_TYPE_Object);
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer[offset..], PipeWireNative.SPA_TYPE_OBJECT_ParamMeta);
+        offset += 4;
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer[offset..], PipeWireNative.SPA_PARAM_Meta);
+        offset += 4;
+
+        WritePropId(buffer, ref offset, PipeWireNative.SPA_PARAM_META_type, PipeWireNative.SPA_META_Header);
+        WritePropInt(buffer, ref offset, PipeWireNative.SPA_PARAM_META_size, (sizeof(long) * 2) + (sizeof(uint) * 2) + sizeof(ulong));
+
+        return offset;
+    }
+
+    internal static int BuildIoBuffersParamPod(Span<byte> buffer)
+    {
+        var offset = 0;
+        var objectBodySize = 8 + (24 * 2);
+
+        WritePodHeader(buffer, ref offset, objectBodySize, SPA_TYPE_Object);
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer[offset..], PipeWireNative.SPA_TYPE_OBJECT_ParamIO);
+        offset += 4;
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer[offset..], PipeWireNative.SPA_PARAM_IO);
+        offset += 4;
+
+        WritePropId(buffer, ref offset, PipeWireNative.SPA_PARAM_IO_id, PipeWireNative.SPA_IO_Buffers);
+        WritePropInt(buffer, ref offset, PipeWireNative.SPA_PARAM_IO_size, sizeof(int) + sizeof(uint));
 
         return offset;
     }
@@ -112,6 +170,20 @@ internal static class SpaPodBuilder
         offset += 4;
 
         // Padding to 8-byte alignment (4 bytes)
+        BinaryPrimitives.WriteUInt32LittleEndian(buf[offset..], 0);
+        offset += 4;
+    }
+
+    private static void WritePropInt(Span<byte> buf, ref int offset, uint key, int value)
+    {
+        BinaryPrimitives.WriteUInt32LittleEndian(buf[offset..], key);
+        offset += 4;
+        BinaryPrimitives.WriteUInt32LittleEndian(buf[offset..], 0);
+        offset += 4;
+
+        WritePodHeader(buf, ref offset, bodySize: 4, SPA_TYPE_Int);
+        BinaryPrimitives.WriteInt32LittleEndian(buf[offset..], value);
+        offset += 4;
         BinaryPrimitives.WriteUInt32LittleEndian(buf[offset..], 0);
         offset += 4;
     }

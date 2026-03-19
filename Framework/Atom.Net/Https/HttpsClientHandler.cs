@@ -1,26 +1,25 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Security;
 using System.Runtime.CompilerServices;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
-using System.Text;
 using Atom.Net.Https.Connections;
-using Atom.Net.Https.Http;
-using Atom.Net.Tls;
 
 namespace Atom.Net.Https;
 
 /// <summary>
-/// Представляет обработчик HTTPS-запросов.
+/// Минимальный обработчик запросов для текущего H1-среза.
+/// На этом этапе поддерживается HTTP/1.1 поверх cleartext и минимального custom TLS 1.2 path через <see cref="Https11Connection"/>.
 /// </summary>
-public class HttpsClientHandler : HttpMessageHandler
+public sealed partial class HttpsClientHandler : HttpMessageHandler
 {
-    internal volatile int activeRequests;
-    internal volatile bool isFirstRequestSended;
-    internal volatile bool isReadyForDisposing;
+    private int activeRequests;
+    private int isDisposed;
+    private readonly ConcurrentDictionary<ConnectionPoolKey, ConnectionPoolState> connectionPool = new();
 
     /// <summary>
     /// Возвращает или задает значение, которое указывает, должен ли обработчик следовать ответам перенаправления.
@@ -105,7 +104,7 @@ public class HttpsClientHandler : HttpMessageHandler
     /// Возвращает доступный для записи словарь (т. е. карту) настраиваемых свойств запросов <see cref="HttpClient"/>.
     /// Словарь инициализируется пустым. Можно вставить и запросить пары "ключ-значение" для пользовательских обработчиков и особой обработки.
     /// </summary>
-    public IDictionary<string, object?> Properties { get; } = new Dictionary<string, object?>();
+    public IDictionary<string, object?> Properties { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
 
     /// <summary>
     /// Возвращает или задает сведения о прокси-сервере, используемые обработчиком.
@@ -125,18 +124,27 @@ public class HttpsClientHandler : HttpMessageHandler
     /// <summary>
     /// Возвращает значение, указывающее, поддерживает ли обработчик автоматическое распаковка содержимого ответа.
     /// </summary>
-    public virtual bool SupportsAutomaticDecompression { get; } = true;
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "The property is part of the instance handler surface.")]
+    [SuppressMessage("Maintainability", "MA0041:Use a method group instead of a lambda", Justification = "The analyzer misfires on expression-bodied instance properties.")]
+    [SuppressMessage("Major Code Smell", "S2325:Methods and properties that don't access instance data should be static", Justification = "The property is part of the instance handler surface.")]
+    public bool SupportsAutomaticDecompression => false;
 
     /// <summary>
     /// Получает значение, указывающее, поддерживает ли обработчик параметры прокси.
     /// </summary>
-    public virtual bool SupportsProxy { get; } = true;
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "The property is part of the instance handler surface.")]
+    [SuppressMessage("Maintainability", "MA0041:Use a method group instead of a lambda", Justification = "The analyzer misfires on expression-bodied instance properties.")]
+    [SuppressMessage("Major Code Smell", "S2325:Methods and properties that don't access instance data should be static", Justification = "The property is part of the instance handler surface.")]
+    public bool SupportsProxy => false;
 
     /// <summary>
     /// Получает значение, указывающее, поддерживает ли обработчик параметры конфигурации для свойств <see cref="AllowAutoRedirect"/>
     /// и <see cref="MaxAutomaticRedirections"/>.
     /// </summary>
-    public virtual bool SupportsRedirectConfiguration { get; } = true;
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "The property is part of the instance handler surface.")]
+    [SuppressMessage("Maintainability", "MA0041:Use a method group instead of a lambda", Justification = "The analyzer misfires on expression-bodied instance properties.")]
+    [SuppressMessage("Major Code Smell", "S2325:Methods and properties that don't access instance data should be static", Justification = "The property is part of the instance handler surface.")]
+    public bool SupportsRedirectConfiguration => false;
 
     /// <summary>
     /// Возвращает или задает значение, указывающее, использует <see cref="CookieContainer"/> ли обработчик свойство
@@ -176,79 +184,26 @@ public class HttpsClientHandler : HttpMessageHandler
     public TimeSpan Expect100ContinueTimeout { get; set; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// Случайный джиттер к любому из интервалов (мин/макс).
+    /// Возвращает или задает таймаут ожидания стартовых заголовков ответа.
     /// </summary>
-    public JitterSettings Jitter { get; set; }
-
-    /// <summary>
-    /// Пауза между HEADERS и DATA (для H2/H3) либо между статус-линией и телом (H1).
-    /// </summary>
-    public TimeSpan HeadersToDataDelay { get; set; } = TimeSpan.Zero;
-
-    /// <summary>
-    /// Возвращает или задает максимальный объем данных, который может быть извлечен из ответов в байтах.
-    /// </summary>
-    public int MaxResponseDrainSize { get; set; } = int.MaxValue;
+    public TimeSpan ResponseHeadersTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Позволяет получить или задать пользовательский обратный вызов, который предоставляет доступ к потоку протокола HTTP с обычным текстом.
+    /// В текущем срезе значение сохраняется, но не используется.
     /// </summary>
     public Func<SocketsHttpPlaintextStreamFilterContext, CancellationToken, ValueTask<Stream>>? PlaintextStreamFilter { get; set; }
 
     /// <summary>
-    /// Получает или задает время неактивности соединения в пуле, после которого оно будет считаться доступным для повторного использования.
+    /// Получает или задает время неактивности соединения в пуле.
+    /// Пока используется только как часть connection options.
     /// </summary>
     public TimeSpan PooledConnectionIdleTimeout { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>
-    /// Получает или задает время соединения в пуле, после которого оно будет считаться доступным для повторного использования.
+    /// Получает или задает максимальное абсолютное время жизни соединения в пуле.
     /// </summary>
     public TimeSpan PooledConnectionLifetime { get; set; } = Timeout.InfiniteTimeSpan;
-
-    /// <summary>
-    /// Возвращает или задает обратный вызов, который выбирает для кодирования значений <see cref="Encoding"/> заголовка запроса.
-    /// </summary>
-    public HeaderEncodingSelector<HttpRequestMessage>? RequestHeaderEncodingSelector { get; set; }
-
-    /// <summary>
-    /// Возвращает или задает период времени, в течение которого данные должны быть извлечены из ответов.
-    /// </summary>
-    public TimeSpan ResponseDrainTimeout { get; set; } = TimeSpan.FromMinutes(5);
-
-    /// <summary>
-    /// Возвращает или задает обратный вызов, который выбирает для декодирования значений <see cref="Encoding"/> заголовка ответа.
-    /// </summary>
-    public HeaderEncodingSelector<HttpRequestMessage>? ResponseHeaderEncodingSelector { get; set; }
-
-    /// <summary>
-    /// Возвращает или задает набор параметров, используемых для проверки подлинности клиента TLS.
-    /// </summary>
-    public SslClientAuthenticationOptions SslOptions { get; set; } = new();
-
-    /// <summary>
-    /// Настройки HTTP/1.1.
-    /// </summary>
-    public Http11Settings Http11 { get; set; }
-
-    /// <summary>
-    /// Настройки HTTP/2.
-    /// </summary>
-    public Http2Settings Http2 { get; set; }
-
-    /// <summary>
-    /// Настройки HTTP/3.
-    /// </summary>
-    public Http3Settings Http3 { get; set; }
-
-    /// <summary>
-    /// Валидатор Client Hello.
-    /// </summary>
-    public IClientHelloValidator? ClientHelloValidator { get; set; }
-
-    /// <summary>
-    /// Использовать ли режим инкогнито.
-    /// </summary>
-    public bool UseIncognitoMode { get; set; }
 
     /// <summary>
     /// Получает кэшированный делегат, который всегда возвращает true.
@@ -274,80 +229,80 @@ public class HttpsClientHandler : HttpMessageHandler
                        (uri.Scheme[3] | 0x20) is 'p' &&
                        (uri.Scheme[4] | 0x20) is 's';
 
-        var port = uri.IsDefaultPort ? (isHttps ? 443 : 80) : uri.Port;
+        var port = uri.Port;
+        if (uri.IsDefaultPort)
+        {
+            port = isHttps ? 443 : 80;
+        }
 
-        // Политика версии берётся из запроса. При необходимости можно переопределить профилем.
         var versionPolicy = request.VersionPolicy;
 
-        // Вычисление лимита потоков: для H1 всегда 1; для H2/H3 — берём из настроек.
-        var maxStreams = request.Version.Major >= 2 ? (request.Version.Major is 2 ? Http2.MaxConcurrentStreams : Http3.MaxStreamsBidi) : 1;
+        var preferredVersion = request.Version == default ? HttpVersion.Version11 : request.Version;
 
         return new HttpsConnectionOptions
         {
-            Host = uri.IdnHost,     // соответствует браузерной мимикрии и SNI.
+            Host = uri.IdnHost,
             Port = port,
             IsHttps = isHttps,
-            PreferredVersion = request.Version, // 1.1 / 2.0 / 3.0
-            VersionPolicy = versionPolicy,   // System.Net.Http.HttpVersionPolicy
-            LocalEndPoint = null,            // TODO: пробросить из TcpSettings при необходимости точной привязки.
+            PreferredVersion = preferredVersion,
+            VersionPolicy = versionPolicy,
+            LocalEndPoint = null,
             ConnectTimeout = ConnectTimeout,
-            // Браузеры имеют ограничение на ожидание стартовых заголовков — берём консервативное значение.
-            // При появлении собственного свойства перетащим сюда прямую настройку.
-            ResponseHeadersTimeout = TimeSpan.FromSeconds(30),
+            ResponseHeadersTimeout = ResponseHeadersTimeout,
+            SslProtocols = SslProtocols,
+            CheckCertificateRevocationList = CheckCertificateRevocationList,
+            ServerCertificateValidationCallback = ServerCertificateCustomValidationCallback is null
+                ? null
+                : (certificate, chain, sslPolicyErrors) => ServerCertificateCustomValidationCallback(request, certificate, chain, sslPolicyErrors),
+            MaxResponseHeadersBytes = MaxResponseHeadersLength <= 0 ? int.MaxValue : checked(MaxResponseHeadersLength * 1024),
             IdleTimeout = PooledConnectionIdleTimeout,
-            MaxConcurrentStreams = maxStreams,
-            AutoDecompression = AutomaticDecompression != DecompressionMethods.None
+            MaxConcurrentStreams = 1,
+            AutoDecompression = false,
         };
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal async Task<HttpsResponseMessage> SendInternalAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed) is not 0, this);
         cancellationToken.ThrowIfCancellationRequested();
         Interlocked.Increment(ref activeRequests);
 
-        var tlsSettings = request.Version.Major switch
-        {
-            2 => Http2.Tls,
-            3 => Http3.Tls,
-            _ => Http11.Tls,
-        };
-
-        if (!Interlocked.CompareExchange(ref isFirstRequestSended, value: true, default)) ClientHelloValidator?.Validate(tlsSettings);
-
+        HttpsRequestMessage? preparedRequest = null;
+        var ownsPreparedRequest = false;
+        Https11Connection? connection = null;
+        ConnectionPoolState? poolState = null;
+        var leaseHeld = false;
         try
         {
-            if (request is HttpsRequestMessage r)
-            {
-                // 1) Сборка опций соединения из настроек хэндлера + параметров запроса.
-                var options = BuildConnectionOptions(r);
+#pragma warning disable CA2000
+            preparedRequest = PrepareRequest(request, out ownsPreparedRequest);
 
-                // 2) Выбор реализации соединения по версии (с учётом политики).
-                using var connection = CreateConnection(options.PreferredVersion);
+            var unsupported = TryCreateUnsupportedResponse(request, preparedRequest);
+            if (unsupported is not null) return unsupported;
 
-                await using (connection.ConfigureAwait(false))
-                {
+            ApplyRequestCookies(preparedRequest);
 
-                    // 3) Открытие соединения (TCP/QUIC + TLS + ALPN) и подготовка кодеков (H1/HPACK/QPACK).
-                    await connection.OpenAsync(options, cancellationToken).ConfigureAwait(false);
+            var options = BuildConnectionOptions(preparedRequest);
+            (connection, poolState, leaseHeld) = await AcquireConnectionAsync(options, cancellationToken).ConfigureAwait(false);
+#pragma warning restore CA2000
 
-                    // 4) Отправка запроса. Реализация сама учтёт HPACK/QPACK/flow-control/декодирование.
-                    var response = await connection.SendAsync(r, cancellationToken).ConfigureAwait(false);
+            var (response, returnedToPool) = await SendOverConnectionAsync(preparedRequest, connection, poolState, options, cancellationToken).ConfigureAwait(false);
+            if (returnedToPool)
+                connection = null;
 
-                    // 5) Для простоты «скелета» закрываем соединение после запроса.
-                    // В дальнейшем это место будет переключено на пул/реюз соединений.
-                    // StartDrain сигнализирует корректное завершение активных потоков (h2/h3).
-                    connection.StartDrain();
-                    await connection.CloseAsync(cancellationToken).ConfigureAwait(false);
-
-                    return response;
-                }
-            }
-
-            throw new NotImplementedException(); // TODO: Реализовать логику отправки запроса и получения ответа с базовыми параметрами запроса (с учётом трафика).
+            return response;
         }
         finally
         {
+            if (connection is not null)
+                await DisposeLeasedConnectionAsync(connection).ConfigureAwait(false);
+
+            if (leaseHeld && poolState is not null)
+                poolState.ReleaseLease();
+
+            DisposePreparedRequest(preparedRequest, ownsPreparedRequest);
+
             Interlocked.Decrement(ref activeRequests);
         }
     }
@@ -360,19 +315,127 @@ public class HttpsClientHandler : HttpMessageHandler
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected override HttpResponseMessage Send(HttpRequestMessage request, CancellationToken cancellationToken)
-        => SendAsync(request, cancellationToken).GetAwaiter().GetResult();
+        => throw new NotSupportedException("Synchronous Send is not supported by HttpsClientHandler. Use SendAsync instead.");
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static HttpsRequestMessage PrepareRequest(HttpRequestMessage request, out bool ownsPreparedRequest)
+    {
+        if (request is HttpsRequestMessage httpsRequest)
+        {
+            ownsPreparedRequest = false;
+            return httpsRequest;
+        }
+
+        var prepared = new HttpsRequestMessage(request.Method, request.RequestUri)
+        {
+            Version = request.Version == default ? HttpVersion.Version11 : request.Version,
+            VersionPolicy = request.VersionPolicy,
+            Content = request.Content,
+        };
+
+        ownsPreparedRequest = true;
+
+        foreach (var header in request.Headers)
+            prepared.Headers.TryAddWithoutValidation(header.Key, header.Value);
+
+        return prepared;
+    }
+
+    private HttpsResponseMessage? TryCreateUnsupportedResponse(HttpRequestMessage originalRequest, HttpsRequestMessage preparedRequest)
+    {
+        _ = preparedRequest.RequestUri ?? throw new InvalidOperationException("RequestUri не задан");
+
+        if (UseProxy && Proxy is not null)
+            return HttpsResponseMessage.FromException(originalRequest, TimeSpan.Zero, new NotSupportedException("Прокси path для минимального H1 handler пока не подключён."));
+
+        if (preparedRequest.Version.Major >= 2)
+            return HttpsResponseMessage.FromException(originalRequest, TimeSpan.Zero, new NotSupportedException("Минимальный handler path пока поддерживает только HTTP/1.1."));
+
+        return null;
+    }
+
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "Connection ownership is transferred to SendInternalAsync, which releases or returns the connection from its finally block.")]
+    private async ValueTask<(Https11Connection Connection, ConnectionPoolState? PoolState, bool LeaseHeld)> AcquireConnectionAsync(HttpsConnectionOptions options, CancellationToken cancellationToken)
+    {
+        if (MaxConnectionsPerServer <= 0)
+            return (new Https11Connection(), null, false);
+
+        var poolKey = new ConnectionPoolKey(options.Host, options.Port, options.IsHttps);
+        var poolState = connectionPool.GetOrAdd(poolKey, static (_, arg) => new ConnectionPoolState(arg.MaxConnections), new ConnectionPoolStateFactoryArg(MaxConnectionsPerServer));
+        await poolState.WaitForLeaseAsync(cancellationToken).ConfigureAwait(false);
+
+        var pooledConnection = TryRentConnection(poolKey, poolState);
+        if (pooledConnection is not null)
+            return (pooledConnection, poolState, true);
+
+        return (new Https11Connection(), poolState, true);
+    }
+
+    private async ValueTask<(HttpsResponseMessage Response, bool ReturnedToPool)> SendOverConnectionAsync(HttpsRequestMessage preparedRequest, Https11Connection connection, ConnectionPoolState? poolState, HttpsConnectionOptions options, CancellationToken cancellationToken)
+    {
+        if (!connection.IsConnected)
+            await connection.OpenAsync(options, cancellationToken).ConfigureAwait(false);
+
+        var uri = preparedRequest.RequestUri ?? throw new InvalidOperationException("RequestUri не задан");
+        var response = await connection.SendAsync(preparedRequest, cancellationToken).ConfigureAwait(false);
+        ApplyResponseCookies(uri, response);
+
+        if (poolState is not null && CanReuseConnection(connection, response))
+        {
+            ReturnConnection(poolState, connection);
+            return (response, true);
+        }
+
+        return (response, false);
+    }
+
+    private static void DisposePreparedRequest(HttpsRequestMessage? preparedRequest, bool ownsPreparedRequest)
+    {
+        if (!ownsPreparedRequest || preparedRequest is null) return;
+
+        preparedRequest.Content = null;
+        preparedRequest.Dispose();
+    }
+
+    private static ValueTask DisposeLeasedConnectionAsync(Https11Connection connection)
+        => DisposeConnectionAsync(connection);
+
+    private void ApplyRequestCookies(HttpsRequestMessage request)
+    {
+        if (!UseCookies || request.RequestUri is null || request.Headers.Contains("Cookie")) return;
+
+        var cookies = CookieContainer.GetCookieHeader(request.RequestUri);
+        if (!string.IsNullOrWhiteSpace(cookies))
+            request.Headers.TryAddWithoutValidation("Cookie", cookies);
+    }
+
+    private void ApplyResponseCookies(Uri uri, HttpsResponseMessage response)
+    {
+        if (!UseCookies || response.Exception is not null) return;
+        if (!response.Headers.TryGetValues("Set-Cookie", out var values)) return;
+
+        foreach (var value in values)
+            CookieContainer.SetCookies(uri, value);
+    }
 
     /// <summary>
-    /// Выбирает реализацию соединения под целевую версию HTTP.
+    /// Освобождает ресурсы обработчика.
     /// </summary>
-    /// <param name="preferred">Предпочитаемая версия.</param>
-    /// <returns>Экземпляр соединения.</returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static IHttpsConnection CreateConnection(Version preferred)
+    /// <param name="disposing">Указывает, нужно ли освобождать управляемые ресурсы.</param>
+    protected override void Dispose(bool disposing)
     {
-        // Быстрый выбор без ветвлений по строкам и без аллокаций.
-        return preferred.Major >= 3 ? new Https3Connection()
-             : preferred.Major is 2 ? new Https2Connection()
-             : new Https11Connection();
+        if (!disposing) return;
+        Volatile.Write(ref isDisposed, value: 1);
+
+        foreach (var pair in connectionPool)
+        {
+            while (pair.Value.Connections.TryDequeue(out var connection))
+                DisposeConnection(connection);
+
+            pair.Value.Dispose();
+        }
+
+        connectionPool.Clear();
+        base.Dispose(disposing);
     }
 }

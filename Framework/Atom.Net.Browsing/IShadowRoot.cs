@@ -1,4 +1,4 @@
-namespace Atom.Net.Browsing;
+﻿namespace Atom.Net.Browsing;
 
 /// <summary>
 /// Представляет теневой корень (Shadow Root) элемента DOM.

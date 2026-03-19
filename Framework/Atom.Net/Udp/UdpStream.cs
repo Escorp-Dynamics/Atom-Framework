@@ -1,4 +1,4 @@
-#pragma warning disable CA2000
+﻿#pragma warning disable CA2000
 
 using System.Net;
 using System.Net.Sockets;
@@ -17,7 +17,11 @@ public sealed class UdpStream : NetworkStream
     private EndPoint RemoteTemplate
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => field ??= new IPEndPoint(IPAddress.IPv6Any, 0);
+        get
+        {
+            field ??= new IPEndPoint(IPAddress.IPv6Any, 0);
+            return field;
+        }
     }
 
     /// <inheritdoc/>
@@ -84,12 +88,13 @@ public sealed class UdpStream : NetworkStream
 
         TryBindLocalEndpoint(Socket, Settings.LocalEndPoint);
         SuppressConnectionResetIfSupported();
+        ApplyTrafficClass(Socket, Settings.Dscp, Settings.UseEcn, SafeRemoteAddressFamily);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private async ValueTask ConnectSeqAsync(IPAddress[] addresses, int port, CancellationToken cancellationToken)
     {
-        Exception? last = default;
+        SocketException? last = default;
 
         for (var i = 0; i < addresses.Length; i++)
         {
@@ -98,11 +103,15 @@ public sealed class UdpStream : NetworkStream
                 await Socket.ConnectAsync(new IPEndPoint(addresses[i], port), cancellationToken).ConfigureAwait(false);
                 return;
             }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { last = ex; }
+            catch (SocketException ex)
+            {
+                if (!IsExpectedConnectFailure(ex)) throw;
+                last = ex;
+            }
         }
 
-        throw last is SocketException se ? se : new SocketException((int)SocketError.HostUnreachable);
+        if (last is not null) throw last;
+        throw new SocketException((int)SocketError.HostUnreachable);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -113,42 +122,102 @@ public sealed class UdpStream : NetworkStream
         // Use heap-allocated arrays here because Span<T> (stackalloc) cannot be
         // stored across await boundaries. We copy indices into arrays and pass
         // their spans to the FillFamilyIndices helper.
-        var idx6Arr = n6 > 0 ? new int[n6] : Array.Empty<int>();
-        var idx4Arr = n4 > 0 ? new int[n4] : Array.Empty<int>();
+        var idx6Arr = n6 > 0 ? new int[n6] : [];
+        var idx4Arr = n4 > 0 ? new int[n4] : [];
 
         FillFamilyIndices(addresses, idx6Arr.AsSpan(), idx4Arr.AsSpan(), out var i6, out var i4);
 
         var p6 = 0;
         var p4 = 0;
         var turnV6 = true;
-        var initialDelay = Settings.HappyEyeballsDelay <= TimeSpan.Zero ? TimeSpan.FromMilliseconds(200) : Settings.HappyEyeballsDelay;
-        var stepDelay = Settings.HappyEyeballsStepDelay <= TimeSpan.Zero ? TimeSpan.FromMilliseconds(250) : Settings.HappyEyeballsStepDelay;
+        var initialDelay = NormalizeDelay(Settings.HappyEyeballsDelay, 200);
+        var stepDelay = NormalizeDelay(Settings.HappyEyeballsStepDelay, 250);
         var firstV4Delayed = false;
 
         while (p6 < i6 || p4 < i4)
         {
+            if (await TryHandleIpv6TurnAsync(addresses, idx6Arr, p6, i6, port, turnV6, firstV4Delayed, initialDelay, stepDelay, cancellationToken).ConfigureAwait(false) is { handled: true, completed: true })
+            {
+                return;
+            }
+
             if (turnV6 && p6 < i6)
             {
-                if (await TryConnectOneAsync(addresses[idx6Arr[p6++]], port, cancellationToken).ConfigureAwait(false)) return;
+                p6++;
                 turnV6 = false;
+                firstV4Delayed = true;
+                continue;
+            }
 
-                if (!firstV4Delayed) { firstV4Delayed = true; await Task.Delay(initialDelay, cancellationToken).ConfigureAwait(false); }
-                else { await Task.Delay(stepDelay, cancellationToken).ConfigureAwait(false); }
-            }
-            else if (!turnV6 && p4 < i4)
+            if (await TryHandleIpv4TurnAsync(addresses, idx4Arr, p4, i4, port, turnV6, stepDelay, cancellationToken).ConfigureAwait(false))
             {
-                if (await TryConnectOneAsync(addresses[idx4Arr[p4++]], port, cancellationToken).ConfigureAwait(false)) return;
+                return;
+            }
+
+            if (!turnV6 && p4 < i4)
+            {
+                p4++;
                 turnV6 = true;
-                await Task.Delay(stepDelay, cancellationToken).ConfigureAwait(false);
+                continue;
             }
-            else
-            {
-                if (p6 < i6) { if (await TryConnectOneAsync(addresses[idx6Arr[p6++]], port, cancellationToken).ConfigureAwait(false)) return; }
-                else if (p4 < i4) { if (await TryConnectOneAsync(addresses[idx4Arr[p4++]], port, cancellationToken).ConfigureAwait(false)) return; }
-            }
+
+            (p6, p4) = await RunFinalFamilyConnectAsync(addresses, idx6Arr, idx4Arr, p6, i6, p4, i4, port, cancellationToken).ConfigureAwait(false);
         }
 
         throw new SocketException((int)SocketError.HostUnreachable);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static TimeSpan NormalizeDelay(TimeSpan value, int defaultMilliseconds)
+        => value <= TimeSpan.Zero ? TimeSpan.FromMilliseconds(defaultMilliseconds) : value;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static async ValueTask<bool> DelayNextFamilyAsync(bool firstV4Delayed, TimeSpan initialDelay, TimeSpan stepDelay, CancellationToken cancellationToken)
+    {
+        if (!firstV4Delayed)
+        {
+            await Task.Delay(initialDelay, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+
+        await Task.Delay(stepDelay, cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private async ValueTask<(bool handled, bool completed)> TryHandleIpv6TurnAsync(IPAddress[] addresses, int[] indices, int position, int count, int port, bool turnV6, bool firstV4Delayed, TimeSpan initialDelay, TimeSpan stepDelay, CancellationToken cancellationToken)
+    {
+        if (!turnV6 || position >= count) return default;
+        if (await TryConnectOneAsync(addresses[indices[position]], port, cancellationToken).ConfigureAwait(false)) return (true, true);
+        await DelayNextFamilyAsync(firstV4Delayed, initialDelay, stepDelay, cancellationToken).ConfigureAwait(false);
+        return (true, false);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private async ValueTask<bool> TryHandleIpv4TurnAsync(IPAddress[] addresses, int[] indices, int position, int count, int port, bool turnV6, TimeSpan stepDelay, CancellationToken cancellationToken)
+    {
+        if (turnV6 || position >= count) return false;
+        if (await TryConnectOneAsync(addresses[indices[position]], port, cancellationToken).ConfigureAwait(false)) return true;
+        await Task.Delay(stepDelay, cancellationToken).ConfigureAwait(false);
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private async ValueTask<(int p6, int p4)> RunFinalFamilyConnectAsync(IPAddress[] addresses, int[] idx6, int[] idx4, int p6, int i6, int p4, int i4, int port, CancellationToken cancellationToken)
+    {
+        if (p6 < i6)
+        {
+            await TryConnectOneAsync(addresses[idx6[p6]], port, cancellationToken).ConfigureAwait(false);
+            return (p6 + 1, p4);
+        }
+
+        if (p4 < i4)
+        {
+            await TryConnectOneAsync(addresses[idx4[p4]], port, cancellationToken).ConfigureAwait(false);
+            return (p6, p4 + 1);
+        }
+
+        return (p6, p4);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -159,9 +228,31 @@ public sealed class UdpStream : NetworkStream
             await Socket.ConnectAsync(new IPEndPoint(ip, port), cancellationToken).ConfigureAwait(false);
             return true;
         }
-        catch (OperationCanceledException) { throw; }
-        catch { return default; }
+        catch (SocketException ex)
+        {
+            if (!IsExpectedConnectFailure(ex)) throw;
+            // Ожидаемый отказ конкретного адреса: продолжаем перебор других адресов.
+            return default;
+        }
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsExpectedConnectFailure(SocketException ex) => ex.SocketErrorCode switch
+    {
+        SocketError.AddressAlreadyInUse => true,
+        SocketError.AddressNotAvailable => true,
+        SocketError.ConnectionRefused => true,
+        SocketError.ConnectionReset => true,
+        SocketError.HostNotFound => true,
+        SocketError.HostUnreachable => true,
+        SocketError.NetworkDown => true,
+        SocketError.NetworkUnreachable => true,
+        SocketError.NoData => true,
+        SocketError.Shutdown => true,
+        SocketError.TimedOut => true,
+        SocketError.TryAgain => true,
+        _ => false,
+    };
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void SuppressConnectionResetIfSupported()
@@ -195,12 +286,10 @@ public sealed class UdpStream : NetworkStream
                 if (n6 >= 0) LastPacketInfo = new UdpPacketInfo(pi6.Address, pi6.Interface);
                 return n6;
             }
-            else // IPv4
-            {
-                var n4 = Socket.ReceiveMessageFrom(buffer, ref flags, ref ep, out var pi4);
-                if (n4 >= 0) LastPacketInfo = new UdpPacketInfo(pi4.Address, pi4.Interface);
-                return n4;
-            }
+
+            var n4 = Socket.ReceiveMessageFrom(buffer, ref flags, ref ep, out var pi4);
+            if (n4 >= 0) LastPacketInfo = new UdpPacketInfo(pi4.Address, pi4.Interface);
+            return n4;
         }
         catch (SocketException se) when (TreatWouldBlockAsZero && se.SocketErrorCode is SocketError.WouldBlock)
         {
@@ -216,22 +305,17 @@ public sealed class UdpStream : NetworkStream
 
         var res = await Socket.ReceiveMessageFromAsync(buffer, RemoteTemplate, cancellationToken).ConfigureAwait(false);
 
-        // IPv4 pktinfo:
-        if (res.PacketInformation.Address is not null && !res.PacketInformation.Address.Equals(IPAddress.None))
-        {
-            LastPacketInfo = new UdpPacketInfo(res.PacketInformation.Address, res.PacketInformation.Interface);
-        }
-        // IPv6 pktinfo доступен начиная с свежих версий (если свойство присутствует).
-        else if (res.PacketInformation.Address is not null)
-        {
-            LastPacketInfo = new UdpPacketInfo(res.PacketInformation.Address, res.PacketInformation.Interface);
-        }
-        else
-        {
-            LastPacketInfo = default; // мягкая деградация (pktinfo недоступен)
-        }
+        LastPacketInfo = CreatePacketInfo(res.PacketInformation);
 
         return res.ReceivedBytes;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static UdpPacketInfo CreatePacketInfo(IPPacketInformation packetInformation)
+    {
+        if (packetInformation.Address is null) return default;
+        if (packetInformation.Address.Equals(IPAddress.None)) return default;
+        return new UdpPacketInfo(packetInformation.Address, packetInformation.Interface);
     }
 
     /// <summary>
@@ -241,12 +325,16 @@ public sealed class UdpStream : NetworkStream
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public async ValueTask ConnectAsync(string host, int port, CancellationToken cancellationToken)
     {
-        using var cts = (Settings.AttemptTimeout > TimeSpan.Zero)
+        using var cts = Settings.AttemptTimeout > TimeSpan.Zero
             ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
             : default;
 
-        cts?.CancelAfter(Settings.AttemptTimeout);
-        var ct = cts?.Token ?? cancellationToken;
+        var ct = cancellationToken;
+        if (cts is not null)
+        {
+            cts.CancelAfter(Settings.AttemptTimeout);
+            ct = cts.Token;
+        }
 
         var addresses = IPAddress.TryParse(host, out var parsed)
             ? [parsed]
@@ -259,7 +347,7 @@ public sealed class UdpStream : NetworkStream
         else
             await ConnectAlternatingAsync(addresses, port, ct).ConfigureAwait(false);
 
-        TrySetIpv4Dscp(Socket, Settings.Dscp, SafeRemoteAddressFamily);
+        ApplyTrafficClass(Socket, Settings.Dscp, Settings.UseEcn, SafeRemoteAddressFamily);
     }
 
     /// <summary>Подключается без токена отмены.</summary>

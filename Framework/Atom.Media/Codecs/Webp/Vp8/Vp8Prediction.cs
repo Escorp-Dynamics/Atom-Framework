@@ -147,12 +147,12 @@ internal static class Vp8Prediction
     /// <paramref name="aboveLeft"/> = the top-left corner pixel.
     /// </summary>
     public static void Predict4x4(int mode, ReadOnlySpan<byte> above, ReadOnlySpan<byte> left,
-        byte aboveLeft, Span<byte> dst, int stride)
+        byte aboveLeft, bool hasAbove, bool hasLeft, Span<byte> dst, int stride)
     {
         switch (mode)
         {
             case Vp8Constants.BDcPred:
-                Predict4x4Dc(above, left, dst, stride);
+                Predict4x4Dc(above, left, hasAbove, hasLeft, dst, stride);
                 break;
             case Vp8Constants.BTmPred:
                 Predict4x4Tm(above, left, aboveLeft, dst, stride);
@@ -185,15 +185,38 @@ internal static class Vp8Prediction
     }
 
     /// <summary>4×4 DC prediction.</summary>
-    private static void Predict4x4Dc(ReadOnlySpan<byte> above, ReadOnlySpan<byte> left, Span<byte> dst, int stride)
+    private static void Predict4x4Dc(ReadOnlySpan<byte> above, ReadOnlySpan<byte> left, bool hasAbove, bool hasLeft, Span<byte> dst, int stride)
     {
-        var sum = 0;
-        for (var i = 0; i < 4; i++)
+        if (!hasAbove && !hasLeft)
         {
-            sum += above[i] + left[i];
+            Fill4x4(dst, stride, 128);
+            return;
         }
 
-        var dc = (byte)((sum + 4) >> 3);
+        var sum = 0;
+        var count = 0;
+
+        if (hasAbove)
+        {
+            for (var i = 0; i < 4; i++)
+            {
+                sum += above[i];
+            }
+
+            count += 4;
+        }
+
+        if (hasLeft)
+        {
+            for (var i = 0; i < 4; i++)
+            {
+                sum += left[i];
+            }
+
+            count += 4;
+        }
+
+        var dc = (byte)((sum + (count >> 1)) / count);
         Fill4x4(dst, stride, dc);
     }
 

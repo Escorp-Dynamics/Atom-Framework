@@ -73,7 +73,7 @@ internal struct Vp8SegmentHeader
 /// </summary>
 internal struct Vp8FilterHeader
 {
-    /// <summary>True = normal filter, false = simple filter.</summary>
+    /// <summary>True = normal filter, false = simple filter. Bitstream filter_type uses the inverse flag (0 = normal, 1 = simple).</summary>
     public bool UseNormalFilter;
 
     /// <summary>Base loop filter level (0–63).</summary>
@@ -114,6 +114,9 @@ internal struct Vp8Macroblock
 
     /// <summary>Whether this macroblock is skipped (all zero residuals).</summary>
     public bool IsSkip;
+
+    /// <summary>Whether inner subblock edges must be filtered for this macroblock.</summary>
+    public bool HasFilterSubblocks;
 
     /// <summary>Effective loop filter level for this macroblock (after segment/ref adjustments).</summary>
     public int FilterLevel;

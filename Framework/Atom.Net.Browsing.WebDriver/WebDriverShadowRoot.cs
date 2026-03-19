@@ -9,7 +9,7 @@ namespace Atom.Net.Browsing.WebDriver;
 /// Все DOM-операции делегируются расширению с указанием хост-элемента,
 /// обеспечивая скоупинг внутри теневого дерева.
 /// </summary>
-internal sealed class WebDriverShadowRoot(string hostElementId, TabChannel channel, bool isClosed = false) : IShadowRoot
+internal sealed class WebDriverShadowRoot(string hostElementId, TabChannel channel) : IShadowRoot
 {
     private bool isDisposed;
 
@@ -74,9 +74,6 @@ internal sealed class WebDriverShadowRoot(string hostElementId, TabChannel chann
             ["shadowHostElementId"] = hostElementId,
         };
 
-        if (isClosed)
-            findPayload["closedShadow"] = true;
-
         var response = await channel.SendCommandAsync(
             BridgeCommand.FindElement, findPayload, cancellationToken).ConfigureAwait(false);
 
@@ -100,9 +97,6 @@ internal sealed class WebDriverShadowRoot(string hostElementId, TabChannel chann
             ["value"] = selector.Value,
             ["shadowHostElementId"] = hostElementId,
         };
-
-        if (isClosed)
-            findPayload["closedShadow"] = true;
 
         var response = await channel.SendCommandAsync(
             BridgeCommand.FindElements, findPayload, cancellationToken).ConfigureAwait(false);
@@ -134,9 +128,6 @@ internal sealed class WebDriverShadowRoot(string hostElementId, TabChannel chann
             ["shadowHostElementId"] = hostElementId,
         };
 
-        if (isClosed)
-            waitPayload["closedShadow"] = true;
-
         var response = await channel.SendCommandAsync(
             BridgeCommand.WaitForElement, waitPayload, cancellationToken).ConfigureAwait(false);
 
@@ -165,12 +156,5 @@ internal sealed class WebDriverShadowRoot(string hostElementId, TabChannel chann
 
         isDisposed = true;
 
-        if (isClosed)
-        {
-            await channel.SendCommandAsync(
-                BridgeCommand.CleanupClosedShadow,
-                new JsonObject { ["hostElementId"] = hostElementId },
-                CancellationToken.None).ConfigureAwait(false);
-        }
     }
 }

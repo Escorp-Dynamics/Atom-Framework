@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using NLog.Extensions.Logging;
 using Serilog;
 
@@ -6,6 +6,7 @@ using ILogger = Microsoft.Extensions.Logging.ILogger;
 
 namespace Atom.Debug.Logging.Tests;
 
+[NonParallelizable]
 public class LoggerTests(BenchmarkDotNet.Loggers.ILogger logger) : BenchmarkTests<LoggerTests>(logger)
 {
     private static StringWriter? consoleOutput;

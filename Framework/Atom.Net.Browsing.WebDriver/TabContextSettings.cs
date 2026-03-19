@@ -152,6 +152,14 @@ public sealed class TabContextSettings
     public bool MediaDevicesProtection { get; init; }
 
     /// <summary>
+    /// Виртуальные media devices для tab-local browser injection.
+    /// Позволяет подменить tab-local <c>enumerateDevices()</c> и маршрутизировать
+    /// <c>getUserMedia()</c> на реальные browser-visible устройства,
+    /// которыми управляет внешняя C# сторона.
+    /// </summary>
+    public VirtualMediaDevicesSettings? VirtualMediaDevices { get; init; }
+
+    /// <summary>
     /// Расширенные параметры WebGL (<c>MAX_TEXTURE_SIZE</c>, <c>MAX_RENDERBUFFER_SIZE</c> и др.).
     /// </summary>
     public WebGLParamsSettings? WebGLParams { get; init; }
@@ -892,6 +900,60 @@ public sealed class SpeechVoiceSettings
     /// Является ли голос локальным (по умолчанию <see langword="true"/>).
     /// </summary>
     public bool LocalService { get; init; } = true;
+}
+
+/// <summary>
+/// Настройки tab-local виртуальных медиа-устройств.
+/// </summary>
+public sealed class VirtualMediaDevicesSettings
+{
+    /// <summary>
+    /// Включить виртуальный микрофон.
+    /// </summary>
+    public bool AudioInputEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Label виртуального микрофона.
+    /// </summary>
+    public string AudioInputLabel { get; init; } = "Virtual Microphone";
+
+    /// <summary>
+    /// Явный browser-visible <c>MediaDeviceInfo.deviceId</c> для микрофона.
+    /// Если задан, используется как основной ключ маршрутизации вместо label.
+    /// </summary>
+    public string? AudioInputBrowserDeviceId { get; init; }
+
+    /// <summary>
+    /// Включить виртуальную камеру.
+    /// </summary>
+    public bool VideoInputEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Label виртуальной камеры.
+    /// </summary>
+    public string VideoInputLabel { get; init; } = "Virtual Camera";
+
+    /// <summary>
+    /// Явный browser-visible <c>MediaDeviceInfo.deviceId</c> для камеры.
+    /// Если задан, используется как основной ключ маршрутизации вместо label.
+    /// </summary>
+    public string? VideoInputBrowserDeviceId { get; init; }
+
+    /// <summary>
+    /// Включить виртуальное audio output устройство в <c>enumerateDevices()</c>.
+    /// </summary>
+    public bool AudioOutputEnabled { get; init; }
+
+    /// <summary>
+    /// Label виртуального output устройства.
+    /// </summary>
+    public string AudioOutputLabel { get; init; } = "Virtual Speakers";
+
+    /// <summary>
+    /// Общий groupId для виртуальных устройств.
+    /// Если не указан, будет использован детерминированный groupId контекста.
+    /// </summary>
+    public string? GroupId { get; init; }
 }
 
 /// <summary>

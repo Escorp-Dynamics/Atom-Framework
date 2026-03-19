@@ -1,6 +1,8 @@
 ﻿using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using Atom.Media;
+using Atom.Tests;
 using Atom.Media.Video;
 
 namespace Atom.Media.Video.Tests;
@@ -68,11 +70,12 @@ public class VirtualCameraE2ETests(ILogger logger) : BenchmarkTests<VirtualCamer
         await Task.Delay(millisecondsDelay: 200);
 
         var nodes = await GetPipeWireNodesAsync();
+        var expectedNodeName = BuildExpectedNodeName(settings.Name);
 
         Assert.That(
-            nodes.Any(n => n.NodeName == "atom-virtual-camera"),
+            nodes.Any(n => n.NodeName == expectedNodeName),
             Is.True,
-            "Нода atom-virtual-camera не найдена в PipeWire");
+            $"Нода {expectedNodeName} не найдена в PipeWire");
     }
 
     [TestCase(TestName = "E2E: нода камеры имеет правильное описание")]
@@ -89,14 +92,14 @@ public class VirtualCameraE2ETests(ILogger logger) : BenchmarkTests<VirtualCamer
         await Task.Delay(millisecondsDelay: 200);
 
         var nodes = await GetPipeWireNodesAsync();
-        var node = nodes.FirstOrDefault(n => n.NodeName == "atom-virtual-camera"
+        var node = nodes.FirstOrDefault(n => n.NodeName == BuildExpectedNodeName(settings.Name)
             && n.NodeDescription == "E2E Description Test");
 
         Assert.That(node, Is.Not.Null, "Нода с описанием 'E2E Description Test' не найдена");
     }
 
-    [TestCase(TestName = "E2E: нода камеры имеет media.type=Video и media.category=Source")]
-    public async Task CameraNodeHasVideoSourceProperties()
+    [TestCase(TestName = "E2E: нода камеры имеет корректную PipeWire-классификацию video source")]
+    public async Task CameraNodeHasVideoSourceClassification()
     {
         var settings = new VirtualCameraSettings
         {
@@ -109,13 +112,15 @@ public class VirtualCameraE2ETests(ILogger logger) : BenchmarkTests<VirtualCamer
         await Task.Delay(millisecondsDelay: 200);
 
         var nodes = await GetPipeWireNodesAsync();
-        var node = nodes.FirstOrDefault(n => n.NodeName == "atom-virtual-camera"
+        var node = nodes.FirstOrDefault(n => n.NodeName == BuildExpectedNodeName(settings.Name)
             && n.NodeDescription == "E2E Media Type Test");
 
         Assert.That(node, Is.Not.Null, "Нода не найдена");
         Assert.That(node!.MediaType, Is.EqualTo("Video"));
         Assert.That(node.MediaCategory, Is.EqualTo("Source"));
         Assert.That(node.MediaRole, Is.EqualTo("Camera"));
+        Assert.That(node.MediaClass, Is.EqualTo("Video/Source"));
+        Assert.That(node.NodeVirtual, Is.EqualTo("true"));
     }
 
     [TestCase(TestName = "E2E: метаданные производителя передаются в PipeWire")]
@@ -135,7 +140,7 @@ public class VirtualCameraE2ETests(ILogger logger) : BenchmarkTests<VirtualCamer
         await Task.Delay(millisecondsDelay: 200);
 
         var nodes = await GetPipeWireNodesAsync();
-        var node = nodes.FirstOrDefault(n => n.NodeName == "atom-virtual-camera"
+        var node = nodes.FirstOrDefault(n => n.NodeName == BuildExpectedNodeName(settings.Name)
             && n.NodeDescription == "E2E Metadata Cam");
 
         Assert.That(node, Is.Not.Null, "Нода не найдена");
@@ -159,23 +164,152 @@ public class VirtualCameraE2ETests(ILogger logger) : BenchmarkTests<VirtualCamer
         var camera = await VirtualCamera.CreateAsync(settings);
         await Task.Delay(millisecondsDelay: 200);
 
-        // Проверяем что нода есть
         var nodesBefore = await GetPipeWireNodesAsync();
         Assert.That(
             nodesBefore.Any(n => n.NodeDescription == uniqueName),
             Is.True,
             "Нода не найдена до Dispose");
 
-        // Dispose
         await camera.DisposeAsync();
         await Task.Delay(millisecondsDelay: 200);
 
-        // Проверяем что нода исчезла
         var nodesAfter = await GetPipeWireNodesAsync();
         Assert.That(
             nodesAfter.Any(n => n.NodeDescription == uniqueName),
             Is.False,
             "Нода всё ещё существует после Dispose");
+    }
+
+    [TestCase(TestName = "E2E: DeviceId формирует стабильное имя ноды и сохраняет grouping")]
+    public async Task DeviceIdFormsStableNodeName()
+    {
+        var settings = new VirtualCameraSettings
+        {
+            Width = 320,
+            Height = 240,
+            Name = "E2E DeviceId Camera",
+            DeviceId = "shared device 001",
+        };
+
+        await using var camera = await VirtualCamera.CreateAsync(settings);
+        await Task.Delay(millisecondsDelay: 200);
+
+        var nodes = await GetPipeWireNodesAsync();
+        var node = nodes.FirstOrDefault(n => n.NodeDescription == settings.Name);
+
+        Assert.That(node, Is.Not.Null, "Нода не найдена");
+        Assert.That(node!.NodeName, Is.EqualTo("atom.camera.shared-device-001"));
+        Assert.That(node.NodeGroup, Is.EqualTo(settings.DeviceId));
+    }
+
+    [TestCase(TestName = "E2E: камера видна через GStreamer device monitor с video/x-raw caps")]
+    public async Task CameraVisibleInGStreamerDeviceMonitor()
+    {
+        if (!ProcessCommandHelpers.IsCommandAvailable("gst-device-monitor-1.0"))
+        {
+            Assert.Ignore("gst-device-monitor-1.0 не найден.");
+        }
+
+        var settings = new VirtualCameraSettings
+        {
+            Width = 640,
+            Height = 480,
+            FrameRate = 30,
+            PixelFormat = VideoPixelFormat.Rgba32,
+            Name = "E2E GStreamer Camera",
+            DeviceId = "gst-camera-001",
+            UsbVendorId = 0x1d6b,
+            UsbProductId = 0x0102,
+        };
+
+        await using var camera = await VirtualCamera.CreateAsync(settings);
+        await camera.StartCaptureAsync();
+
+        var frame = new byte[settings.Width * settings.Height * 4];
+        Array.Fill(frame, (byte)0x7f);
+        camera.WriteFrame(frame);
+        await Task.Delay(millisecondsDelay: 500);
+
+        var output = await ProcessCommandHelpers.RunProcessAsync("timeout", "6s gst-device-monitor-1.0 Video/Source", includeStandardError: true);
+
+        using var scope = Assert.EnterMultipleScope();
+        Assert.That(output, Does.Contain("name  : E2E GStreamer Camera"));
+        Assert.That(output, Does.Contain("class : Video/Source"));
+        Assert.That(output, Does.Contain("video/x-raw"));
+        Assert.That(output, Does.Contain("node.name = atom.camera.gst-camera-001"));
+        Assert.That(output, Does.Contain("device.name = atom.device.gst-camera-001"));
+        Assert.That(output, Does.Contain("node.group = gst-camera-001"));
+        Assert.That(output, Does.Contain("device.vendor.id = 0x1d6b"));
+        Assert.That(output, Does.Contain("device.product.id = 0x0102"));
+    }
+
+    [TestCase(TestName = "E2E: GStreamer consumer может открыть virtual camera и получить video caps")]
+    public async Task CameraReadableViaGStreamerConsumer()
+    {
+        if (!ProcessCommandHelpers.IsCommandAvailable("gst-launch-1.0"))
+        {
+            Assert.Ignore("gst-launch-1.0 не найден.");
+        }
+
+        var uniqueName = "E2E GStreamer Read " + Guid.NewGuid().ToString("N")[..8];
+        var settings = new VirtualCameraSettings
+        {
+            Width = 640,
+            Height = 480,
+            FrameRate = 30,
+            PixelFormat = VideoPixelFormat.Rgba32,
+            Name = uniqueName,
+            DeviceId = "gst-read-" + Guid.NewGuid().ToString("N")[..8],
+        };
+
+        await using var camera = await VirtualCamera.CreateAsync(settings);
+        await camera.StartCaptureAsync();
+
+        var frame = new byte[settings.Width * settings.Height * 4];
+        Array.Fill(frame, (byte)0x5a);
+
+        using var pumpCancellation = new CancellationTokenSource();
+        var pumpTask = Task.Run(async () =>
+        {
+            while (!pumpCancellation.IsCancellationRequested)
+            {
+                camera.WriteFrame(frame);
+                await Task.Delay(33, pumpCancellation.Token);
+            }
+        }, pumpCancellation.Token);
+
+        try
+        {
+            await Task.Delay(millisecondsDelay: 500);
+
+            var nodes = await GetPipeWireNodesAsync();
+            var node = nodes.FirstOrDefault(n => n.NodeDescription == uniqueName);
+
+            Assert.That(node, Is.Not.Null, "Нода камеры не появилась в PipeWire.");
+
+            var output = await ProcessCommandHelpers.RunProcessAsync(
+                "timeout",
+                $"8s gst-launch-1.0 -v pipewiresrc path={node!.NodeId} ! videoconvert ! fakesink sync=false",
+                includeStandardError: true);
+
+            Assert.That(output, Does.Contain("video/x-raw"));
+            Assert.That(output, Does.Contain("format=(string)RGBA"));
+            Assert.That(output, Does.Not.Contain("target not found"));
+            Assert.That(output, Does.Not.Contain("stream error"));
+        }
+        finally
+        {
+            pumpCancellation.Cancel();
+            try
+            {
+                await pumpTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            await camera.StopCaptureAsync();
+        }
     }
 
     [TestCase(TestName = "E2E: полный цикл — создание, захват, запись кадра, остановка")]
@@ -286,7 +420,7 @@ public class VirtualCameraE2ETests(ILogger logger) : BenchmarkTests<VirtualCamer
         var node = nodes.FirstOrDefault(n => n.NodeDescription == uniqueName);
 
         Assert.That(node, Is.Not.Null, $"Нода с описанием '{uniqueName}' не найдена");
-        Assert.That(node!.NodeName, Is.EqualTo("atom-virtual-camera"));
+        Assert.That(node!.NodeName, Is.EqualTo(BuildExpectedNodeName(uniqueName)));
     }
 
     // --- WriteFrame(string imagePath) ---
@@ -382,6 +516,47 @@ public class VirtualCameraE2ETests(ILogger logger) : BenchmarkTests<VirtualCamer
             using var stream = new MemoryStream(pngBytes);
             camera.WriteFrame(stream, ".png");
             await Task.Delay(millisecondsDelay: 33);
+        }
+
+        Assert.That(camera.IsCapturing, Is.True);
+
+        await camera.StopCaptureAsync();
+    }
+
+    [TestCase(TestName = "E2E: StreamFromAsync(MediaStream) стримит PNG кадр как live stream")]
+    public async Task StreamFromMediaStreamLoopsStillPngFrame()
+    {
+        var settings = new VirtualCameraSettings
+        {
+            Width = 4,
+            Height = 4,
+            FrameRate = 30,
+            PixelFormat = VideoPixelFormat.Rgba32,
+            Name = "E2E MediaStream PNG",
+        };
+
+        await using var camera = await VirtualCamera.CreateAsync(settings);
+        await camera.StartCaptureAsync();
+        await Task.Delay(millisecondsDelay: 100);
+
+        var pngBytes = CreateTestPngBytes(4, 4);
+        var streamParameters = new VideoCodecParameters
+        {
+            Width = 4,
+            Height = 4,
+            PixelFormat = VideoPixelFormat.Rgba32,
+            FrameRate = 30,
+        };
+
+        using var videoStream = VideoStream.FromStillImage(pngBytes, ".png", streamParameters);
+        using var cancellation = new CancellationTokenSource(millisecondsDelay: 160);
+
+        try
+        {
+            await camera.StreamFromAsync(videoStream, loop: true, cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
         }
 
         Assert.That(camera.IsCapturing, Is.True);
@@ -602,78 +777,39 @@ public class VirtualCameraE2ETests(ILogger logger) : BenchmarkTests<VirtualCamer
 
     // --- Helpers ---
 
-    private static async Task<List<PipeWireNode>> GetPipeWireNodesAsync()
+    private static Task<List<PipeWireNodeSnapshot>> GetPipeWireNodesAsync()
     {
-        using var process = new Process();
-        process.StartInfo = new ProcessStartInfo
-        {
-            FileName = "pw-dump",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-
-        process.Start();
-
-        var output = await process.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        return ParsePipeWireNodes(output);
+        return PipeWireSnapshotHelpers.GetNodesAsync();
     }
 
-    private static List<PipeWireNode> ParsePipeWireNodes(string json)
+    private static string BuildExpectedNodeName(string value)
     {
-        var result = new List<PipeWireNode>();
+        return "atom.camera." + BuildExpectedSlug(value);
+    }
 
-        using var doc = JsonDocument.Parse(json);
+    private static string BuildExpectedSlug(string value)
+    {
+        Span<char> buffer = stackalloc char[value.Length];
+        var length = 0;
+        var previousWasSeparator = false;
 
-        foreach (var element in doc.RootElement.EnumerateArray())
+        foreach (var character in value)
         {
-            if (!element.TryGetProperty("type", out var typeEl)
-                || typeEl.GetString() != "PipeWire:Interface:Node")
+            if (char.IsLetterOrDigit(character))
             {
+                buffer[length++] = char.ToLowerInvariant(character);
+                previousWasSeparator = false;
                 continue;
             }
 
-            if (!element.TryGetProperty("info", out var info)
-                || !info.TryGetProperty("props", out var props))
+            if (length > 0 && !previousWasSeparator)
             {
-                continue;
+                buffer[length++] = '-';
+                previousWasSeparator = true;
             }
-
-            result.Add(new PipeWireNode
-            {
-                NodeId = element.TryGetProperty("id", out var idEl) ? idEl.GetInt32() : 0,
-                NodeName = GetStringProp(props, "node.name"),
-                NodeDescription = GetStringProp(props, "node.description"),
-                MediaType = GetStringProp(props, "media.type"),
-                MediaCategory = GetStringProp(props, "media.category"),
-                MediaRole = GetStringProp(props, "media.role"),
-                DeviceVendor = GetStringProp(props, "device.vendor.name"),
-                DeviceProduct = GetStringProp(props, "device.product.name"),
-                DeviceSerial = GetStringProp(props, "device.serial"),
-            });
         }
 
-        return result;
-    }
-
-    private static string? GetStringProp(JsonElement props, string key)
-    {
-        return props.TryGetProperty(key, out var val) ? val.GetString() : null;
-    }
-
-    private sealed class PipeWireNode
-    {
-        public int NodeId { get; init; }
-        public string? NodeName { get; init; }
-        public string? NodeDescription { get; init; }
-        public string? MediaType { get; init; }
-        public string? MediaCategory { get; init; }
-        public string? MediaRole { get; init; }
-        public string? DeviceVendor { get; init; }
-        public string? DeviceProduct { get; init; }
-        public string? DeviceSerial { get; init; }
+        return new string(buffer[..length]).Trim('-');
     }
 
     private static void CreateTestPng(string path, int width, int height)
