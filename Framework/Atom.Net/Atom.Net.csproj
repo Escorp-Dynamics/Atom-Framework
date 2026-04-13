@@ -28,16 +28,12 @@
 		<Compile Remove="Https/HttpsClientHandler.cs" />
 		<Compile Remove="Https/HttpsContent.cs" />
 		<Compile Remove="Https/HttpsExtensions.cs" />
-		<Compile Remove="Https/HttpsRequestBuilder.cs" />
 		<Compile Remove="Https/HttpsRequestMessage.cs" />
-		<Compile Remove="Https/IUserAgentAdapter.cs" />
 		<Compile Remove="Https/Ja3.cs" />
 		<Compile Remove="Https/JitterSettings.cs" />
 		<Compile Remove="Https/RequestKind.cs" />
 		<Compile Remove="Https/StreamPriority.cs" />
 		<Compile Remove="Https/Traffic.cs" />
-		<Compile Remove="Https/UrlBuilder.cs" />
-		<Compile Remove="Https/UserAgentAdapter.cs" />
 		<Compile Remove="Proxies/IProxyValidator.cs" />
 		<Compile Remove="Proxies/ProxyValidator.cs" />
 		<Compile Remove="Proxies/ProxyResponseMessage.cs" />
@@ -50,6 +46,12 @@
 		<Compile Include="Https/HttpsClientHandler.cs" />
 		<Compile Include="Https/RequestKind.cs" />
 		<Compile Include="Https/Traffic.cs" />
+		<Compile Include="Https/Headers/FormattingPolicies/IHeadersFormattingPolicy.cs" />
+		<Compile Include="Https/Headers/FormattingPolicies/HeadersFormattingPolicy.cs" />
+		<Compile Include="Https/Headers/FormattingPolicies/ChromeHeadersFormattingPolicy.cs" />
+		<Compile Include="Https/Headers/FormattingPolicies/EdgeHeadersFormattingPolicy.cs" />
+		<Compile Include="Https/Headers/FormattingPolicies/FirefoxHeadersFormattingPolicy.cs" />
+		<Compile Include="Https/Headers/FormattingPolicies/SafariHeadersFormattingPolicy.cs" />
 		<Compile Include="Https/Connections/HttpsConnection.cs" />
 		<Compile Include="Https/Connections/HttpsConnectionOptions.cs" />
 		<Compile Include="Https/Connections/Https11Connection.cs" />
@@ -122,25 +124,5 @@
 		<None Update="icon.png" PackagePath="\" Pack="true" />
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
-
-	<Target Name="PublishPackages" AfterTargets="Pack"
-		Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
-		<PropertyGroup>
-			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
-		</PropertyGroup>
-
-		<ItemGroup>
-			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" />
-			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg"
-				Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
-		</ItemGroup>
-
-		<Exec
-			Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;"
-			Condition="'%(PackageFiles.Identity)' != ''" IgnoreExitCode="true">
-			<Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
-		</Exec>
-
-	</Target>
 
 </Project>

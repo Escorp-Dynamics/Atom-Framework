@@ -99,6 +99,12 @@ public readonly struct TcpSettings() : IEquatable<TcpSettings>
     /// </summary>
     public TimeSpan AttemptTimeout { get; init; } = TimeSpan.FromSeconds(3);
 
+    /// <summary>
+    /// Общий таймаут для безтокенного ConnectAsync(host, port).
+    /// Значение &lt;= 0 или <see cref="Timeout.InfiniteTimeSpan"/> оставляет поведение без жёсткого лимита.
+    /// </summary>
+    public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override int GetHashCode()
@@ -153,6 +159,7 @@ public readonly struct TcpSettings() : IEquatable<TcpSettings>
         hashCode.Add(Dscp);
         hashCode.Add(Delay);
         hashCode.Add(AttemptTimeout);
+        hashCode.Add(ConnectTimeout);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -177,7 +184,8 @@ public readonly struct TcpSettings() : IEquatable<TcpSettings>
         && HappyEyeballsMaxConcurrency == other.HappyEyeballsMaxConcurrency
         && Dscp == other.Dscp
         && Delay == other.Delay
-        && AttemptTimeout == other.AttemptTimeout;
+        && AttemptTimeout == other.AttemptTimeout
+        && ConnectTimeout == other.ConnectTimeout;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool EqualsKeepAlive(TcpSettings other)

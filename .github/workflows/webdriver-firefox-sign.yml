@@ -1,0 +1,104 @@
+name: WebDriver Firefox Sign
+
+on:
+  workflow_dispatch:
+    inputs:
+      targetFramework:
+        description: Target framework for WebDriver build output
+        required: false
+        default: net10.0
+      configuration:
+        description: Build configuration
+        required: false
+        default: Debug
+      runSmoke:
+        description: Run Firefox Stable smoke after AMO signing
+        required: false
+        type: boolean
+        default: false
+      firefoxBinaryPath:
+        description: Firefox Stable binary path for smoke run
+        required: false
+        default: /usr/bin/firefox
+
+jobs:
+  sign-firefox-xpi:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      PROJECT_PATH: Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj
+      TEST_PROJECT_PATH: Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj
+      EXTENSION_RUNTIME_DIR: Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime
+      FIREFOX_OUTPUT_DIR: Framework/Atom.Net.Browsing.WebDriver/bin/${{ inputs.configuration }}/${{ inputs.targetFramework }}/Extension.Firefox
+      FIREFOX_PACKAGE_DIR: Framework/Atom.Net.Browsing.WebDriver/obj/${{ inputs.configuration }}/${{ inputs.targetFramework }}/extension-packages/firefox
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime/package-lock.json
+
+      - name: Build WebDriver and materialize unsigned Firefox package
+        run: dotnet build "$PROJECT_PATH" -c "${{ inputs.configuration }}" -f "${{ inputs.targetFramework }}" -p:CreateFirefoxExtensionPackageOnBuild=true
+
+      - name: Upload unsigned Firefox package
+        uses: actions/upload-artifact@v4
+        with:
+          name: atom-webdriver-firefox-unsigned-${{ inputs.configuration }}-${{ inputs.targetFramework }}
+          path: ${{ env.FIREFOX_PACKAGE_DIR }}/*.zip
+          if-no-files-found: error
+
+      - name: Sign Firefox package via AMO
+        env:
+          WEB_EXT_API_KEY: ${{ secrets['MOZILLA_AMO_JWT_ISSUER'] }}
+          WEB_EXT_API_SECRET: ${{ secrets['MOZILLA_AMO_JWT_SECRET'] }}
+        run: |
+          set -euo pipefail
+
+          test -n "$WEB_EXT_API_KEY" || { echo "Missing secret MOZILLA_AMO_JWT_ISSUER"; exit 1; }
+          test -n "$WEB_EXT_API_SECRET" || { echo "Missing secret MOZILLA_AMO_JWT_SECRET"; exit 1; }
+
+          npm --prefix "$EXTENSION_RUNTIME_DIR" run sign:firefox -- --configuration "${{ inputs.configuration }}" --target-framework "${{ inputs.targetFramework }}" --skip-build
+
+      - name: Resolve signed Firefox XPI
+        id: resolve-signed-xpi
+        run: |
+          set -euo pipefail
+
+          SIGNED_XPI="$(find "$FIREFOX_PACKAGE_DIR/signed" -type f -name '*.xpi' | sort | tail -n 1)"
+          test -n "$SIGNED_XPI" || { echo "Signed Firefox XPI not found"; exit 1; }
+
+          echo "signed_xpi=$SIGNED_XPI" >> "$GITHUB_OUTPUT"
+          echo "Signed Firefox XPI: $SIGNED_XPI"
+
+      - name: Upload signed Firefox XPI
+        uses: actions/upload-artifact@v4
+        with:
+          name: atom-webdriver-firefox-signed-${{ inputs.configuration }}-${{ inputs.targetFramework }}
+          path: ${{ steps.resolve-signed-xpi.outputs.signed_xpi }}
+          if-no-files-found: error
+
+      - name: Smoke Firefox Stable bridge bootstrap
+        if: ${{ inputs.runSmoke }}
+        run: |
+          set -euo pipefail
+
+          test -x "${{ inputs.firefoxBinaryPath }}" || { echo "Firefox binary not executable: ${{ inputs.firefoxBinaryPath }}"; exit 1; }
+
+          ATOM_TEST_WEBDRIVER_BROWSER=firefox \
+          ATOM_TEST_WEBDRIVER_BROWSER_PATH="${{ inputs.firefoxBinaryPath }}" \
+          ATOM_TEST_WEBDRIVER_HEADLESS=true \
+          ATOM_WEBDRIVER_FIREFOX_SIGNED_XPI_PATH="${{ steps.resolve-signed-xpi.outputs.signed_xpi }}" \
+          dotnet test --project "$TEST_PROJECT_PATH" --filter RealBrowserLaunchBootstrapsExtensionBackedDiscoverySurface

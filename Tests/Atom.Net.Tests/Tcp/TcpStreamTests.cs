@@ -155,6 +155,37 @@ public sealed class TcpStreamTests
     }
 
     [Test]
+    public async Task ConnectAsyncWithoutTokenHonorsConfiguredConnectTimeout()
+    {
+        using var stream = new Atom.Net.Tcp.TcpStream(new Atom.Net.Tcp.TcpSettings
+        {
+            AttemptTimeout = Timeout.InfiniteTimeSpan,
+            ConnectTimeout = TimeSpan.FromMilliseconds(150),
+            UseHappyEyeballsAlternating = false,
+        });
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        Exception? failure = default;
+
+        try
+        {
+            await Within(stream.ConnectAsync("203.0.113.1", 65000)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+        finally
+        {
+            stopwatch.Stop();
+        }
+
+        Assert.That(failure, Is.Not.Null);
+        Assert.That(failure, Is.InstanceOf<OperationCanceledException>().Or.InstanceOf<SocketException>());
+        Assert.That(stopwatch.Elapsed, Is.LessThan(TimeSpan.FromSeconds(2)));
+    }
+
+    [Test]
     public async Task ConnectAsyncWithLocalhostCanReachIpv6Listener()
     {
         using var listener = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp);

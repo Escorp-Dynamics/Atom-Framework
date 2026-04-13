@@ -9,3 +9,9 @@
 TestResult.xml
 **/*.pem
 .github/instructions/
+/.tmp/
+/.venv/
+/.worktrees/
+/Reference/WebDriver.Reference/
+**/node_modules/
+/*.log

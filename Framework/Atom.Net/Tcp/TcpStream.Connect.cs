@@ -246,7 +246,7 @@ public sealed partial class TcpStream
                 winner: winnerTcs);
 
             var firstOtherTask = LaunchInitialHappyEyeballsTasks(plan, preferredFamily, initialDelay);
-            var schedulerTask = plan.RunSchedulerAsync();
+            var schedulerTask = RunHappyEyeballsSchedulerAsync(plan, firstOtherTask);
             var all = Task.WhenAll(firstOtherTask, schedulerTask);
 
             await EnsureHappyEyeballsWinnerAsync(winnerTcs.Task, all).ConfigureAwait(false);
@@ -302,12 +302,25 @@ public sealed partial class TcpStream
         await plan.LaunchFirstIpv4AfterDelayAsync(initialDelay).ConfigureAwait(false);
     }
 
+    [SuppressMessage("Reliability", "VSTHRD003:Avoid awaiting foreign Tasks", Justification = "Happy Eyeballs scheduler intentionally coordinates the externally-created initial launch task.")]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static async Task RunHappyEyeballsSchedulerAsync(HappyEyeballsPlanner plan, Task initialLaunchTask)
+    {
+        await initialLaunchTask.ConfigureAwait(false);
+        await plan.RunSchedulerAsync().ConfigureAwait(false);
+    }
+
     [SuppressMessage("Reliability", "VSTHRD003:Avoid awaiting foreign Tasks", Justification = "Happy Eyeballs intentionally coordinates externally-created tasks and does not resume on a captured context.")]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static async ValueTask EnsureHappyEyeballsWinnerAsync(Task winnerTask, Task allTasks)
     {
+        if (winnerTask.IsCompletedSuccessfully) return;
+
         var completed = await Task.WhenAny(winnerTask, allTasks).ConfigureAwait(false);
+        if (winnerTask.IsCompletedSuccessfully) return;
         if (!ReferenceEquals(completed, winnerTask)) throw new SocketException((int)SocketError.HostUnreachable);
+
+        await winnerTask.ConfigureAwait(false);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -371,5 +384,15 @@ public sealed partial class TcpStream
     /// <param name="port">Номер порта.</param>
     /// <exception cref="SocketException">Если ни один адрес не достигнут.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask ConnectAsync(string host, int port) => ConnectAsync(host, port, CancellationToken.None);
+    public async ValueTask ConnectAsync(string host, int port)
+    {
+        if (Settings.ConnectTimeout <= TimeSpan.Zero || Settings.ConnectTimeout == Timeout.InfiniteTimeSpan)
+        {
+            await ConnectAsync(host, port, CancellationToken.None).ConfigureAwait(false);
+            return;
+        }
+
+        using var timeoutCts = new CancellationTokenSource(Settings.ConnectTimeout);
+        await ConnectAsync(host, port, timeoutCts.Token).ConfigureAwait(false);
+    }
 }

@@ -298,7 +298,7 @@ public class OkxClient : ExchangeClientBase
 
     private static ReadOnlyMemory<byte> BuildCommandMessage(string op, string[] marketIds)
     {
-        var builder = new StringBuilder();
+        using var builder = new Atom.Text.ValueStringBuilder();
         builder.Append("{\"op\":\"");
         builder.Append(op);
         builder.Append("\",\"args\":[");

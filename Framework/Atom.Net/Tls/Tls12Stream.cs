@@ -421,6 +421,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         };
     }
 
+    [SuppressMessage("Security", "CA5350:Do Not Use Weak Cryptographic Algorithms", Justification = "TLS 1.2 ServerKeyExchange verification may require legacy SHA-1 for interoperability with real servers and local SslStream peers.")]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void VerifySkeSignature(byte hashId, byte sigAlg, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> skeParams)
     {
@@ -437,15 +438,28 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
 
             var hashAlg = hashId switch
             {
+                2 => HashAlgorithmName.SHA1,
                 4 => HashAlgorithmName.SHA256,
                 5 => HashAlgorithmName.SHA384,
                 6 => HashAlgorithmName.SHA512,
-                _ => throw new NotSupportedException("HashAlgorithm в SKE не поддержан"),
+                8 when sigAlg is 4 => HashAlgorithmName.SHA256,
+                8 when sigAlg is 5 => HashAlgorithmName.SHA384,
+                8 when sigAlg is 6 => HashAlgorithmName.SHA512,
+                _ => throw new NotSupportedException($"HashAlgorithm в SKE не поддержан: 0x{hashId:X2}, sig=0x{sigAlg:X2}"),
             };
 
-            Span<byte> digest = stackalloc byte[hashAlg == HashAlgorithmName.SHA384 ? 48 : hashAlg == HashAlgorithmName.SHA512 ? 64 : 32];
+            var rsaPadding = hashId is 8 && sigAlg is 4 or 5 or 6
+                ? RSASignaturePadding.Pss
+                : RSASignaturePadding.Pkcs1;
 
-            if (hashAlg == HashAlgorithmName.SHA256)
+            Span<byte> digest = stackalloc byte[
+                hashAlg == HashAlgorithmName.SHA1 ? 20 :
+                hashAlg == HashAlgorithmName.SHA384 ? 48 :
+                hashAlg == HashAlgorithmName.SHA512 ? 64 : 32];
+
+            if (hashAlg == HashAlgorithmName.SHA1)
+                SHA1.HashData(toSign.AsSpan(0, 64 + skeParams.Length), digest);
+            else if (hashAlg == HashAlgorithmName.SHA256)
                 SHA256.HashData(toSign.AsSpan(0, 64 + skeParams.Length), digest);
             else if (hashAlg == HashAlgorithmName.SHA384)
                 SHA384.HashData(toSign.AsSpan(0, 64 + skeParams.Length), digest);
@@ -454,9 +468,9 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
 
             using var rsa = serverLeaf.GetRSAPublicKey();
 
-            if (rsa is not null && sigAlg is 1)
+            if (rsa is not null && (sigAlg is 1 || (hashId is 8 && sigAlg is 4 or 5 or 6)))
             {
-                if (!rsa.VerifyHash(digest, signature, hashAlg, RSASignaturePadding.Pkcs1))
+                if (!rsa.VerifyHash(digest, signature, hashAlg, rsaPadding))
                     throw new CryptographicException("RSA-подпись SKE неверна");
 
                 return;
@@ -616,6 +630,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private async ValueTask SendClientKeyExchangeCcsFinishedAsync(CancellationToken cancellationToken)
     {
+        EnsureEcdheForGroup();
         if (ecdhe is null) throw new InvalidOperationException();
 
         // (1) при запросе клиентского сертификата — пустой Certificate
@@ -649,17 +664,30 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private async ValueTask ReceiveServerCcsAndFinishedAsync(CancellationToken cancellationToken)
     {
-        // CCS
-        var (hdr, payload) = await ReadRecordAsync(cancellationToken).ConfigureAwait(false);
+        // TLS 1.2 сервер может прислать plaintext NewSessionTicket перед CCS.
+        while (true)
+        {
+            var (hdr, payload) = await ReadRecordAsync(cancellationToken).ConfigureAwait(false);
 
-        try
-        {
-            if (hdr.ContentType is not TlsContentType.ChangeCipherSpec || hdr.Length is not 1 || payload[0] is not 1)
-                throw new InvalidOperationException("Ожидался ChangeCipherSpec от сервера");
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(payload, clearArray: true);
+            try
+            {
+                if (hdr.ContentType is TlsContentType.ChangeCipherSpec)
+                {
+                    if (hdr.Length is not 1 || payload[0] is not 1)
+                        throw new InvalidOperationException("Ожидался корректный ChangeCipherSpec от сервера");
+
+                    break;
+                }
+
+                if (hdr.ContentType is not TlsContentType.Handshake)
+                    throw new InvalidOperationException("Ожидался ChangeCipherSpec или Handshake от сервера");
+
+                HandleServerHandshakeBeforeFinished(payload.AsSpan(0, hdr.Length));
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(payload, clearArray: true);
+            }
         }
 
         // Finished (encrypted Handshake)
@@ -685,6 +713,44 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         {
             fin.Dispose();
         }
+    }
+
+    private void HandleServerHandshakeBeforeFinished(ReadOnlySpan<byte> payload)
+    {
+        while (payload.Length > 0)
+        {
+            if (payload.Length < 4) throw new InvalidOperationException("Handshake record too short before Finished");
+
+            var type = (TlsHandshakeType)payload[0];
+            var msgLen = (payload[1] << 16) | (payload[2] << 8) | payload[3];
+            var totalLen = 4 + msgLen;
+
+            if (totalLen > payload.Length)
+                throw new InvalidOperationException("Fragmented handshake before Finished не поддержан");
+
+            var msg = payload[..totalLen];
+            if (type is not TlsHandshakeType.NewSessionTicket)
+                throw new InvalidOperationException($"Неожиданное Handshake сообщение перед Finished: {type}");
+
+            transcript.Append(msg);
+            ParseNewSessionTicketBody(msg[4..]);
+            payload = payload[totalLen..];
+        }
+    }
+
+    private void ParseNewSessionTicketBody(ReadOnlySpan<byte> body)
+    {
+        if (body.Length < 6) throw new InvalidOperationException("NST too short (TLS 1.2)");
+
+        var life = (uint)((body[0] << 24) | (body[1] << 16) | (body[2] << 8) | body[3]);
+        var ticketLength = (body[4] << 8) | body[5];
+        if (6 + ticketLength > body.Length) throw new InvalidOperationException("NST ticket length invalid");
+
+        var ticket = new byte[ticketLength];
+        body.Slice(6, ticketLength).CopyTo(ticket);
+
+        SessionTicketLifetimeHint = life;
+        SessionTicket = ticket;
     }
 
     /// <summary>

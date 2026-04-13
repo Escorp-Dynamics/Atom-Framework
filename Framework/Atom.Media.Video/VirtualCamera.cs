@@ -29,6 +29,7 @@ namespace Atom.Media.Video;
 /// </remarks>
 public sealed class VirtualCamera : IAsyncDisposable
 {
+    private static Func<IVirtualCameraBackend>? backendFactoryOverride;
     private readonly IVirtualCameraBackend backend;
     private bool isDisposed;
 
@@ -534,6 +535,18 @@ public sealed class VirtualCamera : IAsyncDisposable
     /// <returns>Инициализированный экземпляр виртуальной камеры.</returns>
     public static ValueTask<VirtualCamera> CreateAsync(VirtualCameraSettings settings) => CreateAsync(settings, CancellationToken.None);
 
+    internal static IDisposable PushBackendFactoryOverride(Func<IVirtualCameraBackend> backendFactory)
+    {
+        ArgumentNullException.ThrowIfNull(backendFactory);
+
+        if (Interlocked.CompareExchange(location1: ref backendFactoryOverride, value: backendFactory, comparand: null) is not null)
+        {
+            throw new InvalidOperationException("Virtual camera backend factory override is already active.");
+        }
+
+        return new BackendFactoryOverrideScope(static () => Interlocked.Exchange(location1: ref backendFactoryOverride, value: null));
+    }
+
     private static void ValidateSettings(VirtualCameraSettings settings)
     {
         if (settings.Width < 1)
@@ -559,6 +572,12 @@ public sealed class VirtualCamera : IAsyncDisposable
 
     private static IVirtualCameraBackend CreateBackend()
     {
+        var overrideFactory = Volatile.Read(ref backendFactoryOverride);
+        if (overrideFactory is not null)
+        {
+            return overrideFactory();
+        }
+
         if (OperatingSystem.IsLinux()) return new LinuxCameraBackend();
         if (OperatingSystem.IsMacOS()) return new MacOSCameraBackend();
         if (OperatingSystem.IsWindows()) return new WindowsCameraBackend();
@@ -576,5 +595,12 @@ public sealed class VirtualCamera : IAsyncDisposable
             _ => throw new NotSupportedException(
                 $"Формат изображения '{extension}' не поддерживается. Используйте PNG или WebP."),
         };
+    }
+
+    private sealed class BackendFactoryOverrideScope(Action dispose) : IDisposable
+    {
+        private Action? dispose = dispose;
+
+        public void Dispose() => Interlocked.Exchange(location1: ref dispose, value: null)?.Invoke();
     }
 }

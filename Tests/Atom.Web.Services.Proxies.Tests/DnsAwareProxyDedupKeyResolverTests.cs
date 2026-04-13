@@ -189,7 +189,7 @@ public class DnsAwareProxyDedupKeyResolverTests(ILogger logger) : BenchmarkTests
         }
 
         await cancelledCaller.CancelAsync();
-        await Assert.ThatAsync(async () => await first, Throws.TypeOf<OperationCanceledException>());
+        await Assert.ThatAsync(async () => await first, Throws.InstanceOf<OperationCanceledException>());
 
         var second = resolver.GetKeyAsync(proxy).AsTask();
         gate.SetResult();

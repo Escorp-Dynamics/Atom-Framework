@@ -1,0 +1,31 @@
+name: WebDriver Artifact Guard
+
+on:
+  push:
+    paths:
+      - 'Framework/Atom.Net.Browsing.WebDriver/**'
+      - 'Reference/WebDriver.Reference/**'
+      - 'Tests/Atom.Net.Browsing.WebDriver.Tests/**'
+      - '.github/scripts/check-no-webdriver-build-artifacts.sh'
+      - '.github/workflows/webdriver-artifact-guard.yml'
+      - '.gitignore'
+  pull_request:
+    paths:
+      - 'Framework/Atom.Net.Browsing.WebDriver/**'
+      - 'Reference/WebDriver.Reference/**'
+      - 'Tests/Atom.Net.Browsing.WebDriver.Tests/**'
+      - '.github/scripts/check-no-webdriver-build-artifacts.sh'
+      - '.github/workflows/webdriver-artifact-guard.yml'
+      - '.gitignore'
+  workflow_dispatch:
+
+jobs:
+  reject-tracked-build-artifacts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify WebDriver build artifacts and legacy reference are not tracked
+        run: bash .github/scripts/check-no-webdriver-build-artifacts.sh

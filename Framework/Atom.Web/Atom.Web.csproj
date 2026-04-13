@@ -19,7 +19,6 @@
 
 	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
@@ -28,13 +27,12 @@
 
 	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
 		<ProjectReference Include="../Atom/Atom.csproj" />
+		<ProjectReference Include="../Atom.SourceGeneration/Atom.SourceGeneration.csproj"
+			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(Configuration)' == 'Release'">
 		<PackageReference Include="Escorp.Atom" Version="*" />
-	</ItemGroup>
-
-	<ItemGroup>
 		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="*" PrivateAssets="all"
 			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
@@ -43,26 +41,5 @@
 		<None Update="icon.png" PackagePath="\" Pack="true" />
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
-
-	<Target Name="PublishPackages" AfterTargets="Pack"
-		Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
-		<PropertyGroup>
-			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
-		</PropertyGroup>
-
-		<ItemGroup>
-			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" />
-			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg"
-				Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
-		</ItemGroup>
-
-		<Exec
-			Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;"
-			Condition="'%(PackageFiles.Identity)' != ''"
-			IgnoreExitCode="true">
-			<Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
-		</Exec>
-
-	</Target>
 
 </Project>

@@ -1,13 +1,12 @@
-﻿using Atom.Architect.Components;
+﻿using System.Net;
+using Atom.Architect.Components;
 using Atom.Collections;
-using System.Net;
-
-#pragma warning disable CS4014
+using Microsoft.Extensions.Logging;
 
 namespace Atom.Web.Proxies.Services;
 
 /// <summary>
-/// Представляет базовую реализацию провайдера прокси.
+/// Представляет базовую реализацию fetch-only провайдера прокси.
 /// </summary>
 [Component]
 public abstract partial class ProxyProvider : IProxyProvider, IProxyPoolSnapshotSource
@@ -15,43 +14,25 @@ public abstract partial class ProxyProvider : IProxyProvider, IProxyPoolSnapshot
     private readonly SparseArray<IProxyValidator> validators = new(1024);
 
     private bool isDisposed;
-    private ServiceProxy[] pool = [];
-    private int nextProxyIndex = -1;
-    private CancellationTokenSource? refreshLoopSource;
-    private Task? refreshLoopTask;
-    private Task<ServiceProxy[]>? refreshTask;
+
+    /// <summary>
+    /// Инициализирует базовый provider surface.
+    /// </summary>
+    protected ProxyProvider(ILogger? logger = null)
+    {
+        Logger = logger;
+    }
+
+    /// <inheritdoc/>
+    public ILogger? Logger { get; set; }
 
     /// <inheritdoc/>
     public IEnumerable<IProxyValidator> Validators => validators;
 
     /// <summary>
-    /// Resolver, определяющий dedup key для элементов внутреннего пула.
+    /// Resolver, определяющий dedup key для элементов снимка, который провайдер отдаёт фабрике.
     /// </summary>
     public IProxyDedupKeyResolver DedupKeyResolver { get; set; } = ProxyDedupKeyResolvers.Literal;
-
-    /// <inheritdoc/>
-    public ProxyRotationStrategy RotationStrategy { get; set; } = ProxyRotationStrategy.RoundRobin;
-
-    /// <inheritdoc/>
-    public TimeSpan RefreshInterval { get; set; } = TimeSpan.FromMinutes(5);
-
-    /// <inheritdoc/>
-    public TimeSpan RefreshErrorBackoff { get; set; } = TimeSpan.FromSeconds(30);
-
-    /// <inheritdoc/>
-    public bool PreservePoolOnRefreshFailure { get; set; } = true;
-
-    /// <inheritdoc/>
-    public DateTime LastRefreshUtc { get; private set; }
-
-    /// <inheritdoc/>
-    public Exception? LastRefreshException { get; private set; }
-
-    /// <inheritdoc/>
-    public int PoolCount
-    {
-        get => Volatile.Read(ref pool).Length;
-    }
 
     /// <summary>
     /// Происходит в момент высвобождения ресурсов.
@@ -60,77 +41,20 @@ public abstract partial class ProxyProvider : IProxyProvider, IProxyPoolSnapshot
     protected virtual void Dispose(bool disposing)
     {
         if (Interlocked.CompareExchange(location1: ref isDisposed, value: true, comparand: default)) return;
-
-        if (disposing)
-        {
-            var source = Interlocked.Exchange(ref refreshLoopSource, null);
-            source?.Cancel();
-            source?.Dispose();
-        }
     }
 
     /// <inheritdoc/>
-    public virtual async ValueTask RefreshAsync(CancellationToken cancellationToken)
+    public virtual async ValueTask<IEnumerable<ServiceProxy>> FetchAsync(CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
-
-        await GetOrStartRefreshTask(cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+        var snapshot = this is IProxyPagedProvider pagedProvider
+            ? await FetchPagedSnapshotAsync(pagedProvider, cancellationToken).ConfigureAwait(false)
+            : await LoadPoolAsync(cancellationToken).ConfigureAwait(false);
+        return await MaterializePoolAsync(snapshot, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
-    public ValueTask RefreshAsync() => RefreshAsync(CancellationToken.None);
-
-    /// <inheritdoc/>
-    public virtual void Return(ServiceProxy item)
-        => ArgumentNullException.ThrowIfNull(item);
-
-    /// <inheritdoc/>
-    public virtual async ValueTask<ServiceProxy> GetAsync(CancellationToken cancellationToken)
-    {
-        var proxy = await SelectSingleAsync(static _ => true, cancellationToken).ConfigureAwait(false);
-        return proxy ?? throw new InvalidOperationException("Сервис не смог вернуть прокси из внутреннего пула.");
-    }
-
-    /// <inheritdoc/>
-    public ValueTask<ServiceProxy> GetAsync() => GetAsync(CancellationToken.None);
-
-    /// <inheritdoc/>
-    public virtual async ValueTask<ServiceProxy> GetAsync(Func<ServiceProxy, bool> filter, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(filter);
-
-        var proxy = await SelectSingleAsync(filter, cancellationToken).ConfigureAwait(false);
-        return proxy ?? throw new InvalidOperationException("Внутренний пул не содержит прокси, удовлетворяющих фильтру.");
-    }
-
-    /// <inheritdoc/>
-    public ValueTask<ServiceProxy> GetAsync(Func<ServiceProxy, bool> filter) => GetAsync(filter, CancellationToken.None);
-
-    /// <inheritdoc/>
-    public ValueTask<IEnumerable<ServiceProxy>> GetAsync(int count, CancellationToken cancellationToken)
-        => GetAsync(count, static _ => true, cancellationToken);
-
-    /// <inheritdoc/>
-    public ValueTask<IEnumerable<ServiceProxy>> GetAsync(int count) => GetAsync(count, CancellationToken.None);
-
-    /// <inheritdoc/>
-    public virtual async ValueTask<IEnumerable<ServiceProxy>> GetAsync(int count, Func<ServiceProxy, bool> filter, CancellationToken cancellationToken)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
-        ArgumentNullException.ThrowIfNull(filter);
-
-        var snapshot = await EnsurePoolSnapshotAsync(cancellationToken).ConfigureAwait(false);
-        if (snapshot.Length == 0)
-        {
-            return [];
-        }
-
-        return Select(snapshot, count, filter);
-    }
-
-    /// <inheritdoc/>
-    public ValueTask<IEnumerable<ServiceProxy>> GetAsync(int count, Func<ServiceProxy, bool> filter)
-        => GetAsync(count, filter, CancellationToken.None);
+    public ValueTask<IEnumerable<ServiceProxy>> FetchAsync() => FetchAsync(CancellationToken.None);
 
     /// <inheritdoc/>
     public virtual async ValueTask<bool> ValidateAsync(ServiceProxy proxy, Uri url, CancellationToken cancellationToken)
@@ -275,7 +199,7 @@ public abstract partial class ProxyProvider : IProxyProvider, IProxyPoolSnapshot
     }
 
     /// <summary>
-    /// Загружает актуальный набор прокси для внутреннего пула сервиса.
+    /// Загружает актуальный набор прокси из внешнего источника провайдера.
     /// </summary>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
     protected abstract ValueTask<IEnumerable<ServiceProxy>> LoadPoolAsync(CancellationToken cancellationToken);
@@ -287,55 +211,7 @@ public abstract partial class ProxyProvider : IProxyProvider, IProxyPoolSnapshot
         => ObjectDisposedException.ThrowIf(isDisposed, GetType().Name);
 
     async ValueTask<ServiceProxy[]> IProxyPoolSnapshotSource.GetPoolSnapshotAsync(CancellationToken cancellationToken)
-        => await EnsurePoolSnapshotAsync(cancellationToken).ConfigureAwait(false);
-
-    private async ValueTask<ServiceProxy[]> EnsurePoolSnapshotAsync(CancellationToken cancellationToken)
-    {
-        ThrowIfDisposed();
-
-        var snapshot = Volatile.Read(ref pool);
-        var shouldRefresh = snapshot.Length == 0
-            || LastRefreshUtc == default
-            || (RefreshInterval > TimeSpan.Zero && DateTime.UtcNow - LastRefreshUtc >= RefreshInterval);
-
-        if (shouldRefresh)
-        {
-            try
-            {
-                await RefreshAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch when (PreservePoolOnRefreshFailure)
-            {
-                if (Volatile.Read(ref pool).Length == 0)
-                {
-                    throw;
-                }
-            }
-        }
-
-        return Volatile.Read(ref pool);
-    }
-
-    private IEnumerable<ServiceProxy> Select(ServiceProxy[] snapshot, int count, Func<ServiceProxy, bool> filter)
-    {
-        if (snapshot.Length == 0)
-        {
-            return [];
-        }
-
-        return ProxyPoolSelection.Select(snapshot, count, filter, RotationStrategy, ref nextProxyIndex);
-    }
-
-    private async ValueTask<ServiceProxy?> SelectSingleAsync(Func<ServiceProxy, bool> filter, CancellationToken cancellationToken)
-    {
-        var snapshot = await EnsurePoolSnapshotAsync(cancellationToken).ConfigureAwait(false);
-        if (snapshot.Length == 0)
-        {
-            return null;
-        }
-
-        return ProxyPoolSelection.SelectSingle(snapshot, filter, RotationStrategy, ref nextProxyIndex);
-    }
+        => [.. await FetchAsync(cancellationToken).ConfigureAwait(false)];
 
     private async ValueTask<ServiceProxy[]> MaterializePoolAsync(IEnumerable<ServiceProxy> proxies, CancellationToken cancellationToken)
     {
@@ -401,6 +277,34 @@ public abstract partial class ProxyProvider : IProxyProvider, IProxyPoolSnapshot
         return [.. result];
     }
 
+    private static async ValueTask<IEnumerable<ServiceProxy>> FetchPagedSnapshotAsync(IProxyPagedProvider pagedProvider, CancellationToken cancellationToken)
+    {
+        var collected = new List<ServiceProxy>();
+        var visitedTokens = new HashSet<string>(StringComparer.Ordinal);
+        string? continuationToken = null;
+
+        while (true)
+        {
+            var visitedKey = continuationToken ?? string.Empty;
+            if (!visitedTokens.Add(visitedKey))
+            {
+                throw new InvalidOperationException("Провайдер вернул циклический continuation token.");
+            }
+
+            var page = await pagedProvider.FetchPageAsync(continuationToken, cancellationToken).ConfigureAwait(false);
+            if (page.Proxies is { Count: > 0 })
+            {
+                collected.AddRange(page.Proxies);
+            }
+
+            if (string.IsNullOrWhiteSpace(page.ContinuationToken))
+            {
+                return collected;
+            }
+
+            continuationToken = page.ContinuationToken;
+        }
+    }
 
     private void RemoveValidators(Func<IProxyValidator, bool> shouldRemove)
     {
@@ -416,107 +320,4 @@ public abstract partial class ProxyProvider : IProxyProvider, IProxyPoolSnapshot
         validators.Reset();
         validators.AddRange(retainedValidators);
     }
-
-    private void EnsureRefreshLoopStarted()
-    {
-        if (RefreshInterval <= TimeSpan.Zero)
-        {
-            return;
-        }
-
-        if (Volatile.Read(ref refreshLoopSource) is not null)
-        {
-            return;
-        }
-
-        var source = new CancellationTokenSource();
-        if (Interlocked.CompareExchange(ref refreshLoopSource, source, null) is not null)
-        {
-            source.Dispose();
-            return;
-        }
-
-        refreshLoopTask = RunRefreshLoopAsync(source.Token);
-    }
-
-    private Task<ServiceProxy[]> GetOrStartRefreshTask(CancellationToken cancellationToken)
-    {
-        while (true)
-        {
-            var existingTask = Volatile.Read(ref refreshTask);
-            if (existingTask is not null)
-            {
-                return existingTask;
-            }
-
-            var refreshCompletion = new TaskCompletionSource<ServiceProxy[]>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (Interlocked.CompareExchange(ref refreshTask, refreshCompletion.Task, null) is not null)
-            {
-                continue;
-            }
-
-            ExecuteRefreshAsync(refreshCompletion, cancellationToken);
-            return refreshCompletion.Task;
-        }
-    }
-
-    private async void ExecuteRefreshAsync(TaskCompletionSource<ServiceProxy[]> refreshCompletion, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var updatedPool = await LoadPoolAsync(cancellationToken).ConfigureAwait(false);
-            var materializedPool = await MaterializePoolAsync(updatedPool, cancellationToken).ConfigureAwait(false);
-
-            Interlocked.Exchange(ref pool, materializedPool);
-            if (Volatile.Read(ref nextProxyIndex) >= materializedPool.Length)
-            {
-                Interlocked.Exchange(ref nextProxyIndex, -1);
-            }
-
-            LastRefreshUtc = DateTime.UtcNow;
-            LastRefreshException = null;
-            EnsureRefreshLoopStarted();
-            refreshCompletion.SetResult(materializedPool);
-        }
-        catch (Exception ex)
-        {
-            LastRefreshException = ex;
-
-            if (!PreservePoolOnRefreshFailure || Volatile.Read(ref pool).Length == 0)
-            {
-                refreshCompletion.SetException(ex);
-                return;
-            }
-
-            refreshCompletion.SetResult(Volatile.Read(ref pool));
-        }
-        finally
-        {
-            Interlocked.CompareExchange(ref refreshTask, null, refreshCompletion.Task);
-        }
-    }
-
-    private async Task RunRefreshLoopAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                await Task.Delay(RefreshInterval, cancellationToken).ConfigureAwait(false);
-                try
-                {
-                    await RefreshAsync(cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception) when (!cancellationToken.IsCancellationRequested)
-                {
-                    await Task.Delay(RefreshErrorBackoff, cancellationToken).ConfigureAwait(false);
-                }
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-    }
 }
-
-#pragma warning restore CS4014

@@ -1,5 +1,5 @@
 ﻿using System.Globalization;
-using System.Text;
+using Atom.Text;
 using Atom.Web.Services.Markets;
 
 namespace Atom.Web.Services.Polymarket;
@@ -37,7 +37,7 @@ public sealed class PolymarketVisualizer
         ArgumentNullException.ThrowIfNull(values);
         if (values.Length == 0) return "[Нет данных]";
 
-        var sb = new StringBuilder();
+        using var sb = new ValueStringBuilder();
 
         if (!string.IsNullOrEmpty(title))
             sb.AppendLine(title);
@@ -113,7 +113,7 @@ public sealed class PolymarketVisualizer
         var posArray = positions is PolymarketPosition[] arr ? arr : positions.ToArray();
         if (posArray.Length == 0) return "[Нет открытых позиций]";
 
-        var sb = new StringBuilder();
+        using var sb = new ValueStringBuilder();
         var header = "│ Asset              │ Qty      │ Cost     │ Price    │ P&amp;L      │ P&amp;L%     │";
         var separator = "├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┤";
         var top =       "┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┐";
@@ -146,24 +146,24 @@ public sealed class PolymarketVisualizer
     {
         ArgumentNullException.ThrowIfNull(result);
 
-        var sb = new StringBuilder();
+        using var sb = new ValueStringBuilder();
         sb.AppendLine("╔══════════════════════════════════════════╗");
-        sb.AppendLine($"║  Бэктест: {result.StrategyName,-30} ║");
+        sb.AppendFormat(Inv, "║  Бэктест: {0,-30} ║", result.StrategyName).AppendLine();
         sb.AppendLine("╠══════════════════════════════════════════╣");
-        sb.AppendLine($"║  Начальный баланс:  {result.InitialBalance,16:F2}   ║");
-        sb.AppendLine($"║  Итоговый баланс:   {result.FinalBalance,16:F2}   ║");
-        sb.AppendLine($"║  P&amp;L:               {result.NetPnL,16:F2}   ║");
-        sb.AppendLine($"║  Доходность:        {result.ReturnPercent,15:F1}%   ║");
+        sb.AppendFormat(Inv, "║  Начальный баланс:  {0,16:F2}   ║", result.InitialBalance).AppendLine();
+        sb.AppendFormat(Inv, "║  Итоговый баланс:   {0,16:F2}   ║", result.FinalBalance).AppendLine();
+        sb.AppendFormat(Inv, "║  P&amp;L:               {0,16:F2}   ║", result.NetPnL).AppendLine();
+        sb.AppendFormat(Inv, "║  Доходность:        {0,15:F1}%   ║", result.ReturnPercent).AppendLine();
         sb.AppendLine("╠══════════════════════════════════════════╣");
-        sb.AppendLine($"║  Сделок:            {result.TotalTrades,16}   ║");
-        sb.AppendLine($"║  Прибыльных:        {result.WinningTrades,16}   ║");
-        sb.AppendLine($"║  Убыточных:         {result.LosingTrades,16}   ║");
-        sb.AppendLine($"║  Win Rate:          {result.WinRate,15:F1}%   ║");
+        sb.AppendFormat(Inv, "║  Сделок:            {0,16}   ║", result.TotalTrades).AppendLine();
+        sb.AppendFormat(Inv, "║  Прибыльных:        {0,16}   ║", result.WinningTrades).AppendLine();
+        sb.AppendFormat(Inv, "║  Убыточных:         {0,16}   ║", result.LosingTrades).AppendLine();
+        sb.AppendFormat(Inv, "║  Win Rate:          {0,15:F1}%   ║", result.WinRate).AppendLine();
         sb.AppendLine("╠══════════════════════════════════════════╣");
-        sb.AppendLine($"║  Sharpe Ratio:      {result.SharpeRatio,16:F2}   ║");
-        sb.AppendLine($"║  Max Drawdown:      {result.MaxDrawdownPercent,15:F1}%   ║");
-        sb.AppendLine($"║  Profit Factor:     {result.ProfitFactor,16:F2}   ║");
-        sb.AppendLine($"║  Avg P&amp;L / Trade:   {result.AveragePnLPerTrade,16:F2}   ║");
+        sb.AppendFormat(Inv, "║  Sharpe Ratio:      {0,16:F2}   ║", result.SharpeRatio).AppendLine();
+        sb.AppendFormat(Inv, "║  Max Drawdown:      {0,15:F1}%   ║", result.MaxDrawdownPercent).AppendLine();
+        sb.AppendFormat(Inv, "║  Profit Factor:     {0,16:F2}   ║", result.ProfitFactor).AppendLine();
+        sb.AppendFormat(Inv, "║  Avg P&amp;L / Trade:   {0,16:F2}   ║", result.AveragePnLPerTrade).AppendLine();
         sb.AppendLine("╚══════════════════════════════════════════╝");
         return sb.ToString();
     }
@@ -175,18 +175,18 @@ public sealed class PolymarketVisualizer
     {
         ArgumentNullException.ThrowIfNull(summary);
 
-        var sb = new StringBuilder();
+        using var sb = new ValueStringBuilder();
         sb.AppendLine("┌──────────────────────────────────────┐");
         sb.AppendLine("│          Сводка портфеля             │");
         sb.AppendLine("├──────────────────────────────────────┤");
-        sb.AppendLine($"│  Открыто:       {summary.OpenPositions,16}   │");
-        sb.AppendLine($"│  Закрыто:       {summary.ClosedPositions,16}   │");
-        sb.AppendLine($"│  Рын. стоимость:{summary.TotalMarketValue,16:F2}   │");
-        sb.AppendLine($"│  Базис:         {summary.TotalCostBasis,16:F2}   │");
-        sb.AppendLine($"│  Unrealized:    {summary.TotalUnrealizedPnL,16:F2}   │");
-        sb.AppendLine($"│  Realized:      {summary.TotalRealizedPnL,16:F2}   │");
-        sb.AppendLine($"│  Комиссии:      {summary.TotalFees,16:F2}   │");
-        sb.AppendLine($"│  Net P&amp;L:       {summary.NetPnL,16:F2}   │");
+        sb.AppendFormat(Inv, "│  Открыто:       {0,16}   │", summary.OpenPositions).AppendLine();
+        sb.AppendFormat(Inv, "│  Закрыто:       {0,16}   │", summary.ClosedPositions).AppendLine();
+        sb.AppendFormat(Inv, "│  Рын. стоимость:{0,16:F2}   │", summary.TotalMarketValue).AppendLine();
+        sb.AppendFormat(Inv, "│  Базис:         {0,16:F2}   │", summary.TotalCostBasis).AppendLine();
+        sb.AppendFormat(Inv, "│  Unrealized:    {0,16:F2}   │", summary.TotalUnrealizedPnL).AppendLine();
+        sb.AppendFormat(Inv, "│  Realized:      {0,16:F2}   │", summary.TotalRealizedPnL).AppendLine();
+        sb.AppendFormat(Inv, "│  Комиссии:      {0,16:F2}   │", summary.TotalFees).AppendLine();
+        sb.AppendFormat(Inv, "│  Net P&amp;L:       {0,16:F2}   │", summary.NetPnL).AppendLine();
         sb.AppendLine("└──────────────────────────────────────┘");
         return sb.ToString();
     }

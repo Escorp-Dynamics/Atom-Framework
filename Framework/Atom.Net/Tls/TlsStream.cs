@@ -125,7 +125,7 @@ public abstract class TlsStream([NotNull] NetworkStream stream, in TlsSettings s
 
         try
         {
-            await ReadExactAsync(hdr, cancellationToken).ConfigureAwait(false);
+            await ReadExactAsync(hdr.AsMemory(0, 5), cancellationToken).ConfigureAwait(false);
 
             var header = TlsRecordHeader.Read(hdr);
 
@@ -183,7 +183,17 @@ public abstract class TlsStream([NotNull] NetworkStream stream, in TlsSettings s
     /// Выполняет рукопожатие.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask HandshakeAsync() => HandshakeAsync(CancellationToken.None);
+    public async ValueTask HandshakeAsync()
+    {
+        if (Settings.HandshakeTimeout <= TimeSpan.Zero || Settings.HandshakeTimeout == Timeout.InfiniteTimeSpan)
+        {
+            await HandshakeAsync(CancellationToken.None).ConfigureAwait(false);
+            return;
+        }
+
+        using var timeoutCts = new CancellationTokenSource(Settings.HandshakeTimeout);
+        await HandshakeAsync(timeoutCts.Token).ConfigureAwait(false);
+    }
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

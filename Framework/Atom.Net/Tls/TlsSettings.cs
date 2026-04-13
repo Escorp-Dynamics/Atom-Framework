@@ -57,18 +57,28 @@ public readonly struct TlsSettings() : IEquatable<TlsSettings>
     /// </summary>
     public TimeSpan Delay { get; init; } = TimeSpan.Zero;
 
+    /// <summary>
+    /// Общий таймаут для безтокенного HandshakeAsync().
+    /// Значение &lt;= 0 или <see cref="Timeout.InfiniteTimeSpan"/> оставляет поведение без жёсткого лимита.
+    /// </summary>
+    public TimeSpan HandshakeTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override int GetHashCode() => HashCode.Combine(
-        MinVersion.GetHashCode(),
-        MaxVersion.GetHashCode(),
-        CipherSuites.GetHashCode(),
-        Extensions.GetHashCode(),
-        CheckCertificateRevocationList.GetHashCode(),
-        ServerCertificateValidationCallback?.GetHashCode() ?? 0,
-        SessionIdPolicy.GetHashCode(),
-        Delay.GetHashCode()
-    );
+    public override int GetHashCode()
+    {
+        var hashCode = new HashCode();
+        hashCode.Add(MinVersion);
+        hashCode.Add(MaxVersion);
+        hashCode.Add(CipherSuites);
+        hashCode.Add(Extensions);
+        hashCode.Add(CheckCertificateRevocationList);
+        hashCode.Add(ServerCertificateValidationCallback);
+        hashCode.Add(SessionIdPolicy);
+        hashCode.Add(Delay);
+        hashCode.Add(HandshakeTimeout);
+        return hashCode.ToHashCode();
+    }
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -76,7 +86,8 @@ public readonly struct TlsSettings() : IEquatable<TlsSettings>
         && CipherSuites.Equals(other.CipherSuites) && Extensions.Equals(other.Extensions)
         && CheckCertificateRevocationList.Equals(other.CheckCertificateRevocationList)
         && Equals(ServerCertificateValidationCallback, other.ServerCertificateValidationCallback)
-        && SessionIdPolicy.Equals(other.SessionIdPolicy) && Delay.Equals(other.Delay);
+        && SessionIdPolicy.Equals(other.SessionIdPolicy) && Delay.Equals(other.Delay)
+        && HandshakeTimeout.Equals(other.HandshakeTimeout);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

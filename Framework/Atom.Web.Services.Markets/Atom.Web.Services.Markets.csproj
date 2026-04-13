@@ -66,24 +66,4 @@
         <None Include="../Atom.Web.Services/icon.png" Link="icon.png" Pack="true" PackagePath="\" />
     </ItemGroup>
 
-    <Target Name="PublishPackages" AfterTargets="Pack">
-        <PropertyGroup>
-            <PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
-        </PropertyGroup>
-
-        <ItemGroup>
-            <PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" />
-            <PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg"
-                Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
-        </ItemGroup>
-
-        <Exec
-            Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;"
-            Condition="'%(PackageFiles.Identity)' != ''"
-            IgnoreExitCode="true">
-            <Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
-        </Exec>
-
-    </Target>
-
 </Project>

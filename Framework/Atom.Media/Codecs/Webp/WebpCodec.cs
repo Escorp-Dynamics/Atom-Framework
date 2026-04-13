@@ -1,4 +1,4 @@
-#pragma warning disable IDE0010, S109, S3776, CA1822, MA0038, MA0051, MA0003
+﻿#pragma warning disable IDE0010, S109, S3776, CA1822, MA0038, MA0051, MA0003
 
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
@@ -185,91 +185,14 @@ public sealed partial class WebpCodec : IImageCodec
     {
         info = default;
 
-        if (data.Length < MinHeaderSize + 8 + Vp8LHeaderSize)
+        var result = WebpContainerParser.Parse(data, out var containerInfo);
+        if (result != CodecResult.Success)
         {
-            return CodecResult.InvalidData;
+            return result;
         }
 
-        if (!CanDecode(data))
-        {
-            return CodecResult.InvalidData;
-        }
-
-        // Пропускаем RIFF header и ищем VP8L/VP8X/VP8 chunk
-        var offset = 12;
-        while (offset + 8 <= data.Length)
-        {
-            var chunkType = data.Slice(offset, 4);
-            var chunkSize = BitConverter.ToInt32(data.Slice(offset + 4, 4));
-
-            if (chunkType.SequenceEqual(Vp8LChunk))
-            {
-                // VP8L header: signature(1) + packed width/height/alpha(4)
-                if (offset + 8 + Vp8LHeaderSize > data.Length)
-                {
-                    return CodecResult.InvalidData;
-                }
-
-                var vp8lData = data.Slice(offset + 8, Vp8LHeaderSize);
-                if (vp8lData[0] != Vp8LSignature)
-                {
-                    return CodecResult.InvalidData;
-                }
-
-                // Packed: width-1 (14 bits) + height-1 (14 bits) + alpha (1 bit) + version (3 bits)
-                var packed = BitConverter.ToUInt32(vp8lData.Slice(1, 4));
-                var width = (int)(packed & 0x3FFF) + 1;
-                var height = (int)((packed >> 14) & 0x3FFF) + 1;
-                var hasAlpha = ((packed >> 28) & 1) == 1;
-
-                info = new WebpInfo(width, height, hasAlpha, true);
-                return CodecResult.Success;
-            }
-
-            if (chunkType.SequenceEqual(Vp8Chunk))
-            {
-                // VP8 (lossy) — parse frame header
-                if (offset + 8 + 10 > data.Length)
-                {
-                    return CodecResult.InvalidData;
-                }
-
-                var vp8Data = data.Slice(offset + 8, 10);
-                // VP8 frame: 3 bytes frame tag + 3 bytes start code + 2 bytes width + 2 bytes height
-                var width = (vp8Data[6] | (vp8Data[7] << 8)) & 0x3FFF;
-                var height = (vp8Data[8] | (vp8Data[9] << 8)) & 0x3FFF;
-
-                info = new WebpInfo(width, height, false, false);
-                return CodecResult.Success;
-            }
-
-            if (chunkType.SequenceEqual(Vp8XChunk))
-            {
-                // VP8X extended header
-                if (offset + 8 + 10 > data.Length)
-                {
-                    return CodecResult.InvalidData;
-                }
-
-                var vp8xData = data.Slice(offset + 8, 10);
-                var flags = vp8xData[0];
-                var hasAlpha = (flags & 0x10) != 0;
-
-                // Width and height are 24-bit, stored as (value - 1)
-                var width = (vp8xData[4] | (vp8xData[5] << 8) | (vp8xData[6] << 16)) + 1;
-                var height = (vp8xData[7] | (vp8xData[8] << 8) | (vp8xData[9] << 16)) + 1;
-
-                info = new WebpInfo(width, height, hasAlpha, false);
-                // Продолжаем искать VP8L/VP8 chunk для определения lossless
-                offset += 8 + ((chunkSize + 1) & ~1);
-                continue;
-            }
-
-            // Переходим к следующему chunk (с выравниванием на 2 байта)
-            offset += 8 + ((chunkSize + 1) & ~1);
-        }
-
-        return info.Width > 0 ? CodecResult.Success : CodecResult.InvalidData;
+        info = new WebpInfo(containerInfo.Width, containerInfo.Height, containerInfo.HasAlpha, containerInfo.IsLossless);
+        return CodecResult.Success;
     }
 
     #endregion

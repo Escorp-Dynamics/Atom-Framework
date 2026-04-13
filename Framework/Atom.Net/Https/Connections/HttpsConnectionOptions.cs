@@ -2,6 +2,8 @@
 using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
+using Atom.Net.Tcp;
+using Atom.Net.Tls;
 
 namespace Atom.Net.Https.Connections;
 
@@ -55,6 +57,16 @@ internal readonly record struct HttpsConnectionOptions
     public TimeSpan ResponseHeadersTimeout { get; init; }
 
     /// <summary>
+    /// Таймаут подготовки и отправки запроса до начала чтения ответа.
+    /// </summary>
+    public TimeSpan RequestSendTimeout { get; init; }
+
+    /// <summary>
+    /// Таймаут чтения тела ответа после того, как блок заголовков уже получен.
+    /// </summary>
+    public TimeSpan ResponseBodyTimeout { get; init; }
+
+    /// <summary>
     /// Разрешённые версии TLS для защищённого соединения.
     /// </summary>
     public SslProtocols SslProtocols { get; init; }
@@ -91,4 +103,16 @@ internal readonly record struct HttpsConnectionOptions
     /// Точная политика (порядок/варианты) задаётся профилем браузера и HeaderPolicy выше по слою.
     /// </summary>
     public bool AutoDecompression { get; init; }
+
+    /// <summary>
+    /// Профильные настройки TCP, выбранные на уровне browser profile.
+    /// Используются как базовый снимок transport-поведения и затем могут быть уточнены explicit handler overrides.
+    /// </summary>
+    public TcpSettings? ProfileTcpSettings { get; init; }
+
+    /// <summary>
+    /// Профильные настройки TLS, выбранные на уровне browser profile.
+    /// Используются как базовый снимок handshake-поведения и затем могут быть уточнены explicit handler overrides.
+    /// </summary>
+    public TlsSettings? ProfileTlsSettings { get; init; }
 }

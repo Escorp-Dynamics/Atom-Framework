@@ -39,7 +39,7 @@ public sealed class PolymarketDataExporter
     {
         ArgumentNullException.ThrowIfNull(positions);
 
-        var sb = new StringBuilder();
+        using var sb = new Atom.Text.ValueStringBuilder();
         sb.AppendLine("AssetId,Market,Outcome,Quantity,AverageCostBasis,TotalCost,CurrentPrice,MarketValue,UnrealizedPnL,UnrealizedPnLPercent,RealizedPnL,TotalFees,TradeCount,IsClosed");
 
         foreach (var p in positions)
@@ -107,7 +107,7 @@ public sealed class PolymarketDataExporter
     {
         ArgumentNullException.ThrowIfNull(snapshots);
 
-        var sb = new StringBuilder();
+        using var sb = new Atom.Text.ValueStringBuilder();
         sb.AppendLine("Timestamp,TotalMarketValue,TotalCostBasis,UnrealizedPnL,RealizedPnL,TotalFees,NetPnL,OpenPositions");
 
         foreach (var s in snapshots)
@@ -169,7 +169,7 @@ public sealed class PolymarketDataExporter
     {
         ArgumentNullException.ThrowIfNull(trades);
 
-        var sb = new StringBuilder();
+        using var sb = new Atom.Text.ValueStringBuilder();
         sb.AppendLine("Id,Market,AssetId,Side,Size,Price,FeeRateBps,Status,MatchTime,Outcome,TraderSide,Owner");
 
         foreach (var t in trades)

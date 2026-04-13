@@ -334,7 +334,7 @@ public class KuCoinClient : ExchangeClientBase
 
     private static ReadOnlyMemory<byte> BuildCommandMessage(string requestId, string type, string[] marketIds)
     {
-        var builder = new StringBuilder();
+        using var builder = new Atom.Text.ValueStringBuilder();
         builder.Append("{\"id\":\"");
         builder.Append(requestId);
         builder.Append("\",\"type\":\"");

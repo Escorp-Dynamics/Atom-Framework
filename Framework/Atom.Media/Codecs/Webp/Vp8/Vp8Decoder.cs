@@ -1,7 +1,7 @@
 ﻿#pragma warning disable S109, S3776, MA0051, MA0182, IDE0010, IDE0045, IDE0047, IDE0048, CA1822, S1172, IDE0060
 
-using System.Runtime.CompilerServices;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Atom.Media.Codecs.Webp.Vp8;
 
 namespace Atom.Media;
@@ -183,8 +183,7 @@ internal sealed class Vp8Decoder
 
         // Context rows for above
         var aboveBModes = new byte[mbW * 4]; // bottom row of 4x4 modes
-        var aboveYWithY2NonZero = new byte[mbW * 4];
-        var aboveYWithoutY2NonZero = new byte[mbW * 4];
+        var aboveYNonZero = new byte[mbW * 4];
         var aboveY2NonZero = new byte[mbW];
         var aboveUNonZero = new byte[mbW * 2];
         var aboveVNonZero = new byte[mbW * 2];
@@ -209,8 +208,7 @@ internal sealed class Vp8Decoder
         {
             ref var tokenBd = ref tokenDecoders[tokenPartitionIndex];
             var leftBModes = new byte[4]; // right column of 4x4 modes
-            var leftYWithY2NonZero = new byte[4];
-            var leftYWithoutY2NonZero = new byte[4];
+            var leftYNonZero = new byte[4];
             byte leftY2NonZero = 0;
             var leftUNonZero = new byte[2];
             var leftVNonZero = new byte[2];
@@ -337,10 +335,27 @@ internal sealed class Vp8Decoder
                 {
                     // B_PRED: per-4x4 interleaved predict->decode->IDCT
                     DecodeBPredBlocks(ref tokenBd, yPlane, yStride, yOffset, hasAbove, hasLeft, ref mb, ref dqm,
-                        coeffs, aboveYWithoutY2NonZero, leftYWithoutY2NonZero, currentMbYNonZero, mbX, diagnostics, captureCurrentMacroblock);
+                        coeffs, aboveYNonZero, leftYNonZero, currentMbYNonZero, mbX, diagnostics, captureCurrentMacroblock);
                 }
                 else
                 {
+                    if (captureCurrentMacroblock)
+                    {
+                        for (var i = 0; i < 16; i++)
+                        {
+                            diagnostics!.FirstMacroblockPredictionAbove16[i] = hasAbove
+                                ? yPlane[yOffset - yStride + i]
+                                : (byte)127;
+                            diagnostics.FirstMacroblockPredictionLeft16[i] = hasLeft
+                                ? yPlane[yOffset + (i * yStride) - 1]
+                                : (byte)129;
+                        }
+
+                        diagnostics!.FirstMacroblockPredictionAboveLeft = (hasAbove && hasLeft)
+                            ? yPlane[yOffset - yStride - 1]
+                            : GetOutOfFrameAboveLeft(hasAbove, hasLeft);
+                    }
+
                     // 16x16 prediction first
                     Apply16x16Prediction(yPlane, yStride, yOffset, hasAbove, hasLeft, mb.YMode);
 
@@ -394,10 +409,10 @@ internal sealed class Vp8Decoder
                                 Array.Clear(coeffs);
                                 var aboveContext = by > 0
                                     ? currentMbYNonZero[((by - 1) * 4) + bx]
-                                    : aboveYWithY2NonZero[(mbX * 4) + bx];
+                                    : aboveYNonZero[(mbX * 4) + bx];
                                 var leftContext = bx > 0
                                     ? currentMbYNonZero[(by * 4) + bx - 1]
-                                    : leftYWithY2NonZero[by];
+                                    : leftYNonZero[by];
                                 System.Collections.Generic.List<string>? yBlockTokenTrace = null;
                                 var captureCurrentSubblock = captureCurrentMacroblock
                                     && by == diagnostics!.TargetSubblockY
@@ -654,29 +669,17 @@ internal sealed class Vp8Decoder
                     }
                 }
 
-                if (mb.YMode == Vp8Constants.BPred)
+                for (var i = 0; i < 4; i++)
                 {
-                    for (var i = 0; i < 4; i++)
-                    {
-                        aboveYWithoutY2NonZero[(mbX * 4) + i] = currentMbYNonZero[12 + i];
-                        leftYWithoutY2NonZero[i] = currentMbYNonZero[(i * 4) + 3];
-                        aboveYWithY2NonZero[(mbX * 4) + i] = 0;
-                        leftYWithY2NonZero[i] = 0;
-                    }
-                }
-                else
-                {
-                    for (var i = 0; i < 4; i++)
-                    {
-                        aboveYWithY2NonZero[(mbX * 4) + i] = currentMbYNonZero[12 + i];
-                        leftYWithY2NonZero[i] = currentMbYNonZero[(i * 4) + 3];
-                        aboveYWithoutY2NonZero[(mbX * 4) + i] = 0;
-                        leftYWithoutY2NonZero[i] = 0;
-                    }
+                    aboveYNonZero[(mbX * 4) + i] = currentMbYNonZero[12 + i];
+                    leftYNonZero[i] = currentMbYNonZero[(i * 4) + 3];
                 }
 
-                aboveY2NonZero[mbX] = currentMbY2NonZero;
-                leftY2NonZero = currentMbY2NonZero;
+                if (mb.YMode != Vp8Constants.BPred)
+                {
+                    aboveY2NonZero[mbX] = currentMbY2NonZero;
+                    leftY2NonZero = currentMbY2NonZero;
+                }
 
                 for (var i = 0; i < 2; i++)
                 {
@@ -1493,13 +1496,25 @@ internal sealed class Vp8Decoder
 
         var lastAbovePixel = yPlane[aboveOffset + 3];
 
-        // For lower rows inside the same macroblock, the 4 pixels to the right belong to
-        // a future macroblock that has not been decoded yet. VP8 extends the edge sample here.
+        // For lower rows inside a B_PRED macroblock, VP8 copies the top-row top-right
+        // extension downward rather than reusing the current row's last reconstructed pixel.
         if (by > 0)
         {
+            if (!hasAbove)
+            {
+                return;
+            }
+
+            var topAboveOffset = yOffset - yStride;
+            var topAboveRightOffset = topAboveOffset + 16;
+            var topRowStart = topAboveOffset - (topAboveOffset % yStride);
+            var topRowEnd = topRowStart + yStride;
+            var lastTopAbovePixel = yPlane[topAboveOffset + 15];
+
             for (var index = 0; index < 4; index++)
             {
-                destination[4 + index] = lastAbovePixel;
+                var src = topAboveRightOffset + index;
+                destination[4 + index] = src < topRowEnd ? yPlane[src] : lastTopAbovePixel;
             }
 
             return;
@@ -1867,6 +1882,12 @@ internal sealed class Vp8DecodeDiagnostics
 
     public byte FirstMacroblockPredictedYTopLeft { get; set; }
 
+    public byte[] FirstMacroblockPredictionAbove16 { get; } = new byte[16];
+
+    public byte[] FirstMacroblockPredictionLeft16 { get; } = new byte[16];
+
+    public byte FirstMacroblockPredictionAboveLeft { get; set; }
+
     public byte FirstBPredSubblockMode { get; set; }
 
     public byte FirstBPredSubblockAboveMode { get; set; }
@@ -2086,6 +2107,9 @@ internal sealed class Vp8DecodeDiagnostics
         FirstMacroblockUvMode = 0;
         FirstMacroblockIsSkip = false;
         FirstMacroblockPredictedYTopLeft = 0;
+        Array.Clear(FirstMacroblockPredictionAbove16);
+        Array.Clear(FirstMacroblockPredictionLeft16);
+        FirstMacroblockPredictionAboveLeft = 0;
         FirstBPredSubblockMode = 0;
         FirstBPredSubblockAboveMode = 0;
         FirstBPredSubblockLeftMode = 0;

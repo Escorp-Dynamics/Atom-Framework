@@ -1,4 +1,4 @@
-#pragma warning disable RS2008
+﻿#pragma warning disable RS2008
 
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
@@ -34,6 +34,15 @@ public abstract class SyntaxProvider<TSymbol, TSyntaxNode>(IncrementalGeneratorI
 isEnabledByDefault: true
     );
 
+    private static readonly DiagnosticDescriptor EntityNameCollision = new(
+        "A1001",
+        "Коллизия identity при генерации",
+        "Generator не может агрегировать entity '{0}' из нескольких разных type identities: {1}",
+        "Usage",
+        DiagnosticSeverity.Error,
+isEnabledByDefault: true
+    );
+
     /// <summary>
     /// Используемые атрибуты.
     /// </summary>
@@ -62,6 +71,7 @@ isEnabledByDefault: true
         {
             ClassDeclarationSyntax c => c.Identifier.Text,
             StructDeclarationSyntax s => s.Identifier.Text,
+            RecordDeclarationSyntax r => r.Identifier.Text,
             InterfaceDeclarationSyntax i => i.Identifier.Text,
             _ => GetEntityName(member.Parent),
         };
@@ -116,13 +126,23 @@ isEnabledByDefault: true
         {
             foreach (var attribute in attributeLists.Attributes)
             {
-                var attr = attribute.Name.ToString();
-                if (!string.IsNullOrEmpty(attr) && Attributes.Any(x => attr.Equals(x, StringComparison.InvariantCultureIgnoreCase))) return true;
+                var attr = GetAttributeSimpleName(attribute.Name);
+                if (!string.IsNullOrEmpty(attr) && Attributes.Any(x => attr.Equals(x, StringComparison.InvariantCultureIgnoreCase) || attr.Equals(x + "Attribute", StringComparison.InvariantCultureIgnoreCase))) return true;
             }
         }
 
         return default;
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static string? GetAttributeSimpleName(NameSyntax name)
+        => name switch
+        {
+            IdentifierNameSyntax identifierName => identifierName.Identifier.Text,
+            QualifiedNameSyntax qualifiedName => GetAttributeSimpleName(qualifiedName.Right),
+            AliasQualifiedNameSyntax aliasQualifiedName => aliasQualifiedName.Name.Identifier.Text,
+            _ => name.ToString(),
+        };
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -154,6 +174,13 @@ isEnabledByDefault: true
             foreach (var kv in members)
             {
                 if (kv.Value.Count is 0) continue;
+
+                if (TryGetIdentityCollision(kv.Value, out var collisionDescription, out var location))
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(EntityNameCollision, location, kv.Key, collisionDescription));
+                    continue;
+                }
+
                 OnExecute(context, kv.Key, [.. kv.Value]);
             }
         }
@@ -162,6 +189,39 @@ isEnabledByDefault: true
             ReportExceptionDiagnostic(context, ex, e => CreateExceptionDiagnostic(e, location: null));
         }
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryGetIdentityCollision(List<ISyntaxProviderInfo<TSymbol, TSyntaxNode>> sources, out string collisionDescription, out Location? location)
+    {
+        location = sources[0].Node.GetLocation();
+        collisionDescription = string.Empty;
+
+        var identities = new HashSet<string>(StringComparer.Ordinal);
+
+        for (var i = 0; i < sources.Count; i++)
+        {
+            if (sources[i].Symbol is not { } symbol)
+                continue;
+
+            var identity = GetTypeIdentity(symbol);
+            identities.Add(identity);
+            if (identities.Count < 2)
+                continue;
+
+            collisionDescription = string.Join(", ", identities.Order(StringComparer.Ordinal));
+            return true;
+        }
+
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static string GetTypeIdentity(ISymbol symbol)
+        => symbol switch
+        {
+            ITypeSymbol typeSymbol => typeSymbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+            _ => symbol.ContainingType?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ?? symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+        };
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Diagnostic CreateExceptionDiagnostic(Exception exception, Location? location)

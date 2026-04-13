@@ -183,6 +183,47 @@ public class LinuxCameraBackendTests(ILogger logger) : BenchmarkTests<LinuxCamer
         Assert.DoesNotThrowAsync(async () => await backend.DisposeAsync());
     }
 
+    [TestCase(TestName = "Stress: несколько init/dispose циклов камеры безопасны")]
+    public async Task InitializeDisposeCyclesAreSafe()
+    {
+        for (var i = 0; i < 3; i++)
+        {
+            var backend = new LinuxCameraBackend();
+            var settings = new VirtualCameraSettings
+            {
+                Width = 320,
+                Height = 240,
+                Name = "Stress Cam " + i,
+            };
+
+            await backend.InitializeAsync(settings, CancellationToken.None);
+            await backend.DisposeAsync();
+
+            Assert.DoesNotThrowAsync(async () => await backend.DisposeAsync());
+        }
+    }
+
+    [TestCase(TestName = "Stress: start/stop/dispose камеры в цикле безопасны")]
+    public async Task StartStopDisposeCyclesAreSafe()
+    {
+        for (var i = 0; i < 3; i++)
+        {
+            await using var backend = new LinuxCameraBackend();
+            var settings = new VirtualCameraSettings
+            {
+                Width = 320,
+                Height = 240,
+                Name = "Capture Cam " + i,
+            };
+
+            await backend.InitializeAsync(settings, CancellationToken.None);
+            await backend.StartCaptureAsync(CancellationToken.None);
+            await backend.StopCaptureAsync(CancellationToken.None);
+
+            Assert.That(backend.IsCapturing, Is.False);
+        }
+    }
+
     [TestCase(TestName = "Полный жизненный цикл: init → start → write → stop → dispose")]
     public async Task FullLifecycle()
     {

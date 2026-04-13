@@ -2,10 +2,11 @@
 
 	<PropertyGroup>
 		<AssemblyName>Escorp.Atom.Net.Browsing.WebDriver</AssemblyName>
-		<NoWarn>CA1003;CA1031</NoWarn>
+		<NoWarn>
+			$(NoWarn);CA1003;CA1031;CA1012;CA1064;CA1819;CA1822;CA2000;CA2227;CS0067;CS1570;CS1572;CS1573;CS1574;CS1591;IDE0005;IDE0028;IDE0039;IDE0305;IL2026;IL3050;AsyncFixer01;MA0017;MA0038;MA0042;MA0084;MA0106;MA0182;RCS1263;S1117;S1481;S2292;S2325;S3237;S3442;S3871;S4136;S4144</NoWarn>
 
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.0.1</Version>
+		<Version>0.8.8</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -18,13 +19,48 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
+	<PropertyGroup>
+		<ExtensionRuntimeDirectory>$(MSBuildThisFileDirectory)ExtensionRuntime</ExtensionRuntimeDirectory>
+		<ExtensionBuildArtifactsRoot>$(MSBuildThisFileDirectory)obj</ExtensionBuildArtifactsRoot>
+		<ExtensionGeneratedDirectory>$(ExtensionBuildArtifactsRoot)/ExtensionRuntime/generated</ExtensionGeneratedDirectory>
+		<ExtensionWorkingLayoutDirectory>$(ExtensionBuildArtifactsRoot)/ExtensionWorkingLayout</ExtensionWorkingLayoutDirectory>
+		<ExtensionWorkingDirectory>$(ExtensionWorkingLayoutDirectory)/Extension</ExtensionWorkingDirectory>
+		<ExtensionFirefoxWorkingDirectory>$(ExtensionWorkingLayoutDirectory)/Extension.Firefox</ExtensionFirefoxWorkingDirectory>
+		<ExtensionPackageArtifactsDirectory>
+			$(ExtensionBuildArtifactsRoot)/$(Configuration)/$(TargetFramework)/extension-packages</ExtensionPackageArtifactsDirectory>
+		<ExtensionFirefoxPackageDirectory>$(ExtensionPackageArtifactsDirectory)/firefox</ExtensionFirefoxPackageDirectory>
+		<ExtensionFirefoxUnsignedPackageName>atom-webdriver-firefox-$(Version)-unsigned.zip</ExtensionFirefoxUnsignedPackageName>
+		<ExtensionFirefoxUnsignedPackagePath>
+			$(ExtensionFirefoxPackageDirectory)/$(ExtensionFirefoxUnsignedPackageName)</ExtensionFirefoxUnsignedPackagePath>
+		<CreateFirefoxExtensionPackageOnBuild
+			Condition="'$(CreateFirefoxExtensionPackageOnBuild)' == '' and '$(Configuration)' == 'Release'">
+			true</CreateFirefoxExtensionPackageOnBuild>
+		<CreateFirefoxExtensionPackageOnBuild
+			Condition="'$(CreateFirefoxExtensionPackageOnBuild)' == ''">false</CreateFirefoxExtensionPackageOnBuild>
+		<TargetsForTfmSpecificContentInPackage>
+			$(TargetsForTfmSpecificContentInPackage);CollectExtensionRuntimePackageFiles</TargetsForTfmSpecificContentInPackage>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ExtensionRuntimeBuildInput Include="$(ExtensionRuntimeDirectory)/**/*.ts" />
+		<ExtensionRuntimeBuildInput Include="$(ExtensionRuntimeDirectory)/**/*.mjs" />
+		<ExtensionRuntimeBuildInput Include="$(ExtensionRuntimeDirectory)/**/*.json"
+			Exclude="$(ExtensionRuntimeDirectory)/node_modules/**/*.json" />
+		<ExtensionRuntimeBuildInput Include="$(ExtensionRuntimeDirectory)/package.json" />
+		<ExtensionRuntimeBuildInput Include="$(ExtensionRuntimeDirectory)/tsconfig.json" />
+	</ItemGroup>
+
+	<PropertyGroup>
+		<MSBuildAllProjects>$(MSBuildAllProjects);@(ExtensionRuntimeBuildInput)</MSBuildAllProjects>
+	</PropertyGroup>
+
 	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
-		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<GeneratePackageOnBuild Condition="'$(IsPacking)' != 'true'">true</GeneratePackageOnBuild>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -32,47 +68,208 @@
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
-		<ProjectReference Include="../Atom.Net.Browsing/Atom.Net.Browsing.csproj" />
+		<ProjectReference Include="../Atom.Net/Atom.Net.csproj" />
+		<ProjectReference Include="../Atom.Media.Video/Atom.Media.Video.csproj" />
+		<ProjectReference Include="../Atom.Media.Audio/Atom.Media.Audio.csproj" />
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(Configuration)' == 'Release'">
-		<PackageReference Include="Atom.Net.Browsing" Version="*" />
+		<PackageReference Include="Escorp.Atom.Net" Version="*" />
+		<!--<PackageReference
+		Include="Atom.Net.Browsing" Version="*" />-->
+		<PackageReference Include="Escorp.Atom.Media.Video" Version="*" />
+		<PackageReference Include="Escorp.Atom.Media.Audio" Version="*" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="*" PrivateAssets="all"
 			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-		<PackageReference Include="Tmds.DBus.Protocol" Version="0.91.0" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Update="icon.png" PackagePath="\" Pack="true" />
+		<None Include="../Atom.Net.Browsing/icon.png" Link="icon.png" PackagePath="icon.png"
+			Pack="true" />
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
 
-	<ItemGroup>
-		<Content Include="Extension\**\*" CopyToOutputDirectory="PreserveNewest"
-			PackagePath="contentFiles\any\any\Extension" />
-	</ItemGroup>
+	<Target Name="PrepareExtensionRuntimeDependencies" BeforeTargets="Build"
+		Condition="Exists('$(ExtensionRuntimeDirectory)/package.json') AND (!Exists('$(ExtensionRuntimeDirectory)/node_modules/typescript/package.json') OR !Exists('$(ExtensionRuntimeDirectory)/node_modules/esbuild/package.json') OR !Exists('$(ExtensionRuntimeDirectory)/node_modules/web-ext/package.json'))">
+		<Exec Command="npm --prefix &quot;$(ExtensionRuntimeDirectory)&quot; install" />
+	</Target>
 
-	<Target Name="PublishPackages" AfterTargets="Pack"
-		Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
-		<PropertyGroup>
-			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
-		</PropertyGroup>
-
-		<ItemGroup>
-			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" />
-			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg"
-				Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
-		</ItemGroup>
-
+	<Target Name="PrepareExtensionRuntimeWorkingDirectories"
+		BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems;Build"
+		DependsOnTargets="PrepareExtensionRuntimeDependencies"
+		Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')">
+		<Exec Command="npm --prefix &quot;$(ExtensionRuntimeDirectory)&quot; run typecheck" />
 		<Exec
-			Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;"
-			Condition="'%(PackageFiles.Identity)' != ''" IgnoreExitCode="true">
-			<Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
-		</Exec>
+			Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/build-background-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;" />
+		<Exec
+			Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/build-content-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;" />
+		<Exec
+			Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/sync-working-layout.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot; --chrome-working-dir &quot;$(ExtensionWorkingDirectory)&quot; --firefox-working-dir &quot;$(ExtensionFirefoxWorkingDirectory)&quot;" />
+		<ItemGroup>
+			<GeneratedChromeExtensionFiles Include="$(ExtensionWorkingDirectory)\**\*" />
+			<GeneratedFirefoxExtensionFiles Include="$(ExtensionFirefoxWorkingDirectory)\**\*" />
+			<ContentWithTargetPath Include="@(GeneratedChromeExtensionFiles)"
+				CopyToOutputDirectory="Always"
+				CopyToPublishDirectory="Always"
+				TargetPath="Extension\%(RecursiveDir)%(Filename)%(Extension)" />
+			<ContentWithTargetPath Include="@(GeneratedChromeExtensionFiles)"
+				CopyToOutputDirectory="Always"
+				TargetPath="ExtensionWorkingLayout\Extension\%(RecursiveDir)%(Filename)%(Extension)" />
+			<ContentWithTargetPath Include="@(GeneratedFirefoxExtensionFiles)"
+				CopyToOutputDirectory="Always"
+				CopyToPublishDirectory="Always"
+				TargetPath="Extension.Firefox\%(RecursiveDir)%(Filename)%(Extension)" />
+			<ContentWithTargetPath Include="@(GeneratedFirefoxExtensionFiles)"
+				CopyToOutputDirectory="Always"
+				TargetPath="ExtensionWorkingLayout\Extension.Firefox\%(RecursiveDir)%(Filename)%(Extension)" />
+		</ItemGroup>
+	</Target>
 
+	<Target Name="CollectExtensionRuntimePackageFiles"
+		DependsOnTargets="PrepareExtensionRuntimeWorkingDirectories"
+		Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')">
+		<ItemGroup>
+			<TfmSpecificPackageFile Include="$(ExtensionWorkingDirectory)\**\*">
+				<PackagePath>contentFiles\any\any\Extension</PackagePath>
+			</TfmSpecificPackageFile>
+			<TfmSpecificPackageFile Include="$(ExtensionFirefoxWorkingDirectory)\**\*">
+				<PackagePath>contentFiles\any\any\Extension.Firefox</PackagePath>
+			</TfmSpecificPackageFile>
+		</ItemGroup>
+	</Target>
+
+	<Target Name="PackageFirefoxExtension" AfterTargets="PrepareExtensionRuntimeWorkingDirectories"
+		DependsOnTargets="PrepareExtensionRuntimeDependencies"
+		Condition="Exists('$(ExtensionRuntimeDirectory)/package.json') AND '$(CreateFirefoxExtensionPackageOnBuild)' == 'true'">
+		<MakeDir Directories="$(ExtensionFirefoxPackageDirectory)" />
+		<Exec
+			Command="npm --prefix &quot;$(ExtensionRuntimeDirectory)&quot; exec web-ext build -- --source-dir &quot;$(ExtensionFirefoxWorkingDirectory)&quot; --artifacts-dir &quot;$(ExtensionFirefoxPackageDirectory)&quot; --filename &quot;$(ExtensionFirefoxUnsignedPackageName)&quot; --overwrite-dest"
+			WorkingDirectory="$(ExtensionRuntimeDirectory)" />
+		<Message Importance="high"
+			Text="Unsigned Firefox package materialized at $(ExtensionFirefoxUnsignedPackagePath)" />
+	</Target>
+
+	<Target Name="SynchronizeExtensionWorkingLayoutOutputs"
+		AfterTargets="Build"
+		Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')">
+		<ItemGroup>
+			<_ChromeOutputLayoutFiles Include="$(TargetDir)Extension/**/*" />
+			<_FirefoxOutputLayoutFiles Include="$(TargetDir)Extension.Firefox/**/*" />
+		</ItemGroup>
+		<MakeDir
+			Directories="$(TargetDir)ExtensionWorkingLayout/Extension;$(TargetDir)ExtensionWorkingLayout/Extension.Firefox" />
+		<Copy SourceFiles="@(_ChromeOutputLayoutFiles)"
+			DestinationFiles="@(_ChromeOutputLayoutFiles->'$(TargetDir)ExtensionWorkingLayout/Extension/%(RecursiveDir)%(Filename)%(Extension)')"
+			SkipUnchangedFiles="true" />
+		<Copy SourceFiles="@(_FirefoxOutputLayoutFiles)"
+			DestinationFiles="@(_FirefoxOutputLayoutFiles->'$(TargetDir)ExtensionWorkingLayout/Extension.Firefox/%(RecursiveDir)%(Filename)%(Extension)')"
+			SkipUnchangedFiles="true" />
+	</Target>
+
+	<Target Name="ValidateExtensionRuntimeOutputLayout"
+		AfterTargets="SynchronizeExtensionWorkingLayoutOutputs"
+		Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')">
+		<Error Condition="!Exists('$(ExtensionWorkingDirectory)/manifest.json')"
+			Text="Chrome working layout не содержит manifest.json: $(ExtensionWorkingDirectory)" />
+		<Error Condition="!Exists('$(ExtensionWorkingDirectory)/background.runtime.js')"
+			Text="Chrome working layout не содержит background.runtime.js: $(ExtensionWorkingDirectory)" />
+		<Error Condition="!Exists('$(ExtensionWorkingDirectory)/content.js')"
+			Text="Chrome working layout не содержит content.js: $(ExtensionWorkingDirectory)" />
+		<Error Condition="!Exists('$(TargetDir)Extension/content.js')"
+			Text="Chrome output layout не содержит content.js: $(TargetDir)Extension" />
+		<Error Condition="!Exists('$(TargetDir)Extension/background.runtime.js')"
+			Text="Chrome output layout не содержит background.runtime.js: $(TargetDir)Extension" />
+		<Error
+			Condition="!Exists('$(TargetDir)ExtensionWorkingLayout/Extension/content.js')"
+			Text="Chrome working output layout не содержит content.js: $(TargetDir)ExtensionWorkingLayout/Extension" />
+		<Error
+			Condition="!Exists('$(TargetDir)ExtensionWorkingLayout/Extension/background.runtime.js')"
+			Text="Chrome working output layout не содержит background.runtime.js: $(TargetDir)ExtensionWorkingLayout/Extension" />
+		<Error Condition="!Exists('$(ExtensionFirefoxWorkingDirectory)/manifest.json')"
+			Text="Firefox working layout не содержит manifest.json: $(ExtensionFirefoxWorkingDirectory)" />
+		<Error Condition="!Exists('$(ExtensionFirefoxWorkingDirectory)/background.runtime.js')"
+			Text="Firefox working layout не содержит background.runtime.js: $(ExtensionFirefoxWorkingDirectory)" />
+		<Error Condition="!Exists('$(ExtensionFirefoxWorkingDirectory)/content.js')"
+			Text="Firefox working layout не содержит content.js: $(ExtensionFirefoxWorkingDirectory)" />
+		<Error Condition="!Exists('$(TargetDir)Extension.Firefox/content.js')"
+			Text="Firefox output layout не содержит content.js: $(TargetDir)Extension.Firefox" />
+		<Error Condition="!Exists('$(TargetDir)Extension.Firefox/background.runtime.js')"
+			Text="Firefox output layout не содержит background.runtime.js: $(TargetDir)Extension.Firefox" />
+		<Error
+			Condition="!Exists('$(TargetDir)ExtensionWorkingLayout/Extension.Firefox/content.js')"
+			Text="Firefox working output layout не содержит content.js: $(TargetDir)ExtensionWorkingLayout/Extension.Firefox" />
+		<Error
+			Condition="!Exists('$(TargetDir)ExtensionWorkingLayout/Extension.Firefox/background.runtime.js')"
+			Text="Firefox working output layout не содержит background.runtime.js: $(TargetDir)ExtensionWorkingLayout/Extension.Firefox" />
+
+		<GetFileHash Files="$(ExtensionWorkingDirectory)/content.js">
+			<Output TaskParameter="Items" ItemName="_ChromeWorkingContentHash" />
+		</GetFileHash>
+		<GetFileHash Files="$(ExtensionWorkingDirectory)/background.runtime.js">
+			<Output TaskParameter="Items" ItemName="_ChromeWorkingBackgroundHash" />
+		</GetFileHash>
+		<GetFileHash Files="$(TargetDir)Extension/content.js">
+			<Output TaskParameter="Items" ItemName="_ChromeOutputContentHash" />
+		</GetFileHash>
+		<GetFileHash Files="$(TargetDir)Extension/background.runtime.js">
+			<Output TaskParameter="Items" ItemName="_ChromeOutputBackgroundHash" />
+		</GetFileHash>
+		<GetFileHash Files="$(TargetDir)ExtensionWorkingLayout/Extension/content.js">
+			<Output TaskParameter="Items" ItemName="_ChromeWorkingOutputContentHash" />
+		</GetFileHash>
+		<GetFileHash
+			Files="$(TargetDir)ExtensionWorkingLayout/Extension/background.runtime.js">
+			<Output TaskParameter="Items" ItemName="_ChromeWorkingOutputBackgroundHash" />
+		</GetFileHash>
+
+		<GetFileHash Files="$(ExtensionFirefoxWorkingDirectory)/content.js">
+			<Output TaskParameter="Items" ItemName="_FirefoxWorkingContentHash" />
+		</GetFileHash>
+		<GetFileHash Files="$(ExtensionFirefoxWorkingDirectory)/background.runtime.js">
+			<Output TaskParameter="Items" ItemName="_FirefoxWorkingBackgroundHash" />
+		</GetFileHash>
+		<GetFileHash Files="$(TargetDir)Extension.Firefox/content.js">
+			<Output TaskParameter="Items" ItemName="_FirefoxOutputContentHash" />
+		</GetFileHash>
+		<GetFileHash Files="$(TargetDir)Extension.Firefox/background.runtime.js">
+			<Output TaskParameter="Items" ItemName="_FirefoxOutputBackgroundHash" />
+		</GetFileHash>
+		<GetFileHash Files="$(TargetDir)ExtensionWorkingLayout/Extension.Firefox/content.js">
+			<Output TaskParameter="Items" ItemName="_FirefoxWorkingOutputContentHash" />
+		</GetFileHash>
+		<GetFileHash
+			Files="$(TargetDir)ExtensionWorkingLayout/Extension.Firefox/background.runtime.js">
+			<Output TaskParameter="Items" ItemName="_FirefoxWorkingOutputBackgroundHash" />
+		</GetFileHash>
+
+		<Error
+			Condition="'@(_ChromeWorkingContentHash->'%(FileHash)')' != '@(_ChromeOutputContentHash->'%(FileHash)')'"
+			Text="Chrome output layout содержит stale content.js и не совпадает с working layout." />
+		<Error
+			Condition="'@(_ChromeWorkingBackgroundHash->'%(FileHash)')' != '@(_ChromeOutputBackgroundHash->'%(FileHash)')'"
+			Text="Chrome output layout содержит stale background.runtime.js и не совпадает с working layout." />
+		<Error
+			Condition="'@(_ChromeWorkingContentHash->'%(FileHash)')' != '@(_ChromeWorkingOutputContentHash->'%(FileHash)')'"
+			Text="Chrome ExtensionWorkingLayout output содержит stale content.js и не совпадает с working layout." />
+		<Error
+			Condition="'@(_ChromeWorkingBackgroundHash->'%(FileHash)')' != '@(_ChromeWorkingOutputBackgroundHash->'%(FileHash)')'"
+			Text="Chrome ExtensionWorkingLayout output содержит stale background.runtime.js и не совпадает с working layout." />
+
+		<Error
+			Condition="'@(_FirefoxWorkingContentHash->'%(FileHash)')' != '@(_FirefoxOutputContentHash->'%(FileHash)')'"
+			Text="Firefox output layout содержит stale content.js и не совпадает с working layout." />
+		<Error
+			Condition="'@(_FirefoxWorkingBackgroundHash->'%(FileHash)')' != '@(_FirefoxOutputBackgroundHash->'%(FileHash)')'"
+			Text="Firefox output layout содержит stale background.runtime.js и не совпадает с working layout." />
+		<Error
+			Condition="'@(_FirefoxWorkingContentHash->'%(FileHash)')' != '@(_FirefoxWorkingOutputContentHash->'%(FileHash)')'"
+			Text="Firefox ExtensionWorkingLayout output содержит stale content.js и не совпадает с working layout." />
+		<Error
+			Condition="'@(_FirefoxWorkingBackgroundHash->'%(FileHash)')' != '@(_FirefoxWorkingOutputBackgroundHash->'%(FileHash)')'"
+			Text="Firefox ExtensionWorkingLayout output содержит stale background.runtime.js и не совпадает с working layout." />
 	</Target>
 
 </Project>

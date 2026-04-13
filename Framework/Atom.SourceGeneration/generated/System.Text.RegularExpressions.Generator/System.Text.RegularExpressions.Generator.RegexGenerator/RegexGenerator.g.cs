@@ -25,7 +25,7 @@ namespace Atom.SourceGeneration.PipeWire
         /// </code>
         /// </remarks>
         [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.13.2411")]
-        private static partial global::System.Text.RegularExpressions.Regex EnumPattern() => global::System.Text.RegularExpressions.Generated.EnumPattern_0.Instance;
+        private static partial global::System.Text.RegularExpressions.Regex EnumPattern => global::System.Text.RegularExpressions.Generated.EnumPattern_0.Instance;
     }
 }
 
@@ -46,7 +46,7 @@ namespace Atom.SourceGeneration.PipeWire
         /// </code>
         /// </remarks>
         [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.13.2411")]
-        private static partial global::System.Text.RegularExpressions.Regex CCommentPattern() => global::System.Text.RegularExpressions.Generated.CCommentPattern_1.Instance;
+        private static partial global::System.Text.RegularExpressions.Regex CCommentPattern => global::System.Text.RegularExpressions.Generated.CCommentPattern_1.Instance;
     }
 }
 
@@ -68,7 +68,7 @@ namespace Atom.SourceGeneration.PipeWire
         /// </code>
         /// </remarks>
         [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.13.2411")]
-        private static partial global::System.Text.RegularExpressions.Regex IdentifierPattern() => global::System.Text.RegularExpressions.Generated.IdentifierPattern_2.Instance;
+        private static partial global::System.Text.RegularExpressions.Regex IdentifierPattern => global::System.Text.RegularExpressions.Generated.IdentifierPattern_2.Instance;
     }
 }
 

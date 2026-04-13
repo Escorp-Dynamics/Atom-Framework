@@ -105,7 +105,11 @@ public sealed partial class TcpStream : NetworkStream
             while (!linkedCts.IsCancellationRequested)
             {
                 // Если обе очереди опустели — выходим
-                if (p6 >= count6 && p4 >= count4) return;
+                if (p6 >= count6 && p4 >= count4)
+                {
+                    await WaitForAttemptsToDrainAsync().ConfigureAwait(false);
+                    return;
+                }
 
                 // Ждём свободный слот при превышении лимита параллелизма
                 await WaitForConcurrencySlotAsync().ConfigureAwait(false);
@@ -117,6 +121,20 @@ public sealed partial class TcpStream : NetworkStream
                 // Пауза между «ступенями», как в браузерах
                 try { await Task.Delay(stepDelay, linkedCts.Token).ConfigureAwait(false); }
                 catch (OperationCanceledException) { return; }
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private async Task WaitForAttemptsToDrainAsync()
+        {
+            if (Volatile.Read(ref inFlight) is 0) return;
+
+            var sw = new SpinWait();
+
+            while (Volatile.Read(ref inFlight) > 0 && !linkedCts.IsCancellationRequested)
+            {
+                sw.SpinOnce(sleep1Threshold: 20);
+                await YieldAfterSpinAsync(sw).ConfigureAwait(false);
             }
         }
 

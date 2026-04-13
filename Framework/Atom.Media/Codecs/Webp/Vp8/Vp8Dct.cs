@@ -12,13 +12,13 @@ internal static class Vp8Dct
 {
     /// <summary>
     /// Performs 4×4 inverse DCT (RFC 6386 §14.3 short_idct4x4llm_c).
-    /// Coefficients in <paramref name="input"/> (16 shorts, zigzag-reordered before call).
+    /// Coefficients in <paramref name="input"/> are in natural 4x4 raster order.
     /// Result is ADDED to <paramref name="output"/> (stride = <paramref name="stride"/>).
     /// </summary>
     /// <remarks>
     /// RFC 6386 §20.8 short_idct4x4llm_c reference:
     /// <code>
-    /// temp1 = (ip[n] * sinpi8sqrt2) >> 16;  if (ip[n] &lt; 0) temp1--;
+    /// temp1 = (ip[n] * sinpi8sqrt2) >> 16;
     /// temp2 = ip[n] + ((ip[n] * cospi8sqrt2minus1) >> 16);
     /// </code>
     /// </remarks>
@@ -42,9 +42,9 @@ internal static class Vp8Dct
             var d = t1 + t2;
 
             temp[i] = a + d;
-            temp[12 + i] = a - d;
             temp[4 + i] = b + c;
             temp[8 + i] = b - c;
+            temp[12 + i] = a - d;
         }
 
         // Rows

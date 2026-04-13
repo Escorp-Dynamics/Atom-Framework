@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<AssemblyName>Escorp.Atom.Compilers.JavaScript</AssemblyName>
+		<RootNamespace>Atom.Compilers.JavaScript</RootNamespace>
+		<NoWarn>CS1591</NoWarn>
+
+		<PackageId>$(AssemblyName)</PackageId>
+		<Version>0.0.1</Version>
+		<Authors>Yuriy Yesin, Escorp Labs</Authors>
+		<Company>Escorp Dynamics</Company>
+		<Product>Escorp.$(AssemblyName)</Product>
+		<RepositoryUrl>https://gitflic.ru/project/escorp-lab/atom</RepositoryUrl>
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<PackageTags>
+			atom;framework;escorp;exomode;javascript;compiler;runtime;aot;nativeaot;zero-alloc;lock-free</PackageTags>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+	</PropertyGroup>
+
+	<ItemGroup
+		Condition="'$(DisableJavaScriptSourceGenerationAnalyzerReference)' != 'true' and ('$(Configuration)' == 'Debug' or '$(UseLocalJavaScriptSourceGenerationAnalyzerReference)' == 'true')">
+		<ProjectReference
+			Include="../Atom.Compilers.JavaScript.SourceGeneration/Atom.Compilers.JavaScript.SourceGeneration.csproj"
+			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+	</ItemGroup>
+
+	<ItemGroup
+		Condition="'$(Configuration)' == 'Release' and '$(UseLocalJavaScriptSourceGenerationAnalyzerReference)' != 'true'">
+		<PackageReference Include="Escorp.Atom.Compilers.JavaScript.SourceGeneration" Version="*"
+			PrivateAssets="all"
+			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="Atom.Compilers.JavaScript.Tests" />
+		<InternalsVisibleTo Include="Atom.Compilers.JavaScript.SourceGeneration.Tests" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="README.md" PackagePath="\" Pack="true" />
+		<None Update="JAVASCRIPT_COMPILER_ROADMAP.md" PackagePath="\" Pack="true" />
+	</ItemGroup>
+
+</Project>

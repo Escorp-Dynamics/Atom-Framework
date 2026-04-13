@@ -70,6 +70,85 @@ public class ProxyNovaProviderTests(ILogger logger) : BenchmarkTests<ProxyNovaPr
         }
     }
 
+    [TestCase(TestName = "ProxyNova парсит реальные country-sliced expression patterns"), Benchmark]
+    public void ParseRealCountrySlicedExpressionPatternsTest()
+    {
+        const string payload = """
+                        {
+                            "data": [
+                                {
+                                    "ip": "atob(\"MTQ5LjEyOS4yNTUu\").concat(\"1179197\".substring(1+0, 8-4))",
+                                    "port": 18080,
+                                    "countryCode": "ID",
+                                    "aliveSecondsAgo": 10,
+                                    "uptime": 50
+                                },
+                                {
+                                    "ip": "[58,57,60,55,58,64,58,55,58,65,59,55].map((code) => String.fromCharCode(code-9)).join(\"\").concat(\"56\".split(\"\").reverse().join(\"\"))",
+                                    "port": 43188,
+                                    "countryCode": "ID",
+                                    "aliveSecondsAgo": 10,
+                                    "uptime": 3
+                                },
+                                {
+                                    "ip": "\"101.255.165\".repeat(2).substring(11).concat(\".106\".repeat(3).substring(8))",
+                                    "port": 8090,
+                                    "countryCode": "ID",
+                                    "aliveSecondsAgo": 10,
+                                    "uptime": 7
+                                }
+                            ]
+                        }
+                        """;
+
+        var proxies = ProxyNovaProvider.Parse(payload).ToArray();
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(proxies, Has.Length.EqualTo(3));
+            Assert.That(proxies.Select(static proxy => proxy.Host), Is.EquivalentTo(new[]
+            {
+                                "149.129.255.179",
+                                "103.171.182.65",
+                                "101.255.165.106",
+                        }));
+        }
+    }
+
+    [TestCase(TestName = "ProxyNova отбрасывает malformed upstream expression без валидного IP"), Benchmark]
+    public void ParseMalformedUpstreamExpressionSkipsInvalidRecordTest()
+    {
+        const string payload = """
+                        {
+                            "data": [
+                                {
+                                    "ip": "atob(\"MTc3LjIzLjE=\").concat(\"56.\".repeat(3).substring(6))",
+                                    "port": 9999,
+                                    "countryCode": "BR",
+                                    "aliveSecondsAgo": 10,
+                                    "uptime": 12
+                                },
+                                {
+                                    "ip": "atob(\"MTI3LjAuMC4x\")",
+                                    "port": 8080,
+                                    "countryCode": "BR",
+                                    "aliveSecondsAgo": 10,
+                                    "uptime": 12
+                                }
+                            ]
+                        }
+                        """;
+
+        var proxies = ProxyNovaProvider.Parse(payload).ToArray();
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(proxies, Has.Length.EqualTo(1));
+            Assert.That(proxies[0].Host, Is.EqualTo("127.0.0.1"));
+            Assert.That(proxies[0].Port, Is.EqualTo(8080));
+        }
+    }
+
     [TestCase(TestName = "Пустой payload даёт пустой набор proxy"), Benchmark]
     public void ParseEmptyPayloadTest()
     {
@@ -117,7 +196,7 @@ public class ProxyNovaProviderTests(ILogger logger) : BenchmarkTests<ProxyNovaPr
             Near = new(48.8566, 2.3522),
             Limit = 50000,
         }, httpClient);
-        await provider.RefreshAsync();
+        var snapshot = (await provider.FetchAsync()).ToArray();
 
         using (Assert.EnterMultipleScope())
         {
@@ -125,7 +204,7 @@ public class ProxyNovaProviderTests(ILogger logger) : BenchmarkTests<ProxyNovaPr
             Assert.That(requestedUri!.Query, Does.Contain("limit=1000"));
             Assert.That(requestedUri!.Query, Does.Contain("near=48.8566%2C2.3522"));
             Assert.That(requestedUri!.Query, Does.Not.Contain("country="));
-            Assert.That(provider.PoolCount, Is.EqualTo(1));
+            Assert.That(snapshot, Has.Length.EqualTo(1));
         }
     }
 
@@ -142,7 +221,36 @@ public class ProxyNovaProviderTests(ILogger logger) : BenchmarkTests<ProxyNovaPr
 
         using var provider = new ProxyNovaProvider($"{ProxyNovaProvider.DefaultEndpoint}?near=abc", httpClient);
 
-        Assert.That(async () => await provider.RefreshAsync(), Throws.TypeOf<FormatException>());
+        Assert.That(async () => await provider.FetchAsync(), Throws.TypeOf<FormatException>());
+    }
+
+    [TestCase(TestName = "ProxyNova targeted fetch использует requested count как limit"), Benchmark]
+    public async Task TargetedFetchUsesRequestedCountAsLimitTest()
+    {
+        Uri? requestedUri = null;
+        using var httpClient = new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            requestedUri = request.RequestUri;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"data\":[{\"ip\":\"atob(\\\"MTI3LjAuMC4x\\\")\",\"port\":8080,\"countryCode\":\"FR\",\"aliveSecondsAgo\":1,\"uptime\":100}]}")
+                {
+                    Headers = { ContentType = new("application/json") },
+                },
+            };
+        }));
+
+        using var provider = new ProxyNovaProvider(ProxyNovaProvider.DefaultEndpoint, httpClient);
+        var result = await ((IProxyTargetedProvider)provider).FetchAsync(
+            new ProxyProviderFetchRequest(5, [], [], []),
+            CancellationToken.None);
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(requestedUri, Is.Not.Null);
+            Assert.That(requestedUri!.Query, Does.Contain("limit=5"));
+            Assert.That(result.Proxies, Has.Count.EqualTo(1));
+        }
     }
 
     private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler

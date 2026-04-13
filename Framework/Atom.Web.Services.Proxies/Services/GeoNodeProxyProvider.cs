@@ -1,22 +1,44 @@
 ﻿using System.Globalization;
+using System.Net;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using Atom.Net.Proxies;
 using Atom.Web.Analytics;
+using Microsoft.Extensions.Logging;
 
 namespace Atom.Web.Proxies.Services;
 
 /// <summary>
 /// Провайдер бесплатных прокси через публичный API GeoNode.
 /// </summary>
-public sealed class GeoNodeProxyProvider : NetworkProxyProvider
+public sealed class GeoNodeProxyProvider : NetworkProxyProvider, IProxyPagedProvider
 {
     /// <summary>
     /// Базовый endpoint GeoNode proxy-list API.
     /// </summary>
     public const string DefaultEndpoint = "https://proxylist.geonode.com/api/proxy-list?limit=100&page=1&sort_by=lastChecked&sort_type=desc";
 
+    /// <summary>
+    /// Рабочий дефолтный лимит старта запросов в секунду для полного page-walk GeoNode.
+    /// </summary>
+    public const int DefaultRequestsPerSecondLimit = 4;
+
+    /// <summary>
+    /// Число повторов по умолчанию для retryable ответов GeoNode.
+    /// </summary>
+    public const int DefaultRetryAttempts = 2;
+
+    /// <summary>
+    /// Базовая задержка по умолчанию между retryable запросами GeoNode.
+    /// </summary>
+    public const int DefaultRetryDelayMilliseconds = 750;
+
     private readonly HttpClient httpClient;
     private readonly bool disposeHttpClient;
+    private readonly bool fetchAllPages;
+    private readonly GeoNodeProxyProviderOptions? options;
+    private readonly int retryAttempts;
+    private readonly TimeSpan retryDelay;
 
     /// <summary>
     /// Endpoint, из которого загружается список прокси.
@@ -24,21 +46,38 @@ public sealed class GeoNodeProxyProvider : NetworkProxyProvider
     public string Endpoint { get; }
 
     /// <summary>
+    /// Указывает, должен ли провайдер пройти все страницы GeoNode API.
+    /// </summary>
+    public bool FetchAllPages => fetchAllPages;
+
+    /// <summary>
     /// Создаёт провайдер GeoNode.
     /// </summary>
-    public GeoNodeProxyProvider(string endpoint = DefaultEndpoint, HttpClient? httpClient = null)
+    public GeoNodeProxyProvider(string endpoint = DefaultEndpoint, HttpClient? httpClient = null, ILogger? logger = null)
+        : base(logger)
     {
         Endpoint = endpoint;
         this.httpClient = httpClient ?? new HttpClient();
         disposeHttpClient = httpClient is null;
+        fetchAllPages = false;
+        RequestsPerSecondLimit = DefaultRequestsPerSecondLimit;
+        retryAttempts = DefaultRetryAttempts;
+        retryDelay = TimeSpan.FromMilliseconds(DefaultRetryDelayMilliseconds);
     }
 
     /// <summary>
     /// Создаёт провайдер GeoNode из явной конфигурации endpoint.
     /// </summary>
-    public GeoNodeProxyProvider(GeoNodeProxyProviderOptions options, HttpClient? httpClient = null)
-        : this(CreateEndpoint(options), httpClient)
+    public GeoNodeProxyProvider(GeoNodeProxyProviderOptions options, HttpClient? httpClient = null, ILogger? logger = null)
+        : this(CreateEndpoint(options), httpClient, logger)
     {
+        ArgumentNullException.ThrowIfNull(options);
+
+        this.options = options;
+        fetchAllPages = options.FetchAllPages;
+        RequestsPerSecondLimit = Math.Max(1, options.RequestsPerSecondLimit);
+        retryAttempts = Math.Max(0, options.RetryAttempts);
+        retryDelay = TimeSpan.FromMilliseconds(Math.Max(1, options.RetryDelayMilliseconds));
     }
 
     /// <inheritdoc/>
@@ -55,11 +94,40 @@ public sealed class GeoNodeProxyProvider : NetworkProxyProvider
     /// <inheritdoc/>
     protected override async ValueTask<IEnumerable<ServiceProxy>> LoadPoolAsync(CancellationToken cancellationToken)
     {
-        using var response = await httpClient.GetAsync(Endpoint, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        var payload = await LoadPayloadAsync(Endpoint, cancellationToken).ConfigureAwait(false);
+        return Parse(payload).ToList();
+    }
 
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        return Parse(payload);
+    /// <inheritdoc/>
+    public async ValueTask<ProxyProviderFetchPage> FetchPageAsync(string? continuationToken, CancellationToken cancellationToken)
+    {
+        var page = string.IsNullOrWhiteSpace(continuationToken)
+            ? ProviderEndpointBuilder.PositiveOrDefault(options?.Page ?? 1, 1)
+            : int.Parse(continuationToken, CultureInfo.InvariantCulture);
+
+        var endpoint = page == ProviderEndpointBuilder.PositiveOrDefault(options?.Page ?? 1, 1)
+            ? Endpoint
+            : CreateEndpoint(new GeoNodeProxyProviderOptions
+            {
+                Limit = options?.Limit ?? 100,
+                Page = page,
+                SortBy = options?.SortBy ?? "lastChecked",
+                SortType = options?.SortType ?? "desc",
+            });
+
+        var payload = await LoadPayloadAsync(endpoint, cancellationToken).ConfigureAwait(false);
+        var proxies = Parse(payload).ToArray();
+        if (!fetchAllPages || options is null)
+        {
+            return new ProxyProviderFetchPage(proxies);
+        }
+
+        var metadata = ParsePageMetadata(payload, options);
+        var nextPage = metadata.Total > 0 && metadata.PageCount > metadata.Page
+            ? (metadata.Page + 1).ToString(CultureInfo.InvariantCulture)
+            : null;
+
+        return new ProxyProviderFetchPage(proxies, nextPage);
     }
 
     /// <summary>
@@ -117,6 +185,73 @@ public sealed class GeoNodeProxyProvider : NetworkProxyProvider
         };
 
         return ProviderEndpointBuilder.Create("https://proxylist.geonode.com/api/proxy-list", query);
+    }
+
+    private async Task<string> LoadPayloadAsync(string endpoint, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            using var response = await RunRateLimitedAsync(async token =>
+            {
+                return await httpClient.GetAsync(endpoint, token).ConfigureAwait(false);
+            }, cancellationToken).ConfigureAwait(false);
+
+            if (response.IsSuccessStatusCode)
+            {
+                return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (attempt >= retryAttempts || !IsRetryableStatusCode(response.StatusCode))
+            {
+                response.EnsureSuccessStatusCode();
+            }
+
+            await Task.Delay(GetRetryDelay(response.Headers.RetryAfter, attempt), cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private TimeSpan GetRetryDelay(RetryConditionHeaderValue? retryAfter, int attempt)
+    {
+        var exponentialDelay = TimeSpan.FromMilliseconds(retryDelay.TotalMilliseconds * Math.Pow(2, attempt));
+        if (retryAfter is null)
+        {
+            return exponentialDelay;
+        }
+
+        if (retryAfter.Delta is { } delta && delta > TimeSpan.Zero)
+        {
+            return delta > exponentialDelay ? delta : exponentialDelay;
+        }
+
+        if (retryAfter.Date is { } date)
+        {
+            var dateDelay = date - DateTimeOffset.UtcNow;
+            if (dateDelay > TimeSpan.Zero)
+            {
+                return dateDelay > exponentialDelay ? dateDelay : exponentialDelay;
+            }
+        }
+
+        return exponentialDelay;
+    }
+
+    private static bool IsRetryableStatusCode(HttpStatusCode statusCode)
+        => statusCode == HttpStatusCode.TooManyRequests
+           || statusCode == HttpStatusCode.RequestTimeout
+           || statusCode == HttpStatusCode.BadGateway
+           || statusCode == HttpStatusCode.ServiceUnavailable
+           || statusCode == HttpStatusCode.GatewayTimeout;
+
+    private static GeoNodePageMetadata ParsePageMetadata(string payload, GeoNodeProxyProviderOptions options)
+    {
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+
+        var limit = TryParseInt32(root, "limit") ?? ProviderEndpointBuilder.PositiveOrDefault(options.Limit, 100);
+        var page = TryParseInt32(root, "page") ?? ProviderEndpointBuilder.PositiveOrDefault(options.Page, 1);
+        var total = TryParseInt32(root, "total") ?? 0;
+
+        return new(total, page, limit);
     }
 
     private static Geolocation? CreateGeolocation(JsonElement item)
@@ -260,5 +395,10 @@ public sealed class GeoNodeProxyProvider : NetworkProxyProvider
         }
 
         return value;
+    }
+
+    private readonly record struct GeoNodePageMetadata(int Total, int Page, int Limit)
+    {
+        public int PageCount => Limit <= 0 ? 1 : (int)Math.Ceiling((double)Total / Limit);
     }
 }

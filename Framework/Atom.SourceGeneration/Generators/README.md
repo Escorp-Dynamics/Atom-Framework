@@ -15,6 +15,8 @@
   - `TypeSyntaxProvider`
   - `FieldSyntaxProvider`
   - `MethodSyntaxProvider`
+  - `PropertySyntaxProvider`
+  - `MemberSyntaxProvider`
 
 `SyntaxProviderInfo` вместе с `ISyntaxProviderInfo` несут `SyntaxNode`,
 вычисленный `ISymbol` и имя атрибута, удовлетворяющего фильтру.
@@ -62,4 +64,3 @@ public sealed class AuditGenerator : IIncrementalGenerator
 создание `SyntaxProvider` и регистрацию `SourceOutput`. Если передать ещё и
 `IAnalyzerSyntaxProvider`, генератор будет повторно запускаться на узлах, где
 анализатор сработал (см. `Extensions.cs`).
-

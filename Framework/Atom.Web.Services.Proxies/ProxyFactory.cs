@@ -1,5 +1,11 @@
-﻿using Atom.Architect.Components;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
+using System.Threading.Channels;
+using Atom.Architect.Components;
+using Atom.Net.Proxies;
+using Atom.Web.Analytics;
 using Atom.Web.Proxies.Services;
+using Microsoft.Extensions.Logging;
 
 namespace Atom.Web.Proxies;
 
@@ -9,15 +15,53 @@ namespace Atom.Web.Proxies;
 [ComponentOwner(typeof(IProxyProvider))]
 public partial class ProxyFactory : IProxyFactory<IProxyProvider, ProxyFactory>
 {
+    private readonly ConcurrentDictionary<IProxyProvider, ProviderRegistration> providerRegistrations = [];
+    private readonly ConcurrentDictionary<long, DateTime> blockedProxyIds = [];
+    private readonly ConcurrentDictionary<string, long> proxyIdsByKey = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<long, IProxyProvider> providersById = [];
+    private readonly Channel<byte> rebuildSignals = Channel.CreateUnbounded<byte>(new UnboundedChannelOptions
+    {
+        SingleReader = true,
+        SingleWriter = false,
+    });
+    private readonly CancellationTokenSource rebuildLoopSource = new();
+    private readonly Task rebuildLoopTask;
+    private Meter? meter;
+    private Counter<long>? refreshSuccessCounter;
+    private Counter<long>? refreshFailureCounter;
+    private Counter<long>? rebuildCounter;
+    private Counter<long>? leaseGrantedCounter;
+    private Counter<long>? leaseReleasedCounter;
+    private Counter<long>? targetedSelectionCounter;
+    private UpDownCounter<int>? activeProxyCountCounter;
+    private UpDownCounter<int>? blockedLeaseCountCounter;
+    private UpDownCounter<int>? providerCountCounter;
+
     private bool isDisposed;
     private int nextProxyIndex = -1;
-    private TimeSpan refreshInterval = TimeSpan.FromMinutes(5);
+    private int nextProviderOrder;
+    private int activeProxyCount;
+    private int publishedActiveProxyCount;
+    private int publishedBlockedLeaseCount;
+    private int publishedProviderCount;
+    private long nextProxyId;
+    private IMeterFactory? meterFactory;
+    private TimeSpan refreshInterval = TimeSpan.FromSeconds(30);
     private TimeSpan refreshErrorBackoff = TimeSpan.FromSeconds(30);
     private bool preservePoolOnRefreshFailure = true;
-    private ProxyRotationStrategy serviceRotationStrategy = ProxyRotationStrategy.RoundRobin;
+    private TimeSpan blockedLeaseTimeout = TimeSpan.FromHours(24);
+    private ProxyType[] allowedProtocols = [];
+    private Country[] allowedCountries = [];
+    private AnonymityLevel[] allowedAnonymityLevels = [];
+
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="ProxyFactory"/>.
+    /// </summary>
+    public ProxyFactory()
+        => rebuildLoopTask = RunRebuildLoopAsync(rebuildLoopSource.Token);
 
     /// <inheritdoc/>
-    public IEnumerable<IProxyProvider> Services => TryGetAll<IProxyProvider>(out var providers) ? providers : [];
+    public IEnumerable<IProxyProvider> Providers => TryGetAll<IProxyProvider>(out var providers) ? providers : [];
 
     /// <summary>
     /// Resolver, определяющий dedup key для aggregate proxy pool.
@@ -25,33 +69,99 @@ public partial class ProxyFactory : IProxyFactory<IProxyProvider, ProxyFactory>
     public IProxyDedupKeyResolver DedupKeyResolver { get; set; } = ProxyDedupKeyResolvers.Literal;
 
     /// <summary>
-    /// Интервал автообновления, который контейнер применяет ко всем подключаемым сервисам.
+    /// Логгер фабрики для runtime-диагностики refresh и rebuild процессов.
+    /// </summary>
+    public ILogger? Logger { get; set; }
+
+    /// <summary>
+    /// Источник Meter для диагностики и внешней инструментализации фабрики.
+    /// </summary>
+    public IMeterFactory? MeterFactory
+    {
+        get => meterFactory;
+        set => SetMeterFactory(value);
+    }
+
+    /// <summary>
+    /// Число deduped proxy в последнем перестроенном aggregate snapshot, соответствующих активным factory filters.
+    /// Значение обновляется после фонового rebuild и не гарантирует мгновенную синхронность сразу после смены filter-ов или provider stack.
+    /// </summary>
+    public int Count => Volatile.Read(ref activeProxyCount);
+
+    /// <summary>
+    /// Разрешённые протоколы aggregate pool. Пустой набор разрешает все протоколы.
+    /// </summary>
+    public IEnumerable<ProxyType> AllowedProtocols
+    {
+        get => Volatile.Read(ref allowedProtocols);
+        set
+        {
+            Volatile.Write(ref allowedProtocols, value is null ? [] : [.. value.Distinct()]);
+            SignalRebuild();
+        }
+    }
+
+    /// <summary>
+    /// Разрешённые страны. Пустой набор разрешает все страны.
+    /// </summary>
+    public IEnumerable<Country> AllowedCountries
+    {
+        get => Volatile.Read(ref allowedCountries);
+        set
+        {
+            Volatile.Write(
+                ref allowedCountries,
+                value is null
+                    ? []
+                    : [.. value.Where(static item => item is not null).Distinct()]);
+            SignalRebuild();
+        }
+    }
+
+    /// <summary>
+    /// Разрешённые уровни анонимности aggregate pool. Пустой набор разрешает все уровни.
+    /// </summary>
+    public IEnumerable<AnonymityLevel> AllowedAnonymityLevels
+    {
+        get => Volatile.Read(ref allowedAnonymityLevels);
+        set
+        {
+            Volatile.Write(ref allowedAnonymityLevels, value is null ? [] : [.. value.Distinct()]);
+            SignalRebuild();
+        }
+    }
+
+    /// <summary>
+    /// Интервал, через который фабрика опрашивает подключённые провайдеры и обновляет их снимки.
     /// </summary>
     public TimeSpan RefreshInterval
     {
         get => refreshInterval;
         set
         {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, TimeSpan.Zero);
+
             refreshInterval = value;
-            ApplyToServices(static (service, interval) => service.RefreshInterval = interval, value);
+            RestartProviderPolling();
         }
     }
 
     /// <summary>
-    /// Интервал ожидания перед повторным фоновым обновлением после ошибки.
+    /// Интервал ожидания перед повторным опросом после ошибки обновления снимка.
     /// </summary>
     public TimeSpan RefreshErrorBackoff
     {
         get => refreshErrorBackoff;
         set
         {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, TimeSpan.Zero);
+
             refreshErrorBackoff = value;
-            ApplyToServices(static (service, backoff) => service.RefreshErrorBackoff = backoff, value);
         }
     }
 
     /// <summary>
-    /// Указывает, должен ли сервис сохранять последний успешный пул при ошибке обновления.
+    /// Указывает, должна ли фабрика сохранять последний успешный snapshot при ошибке обновления провайдера.
     /// </summary>
     public bool PreservePoolOnRefreshFailure
     {
@@ -59,7 +169,6 @@ public partial class ProxyFactory : IProxyFactory<IProxyProvider, ProxyFactory>
         set
         {
             preservePoolOnRefreshFailure = value;
-            ApplyToServices(static (service, preserve) => service.PreservePoolOnRefreshFailure = preserve, value);
         }
     }
 
@@ -70,98 +179,16 @@ public partial class ProxyFactory : IProxyFactory<IProxyProvider, ProxyFactory>
     public ProxyRotationStrategy RotationStrategy { get; set; } = ProxyRotationStrategy.RoundRobin;
 
     /// <summary>
-    /// Стратегия ротации, которую контейнер применяет ко всем подключаемым сервисам.
+    /// Интервал, после которого невозвращённые leased proxy снимаются с блокировки автоматически.
     /// </summary>
-    public ProxyRotationStrategy ServiceRotationStrategy
+    public TimeSpan BlockedLeaseTimeout
     {
-        get => serviceRotationStrategy;
+        get => blockedLeaseTimeout;
         set
         {
-            serviceRotationStrategy = value;
-            ApplyToServices(static (service, strategy) => service.RotationStrategy = strategy, value);
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, TimeSpan.Zero);
+            blockedLeaseTimeout = value;
         }
-    }
-
-    /// <summary>
-    /// Подключает провайдера и сразу применяет к нему container-level defaults.
-    /// </summary>
-    public ProxyFactory UseProvider(IProxyProvider provider)
-    {
-        ArgumentNullException.ThrowIfNull(provider);
-
-        ApplyReliabilitySettings(provider);
-        Use<IProxyProvider>(provider);
-        return this;
-    }
-
-    /// <summary>
-    /// Подключает провайдера и позволяет сразу переопределить его настройки поверх контейнерных defaults.
-    /// </summary>
-    public ProxyFactory Use<T>(T component, Action<T> configure) where T : class, IProxyProvider
-    {
-        ArgumentNullException.ThrowIfNull(component);
-        ArgumentNullException.ThrowIfNull(configure);
-
-        UseProvider(component);
-        configure(component);
-        return this;
-    }
-
-    /// <summary>
-    /// Переопределяет настройки уже подключённого сервиса.
-    /// </summary>
-    public ProxyFactory Configure<T>(Action<T> configure) where T : class, IProxyProvider
-    {
-        ArgumentNullException.ThrowIfNull(configure);
-
-        var service = FindProvider<T>();
-        if (service is not null)
-        {
-            configure(service);
-        }
-
-        return this;
-    }
-
-    /// <summary>
-    /// Собирает и валидирует единый пул прокси из всех подключённых proxy provider сервисов.
-    /// </summary>
-    /// <param name="validationUri">Адрес, на котором нужно проверить прокси.</param>
-    /// <param name="filter">Фильтр выборки. Если не указан, возвращаются все прокси.</param>
-    /// <param name="cancellationToken">Токен отмены задачи.</param>
-    public async ValueTask<IEnumerable<ServiceProxy>> GetValidatedPoolAsync(
-        Uri validationUri,
-        Func<ServiceProxy, bool>? filter = null,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(validationUri);
-        filter ??= static _ => true;
-
-        var providers = GetProvidersSnapshot(applyReliabilitySettings: true);
-        if (providers.Length == 0)
-        {
-            return [];
-        }
-
-        var tasks = new Task<List<ServiceProxy>>[providers.Length];
-        for (var index = 0; index < providers.Length; index++)
-        {
-            tasks[index] = CollectValidatedProxiesAsync(providers[index], validationUri, filter, cancellationToken);
-        }
-
-        await Task.WhenAll(tasks).ConfigureAwait(false);
-        var result = new ServiceProxy[GetTotalCount(tasks)];
-        var resultIndex = 0;
-        for (var index = 0; index < tasks.Length; index++)
-        {
-            var validated = tasks[index].Result;
-            for (var validatedIndex = 0; validatedIndex < validated.Count; validatedIndex++)
-            {
-                result[resultIndex++] = validated[validatedIndex];
-            }
-        }
-
-        return await DeduplicateAsync(result, resultIndex, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -169,13 +196,103 @@ public partial class ProxyFactory : IProxyFactory<IProxyProvider, ProxyFactory>
     /// </summary>
     public async ValueTask<ServiceProxy> GetAsync(CancellationToken cancellationToken = default)
     {
+        var targeted = await TryGetColdTargetedSelectionAsync(1, cancellationToken).ConfigureAwait(false);
+        if (targeted.Length != 0)
+        {
+            targetedSelectionCounter?.Add(1);
+            if (Logger is { } logger)
+            {
+                logger.SingleTargetedColdStartSatisfied();
+            }
+
+            return targeted[0];
+        }
+
         var proxy = await SelectSingleAsync(static _ => true, cancellationToken).ConfigureAwait(false);
         return proxy ?? throw new InvalidOperationException("Контейнер не содержит доступных прокси.");
     }
 
     /// <inheritdoc/>
     public void Return(ServiceProxy item)
-        => ArgumentNullException.ThrowIfNull(item);
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (item.Id <= 0)
+        {
+            return;
+        }
+
+        if (CleanupBlockedProxyId(item.Id))
+        {
+            leaseReleasedCounter?.Add(1);
+            PublishBlockedLeaseCount(blockedProxyIds.Count);
+        }
+    }
+
+    /// <summary>
+    /// Вручную очищает утёкшие lease для указанных прокси.
+    /// </summary>
+    public int CleanupLeasedProxies(IEnumerable<ServiceProxy> proxies)
+    {
+        ArgumentNullException.ThrowIfNull(proxies);
+
+        return CleanupBlockedProxyIds(proxies.Where(static proxy => proxy is not null).Select(static proxy => proxy.Id));
+    }
+
+    /// <summary>
+    /// Вручную очищает все утёкшие lease.
+    /// </summary>
+    public int CleanupLeasedProxies()
+        => CleanupBlockedProxyIds();
+
+    internal int CleanupBlockedProxyIds(IEnumerable<long> proxyIds)
+    {
+        ArgumentNullException.ThrowIfNull(proxyIds);
+
+        var cleaned = 0;
+        foreach (var proxyId in proxyIds)
+        {
+            if (proxyId > 0 && CleanupBlockedProxyId(proxyId))
+            {
+                cleaned++;
+            }
+        }
+
+        if (cleaned != 0)
+        {
+            leaseReleasedCounter?.Add(cleaned);
+            PublishBlockedLeaseCount(blockedProxyIds.Count);
+            if (Logger is { } logger)
+            {
+                logger.ExplicitLeaseCleanup(cleaned);
+            }
+        }
+
+        return cleaned;
+    }
+
+    internal int CleanupBlockedProxyIds()
+    {
+        var cleaned = 0;
+        foreach (var proxyId in blockedProxyIds.Keys)
+        {
+            if (CleanupBlockedProxyId(proxyId))
+            {
+                cleaned++;
+            }
+        }
+
+        if (cleaned != 0)
+        {
+            leaseReleasedCounter?.Add(cleaned);
+            PublishBlockedLeaseCount(blockedProxyIds.Count);
+            if (Logger is { } logger)
+            {
+                logger.FullLeaseCleanup(cleaned);
+            }
+        }
+
+        return cleaned;
+    }
 
     /// <summary>
     /// Освобождает ресурсы фабрики и подключенных провайдеров.
@@ -185,6 +302,22 @@ public partial class ProxyFactory : IProxyFactory<IProxyProvider, ProxyFactory>
         if (Interlocked.CompareExchange(ref isDisposed, true, false))
         {
             return;
+        }
+
+        foreach (var registration in providerRegistrations.Values)
+        {
+            registration.Stop();
+        }
+
+        rebuildLoopSource.Cancel();
+        rebuildSignals.Writer.TryComplete();
+
+        try
+        {
+            rebuildLoopTask.GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
         }
 
         foreach (var provider in GetProvidersSnapshot())
@@ -197,6 +330,8 @@ public partial class ProxyFactory : IProxyFactory<IProxyProvider, ProxyFactory>
             provider.Dispose();
         }
 
+        rebuildLoopSource.Dispose();
+        meter?.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -214,107 +349,611 @@ public partial class ProxyFactory : IProxyFactory<IProxyProvider, ProxyFactory>
     /// <summary>
     /// Возвращает следующую последовательность прокси из общего контейнерного пула.
     /// </summary>
-    public ValueTask<IEnumerable<ServiceProxy>> GetAsync(int count, CancellationToken cancellationToken = default)
-        => GetAsync(count, static _ => true, cancellationToken);
+    public async ValueTask<IEnumerable<ServiceProxy>> GetAsync(int count, CancellationToken cancellationToken = default)
+    {
+        var targeted = await TryGetColdTargetedSelectionAsync(count, cancellationToken).ConfigureAwait(false);
+        if (targeted.Length != 0)
+        {
+            targetedSelectionCounter?.Add(targeted.Length);
+            if (Logger is { } logger)
+            {
+                logger.BatchTargetedColdStartSatisfied(targeted.Length);
+            }
+
+            return targeted;
+        }
+
+        return await GetAsync(count, static _ => true, cancellationToken).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Возвращает следующую последовательность прокси из общего контейнерного пула, удовлетворяющую фильтру.
-    /// Контейнер применяет стратегию выбора к уже агрегированному snapshot и не делегирует container-level rotation отдельным сервисам.
     /// </summary>
     public async ValueTask<IEnumerable<ServiceProxy>> GetAsync(int count, Func<ServiceProxy, bool> filter, CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
         ArgumentNullException.ThrowIfNull(filter);
 
-        var snapshot = await CollectAsync(cancellationToken).ConfigureAwait(false);
+        var snapshot = await CollectAvailableSnapshotAsync(filter, includeBlocked: false, cancellationToken).ConfigureAwait(false);
         if (snapshot.Length == 0)
         {
             return [];
         }
 
-        return ProxyPoolSelection.Select(snapshot, count, filter, RotationStrategy, ref nextProxyIndex);
+        var selected = ProxyPoolSelection.Select(snapshot, count, static _ => true, RotationStrategy, ref nextProxyIndex);
+        return LeaseSelection(selected, count);
     }
 
     private void ApplyReliabilitySettings(IProxyProvider provider)
     {
-        provider.RefreshInterval = RefreshInterval;
-        provider.RefreshErrorBackoff = RefreshErrorBackoff;
-        provider.PreservePoolOnRefreshFailure = PreservePoolOnRefreshFailure;
-        provider.RotationStrategy = ServiceRotationStrategy;
-
         if (provider is ProxyProvider proxyProvider)
         {
             proxyProvider.DedupKeyResolver = DedupKeyResolver;
+            proxyProvider.Logger ??= Logger;
         }
     }
 
-    private void ApplyToServices<TValue>(Action<IProxyProvider, TValue> apply, TValue value)
+    private async ValueTask<ServiceProxy[]> CollectAvailableSnapshotAsync(
+        Func<ServiceProxy, bool> filter,
+        bool includeBlocked,
+        CancellationToken cancellationToken)
     {
-        foreach (var provider in GetProvidersSnapshot(applyReliabilitySettings: true))
-        {
-            apply(provider, value);
-        }
+        await EnsureWarmSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        CleanupExpiredBlockedEntries();
+
+        return await CollectSnapshotCoreAsync(filter, includeBlocked, cancellationToken).ConfigureAwait(false);
     }
 
-    private async ValueTask<ServiceProxy[]> CollectAsync(CancellationToken cancellationToken)
+    private async ValueTask<ServiceProxy[]> CollectSnapshotCoreAsync(
+        Func<ServiceProxy, bool> filter,
+        bool includeBlocked,
+        CancellationToken cancellationToken)
     {
-        var providers = GetProvidersSnapshot(applyReliabilitySettings: true);
-        if (providers.Length == 0)
+        var registrations = GetOrderedRegistrations();
+        if (registrations.Length == 0)
         {
             return [];
         }
 
-        var tasks = new Task<IReadOnlyList<ServiceProxy>>[providers.Length];
-        for (var index = 0; index < providers.Length; index++)
+        var protocols = Volatile.Read(ref allowedProtocols);
+        var countries = Volatile.Read(ref allowedCountries);
+        var anonymityLevels = Volatile.Read(ref allowedAnonymityLevels);
+        var candidates = new List<(ServiceProxy Proxy, IProxyProvider Provider)>();
+        for (var registrationIndex = 0; registrationIndex < registrations.Length; registrationIndex++)
         {
-            tasks[index] = CollectServicePoolSnapshotAsync(providers[index], cancellationToken);
-        }
-
-        await Task.WhenAll(tasks).ConfigureAwait(false);
-        var result = new ServiceProxy[GetTotalCount(tasks)];
-        var resultIndex = 0;
-        for (var index = 0; index < tasks.Length; index++)
-        {
-            var proxies = tasks[index].Result;
-            for (var proxyIndex = 0; proxyIndex < proxies.Count; proxyIndex++)
+            var registration = registrations[registrationIndex];
+            var snapshot = Volatile.Read(ref registration.Snapshot);
+            for (var proxyIndex = 0; proxyIndex < snapshot.Length; proxyIndex++)
             {
-                result[resultIndex++] = proxies[proxyIndex];
+                var proxy = snapshot[proxyIndex];
+                if (!MatchesFactoryFilters(proxy, protocols, countries, anonymityLevels) || !filter(proxy))
+                {
+                    continue;
+                }
+
+                candidates.Add((proxy, registration.Provider));
             }
         }
 
-        return await DeduplicateAsync(result, resultIndex, cancellationToken).ConfigureAwait(false);
+        if (candidates.Count == 0)
+        {
+            return [];
+        }
+
+        return await FinalizeCandidatesAsync(candidates, includeBlocked, cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<List<ServiceProxy>> CollectValidatedProxiesAsync(
-        IProxyProvider provider,
-        Uri validationUri,
-        Func<ServiceProxy, bool> filter,
-        CancellationToken cancellationToken)
+    private async ValueTask EnsureWarmSnapshotAsync(CancellationToken cancellationToken)
     {
-        var proxies = await CollectServicePoolAsync(provider, cancellationToken).ConfigureAwait(false);
-        var result = new List<ServiceProxy>(GetProxyCount(proxies));
-        foreach (var proxy in proxies)
+        var registrations = GetOrderedRegistrations();
+        if (registrations.Length == 0)
         {
-            if (!filter(proxy))
+            return;
+        }
+
+        if (registrations.All(static registration => Volatile.Read(ref registration.Snapshot).Length != 0))
+        {
+            return;
+        }
+
+        var warmed = false;
+        for (var index = 0; index < registrations.Length; index++)
+        {
+            var registration = registrations[index];
+            if (registration.IsInitialized)
             {
                 continue;
             }
 
-            if (await provider.ValidateAsync(proxy, validationUri, cancellationToken).ConfigureAwait(false))
+            if (Volatile.Read(ref registration.Snapshot).Length != 0)
             {
-                result.Add(proxy);
+                continue;
+            }
+
+            var snapshot = await CollectServicePoolSnapshotAsync(registration.Provider, cancellationToken).ConfigureAwait(false);
+            Volatile.Write(ref registration.Snapshot, snapshot);
+            registration.MarkInitialized();
+            warmed = true;
+        }
+
+        if (!warmed)
+        {
+            return;
+        }
+
+        SignalRebuild();
+    }
+
+    private async Task<ServiceProxy?> SelectSingleAsync(Func<ServiceProxy, bool> filter, CancellationToken cancellationToken)
+    {
+        var snapshot = await CollectAvailableSnapshotAsync(filter, includeBlocked: false, cancellationToken).ConfigureAwait(false);
+        if (snapshot.Length == 0)
+        {
+            return null;
+        }
+
+        var selected = ProxyPoolSelection.SelectSingle(snapshot, static _ => true, RotationStrategy, ref nextProxyIndex);
+        if (selected is null)
+        {
+            return null;
+        }
+
+        var leased = LeaseSelection([selected], 1);
+        return leased.Length == 0 ? null : leased[0];
+    }
+
+    private async ValueTask<ServiceProxy[]> TryGetColdTargetedSelectionAsync(int requestedCount, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(requestedCount);
+
+        var registrations = GetOrderedRegistrations();
+        if (registrations.Length == 0
+            || registrations.Any(static registration => Volatile.Read(ref registration.Snapshot).Length != 0)
+            || registrations.Any(static registration => registration.Provider is not IProxyTargetedProvider))
+        {
+            return [];
+        }
+
+        var protocols = Volatile.Read(ref allowedProtocols);
+        var countries = Volatile.Read(ref allowedCountries);
+        var anonymityLevels = Volatile.Read(ref allowedAnonymityLevels);
+        var request = new ProxyProviderFetchRequest(requestedCount, protocols, countries, anonymityLevels);
+        var candidates = new List<(ServiceProxy Proxy, IProxyProvider Provider)>();
+
+        for (var index = 0; index < registrations.Length; index++)
+        {
+            var targetedProvider = (IProxyTargetedProvider)registrations[index].Provider;
+            var result = await targetedProvider.FetchAsync(request, cancellationToken).ConfigureAwait(false);
+            for (var proxyIndex = 0; proxyIndex < result.Proxies.Count; proxyIndex++)
+            {
+                var proxy = result.Proxies[proxyIndex];
+                if (MatchesFactoryFilters(proxy, protocols, countries, anonymityLevels))
+                {
+                    candidates.Add((proxy, registrations[index].Provider));
+                }
             }
         }
 
-        return result;
+        if (candidates.Count == 0)
+        {
+            return [];
+        }
+
+        var snapshot = await FinalizeCandidatesAsync(candidates, includeBlocked: false, cancellationToken).ConfigureAwait(false);
+        if (snapshot.Length == 0)
+        {
+            return [];
+        }
+
+        var selected = ProxyPoolSelection.Select(snapshot, requestedCount, static _ => true, RotationStrategy, ref nextProxyIndex);
+        return LeaseSelection(selected, requestedCount);
     }
 
-    private static async Task<IReadOnlyList<ServiceProxy>> CollectServicePoolSnapshotAsync(IProxyProvider provider, CancellationToken cancellationToken)
+    private async ValueTask<ServiceProxy[]> FinalizeCandidatesAsync(
+        IReadOnlyList<(ServiceProxy Proxy, IProxyProvider Provider)> candidates,
+        bool includeBlocked,
+        CancellationToken cancellationToken)
+    {
+        var keyTasks = new Dictionary<string, Task<string>>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < candidates.Count; index++)
+        {
+            var host = candidates[index].Proxy.Host ?? string.Empty;
+            if (!keyTasks.ContainsKey(host))
+            {
+                keyTasks.Add(host, DedupKeyResolver.GetKeyAsync(candidates[index].Proxy, cancellationToken).AsTask());
+            }
+        }
+
+        await Task.WhenAll(keyTasks.Values).ConfigureAwait(false);
+
+        var result = new List<ServiceProxy>(candidates.Count);
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < candidates.Count; index++)
+        {
+            var candidate = candidates[index];
+            var key = keyTasks[candidate.Proxy.Host ?? string.Empty].Result;
+            if (!seenKeys.Add(key))
+            {
+                continue;
+            }
+
+            var proxyId = proxyIdsByKey.GetOrAdd(key, _ => Interlocked.Increment(ref nextProxyId));
+            providersById[proxyId] = candidate.Provider;
+
+            var proxy = new ServiceProxy(proxyId, candidate.Proxy);
+            if (!includeBlocked && blockedProxyIds.ContainsKey(proxy.Id))
+            {
+                continue;
+            }
+
+            result.Add(proxy);
+        }
+
+        return [.. result];
+    }
+
+    private ServiceProxy[] LeaseSelection(IReadOnlyList<ServiceProxy> selected, int requestedCount)
+    {
+        if (selected.Count == 0 || requestedCount <= 0)
+        {
+            return [];
+        }
+
+        var leased = new List<ServiceProxy>(Math.Min(requestedCount, selected.Count));
+        var nowUtc = DateTime.UtcNow;
+        for (var index = 0; index < selected.Count && leased.Count < requestedCount; index++)
+        {
+            var proxy = selected[index];
+            if (proxy.Id <= 0)
+            {
+                continue;
+            }
+
+            if (blockedProxyIds.TryAdd(proxy.Id, nowUtc))
+            {
+                leased.Add(proxy);
+            }
+        }
+
+        if (leased.Count != 0)
+        {
+            leaseGrantedCounter?.Add(leased.Count);
+            PublishBlockedLeaseCount(blockedProxyIds.Count);
+        }
+
+        return [.. leased];
+    }
+
+    private ProxyFactory AttachProvider(IProxyProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+
+        ApplyReliabilitySettings(provider);
+        Use<IProxyProvider>(provider);
+        EnsureProviderRegistrationStarted(provider);
+        PublishProviderCount(providerRegistrations.Count);
+        SignalRebuild();
+        return this;
+    }
+
+    private IProxyProvider[] GetProvidersSnapshot()
+    {
+        if (!TryGetAll<IProxyProvider>(out var providers))
+        {
+            return [];
+        }
+
+        return [.. providers];
+    }
+
+    private ProviderRegistration EnsureProviderRegistration(IProxyProvider provider)
+        => providerRegistrations.GetOrAdd(provider, static (service, factory) =>
+        {
+            factory.ApplyReliabilitySettings(service);
+            var created = new ProviderRegistration(service, Interlocked.Increment(ref factory.nextProviderOrder));
+            if (service is IComponent component)
+            {
+                component.Detached += factory.OnProviderDetached;
+            }
+
+            return created;
+        }, this);
+
+    private void EnsureAttachedProvidersRegistered()
+    {
+        if (!TryGetAll<IProxyProvider>(out var providers))
+        {
+            return;
+        }
+
+        foreach (var provider in providers)
+        {
+            EnsureProviderRegistrationStarted(provider);
+        }
+    }
+
+    private ProviderRegistration EnsureProviderRegistrationStarted(IProxyProvider provider)
+    {
+        var registration = EnsureProviderRegistration(provider);
+        if (!registration.IsStarted)
+        {
+            if (Logger is { } logger)
+            {
+                logger.ProviderAttached(provider.GetType().Name, providerRegistrations.Count);
+            }
+
+            StartProviderPolling(registration, registration.Restart());
+        }
+
+        return registration;
+    }
+
+    private void RestartProviderPolling()
+    {
+        foreach (var registration in providerRegistrations.Values)
+        {
+            StartProviderPolling(registration, registration.Restart());
+        }
+    }
+
+    private void StartProviderPolling(ProviderRegistration registration, CancellationToken cancellationToken)
+    {
+        registration.MarkStarted();
+        _ = RefreshProviderSnapshotAsync(registration, cancellationToken);
+        registration.PollTask = RefreshInterval > TimeSpan.Zero
+            ? RunProviderPollingAsync(registration, cancellationToken)
+            : Task.CompletedTask;
+    }
+
+    private async Task RunProviderPollingAsync(ProviderRegistration registration, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(RefreshInterval, cancellationToken).ConfigureAwait(false);
+                await RefreshProviderSnapshotAsync(registration, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task RefreshProviderSnapshotAsync(ProviderRegistration registration, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var snapshot = await CollectServicePoolSnapshotAsync(registration.Provider, cancellationToken).ConfigureAwait(false);
+            Volatile.Write(ref registration.Snapshot, snapshot);
+            refreshSuccessCounter?.Add(1);
+            if (Logger is { } logger)
+            {
+                logger.ProviderSnapshotRefreshed(registration.Provider.GetType().Name, snapshot.Length);
+            }
+
+            SignalRebuild();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            refreshFailureCounter?.Add(1);
+            var preservedSnapshotCount = Volatile.Read(ref registration.Snapshot).Length;
+            if (PreservePoolOnRefreshFailure)
+            {
+                if (Logger is { } logger)
+                {
+                    logger.ProviderSnapshotRefreshFailedPreserved(exception, registration.Provider.GetType().Name, preservedSnapshotCount);
+                }
+            }
+            else
+            {
+                if (Logger is { } logger)
+                {
+                    logger.ProviderSnapshotRefreshFailedCleared(exception, registration.Provider.GetType().Name);
+                }
+            }
+
+            if (!PreservePoolOnRefreshFailure)
+            {
+                Volatile.Write(ref registration.Snapshot, []);
+                SignalRebuild();
+            }
+
+            if (RefreshErrorBackoff > TimeSpan.Zero)
+            {
+                await Task.Delay(RefreshErrorBackoff, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            registration.MarkInitialized();
+        }
+    }
+
+    private void OnProviderDetached(object? sender, ComponentEventArgs args)
+    {
+        if (args.Component is not IProxyProvider provider)
+        {
+            return;
+        }
+
+        if (provider is IComponent component)
+        {
+            component.Detached -= OnProviderDetached;
+        }
+
+        if (providerRegistrations.TryRemove(provider, out var registration))
+        {
+            registration.Stop();
+            PublishProviderCount(providerRegistrations.Count);
+            if (Logger is { } logger)
+            {
+                logger.ProviderDetached(provider.GetType().Name, providerRegistrations.Count);
+            }
+
+            SignalRebuild();
+        }
+    }
+
+    private void SignalRebuild()
+        => rebuildSignals.Writer.TryWrite(0);
+
+    private async Task RunRebuildLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (await rebuildSignals.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                while (rebuildSignals.Reader.TryRead(out _))
+                {
+                }
+
+                await RefreshProxyIndexAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task RefreshProxyIndexAsync(CancellationToken cancellationToken)
+    {
+        rebuildCounter?.Add(1);
+        var registrations = GetOrderedRegistrations();
+        if (registrations.Length == 0)
+        {
+            Volatile.Write(ref activeProxyCount, 0);
+            PublishActiveProxyCount(0);
+            PublishProviderCount(0);
+            proxyIdsByKey.Clear();
+            providersById.Clear();
+            return;
+        }
+
+        var protocols = Volatile.Read(ref allowedProtocols);
+        var countries = Volatile.Read(ref allowedCountries);
+        var anonymityLevels = Volatile.Read(ref allowedAnonymityLevels);
+        var activeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var activeIds = new HashSet<long>();
+        for (var registrationIndex = 0; registrationIndex < registrations.Length; registrationIndex++)
+        {
+            var registration = registrations[registrationIndex];
+            var snapshot = Volatile.Read(ref registration.Snapshot);
+            for (var proxyIndex = 0; proxyIndex < snapshot.Length; proxyIndex++)
+            {
+                var proxy = snapshot[proxyIndex];
+                if (!MatchesFactoryFilters(proxy, protocols, countries, anonymityLevels))
+                {
+                    continue;
+                }
+
+                var key = await DedupKeyResolver.GetKeyAsync(proxy, cancellationToken).ConfigureAwait(false);
+                if (!activeKeys.Add(key))
+                {
+                    continue;
+                }
+
+                var id = proxyIdsByKey.GetOrAdd(key, _ => Interlocked.Increment(ref nextProxyId));
+                providersById[id] = registration.Provider;
+                activeIds.Add(id);
+            }
+        }
+
+        Volatile.Write(ref activeProxyCount, activeIds.Count);
+        PublishActiveProxyCount(activeIds.Count);
+        PublishProviderCount(registrations.Length);
+        if (Logger is { } logger)
+        {
+            logger.RebuildCompleted(activeIds.Count, registrations.Length, blockedProxyIds.Count);
+        }
+
+        foreach (var pair in proxyIdsByKey)
+        {
+            if (activeKeys.Contains(pair.Key) || blockedProxyIds.ContainsKey(pair.Value))
+            {
+                continue;
+            }
+
+            proxyIdsByKey.TryRemove(pair.Key, out _);
+            providersById.TryRemove(pair.Value, out _);
+        }
+
+        foreach (var pair in providersById)
+        {
+            if (activeIds.Contains(pair.Key) || blockedProxyIds.ContainsKey(pair.Key))
+            {
+                continue;
+            }
+
+            providersById.TryRemove(pair.Key, out _);
+        }
+    }
+
+    private ProviderRegistration[] GetOrderedRegistrations()
+    {
+        EnsureAttachedProvidersRegistered();
+        return [.. providerRegistrations.Values.OrderBy(static registration => registration.Order)];
+    }
+
+    private void SetMeterFactory(IMeterFactory? value)
+    {
+        meter?.Dispose();
+        meter = null;
+        refreshSuccessCounter = null;
+        refreshFailureCounter = null;
+        rebuildCounter = null;
+        leaseGrantedCounter = null;
+        leaseReleasedCounter = null;
+        targetedSelectionCounter = null;
+        activeProxyCountCounter = null;
+        blockedLeaseCountCounter = null;
+        providerCountCounter = null;
+        meterFactory = value;
+        publishedActiveProxyCount = 0;
+        publishedBlockedLeaseCount = 0;
+        publishedProviderCount = 0;
+
+        if (value is null)
+        {
+            return;
+        }
+
+        meter = value.Create(new MeterOptions("Escorp.Atom.Web.Services.Proxies.ProxyFactory"));
+        refreshSuccessCounter = meter.CreateCounter<long>("proxy.factory.refresh.success");
+        refreshFailureCounter = meter.CreateCounter<long>("proxy.factory.refresh.failure");
+        rebuildCounter = meter.CreateCounter<long>("proxy.factory.rebuild");
+        leaseGrantedCounter = meter.CreateCounter<long>("proxy.factory.lease.granted");
+        leaseReleasedCounter = meter.CreateCounter<long>("proxy.factory.lease.released");
+        targetedSelectionCounter = meter.CreateCounter<long>("proxy.factory.selection.targeted");
+        activeProxyCountCounter = meter.CreateUpDownCounter<int>("proxy.factory.count.active");
+        blockedLeaseCountCounter = meter.CreateUpDownCounter<int>("proxy.factory.count.blocked");
+        providerCountCounter = meter.CreateUpDownCounter<int>("proxy.factory.count.providers");
+
+        PublishActiveProxyCount(Volatile.Read(ref activeProxyCount));
+        PublishBlockedLeaseCount(blockedProxyIds.Count);
+        PublishProviderCount(providerRegistrations.Count);
+    }
+
+    private static async Task<ServiceProxy[]> CollectServicePoolSnapshotAsync(IProxyProvider provider, CancellationToken cancellationToken)
     {
         var proxies = await CollectServicePoolAsync(provider, cancellationToken).ConfigureAwait(false);
+        if (proxies is ServiceProxy[] array)
+        {
+            return array;
+        }
+
         if (proxies is IReadOnlyList<ServiceProxy> list)
         {
-            return list;
+            var snapshot = new ServiceProxy[list.Count];
+            for (var index = 0; index < list.Count; index++)
+            {
+                snapshot[index] = list[index];
+            }
+
+            return snapshot;
         }
 
         if (proxies is ICollection<ServiceProxy> collection)
@@ -330,7 +969,7 @@ public partial class ProxyFactory : IProxyFactory<IProxyProvider, ProxyFactory>
             materialized.Add(proxy);
         }
 
-        return materialized;
+        return [.. materialized];
     }
 
     private static async ValueTask<IEnumerable<ServiceProxy>> CollectServicePoolAsync(IProxyProvider provider, CancellationToken cancellationToken)
@@ -340,141 +979,119 @@ public partial class ProxyFactory : IProxyFactory<IProxyProvider, ProxyFactory>
             return await snapshotSource.GetPoolSnapshotAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        return await provider.GetAsync(int.MaxValue, cancellationToken).ConfigureAwait(false);
+        return await provider.FetchAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private T? FindProvider<T>() where T : class, IProxyProvider
+    private void CleanupExpiredBlockedEntries()
     {
-        foreach (var provider in GetProvidersSnapshot())
+        var cleaned = 0;
+        var nowUtc = DateTime.UtcNow;
+        foreach (var pair in blockedProxyIds)
         {
-            if (provider is T typedProvider)
+            if (nowUtc - pair.Value >= BlockedLeaseTimeout)
             {
-                return typedProvider;
+                blockedProxyIds.TryRemove(pair.Key, out _);
+                cleaned++;
             }
         }
 
-        return null;
-    }
-
-    private IProxyProvider[] GetProvidersSnapshot(bool applyReliabilitySettings = false)
-    {
-        if (!TryGetAll<IProxyProvider>(out var providers))
+        if (cleaned != 0)
         {
-            return [];
-        }
-
-        IProxyProvider[] snapshot = [.. providers];
-        if (!applyReliabilitySettings)
-        {
-            return snapshot;
-        }
-
-        foreach (var provider in snapshot)
-        {
-            ApplyReliabilitySettings(provider);
-        }
-
-        return snapshot;
-    }
-
-    private static int GetProxyCount(IEnumerable<ServiceProxy> proxies)
-    {
-        if (proxies is IReadOnlyCollection<ServiceProxy> readOnlyCollection)
-        {
-            return readOnlyCollection.Count;
-        }
-
-        if (proxies is ICollection<ServiceProxy> collection)
-        {
-            return collection.Count;
-        }
-
-        return 0;
-    }
-
-    private static int GetTotalCount(Task<List<ServiceProxy>>[] tasks)
-    {
-        var totalCount = 0;
-        for (var index = 0; index < tasks.Length; index++)
-        {
-            totalCount += tasks[index].Result.Count;
-        }
-
-        return totalCount;
-    }
-
-    private static int GetTotalCount(Task<IReadOnlyList<ServiceProxy>>[] tasks)
-    {
-        var totalCount = 0;
-        for (var index = 0; index < tasks.Length; index++)
-        {
-            totalCount += tasks[index].Result.Count;
-        }
-
-        return totalCount;
-    }
-
-    private async ValueTask<ServiceProxy[]> DeduplicateAsync(ServiceProxy[] proxies, int count, CancellationToken cancellationToken)
-    {
-        if (count <= 1)
-        {
-            return TrimResult(proxies, count);
-        }
-
-        var keyTasks = new Dictionary<string, Task<string>>(StringComparer.OrdinalIgnoreCase);
-        for (var index = 0; index < count; index++)
-        {
-            var proxy = proxies[index];
-            var host = proxy.Host ?? string.Empty;
-            if (!keyTasks.ContainsKey(host))
+            leaseReleasedCounter?.Add(cleaned);
+            PublishBlockedLeaseCount(blockedProxyIds.Count);
+            if (Logger is { } logger)
             {
-                keyTasks.Add(host, DedupKeyResolver.GetKeyAsync(proxy, cancellationToken).AsTask());
+                logger.ExpiredBlockedLeases(cleaned);
             }
         }
-
-        await Task.WhenAll(keyTasks.Values).ConfigureAwait(false);
-
-        var result = new ServiceProxy[count];
-        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var resultIndex = 0;
-        for (var index = 0; index < count; index++)
-        {
-            var proxy = proxies[index];
-            var host = proxy.Host ?? string.Empty;
-            if (seenKeys.Add(keyTasks[host].Result))
-            {
-                result[resultIndex++] = proxy;
-            }
-        }
-
-        return TrimResult(result, resultIndex);
     }
 
-    private static ServiceProxy[] TrimResult(ServiceProxy[] result, int count)
+    private bool CleanupBlockedProxyId(long proxyId)
+        => blockedProxyIds.TryRemove(proxyId, out _);
+
+    private void PublishActiveProxyCount(int currentCount)
+        => PublishUpDownDelta(activeProxyCountCounter, ref publishedActiveProxyCount, currentCount);
+
+    private void PublishBlockedLeaseCount(int currentCount)
+        => PublishUpDownDelta(blockedLeaseCountCounter, ref publishedBlockedLeaseCount, currentCount);
+
+    private void PublishProviderCount(int currentCount)
+        => PublishUpDownDelta(providerCountCounter, ref publishedProviderCount, currentCount);
+
+    private static void PublishUpDownDelta(UpDownCounter<int>? counter, ref int publishedValue, int currentValue)
     {
-        if (count == 0)
+        var previousValue = Interlocked.Exchange(ref publishedValue, currentValue);
+        var delta = currentValue - previousValue;
+        if (delta != 0)
         {
-            return [];
+            counter?.Add(delta);
         }
-
-        if (count == result.Length)
-        {
-            return result;
-        }
-
-        var trimmed = new ServiceProxy[count];
-        Array.Copy(result, trimmed, count);
-        return trimmed;
     }
 
-    private async ValueTask<ServiceProxy?> SelectSingleAsync(Func<ServiceProxy, bool> filter, CancellationToken cancellationToken)
+    private static bool MatchesFactoryFilters(
+        ServiceProxy proxy,
+        ProxyType[] protocols,
+        Country[] countries,
+        AnonymityLevel[] anonymityLevels)
     {
-        var snapshot = await CollectAsync(cancellationToken).ConfigureAwait(false);
-        if (snapshot.Length == 0)
+        if (protocols.Length != 0 && Array.IndexOf(protocols, proxy.Type) < 0)
         {
-            return null;
+            return false;
         }
 
-        return ProxyPoolSelection.SelectSingle(snapshot, filter, RotationStrategy, ref nextProxyIndex);
+        if (anonymityLevels.Length != 0 && Array.IndexOf(anonymityLevels, proxy.Anonymity) < 0)
+        {
+            return false;
+        }
+
+        if (countries.Length == 0)
+        {
+            return true;
+        }
+
+        var countryCode = proxy.Geolocation?.Country?.IsoCode2;
+        return !string.IsNullOrWhiteSpace(countryCode)
+            && countries.Any(country => string.Equals(country.IsoCode2, countryCode, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private sealed class ProviderRegistration(IProxyProvider provider, int order)
+    {
+        private int initialized;
+        private CancellationTokenSource? source;
+        private int started;
+
+        public IProxyProvider Provider { get; } = provider;
+
+        public int Order { get; } = order;
+
+        public ServiceProxy[] Snapshot = [];
+
+        public Task PollTask { get; set; } = Task.CompletedTask;
+
+        public bool IsStarted => Volatile.Read(ref started) == 1;
+
+        public bool IsInitialized => Volatile.Read(ref initialized) == 1;
+
+        public void MarkStarted()
+            => Interlocked.Exchange(ref started, 1);
+
+        public void MarkInitialized()
+            => Interlocked.Exchange(ref initialized, 1);
+
+        public CancellationToken Restart()
+        {
+            var nextSource = new CancellationTokenSource();
+            var currentSource = Interlocked.Exchange(ref source, nextSource);
+            currentSource?.Cancel();
+            currentSource?.Dispose();
+            return nextSource.Token;
+        }
+
+        public void Stop()
+        {
+            var currentSource = Interlocked.Exchange(ref source, null);
+            currentSource?.Cancel();
+            currentSource?.Dispose();
+        }
     }
 }

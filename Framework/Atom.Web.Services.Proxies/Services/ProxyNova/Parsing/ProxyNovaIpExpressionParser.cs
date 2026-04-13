@@ -72,7 +72,7 @@ internal sealed class ProxyNovaIpExpressionParser(string expression)
     private ScriptValue ParseConcat(ScriptValue value)
     {
         Expect('(');
-        var builder = new StringBuilder(value.AsString());
+        using var builder = new Atom.Text.ValueStringBuilder(value.AsString());
         var first = true;
         while (true)
         {
@@ -97,14 +97,19 @@ internal sealed class ProxyNovaIpExpressionParser(string expression)
     {
         Expect('(');
         var start = ParseIntegerExpression();
-        Expect(',');
-        var end = ParseIntegerExpression();
+        int? end = null;
+        SkipWhitespace();
+        if (TryConsume(','))
+        {
+            end = ParseIntegerExpression();
+        }
+
         Expect(')');
 
         var text = value.AsString();
         start = Math.Clamp(start, 0, text.Length);
-        end = Math.Clamp(end, start, text.Length);
-        return new ScriptValue(text[start..end]);
+        var boundedEnd = Math.Clamp(end ?? text.Length, start, text.Length);
+        return new ScriptValue(text[start..boundedEnd]);
     }
 
     private ScriptValue ParseSplit(ScriptValue value)
@@ -150,7 +155,7 @@ internal sealed class ProxyNovaIpExpressionParser(string expression)
         }
 
         var text = value.AsString();
-        var builder = new StringBuilder(text.Length * count);
+        using var builder = new Atom.Text.ValueStringBuilder(text.Length * count);
         for (var iteration = 0; iteration < count; iteration++)
         {
             builder.Append(text);
@@ -226,7 +231,7 @@ internal sealed class ProxyNovaIpExpressionParser(string expression)
             return values[0];
         }
 
-        var builder = new StringBuilder();
+        using var builder = new Atom.Text.ValueStringBuilder();
         builder.Append(values[0]);
         for (var index = 1; index < values.Count; index++)
         {
@@ -335,7 +340,7 @@ internal sealed class ProxyNovaIpExpressionParser(string expression)
     private string ParseStringLiteral()
     {
         Expect('"');
-        var builder = new StringBuilder();
+        using var builder = new Atom.Text.ValueStringBuilder();
         while (index < expression.Length)
         {
             var character = expression[index++];
@@ -464,7 +469,7 @@ internal sealed class ProxyNovaIpExpressionParser(string expression)
             }
 
             var numbers = numbersValue ?? throw new FormatException("Expected scalar value.");
-            var builder = new StringBuilder(numbers.Count * 3);
+            using var builder = new Atom.Text.ValueStringBuilder(numbers.Count * 3);
             foreach (var number in numbers)
             {
                 builder.Append(number.ToString(CultureInfo.InvariantCulture));

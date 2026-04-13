@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
 namespace Atom.Net.Https.Headers;
@@ -14,12 +14,12 @@ public abstract class HeadersFormattingPolicy : IHeadersFormattingPolicy
     private static readonly Lazy<EdgeHeadersFormattingPolicy> edge = new(() => new(), isThreadSafe: true);
     private static readonly Lazy<FirefoxHeadersFormattingPolicy> firefox = new(() => new(), isThreadSafe: true);
     private static readonly Lazy<SafariHeadersFormattingPolicy> safari = new(() => new(), isThreadSafe: true);
-    private static readonly IEnumerable<char> defaultPseudoHeadersOrder = new[] { 'm', 's', 'a', 'p' };
+    private static readonly IEnumerable<char> defaultPseudoHeadersOrder = ['m', 's', 'a', 'p'];
 
     protected virtual int MaxCookieHeaderLength { get; } = 4096;
 
-    protected static readonly string[] DefaultOrderCommon = new[]
-    {
+    protected static readonly string[] DefaultOrderCommon =
+    [
         // NB: Для H2+/H3 host/connection не эмитим (см. IsHopByHopH2)
         "host",
         "connection",
@@ -57,6 +57,7 @@ public abstract class HeadersFormattingPolicy : IHeadersFormattingPolicy
 
         // Базовые
         "user-agent",
+        "sec-purpose",
         "accept",
 
         // sec-fetch-* (у navigation порядок включает sec-fetch-user)
@@ -64,6 +65,7 @@ public abstract class HeadersFormattingPolicy : IHeadersFormattingPolicy
         "sec-fetch-mode",
         "sec-fetch-user",
         "sec-fetch-dest",
+        "service-worker",
 
         // Ссылочные/кросс-сайтовые
         "referer",
@@ -80,7 +82,7 @@ public abstract class HeadersFormattingPolicy : IHeadersFormattingPolicy
         "pragma",
         "cache-control",
         "te",
-    };
+    ];
 
     /// <inheritdoc/>
     public bool IsMobile { get; init; }
@@ -91,6 +93,8 @@ public abstract class HeadersFormattingPolicy : IHeadersFormattingPolicy
         {
             { RequestKind.Navigation, defaultPseudoHeadersOrder },
             { RequestKind.Preload, defaultPseudoHeadersOrder },
+            { RequestKind.ModulePreload, defaultPseudoHeadersOrder },
+            { RequestKind.Prefetch, defaultPseudoHeadersOrder },
             { RequestKind.Fetch, defaultPseudoHeadersOrder },
             { RequestKind.ServiceWorker, defaultPseudoHeadersOrder },
             { RequestKind.Unknown, defaultPseudoHeadersOrder },
@@ -300,13 +304,11 @@ public abstract class HeadersFormattingPolicy : IHeadersFormattingPolicy
                 chunkEnd = i + 1;
             }
 
-            int emitEnd;
-            if (chunkEnd >= length)
-                emitEnd = length;
-            else if (lastSep >= 0)
-                emitEnd = lastSep + 1;
-            else
-                emitEnd = chunkEnd;
+            var emitEnd = chunkEnd >= length
+                ? length
+                : lastSep >= 0
+                    ? lastSep + 1
+                    : chunkEnd;
 
             var s = start;
             var e = emitEnd - 1;

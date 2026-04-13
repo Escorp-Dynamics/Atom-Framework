@@ -1,4 +1,4 @@
-namespace Atom.Net.Https.Headers;
+﻿namespace Atom.Net.Https.Headers;
 
 /// <summary>
 /// Реализация, мимикрирующая Chrome: порядок и casing как у браузера, Cookie crumbling включён.
@@ -12,6 +12,8 @@ public class ChromeHeadersFormattingPolicy : HeadersFormattingPolicy
     {
         { RequestKind.Navigation, defaultPseudoHeadersOrder },
         { RequestKind.Preload, defaultPseudoHeadersOrder },
+        { RequestKind.ModulePreload, defaultPseudoHeadersOrder },
+        { RequestKind.Prefetch, defaultPseudoHeadersOrder },
         { RequestKind.Fetch, defaultPseudoHeadersOrder },
         { RequestKind.ServiceWorker, defaultPseudoHeadersOrder },
         { RequestKind.Unknown, defaultPseudoHeadersOrder },

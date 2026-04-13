@@ -303,7 +303,7 @@ public class BitstampClient : ExchangeClientBase
 
     private static ReadOnlyMemory<byte> BuildCommandMessage(string @event, string marketId)
     {
-        var builder = new StringBuilder();
+        using var builder = new Atom.Text.ValueStringBuilder();
         builder.Append("{\"event\":\"");
         builder.Append(@event);
         builder.Append("\",\"data\":{\"channel\":\"live_trades_");

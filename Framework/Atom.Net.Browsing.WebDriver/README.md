@@ -1,15 +1,17 @@
 # Atom.Net.Browsing.WebDriver
 
-Драйвер браузера через WebSocket-мост и расширение-коннектор. В отличие от Selenium/Puppeteer не использует CDP: связь идёт через расширение браузера, а page input выполняется tab-local внутри самой страницы без debugger API, что делает драйвер неотличимым от реального пользователя для систем антидетекта.
+Драйвер браузера через WebSocket-мост и расширение-коннектор. В отличие от Selenium/Puppeteer не использует CDP и отладочный API браузера: связь идёт через расширение браузера, а DOM-команды выполняются через изолированный канал вкладки. Пользовательский ввод при этом больше не синтетический: действия по селектору и точке идут через доверенные `VirtualMouse` и `VirtualKeyboard` в изолированном контексте дисплея.
 
 ## Архитектура
 
 ```text
-.NET (WebDriverBrowser)
+.NET (WebBrowser)
   │
-  ├── BridgeServer (HTTP + WebSocket)
-  │     ├── Discovery endpoint (HTML)
-  │     └── WebSocket каналы
+    ├── BridgeServer (HTTP + WebSocket)
+    │     ├── Discovery / health / debug-event endpoint
+    │     ├── WebSocket каналы для обычного bridge-пути
+    │     ├── WSS transport для extension-backed channel
+    │     └── HTTPS managed delivery для Chromium system-policy path
   │
   └── TabChannel (по одному на вкладку)
         ↕ WebSocket
@@ -20,7 +22,68 @@ Extension (background.js)
       Страница (MAIN world)
 ```
 
-Каждая вкладка получает изолированный WebSocket-канал — команды выполняются независимо, как если бы каждая вкладка была отдельным процессом.
+Каждая вкладка получает изолированный transport-канал. Для обычного bridge-пути это локальный WebSocket, а для Linux Chrome Stable с system-policy bootstrap текущий browser-side channel поднимается через отдельный WSS transport. Команды выполняются независимо, как если бы каждая вкладка была отдельным процессом.
+
+### Текущий runtime-срез
+
+В текущей ветке уже существует промежуточный runtime-слой, который подготавливает переход к полноценному BridgeServer, но пока не притворяется полной заменой эталонной реализации.
+
+```text
+PageNavigationState
+    ├── local BridgeMessage request/response envelope
+    ├── local BridgeEvent queue
+    ├── local callback producer для ExecuteScript
+    └── context propagation: windowId + tabId
+
+WebPage
+    ├── transport consumer
+    ├── BridgeEventReceived
+    ├── публичные события жизненного цикла
+    └── page-local callback/interception dispatch
+
+Frame
+    └── публичные события жизненного цикла
+
+WebWindow
+    ├── bridge event queue
+    ├── BridgeEventReceived
+    └── публичная цепочка ретрансляции lifecycle и interception
+
+WebBrowser
+    ├── bridge event queue
+    ├── BridgeEventReceived
+    └── публичная цепочка ретрансляции lifecycle и interception
+```
+
+Сейчас staged runtime публикует локальный bridge-поток по цепочке transport -> page -> window -> browser.
+
+Для одной навигации active runtime публикует упорядоченный конверт:
+
+- `RequestIntercepted`
+- `ResponseReceived`
+- `DomContentLoaded`
+- `NavigationCompleted`
+- `PageLoaded`
+
+`Callback` и `CallbackFinalized` тоже уже существуют в текущем runtime-срезе, но пока генерируются локальным transport-слоем только для распознанных вызовов подписанных callback-путей во время `ExecuteScript`.
+
+### Threading policy
+
+Текущий runtime-срез сейчас считается потокобезопасной базой, но не runtime без блокировок в строгом смысле:
+
+- `PageNavigationState` сериализует mutable navigation state (`history`, `currentIndex`) под `System.Threading.Lock`, а delivery очереди bridge events держит отдельно в `ConcurrentQueue`
+- `WebBrowser`, `WebWindow` и `WebPage` используют `ConcurrentQueue` для внутренних потоков bridge-событий, поэтому параллельный drain больше не зависит от обычных `Queue<T>`
+- публикация `CurrentWindow` и `CurrentPage` упорядочена: новая сущность сначала попадает в snapshot-коллекцию, и только потом публикуется через `Volatile`
+- `OpenWindowAsync`, `OpenPageAsync` и teardown-path координируются через `System.Threading.Lock`, чтобы `DisposeAsync` не гонялся с добавлением новых сущностей
+- browser-level `ClearAllCookiesAsync` fan-out'ит очистку по всем еще открытым окнам браузера, а window-level `ClearAllCookiesAsync` делает то же самое по всем еще открытым страницам окна; если teardown уже начался, оба boundary должны fail-fast через `ObjectDisposedException`
+- после входа `WebBrowser` или `WebWindow` в disposed state поздние `Open*`, `NavigateAsync`, `ReloadAsync`, lookup-методы, cookie/geometry inspection и inspection текущей страницы должны либо завершиться до teardown, либо упасть с `ObjectDisposedException`; тихое продолжение новой операции после dispose больше не считается допустимым поведением
+- `IWebBrowser`, `IWebWindow`, `IDomContext` и `IElement` теперь публикуют `IsDisposed` как advisory snapshot текущего lifecycle state; это удобно для недорогих чтений и snapshot-логики, но не отменяет необходимость fail-fast guard'ов на boundary-методах, потому что между чтением флага и реальным действием остаётся обычное TOCTOU-окно
+- `WebPage`, `MainFrame`, `Element` и `ShadowRoot` теперь тоже отражают disposal state через owner snapshot и сохраняют fail-fast поведение на boundary-вызовах после teardown
+- пока browser/window остаются живыми, их ownership-коллекции скрывают уже disposed children; `CurrentWindow` промотируется только при dispose текущего окна, а `CurrentPage` промотируется только внутри текущего окна при наличии живой replacement-страницы; если текущая страница текущего окна удалена и внутри этого окна replacement больше нет, browser/window сохраняют последний опубликованный snapshot этой страницы до явного `OpenWindowAsync` или `OpenPageAsync`, даже если в других окнах еще есть живые страницы, и current-boundary методы в этот промежуток fail-fast'ят через `ObjectDisposedException`; после полного teardown верхнего уровня ownership-коллекции очищаются, но `CurrentWindow` и `CurrentPage` все равно сохраняют последний опубликованный snapshot; add/remove для lifecycle, callback и interception events остаются inert и non-throwing
+- browser/window lookup больше не опираются на late-dispose try/catch: active runtime сканирует concrete live snapshots и пропускает кандидатов, которые уже успели перейти в disposed state к моменту проверки
+- публичные события жизненного цикла и внутренний `BridgeEventReceived` рассчитаны на concurrent delivery и subscriber churn, но гарантия порядка относится к одному transport stream; при параллельных producers события разных навигаций могут естественно чередоваться
+
+Текущий baseline проверяется concurrency suite в `Tests/Atom.Net.Browsing.WebDriver.Tests/WebDriverConcurrencyTests.cs`: concurrent drain, mixed producer/consumer, publication stress для `CurrentWindow` / `CurrentPage`, lookup stress, dispose-race, navigate-dispose, mixed dispose+lookup, `IsDisposed` visibility и subscriber churn.
 
 ## Поддерживаемые браузеры
 
@@ -29,390 +92,405 @@ Extension (background.js)
 | Brave | ✅ | Полная поддержка |
 | Opera | ✅ | Полная поддержка |
 | Vivaldi | ✅ | Полная поддержка |
-| Firefox | ✅ | Через `web-ext run` (MV2) |
-| Chrome | ❌ | `--load-extension` + новый `--user-data-dir` деактивирует расширения |
-| Edge | ❌ | FRE блокирует расширения при новом профиле |
-| Yandex | ❌ | Аналогично Chrome |
+| Firefox | ⚠️ | На Linux Stable неподписанный profile-local bootstrap не гарантируется; stable-path требует подписанный XPI через ATOM_WEBDRIVER_FIREFOX_SIGNED_XPI_PATH, для живой проверки без подписи используйте Developer Edition или Nightly |
+| Chrome | ✅ | Полная поддержка |
+| Edge | ✅ | Полная поддержка |
+| Yandex | ✅ | Полная поддержка |
 
 ## API
 
-### Интерфейсы (`Atom.Net.Browsing`)
+### Интерфейсы (`Atom.Net.Browsing.WebDriver`)
 
 | Интерфейс | Назначение |
 | --------- | ---------- |
-| `IDomContext` | DOM-операции: `ExecuteAsync`, `FindElementAsync`, `GetTitleAsync`, `GetUrlAsync`, `GetContentAsync` |
-| `IWebPage` | Страница: `NavigateAsync`, `CaptureScreenshotAsync`, cookies, `MainFrame` |
-| `IFrame` | Фрейм: `Id`, `Name`, `Source`, наследует `IDomContext` |
-| `IElement` | Элемент: `ClickAsync`, `TypeAsync`, `GetPropertyAsync`, `FindElementAsync` |
+| `IDomContext` | DOM-операции: `EvaluateAsync`, `WaitForElementAsync`, `GetElementAsync`, `GetElementsAsync`, `GetUrlAsync`, `GetTitleAsync`, `GetContentAsync`, advisory `IsDisposed` |
+| `IWebPage` | Страница: `NavigateAsync`, `ReloadAsync`, cookies, `MainFrame`, callback- и interception-события, публичные события жизненного цикла |
+| `IFrame` | Фрейм: `Page`, `Host`, `GetNameAsync`, `GetParentFrameAsync`, наследует `IDomContext`, публичные события жизненного цикла |
+| `IElement` | Элемент: `ClickAsync`, `TypeAsync`, `PressAsync`, `GetPropertyAsync`, `GetAttributeAsync`, advisory `IsDisposed` |
+| `IWebWindow` | Окно: страницы, `ActivateAsync`, `CloseAsync`, навигация текущей вкладки, публичные события жизненного цикла, advisory `IsDisposed` |
+| `IWebBrowser` | Браузер: окна, страницы, запуск, навигация, публичные события жизненного цикла, advisory `IsDisposed` |
 
 ### Реализации (`Atom.Net.Browsing.WebDriver`)
 
 | Класс | Назначение |
 | ----- | ---------- |
-| `WebDriverBrowser` | Точка входа: `LaunchAsync`, `OpenTabAsync`, `CloseTabAsync` |
-| `WebDriverPage` | Страница вкладки, делегирует DOM-операции к `MainFrame` |
-| `WebDriverFrame` | Выполняет DOM-команды через `TabChannel` |
-| `WebDriverElement` | Элемент DOM с действиями через расширение |
-| `BridgeServer` | HTTP/WebSocket-сервер моста |
-| `TabChannel` | Изолированный WebSocket-канал вкладки |
+| `WebBrowser` | Точка входа: `LaunchAsync`, `OpenWindowAsync`, `CurrentWindow`, `CurrentPage`, browser-level lifecycle propagation |
+| `WebWindow` | Окно браузера, владеет страницами, агрегирует lifecycle envelopes от своих вкладок |
+| `WebPage` | Страница, делегирует DOM-операции к `MainFrame` и читает transport lifecycle envelopes |
+| `Frame` | Runtime-реализация фрейма страницы |
+| `Element` | Runtime-реализация DOM-элемента |
+| `ShadowRoot` | Runtime-реализация ограниченного Shadow DOM-контекста |
 
-### Page-local input
+### Семантика поиска
 
-Для пользовательского ввода драйвер использует tab-local page-side backend, а не `browser.debugger` / CDP. Это важно для anti-detect и для параллельной работы нескольких вкладок: у каждой вкладки свой канал и своё выполнение input-скриптов, без глобальной сериализации через foreground cursor или shared debugger session.
+- `IWebWindow.GetUrlAsync` и `IWebWindow.GetTitleAsync` отражают только `CurrentPage` окна.
+- `IWebWindow.ActivateAsync` публикует окно как `CurrentWindow` браузера и синхронизирует этот переход с bridge-backed runtime, если у текущей страницы уже привязаны мостовые команды.
+- `IWebWindow.CloseAsync` закрывает окно через bridge-backed команду при наличии моста и затем завершает локальный teardown окна; после закрытия браузер публикует следующий живой snapshot окна, если он существует.
+- `IWebBrowser.GetWindowAsync("current")` возвращает `CurrentWindow` напрямую; любой другой `string` ищет окно по заголовку его текущей страницы и пропускает живые окна, у которых текущий удержанный snapshot страницы уже перешёл в disposed state к моменту проверки.
+- `IWebBrowser.GetWindowAsync(Uri)` ищет окно по любой открытой странице внутри окна, а не только по `CurrentPage`.
+- `IWebBrowser.GetPageAsync(string/Uri)` и `IWebWindow.GetPageAsync(string/Uri)` сканируют concrete live snapshots и пропускают дочерние snapshots, которые успели перейти в disposed state к моменту проверки, без late-dispose exception loop.
+- `IWebBrowser.GetPageAsync("current")` и `IWebWindow.GetPageAsync("current")` возвращают текущий snapshot напрямую; literal title `current` не имеет приоритета над этим специальным token.
+- `IWebPage.GetFrameAsync("MainFrame")` возвращает `MainFrame` напрямую; literal frame name `MainFrame` не имеет приоритета над этим специальным token.
+- Если несколько живых сущностей совпадают по одному и тому же обычному title или url, порядок возврата определяется текущим live snapshot и не считается публичной гарантией.
+- Cookie-surface в текущем runtime-срезе materialize-ит page-local состояние: page-level `SetCookiesAsync` сохраняет cookies в живом runtime snapshot, `GetAllCookiesAsync` возвращает их обратно, `ClearAllCookiesAsync` очищает текущую страницу, а window/browser уровни fan-out'ят очистку по своим живым страницам и окнам.
+- Screenshot-surface в текущем runtime-срезе тоже stub-овая: page, main frame и element сейчас возвращают пустой payload, поэтому отсутствие байтов не нужно интерпретировать как частичную ошибку захвата.
 
-Поддерживаются два класса API:
+### Публичный жизненный цикл
 
-- selector-oriented: `ClickElementAsync`, `FocusElementAsync`, `HoverElementAsync`, `TypeElementAsync`, `CheckElementAsync`
-- viewport/key-oriented: `ClickPointAsync`, `KeyPressAsync`
+Публичная lifecycle-surface теперь разделена на три отдельных события у `IFrame`, `IWebPage`, `IWebWindow` и `IWebBrowser`:
 
-Все эти операции выполняются через JavaScript в page context и synthetic DOM events. Это значит:
+- `DomContentLoaded`
+- `NavigationCompleted`
+- `PageLoaded`
 
-- point click и key press больше не зависят от debugger/CDP
-- input остаётся headless-safe и parallel-safe
-- поведение согласовано между обычными и isolated tabs
+`WebLifecycleEventArgs` несёт только публичный navigation context: `Window`, `Page`, `Frame`, `Url` и `Title`.
 
-При этом synthetic page-side input не может сделать событие trusted на уровне браузера/ОС. Для real-site anti-bot сценариев, где важны `isTrusted` и реальный user activation, нужен отдельный native backend. Его проектирование описано в [TRUSTED_INPUT_DESIGN.md](TRUSTED_INPUT_DESIGN.md).
+Пример подписки на `NavigationCompleted` страницы:
 
-Внутри драйвера уже добавлен минимальный skeleton под Linux X11/XTest detection, но он пока не активирует trusted input capability: до реализации native window discovery и viewport-to-screen mapping runtime продолжает честно объявлять trusted input недоступным.
+```csharp
+await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings
+{
+    Profile = WebBrowserProfile.Brave,
+});
+
+var page = browser.CurrentPage;
+page.NavigationCompleted += (_, args) =>
+{
+    Console.WriteLine($"{args.Title} -> {args.Url}");
+    Console.WriteLine($"Frame ref: {ReferenceEquals(args.Frame, page.MainFrame)}");
+};
+
+await page.NavigateAsync(new Uri("https://example.com"));
+```
+
+Пример browser-level aggregation по трем lifecycle этапам:
+
+```csharp
+await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+
+browser.DomContentLoaded += (_, args) => Console.WriteLine($"DOM ready: {args.Url}");
+browser.NavigationCompleted += (_, args) => Console.WriteLine($"Navigation complete: {args.Url}");
+browser.PageLoaded += (_, args) => Console.WriteLine($"Loaded: {args.Title}");
+```
+
+### Доверенный ввод
+
+Для пользовательского ввода драйвер использует доверенный путь OS/X11 через `VirtualMouse` и `VirtualKeyboard`, а не синтетическую DOM-диспетчеризацию внутри страницы. Это важно для anti-detect и для параллельной работы нескольких вкладок: у каждой вкладки свой канал, свой контекст дисплея и ввода, и нет зависимости от скрытой отладочной сессии или контура управления DevTools.
+
+Поддерживаются операции уровня элемента, включая `ClickAsync`, `HoverAsync`, `FocusAsync`, `TypeAsync`, `PressAsync`, а также их человекоподобные варианты `HumanityClickAsync` и `HumanityTypeAsync`.
+
+Все эти операции выполняются через доверенный контур ввода и DOM-мост поиска. Это значит:
+
+- нажатия мышью и клавиш не зависят от синтетических DOM-событий
+- ввод остаётся безопасным для параллельного выполнения при изолированных контекстах вкладки и дисплея
+- `isTrusted` и `userActivation` теперь определяются реальным путём ввода, а не диспетчеризацией на стороне страницы
+
+DOM-мост по-прежнему отвечает только за поиск, ограничение области `shadow-root`, запросы геометрии и состояния и выполнение JS. Ввод больше не эмулируется через `element.click()`, синтетические `MouseEvent` и `PointerEvent` или прямое изменение `value`.
 
 Пример:
 
 ```csharp
-await page.ClickElementAsync(new ElementSelector
-{
-    Strategy = ElementSelectorStrategy.Css,
-    Value = "#login-button",
-});
+var element = await page.WaitForElementAsync("#login-button");
+await element!.ClickAsync();
 
-await page.ClickPointAsync(320, 240);
-await page.KeyPressAsync("Enter");
+await element.HumanityTypeAsync("demo@example.com");
+await element.PressAsync(ConsoleKey.Enter);
 ```
 
 ## Быстрый старт
 
 ```csharp
-// Запуск браузера с расширением.
-await using var browser = await WebDriverBrowser.LaunchAsync(
-    "/usr/bin/brave",
-    "./Extension",
-    arguments: ["--headless=new", "--no-sandbox"]);
+// LaunchAsync материализует profile defaults и запускает реальный browser process,
+// если Profile указывает на запускаемый binary.
+await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings
+{
+    UseHeadlessMode = true,
+    Args = ["--no-sandbox"],
+    Profile = WebBrowserProfile.Brave,
+});
 
-// Ожидание подключения первой вкладки.
-var tcs = new TaskCompletionSource<TabConnectedEventArgs>();
-browser.TabConnected += (_, e) => { tcs.TrySetResult(e); return ValueTask.CompletedTask; };
-var tab = await tcs.Task;
-var page = browser.GetPage(tab.TabId)!;
+// Работа с текущей вкладкой.
+var page = browser.CurrentPage;
 
 // DOM-операции.
 var title = await page.GetTitleAsync();
-var element = await page.FindElementAsync(new ElementSelector
-{
-    Strategy = ElementSelectorStrategy.Css,
-    Value = "#login-button",
-});
+var element = await page.GetElementAsync("#login-button");
 await element!.ClickAsync();
 
 // Выполнение JS в MAIN world.
-var result = await page.ExecuteAsync("return document.cookie");
+var result = await page.EvaluateAsync<string>("document.cookie");
 ```
 
 ## Механизм подключения
 
-1. `LaunchAsync` копирует расширение во временную директорию и записывает `config.json` с параметрами моста (`host`, `port`, `secret`)
-2. `background.js` при старте читает `config.json` через `fetch(browser.runtime.getURL("config.json"))`
-3. Расширение открывает discovery-вкладку и регистрирует WebSocket-каналы для каждой вкладки
-4. `content.js` устанавливает eval bridge через MutationObserver для выполнения JS в контексте страницы
+Текущее состояние ветки:
+
+- `LaunchAsync` уже материализует внутренние profile files и стартует реальный browser process из `Profile.BinaryPath`, если binary действительно запускаемый.
+- `LaunchAsync` уже материализует внутренние profile files, поднимает live `BridgeServer`, раскладывает Chromium-расширение с `config.json` в materialized profile, стартует реальный browser process из `Profile.BinaryPath` и возвращает браузер только после initial discovery bridge-bootstrap текущей вкладки.
+- Если в живой browser session уже есть bridge-bound страница, `OpenWindowAsync` и `OpenPageAsync` идут через direct bridge-команды `OpenWindow` и `OpenTab` и возвращают новый window/page snapshot только после регистрации новой вкладки и привязки page/window bridge-команд; без bridge-bound source page эти операции остаются локальным staged fallback.
+- DOM/page model больше не является только пустым scaffold: поверх локального transport уже существуют protocol envelope, context propagation, lifecycle queues и публичные события жизненного цикла.
+- Первый настоящий bridge-bootstrap уже подключён для Chromium-профилей: discovery endpoint живёт в `BridgeServer`, расширение получает явный `sessionId`, а текущие `WebPage` и `WebWindow` перевязываются на реальный `tabId` и `windowId` после handshake.
+- Полной reference parity всё ещё нет: DOM `EvaluateAsync`, element-команды и общий browser-side lifecycle поток пока не переведены на живой extension-backed transport.
+
+Текущий staged runtime в ветке:
+
+1. `PageNavigationState` materialize-ит local `BridgeMessage` request/response envelope для `Navigate`, `Reload`, `GetUrl`, `GetTitle`, `GetContent` и `ExecuteScript`
+2. Для `Navigate` и `Reload` transport ставит в очередь `RequestIntercepted` и `ResponseReceived`, а затем lifecycle-конверт `DomContentLoaded -> NavigationCompleted -> PageLoaded`
+3. Для `ExecuteScript` transport может локально синтезировать `Callback` и `CallbackFinalized`, если выражение похоже на прямой вызов подписанного callback-пути
+4. `WebPage` читает bridge stream из transport, поднимает page-level callback/interception events и прокидывает lifecycle в `MainFrame`, `WebWindow` и `WebBrowser`
+5. `WebWindow` и `WebBrowser` получают тот же ordered bridge stream для одной transport-очереди; при параллельных producers interleave между разными навигациями допустим
+
+Отдельная граница между стабильным контрактом и временной локальной эмуляцией зафиксирована в [Framework/Atom.Net.Browsing.WebDriver/STAGED_RUNTIME_BOUNDARY.md](Framework/Atom.Net.Browsing.WebDriver/STAGED_RUNTIME_BOUNDARY.md).
+
+## Структура проверки bridge
+
+Текущий bridge-срез проверяется несколькими слоями tests с разной зоной ответственности:
+
+- `WebDriverBridgeHandshakeValidatorTests` держит field validation и reject-code mapping на уровне handshake validator
+- `WebDriverBridgeHandshakeSkeletonTests` теперь является runnable contract-layer для validator и message-factory semantics, без дублирования transport-integration веток
+- `WebDriverBridgeServerStateTests` и `WebDriverBridgeServerStateSkeletonTests` держат owner-state semantics, cleanup и health counters
+- `WebDriverBridgeServerSkeletonTests` держит live transport integration для websocket handshake, tab lifecycle, `SendRequestAsync` guard contract, inbound response validation, late-response semantics, первые per-command payload contracts для `GetTitle`, `GetUrl`, `GetContent`, `GetWindowBounds`, `ResolveElementScreenPoint`, `DebugPortStatus` и richer `DescribeElement`, pending request completion and failure, timeout/cancel semantics, duplicate session, first-message policy, second handshake и close edge cases, а также secure transport coverage для WSS handshake, reject при неверном secret и health-среза secure transport
+- `BridgeTestHelpers` централизует вспомогательные harness-методы для websocket и health в bridge-related test files
+
+Внутри `BridgeServer` поверх raw `SendRequestAsync` уже существует минимальный command-aware helper layer для `GetTitle`, `GetUrl`, `GetContent`, `GetWindowBounds`, `ActivateWindow`, `CloseWindow`, `ResolveElementScreenPoint`, `DebugPortStatus` и `DescribeElement`. Это пока internal runtime-surface, а не публичный API верхнего уровня.
+
+Поверх этого helper layer теперь существует отдельный internal `BridgeCommandClient`, а ещё выше появился page-bound internal `PageBridgeCommandClient`, который один раз связывает `session/tab` context и позволяет `WebPage` и `WebWindow` читать bridge-backed metadata и отправлять window-bound команды без утечки `sessionId` и `tabId` в публичный API.
+
+Такое разбиение нужно сохранять и дальше:
+
+- contract-level проверки должны оставаться рядом с validator, factory и owner state
+- transport-specific handshake и teardown coverage не стоит возвращать в contract-level test files
+
+## Путь проверки в реальном браузере
+
+Тесты реального браузера в `Tests/Atom.Net.Browsing.WebDriver.Tests` не включаются по умолчанию. Для них требуется явное переопределение окружения:
+
+- `ATOM_TEST_WEBDRIVER_BROWSER` — имя браузера: `chrome`, `edge`, `brave`, `opera`, `vivaldi`, `yandex` или `firefox`
+- `ATOM_TEST_WEBDRIVER_BROWSER_PATH` — опциональный путь к исполняемому файлу, если нужен не автоматически найденный браузер
+- `ATOM_TEST_WEBDRIVER_HEADLESS` — опциональное переопределение headless-режима: `true` или `false`
+
+Для branded Google Chrome Stable на Linux discovery-bootstrap теперь дополнительно материализует системный managed-policy target по пути `/etc/opt/chrome/policies/managed/atom-webdriver-extension.json`.
+
+- локальный `chromium.managed-policy.json` внутри temp-профиля сохраняется как диагностический артефакт и источник JSON для публикации
+- если процесс уже имеет права записи в системный каталог, policy публикуется напрямую
+- если прямой записи нет, runtime пробует best-effort публикацию через `sudo`, используя `ATOM_WEBDRIVER_ROOT_PASSWORD` либо legacy `ESCORP_ROOT_PASSWORD`
+- если системная публикация не удалась, это видно в `profile.json` через `bridge.managedPolicyPublishPath` и `bridge.managedPolicyDiagnostics`
+
+Важно разделять два независимых условия:
+
+- system-policy publish и trust bootstrap для branded Chrome Stable на Linux всё ещё могут требовать системные права, если у процесса нет прямой записи в `/etc/opt/chrome/policies/managed`
+- после того как policy уже опубликована и certificate trust уже устроен, сам browser-side transport больше не зависит от нового root-вмешательства: текущий post-delivery channel для этого профиля идёт через отдельный WSS transport
+
+Именно этот transport blocker и был финальным live-блокером в текущей ветке: старый plain ws путь закрывался со стороны клиента до server-side upgrade, а переход на WSS снял этот сбой, не отменяя саму необходимость managed-policy bootstrap для branded Chrome Stable
+
+Рекомендованный безопасный путь проверки для текущей ветки:
+
+1. Сначала прогнать обычный `Atom.Net.Browsing.WebDriver.Tests` без переопределений и убедиться, что bridge- и runtime-слой unit/integration тестов зелёный.
+2. Затем включить только переопределения для реального браузера и прогнать `WebDriverRealBrowserIntegrationTests` либо полный проект тестов.
+3. Интерпретировать эти tests как проверку запуска браузера, materialization профиля, времени жизни процесса, discovery-bootstrap текущей вкладки и базовой page/window-surface, а не как уже полную DOM-паритетную замену локального transport.
+
+Актуально подтверждённый live-срез для этого пути сейчас такой:
+
+- `RealBrowserLaunchBootstrapsExtensionBackedDiscoverySurface` подтверждает discovery-bootstrap и первичную привязку extension-backed surface
+- `LaunchAsyncMaterializesRequestedRealBrowserProfileAndHeadlessMode` подтверждает materialization профиля и запуск branded Chrome Stable в ожидаемом режиме
+- `RealBrowserLaunchKeepsWindowAndPageSurfaceOperational` подтверждает рабочие page/window команды поверх уже поднятого extension-backed канала
+- `RealBrowserWindowActivateAndCloseSurfaceStaysOperational` подтверждает, что window activate/close surface остаётся рабочим поверх того же transport-контура
+
+Отдельно на серверном контрактном слое теперь зафиксировано, что secure transport:
+
+- принимает WSS handshake только с корректным secret из `transportUrl`
+- отвергает upgrade с неверным secret ещё до websocket acceptance
+- публикуется в health payload отдельным `secureTransport` блоком
+
+Текущий живой smoke для реального браузера уже держится в коротком бюджете: ожидание завершения browser process после `DisposeAsync` в `WebDriverRealBrowserIntegrationTests` ужато до 5 секунд и остаётся зелёным на Chrome в headless-режиме.
+
+Теперь тот же 5-секундный default выставлен и для `BridgeSettings.RequestTimeout`, но его всё равно нужно трактовать как часть мостового контракта, а не как обычный test-tuning:
+
+- default живёт в `BridgeSettings.RequestTimeout` и теперь равен 5 секундам
+- значение сериализуется в handshake accept payload как `RequestTimeoutMs`
+- server-side `BridgeServer` использует тот же budget для pending request completion и timeout-маркировки
+- contract и handshake tests уже явно проверяют текущее значение по умолчанию
+
+После перехода default `BridgeSettings.RequestTimeout` к 5 секундам безопасная проверка выглядит так:
+
+1. Держать отдельным контуром real-browser smoke для запуска браузера и базовой page/window-surface.
+2. Держать отдельным контуром handshake и contract assertions в `WebDriverProtocolSurfaceTests`, `WebDriverBridgeHandshakeSkeletonTests`, `WebDriverBridgeHandshakeValidatorTests` и `BridgeTestHelpers`, потому что они подтверждают уже именно протокольное значение default timeout.
+3. Отдельно перепроверять `WebDriverBridgeServerSkeletonTests`, где timeout-oriented сценарии уже используют локальные override-значения `200ms` и потому проверяют server-side timeout semantics независимо от нового default.
+
+Это важно, потому что live-срез `BridgeServer` уже проверяет server-side handshake и state model, а Chromium bootstrap теперь доведён до discovery-tab и direct page/window commands, но полный bridge-транспорт на стороне браузера всё ещё не доведён до полной reference parity.
+
+Актуальный список оставшихся пробелов bridge-bootstrap и рекомендованный порядок следующих этапов реализации зафиксирован в [Framework/Atom.Net.Browsing.WebDriver/STAGED_RUNTIME_BOUNDARY.md](Framework/Atom.Net.Browsing.WebDriver/STAGED_RUNTIME_BOUNDARY.md).
+
+Ниже описан уже не только целевой, но и частично активный bootstrap path. Сейчас live runtime гарантированно покрывает discovery и initial page/window binding для Chromium, а DOM и richer command surface ещё остаются следующим этапом:
+
+- `LaunchAsync` копирует расширение во временную директорию и записывает внутренний `config.json` для transport bridge между драйвером и extension
+- `background.runtime.js` при старте читает `config.json` через `fetch(runtime.getURL("config.json"))`
+- для Linux Chrome Stable с system-policy bootstrap `config.json` может нести отдельный `transportUrl`, и background runtime использует его как приоритетный browser-side channel
+- Расширение открывает discovery-вкладку и регистрирует WebSocket-каналы для каждой вкладки
+- `content.js` устанавливает eval bridge через MutationObserver для выполнения JS в контексте страницы
+
+Для текущего WSS-пути это означает следующее разделение ролей:
+
+- HTTP остаётся точкой discovery, health и debug-event
+- HTTPS managed delivery остаётся путём доставки manifest и CRX для system-policy сценария
+- WSS используется как выделенный browser-side transport channel после доставки и bootstrap
+- secret из `transportUrl` валидируется сервером ещё на этапе upgrade, до принятия websocket-сессии
 
 ## Расширение
 
 Единая кодовая база для Chrome (MV3) и Firefox (MV2):
 
-- `Extension/` — Chrome MV3 (service worker)
-- `Extension.Firefox/` — Firefox MV2 (JS-файлы генерируются из `Extension/` при сборке через MSBuild)
+- `ExtensionRuntime/` — исходники runtime и packaging templates
+- `Extension/` и `Extension.Firefox/` в `bin` — build output каталоги расширений для Chrome MV3 и Firefox MV2
+
+Новый scaffold ExtensionRuntime уже привязан к обычной сборке проекта: typecheck, сборка background runtime и синхронизация рабочих каталогов выполняются на уровне csproj, а build-owned артефакты живут в промежуточном каталоге и попадают в `bin`, а не в исходники
 
 Полифилл `const browser = globalThis.browser ?? globalThis.chrome;` обеспечивает кроссбраузерность API.
 
 ## Перехват запросов
 
-`SetRequestInterceptionAsync(true)` включает перехват запросов на уровне расширения. Базовые сценарии `Continue`, `Abort`, фильтрация по URL-паттернам и модификация заголовков работают через `webRequest`.
+В active runtime события `Request` и `Response` уже работают как live extension-backed interception surface на уровнях page/window/browser для fetch и других subresource-запросов. В headless Firefox Developer Edition этот срез подтверждён реальными тестами: `Continue`, `Abort`, `Redirect`, `Fulfill`, URL-pattern filtering, request header mutation и response header mutation проходят end-to-end через `BridgeServer` и `ExtensionRuntime`, включая bubbling между page/window/browser.
 
-### Main-frame fulfill
+Это и есть текущий production-ready contract slice пакета для заявленной цели Firefox Dev headless. Он покрывает active request-side и response-side decision semantics, outer scope inheritance и per-tab/page-context locality. Неподтверждённые зоны теперь уже относятся не к самому fetch/subresource interception pipeline, а к отдельным сценариям вроде main-frame navigation fulfill и к кроссбраузерной parity вне Firefox Developer Edition.
 
-- Для `main_frame` fulfill во время навигации расширение использует body override без смены адреса. URL навигации сохраняется исходным, а кастомный HTML подставляется после загрузки через content-script.
-- Поскольку CDP/debugger API намеренно не используются, это не является true network-level fulfill: исходный navigation request может успеть дойти до origin до подмены DOM.
+В этот validated slice теперь входят и Client Hints: active payload contract сериализует high-entropy поля, `ExtensionRuntime` покрывает low/high entropy HTTP mutation и JS-side `navigator.userAgentData`, а live Firefox Developer Edition headless loopback test подтверждает исходящие `Sec-CH-UA`, `Sec-CH-UA-Full-Version-List`, `Sec-CH-UA-Platform`, `Sec-CH-UA-Platform-Version`, `Sec-CH-UA-Mobile`, `Sec-CH-UA-Arch`, `Sec-CH-UA-Model` и `Sec-CH-UA-Bitness`.
 
-Это ограничение важно учитывать в антибот-сценариях, где критично именно отсутствие сетевого запроса к origin.
+### Подмена ответа для main_frame
 
-## Изоляция контекстов
+- Описание ниже относится к отдельному special-case сценарию и не отменяет того факта, что fetch/subresource interception уже живой и подтверждённый.
+- В active extension runtime request-side `FulfillAsync` для `main_frame` не считается production-ready и не должен использоваться как “честный” synthetic navigation response.
+- Firefox WebExtensions `webRequest.onBeforeRequest` умеет только `cancel` или `redirectUrl`, а `filterResponseData` работает уже на стадии response stream. Поэтому current runtime не заявляет main-frame fulfill parity без сетевого шага к origin.
+- Local bridge `/fulfill/{id}` — это внутренний buffering contract между C# bridge и extension runtime для хранения prepared body, а не доказательство прямой browser-side main_frame delivery. Для request-side `main_frame` активный runtime этот URL не consumes как fallback и fail-closed завершает запрос на browser webRequest boundary.
+- Из этого следует жёсткое правило: если для `main_frame` критично отсутствие сетевого запроса к узлу назначения, текущий extension-backed runtime такой fulfill не поддерживает. Fetch/subresource fulfill остаётся поддержанным, а main-frame navigation fulfill следует считать неподдерживаемым сценарием, а не fallback-фичей.
 
-Два уровня изоляции:
-
-| Уровень | Метод | Изоляция | Когда использовать |
-| ------- | ----- | -------- | ----------------- |
-| **Процесс** | `CreateContextAsync` | Отдельный процесс + профиль (OS-level) | Полная изоляция: прокси, cookies, кэш, сетевой стек |
-| **Расширение** | `OpenIsolatedTabAsync` | Одно окно, изоляция через расширение | Лёгкие параллельные сессии без накладных расходов на процесс |
-
-### `CreateContextAsync` — изоляция на уровне процесса
-
-Создаёт отдельный процесс браузера с уникальным временным профилем, подключённый к общему WebSocket-мосту.
+### Прокси на уровнях браузера, окна и страницы
 
 ```csharp
-var ctx = await browser.CreateContextAsync(
-    "/usr/bin/brave",
-    "./Extension",
-    settings: new TabContextSettings
-    {
-        Proxy = "socks5://proxy.example.com:1080",
-        UserAgent = "CustomBot/1.0",
-        Timezone = "America/New_York",
-        Locale = "en-US",
-    });
+var proxy = new WebProxy("http://proxy.example.com:8080");
 
-var page = ctx.Page;
-await page.NavigateAsync(new Uri("https://example.com"));
-```
-
-### `OpenIsolatedTabAsync` — изоляция на уровне расширения
-
-Открывает вкладку в текущем окне с MAIN world инъекцией для подмены navigator, storage, fingerprint.
-
-```csharp
-var page = await browser.OpenIsolatedTabAsync(
-    url: new Uri("https://example.com"),
-    settings: new TabContextSettings
-    {
-        UserAgent = "Mozilla/5.0 (Custom)",
-        Platform = "Win32",
-        Languages = ["en-US", "en"],
-        Locale = "en-US",
-        Timezone = "Europe/London",
-        Screen = new ScreenSettings { Width = 1920, Height = 1080, ColorDepth = 24 },
-        WebGL = new WebGLSettings
-        {
-            Vendor = "Google Inc. (NVIDIA)",
-            Renderer = "ANGLE (NVIDIA GeForce GTX 1080)",
-        },
-        CanvasNoise = true,
-        WebRtcPolicy = "disable",
-        Proxy = "http://proxy:8080",
-    });
-
-var ua = await page.ExecuteAsync("navigator.userAgent");
-```
-
-### `TabContextSettings`
-
-| Свойство | Тип | Описание |
-| -------- | --- | -------- |
-| `Proxy` | `string?` | URL прокси: `http://`, `https://`, `socks4://`, `socks5://` |
-| `UserAgent` | `string?` | Подмена `navigator.userAgent` + HTTP-заголовок `User-Agent` |
-| `Locale` | `string?` | Подмена `navigator.language` |
-| `Timezone` | `string?` | IANA timezone (`America/New_York`). Подменяет `Intl.DateTimeFormat`, `getTimezoneOffset()`, `toLocaleString` |
-| `Platform` | `string?` | Подмена `navigator.platform` |
-| `Languages` | `IReadOnlyList<string>?` | Подмена `navigator.languages` |
-| `Screen` | `ScreenSettings?` | Подмена `screen.width`, `screen.height`, `screen.colorDepth` |
-| `WebGL` | `WebGLSettings?` | Подмена `WEBGL_debug_renderer_info` vendor/renderer |
-| `CanvasNoise` | `bool` | Добавляет случайный шум в `canvas.toDataURL()` / `getImageData()` |
-| `WebRtcPolicy` | `string?` | `"disable"` — блокирует `RTCPeerConnection`; `"relay-only"` — только TURN |
-| `Geolocation` | `GeolocationSettings?` | Подмена `navigator.geolocation` (latitude, longitude, accuracy) |
-| `AllowedFonts` | `IReadOnlyList<string>?` | Список разрешённых шрифтов; `document.fonts.check()` блокирует остальные |
-| `AudioNoise` | `bool` | Детерминированный шум AudioContext fingerprint (на основе contextId) |
-| `HardwareConcurrency` | `int?` | Подмена `navigator.hardwareConcurrency` |
-| `DeviceMemory` | `double?` | Подмена `navigator.deviceMemory` (ГБ) |
-| `BatteryProtection` | `bool` | `navigator.getBattery()` → charging=true, level=1.0 |
-| `PermissionsProtection` | `bool` | `navigator.permissions.query()` → state="prompt" для всех |
-| `ClientHints` | `ClientHintsSettings?` | Подмена `navigator.userAgentData` + HTTP-заголовков `Sec-CH-UA-*` |
-| `NetworkInfo` | `NetworkInfoSettings?` | Подмена `navigator.connection` (effectiveType, rtt, downlink, saveData) |
-| `SpeechVoices` | `IReadOnlyList<SpeechVoiceSettings>?` | Подмена `speechSynthesis.getVoices()` фиксированным набором |
-| `MediaDevicesProtection` | `bool` | `enumerateDevices()` → стандартный набор (1 audio in/out, 1 video) |
-| `VirtualMediaDevices` | `VirtualMediaDevicesSettings?` | Tab-local alias `enumerateDevices()` + routed `getUserMedia()` к browser-visible audio/video устройствам; для стабильности предпочтительны явные `AudioInputBrowserDeviceId` / `VideoInputBrowserDeviceId`, audio output пока только alias-экспозиция без sink routing |
-| `WebGLParams` | `WebGLParamsSettings?` | Расширенные параметры WebGL (`MAX_TEXTURE_SIZE` и др.) |
-| `DoNotTrack` | `string?` | Значение `navigator.doNotTrack` (`"1"` / `"0"`) |
-| `GlobalPrivacyControl` | `bool?` | Значение `navigator.globalPrivacyControl` |
-| `IntlSpoofing` | `bool` | Подменяет locale в `Intl.NumberFormat`, `Intl.ListFormat` и др. на `Locale` |
-| `ScreenOrientation` | `string?` | `screen.orientation.type` (`"portrait-primary"`, `"landscape-primary"`) |
-| `ColorScheme` | `string?` | `matchMedia('prefers-color-scheme')` → `"light"` / `"dark"` |
-| `ReducedMotion` | `bool?` | `matchMedia('prefers-reduced-motion')` → reduce / no-preference |
-| `TimerPrecisionMs` | `double?` | Округление `performance.now()` и `Date.now()` до заданной точности (мс) |
-| `WebSocketProtection` | `string?` | `"block"` — отключить WebSocket; `"same-origin"` — только same-origin |
-| `WebGLNoise` | `bool` | Шум в `readPixels()` для рандомизации WebGL-хешей |
-| `StorageQuota` | `long?` | Подмена `navigator.storage.estimate()` (байты) |
-| `KeyboardLayout` | `string?` | Фиксированная раскладка `keyboard.getLayoutMap()` (QWERTY) |
-| `WebRtcIcePolicy` | `string?` | `"sanitize"` — замена приватных IP на `0.0.0.0`; `"block"` — подавление всех ICE |
-| `PluginSpoofing` | `bool` | Подмена `navigator.plugins` / `navigator.mimeTypes` (PDF Viewer) |
-| `SpeechRecognitionProtection` | `bool` | Заглушка `SpeechRecognition` / `webkitSpeechRecognition` |
-| `MaxTouchPoints` | `int?` | `navigator.maxTouchPoints` + удаление `TouchEvent` при 0 |
-| `AudioSampleRate` | `int?` | `AudioContext.sampleRate` override (напр. 44100) |
-| `AudioChannelCount` | `int?` | `AudioDestinationNode.maxChannelCount` override |
-| `PdfViewerEnabled` | `bool?` | `navigator.pdfViewerEnabled` override |
-| `NotificationPermission` | `string?` | `Notification.permission` + `requestPermission()` override |
-| `GamepadProtection` | `bool?` | Блокирует Gamepad API — `getGamepads()` возвращает `[]` |
-| `HardwareApiProtection` | `bool?` | Скрывает `navigator.bluetooth`, `.usb`, `.serial`, `.hid` |
-| `PerformanceProtection` | `bool?` | Фильтрует `PerformanceObserver` + `getEntries()` → `[]` |
-| `DocumentReferrer` | `string?` | `document.referrer` override |
-| `HistoryLength` | `int?` | `history.length` override |
-| `DeviceMotionProtection` | `bool` | Блокирует `DeviceOrientationEvent` / `DeviceMotionEvent` |
-| `AmbientLightProtection` | `bool` | Блокирует `AmbientLightSensor` API |
-| `ConnectionRtt` | `int?` | `navigator.connection.rtt` standalone override (мс) |
-| `ConnectionDownlink` | `double?` | `navigator.connection.downlink` standalone override (Мбит/с) |
-| `MediaCapabilitiesProtection` | `bool` | `mediaCapabilities.decodingInfo` → always supported |
-| `ClipboardProtection` | `bool` | Блокирует `clipboard.read` / `readText` |
-| `WebShareProtection` | `bool` | Блокирует `navigator.share` / `canShare` |
-| `WakeLockProtection` | `bool` | Блокирует `navigator.wakeLock.request` |
-| `IdleDetectionProtection` | `bool` | Блокирует `IdleDetector` API |
-| `CredentialProtection` | `bool` | Блокирует `navigator.credentials.get` / `create` |
-| `PaymentProtection` | `bool` | Блокирует `PaymentRequest` конструктор |
-| `StorageEstimateUsage` | `long?` | `navigator.storage.estimate()` — подмена usage |
-| `FileSystemAccessProtection` | `bool` | Блокирует `showOpenFilePicker`/`showSaveFilePicker`/`showDirectoryPicker` |
-| `BeaconProtection` | `bool` | `navigator.sendBeacon` → тихий `true` |
-| `VisibilityStateOverride` | `string?` | `document.visibilityState` + блокировка `visibilitychange` |
-| `ColorDepth` | `int?` | `screen.colorDepth` / `pixelDepth` override |
-| `InstalledAppsProtection` | `bool` | Блокирует `navigator.getInstalledRelatedApps` → пустой массив |
-| `FontMetricsProtection` | `bool` | Нормализует метрики шрифтов через `getComputedStyle` |
-| `CrossOriginIsolationOverride` | `bool?` | `window.crossOriginIsolated` override + блокировка `SharedArrayBuffer` |
-| `PerformanceNowJitter` | `double?` | Jitter для `performance.now()` (мс) |
-| `WindowControlsOverlayProtection` | `bool` | Скрывает `navigator.windowControlsOverlay` |
-| `ScreenOrientationLockProtection` | `bool` | Блокирует `screen.orientation.lock()` |
-| `KeyboardApiProtection` | `bool` | Блокирует `navigator.keyboard.getLayoutMap()` |
-| `UsbHidSerialProtection` | `bool` | Скрывает `navigator.usb`, `navigator.hid`, `navigator.serial` |
-| `PresentationApiProtection` | `bool` | Скрывает `navigator.presentation` |
-| `ContactsApiProtection` | `bool` | Скрывает `navigator.contacts` |
-| `BluetoothProtection` | `bool` | Скрывает `navigator.bluetooth` |
-| `EyeDropperProtection` | `bool` | Блокирует `EyeDropper` API |
-| `MultiScreenProtection` | `bool` | Блокирует `window.getScreenDetails()` |
-| `InkApiProtection` | `bool` | Скрывает `navigator.ink` |
-| `VirtualKeyboardProtection` | `bool` | Скрывает `navigator.virtualKeyboard` |
-| `NfcProtection` | `bool` | Скрывает `NDEFReader` (Web NFC) |
-| `FileHandlingProtection` | `bool` | Блокирует File Handling API (`launchQueue`) |
-| `WebXrProtection` | `bool` | Скрывает `navigator.xr` (WebXR) |
-| `WebNnProtection` | `bool` | Блокирует `navigator.ml` (Web Neural Network) |
-| `SchedulingProtection` | `bool` | Скрывает `scheduler.postTask()` / `scheduler.yield()` |
-| `StorageAccessProtection` | `bool` | Блокирует `document.requestStorageAccess()` / `hasStorageAccess()` |
-| `ContentIndexProtection` | `bool` | Блокирует Content Indexing API (`registration.index`) |
-| `BackgroundSyncProtection` | `bool` | Блокирует `registration.sync` / `periodicSync` |
-| `CookieStoreProtection` | `bool` | Скрывает `window.cookieStore` |
-| `WebLocksProtection` | `bool` | Скрывает `navigator.locks` (Web Locks API) |
-| `ShapeDetectionProtection` | `bool` | Скрывает `BarcodeDetector` / `FaceDetector` / `TextDetector` |
-| `WebTransportProtection` | `bool` | Блокирует `WebTransport` |
-| `RelatedAppsProtection` | `bool` | Блокирует `navigator.getInstalledRelatedApps()` |
-| `DigitalGoodsProtection` | `bool` | Скрывает `window.getDigitalGoodsService()` |
-| `ComputePressureProtection` | `bool` | Скрывает `PressureObserver` (Compute Pressure API) |
-| `FileSystemPickerProtection` | `bool` | Блокирует `showDirectoryPicker()` / `showOpenFilePicker()` / `showSaveFilePicker()` |
-| `DisplayOverrideProtection` | `bool` | Скрывает `navigator.windowControlsOverlay` |
-| `BatteryLevelOverride` | `double?` | Подменяет `BatteryManager.level` (0.0–1.0) |
-| `PictureInPictureProtection` | `bool` | Блокирует `DocumentPictureInPicture` / `PictureInPictureWindow` |
-| `DevicePostureProtection` | `bool` | Скрывает `navigator.devicePosture` |
-| `WebAuthnProtection` | `bool` | Блокирует WebAuthn (FIDO) через `credentials.get/create` |
-| `FedCmProtection` | `bool` | Блокирует FedCM через `credentials.get` (identity) |
-| `LocalFontAccessProtection` | `bool` | Блокирует `window.queryLocalFonts()` |
-| `AutoplayPolicyProtection` | `bool` | Блокирует `navigator.getAutoplayPolicy()` |
-| `LaunchHandlerProtection` | `bool` | Скрывает `window.LaunchParams` |
-| `TopicsApiProtection` | `bool` | Блокирует `document.browsingTopics()` (Privacy Sandbox) |
-| `AttributionReportingProtection` | `bool` | Блокирует Attribution Reporting API |
-| `FencedFrameProtection` | `bool` | Скрывает `HTMLFencedFrameElement` / `window.fence` |
-| `SharedStorageProtection` | `bool` | Блокирует `window.sharedStorage` |
-| `PrivateAggregationProtection` | `bool` | Блокирует `privateAggregation` |
-| `WebOtpProtection` | `bool` | Блокирует Web OTP (`OTPCredential`) |
-| `WebMidiProtection` | `bool` | Блокирует `navigator.requestMIDIAccess()` |
-| `WebCodecsProtection` | `bool` | Блокирует WebCodecs API (`VideoEncoder`, etc.) |
-| `NavigationApiProtection` | `bool` | Блокирует `window.navigation` (Navigation API) |
-| `ScreenCaptureProtection` | `bool` | Блокирует `getDisplayMedia()` (Screen Capture) |
-| `StartUrl` | `Uri?` | URL при запуске (`CreateContextAsync`) |
-| `Arguments` | `IEnumerable<string>?` | Аргументы командной строки (`CreateContextAsync`) |
-
-#### `ClientHintsSettings`
-
-| Свойство | Тип | Описание |
-| -------- | --- | -------- |
-| `Brands` | `IReadOnlyList<ClientHintBrand>?` | Список брендов (бренд + версия) |
-| `FullVersionList` | `IReadOnlyList<ClientHintBrand>?` | Полный список для `getHighEntropyValues()` |
-| `Platform` | `string?` | Платформа (`"Windows"`, `"Linux"`, `"macOS"`) |
-| `PlatformVersion` | `string?` | Версия платформы |
-| `Mobile` | `bool?` | Мобильное устройство |
-| `Architecture` | `string?` | Архитектура CPU (`"x86"`) |
-| `Model` | `string?` | Модель устройства |
-| `Bitness` | `string?` | Разрядность (`"64"`) |
-
-#### `NetworkInfoSettings`
-
-| Свойство | Тип | Описание |
-| -------- | --- | -------- |
-| `EffectiveType` | `string` | Тип соединения (`"4g"`, `"3g"`, `"2g"`) — по умолчанию `"4g"` |
-| `Rtt` | `double` | Round-trip time, мс — по умолчанию `50` |
-| `Downlink` | `double` | Пропускная способность, Мбит/с — по умолчанию `10.0` |
-| `SaveData` | `bool` | Режим экономии трафика |
-
-#### `VirtualMediaDevicesSettings`
-
-`VirtualMediaDevices` не синтезирует media tracks в content script. Он публикует tab-local alias устройства в `enumerateDevices()` и маршрутизирует `getUserMedia()` к уже существующим browser-visible audio/video устройствам, заданным со стороны C#.
-
-Пример:
-
-```csharp
-var tab = await browser.OpenIsolatedTabAsync(settings: new TabContextSettings
+await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings
 {
-    VirtualMediaDevices = new VirtualMediaDevicesSettings
-    {
-        AudioInputLabel = "Virtual Mic A",
-        AudioInputBrowserDeviceId = "browser-visible-audio-device-id",
-        VideoInputLabel = "Virtual Cam A",
-        VideoInputBrowserDeviceId = "browser-visible-video-device-id",
-        AudioOutputEnabled = true,
-        AudioOutputLabel = "Virtual Speakers A",
-    },
+    Proxy = proxy,
+});
+
+var proxiedPage = await browser.CurrentWindow.OpenPageAsync(
+    new WebPageSettings { Proxy = proxy });
+await proxiedPage.NavigateAsync(new Uri("https://example.com"));
+
+var proxiedWindow = await browser.OpenWindowAsync(
+    new WebWindowSettings { Proxy = proxy });
+await proxiedWindow.NavigateAsync(new Uri("https://example.com"));
+```
+
+Proxy с логином и паролем тоже поддерживается:
+
+```csharp
+var authenticatedProxy = new WebProxy("http://proxy.example.com:8080")
+{
+    Credentials = new NetworkCredential("user", "pass"),
+};
+```
+
+## Browser profiles and devices
+
+Внешний orchestration-слой теперь можно строить целиком внутри пакета WebDriver, без вынесения profile/device surface в родительский контракт.
+
+### Запуск по профилю браузера
+
+```csharp
+var profile = WebBrowserProfile.Brave;
+
+await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings
+{
+    Profile = profile,
+    Args = ["--no-sandbox"],
+    Device = Device.DesktopFullHd,
 });
 ```
 
-Если `AudioInputBrowserDeviceId` или `VideoInputBrowserDeviceId` не заданы, драйвер пытается разрешить native устройство по label. Для стабильного routing в GUI/browser E2E сценариях предпочтительнее передавать явный browser-visible `deviceId`.
+`WebBrowserProfile` здесь отвечает только за выбор бинарника, канала и runtime profile path. Временные файлы профиля materialize-ятся внутри `LaunchAsync` уже после того, как собраны все `WebBrowserSettings` и `Device`-данные.
 
-| Свойство | Тип | Описание |
-| -------- | --- | -------- |
-| `AudioInputEnabled` | `bool` | Публиковать alias виртуального микрофона |
-| `AudioInputLabel` | `string` | Label alias микрофона в `enumerateDevices()` |
-| `AudioInputBrowserDeviceId` | `string?` | Явный browser-visible `MediaDeviceInfo.deviceId` для маршрутизации микрофона |
-| `VideoInputEnabled` | `bool` | Публиковать alias виртуальной камеры |
-| `VideoInputLabel` | `string` | Label alias камеры в `enumerateDevices()` |
-| `VideoInputBrowserDeviceId` | `string?` | Явный browser-visible `MediaDeviceInfo.deviceId` для маршрутизации камеры |
-| `AudioOutputEnabled` | `bool` | Публиковать alias audio output устройства в `enumerateDevices()` |
-| `AudioOutputLabel` | `string` | Label alias output устройства |
-| `GroupId` | `string?` | Общий `groupId` для alias устройств; по умолчанию генерируется из tab context |
+При materialization драйвер теперь не ограничивается одним `profile.json`: под каждый browser family заранее раскладываются automation-oriented profile files. Для Chromium-профилей создаются `Default/Preferences`, `Local State` и `First Run` с отключёнными welcome/FRE, background networking, sync, autofill, translate, Safe Browsing и password-manager фичами. Для Firefox создаётся `user.js` с отключёнными telemetry/new tab/discovery/pocket/GPU-heavy флагами и с базовой automation-конфигурацией. Browser-specific ветки тоже учитываются: например, Edge получает anti-FRE disable-features, а Vivaldi — pre-seeded startup/welcome prefs.
 
-Ограничение: audio output сейчас ограничен alias-экспозицией в `enumerateDevices()` и не выполняет реальный sink routing.
+Для Firefox на Linux это ограничение принципиальное для release Stable: неподписанное profile-local расширение обычно не активируется. Драйвер намеренно не переводит этот bootstrap на Marionette, потому что такой обход меняет JS-видимое automation state страницы, включая `navigator.webdriver`.
 
-#### `CreateAntiDetectProfile`
+Для Firefox Stable runtime теперь поддерживает отдельный install overlay: если задать путь к подписанному XPI через `ATOM_WEBDRIVER_FIREFOX_SIGNED_XPI_PATH`, драйвер поднимает локальную shim-installation внутри materialized profile, кладёт туда `distribution/policies.json`, force-install'ит signed XPI через `ExtensionSettings` и передаёт session config через `3rdparty -> Extensions -> <addon-id>`, который background runtime читает из `storage.managed`. Сам подписанный XPI runtime не модифицирует, поэтому пакет должен быть заранее собран и подписан из той же версии extension source.
 
-Фабричный метод для быстрого создания полного anti-detect профиля:
+Если на машине уже существует глобальный `/etc/firefox/policies/policies.json` c тем же addon id, Firefox Stable может предпочесть системную policy и проигнорировать overlay policy из install shim. Runtime теперь сохраняет такое пересечение в `bridge.managedPolicyDiagnostics.detail`, но сам конфликт нужно устранять на уровне host policy: удалить или синхронизировать системную запись.
+
+Если signed XPI не задан, Linux Firefox Stable остаётся в диагностическом profile-local режиме, а для живой проверки extension-backed bootstrap по-прежнему рекомендуются Firefox Developer Edition или Nightly.
+
+### Автоматическая упаковка и подпись Firefox XPI
+
+Сборка `Framework/Atom.Net.Browsing.WebDriver` теперь умеет автоматически материализовать unsigned Firefox package в `obj/<Configuration>/<TargetFramework>/extension-packages/firefox/atom-webdriver-firefox-<version>-unsigned.zip`. Для локального прогона можно использовать задачу VS Code `package webdriver firefox xpi` или прямой `dotnet build -c Debug -p:CreateFirefoxExtensionPackageOnBuild=true`. Для `Release` в этом репо по-прежнему нужны доступные приватные NuGet-источники WebDriver-зависимостей.
+
+Для автоматической подписи добавлен ручной workflow `.github/workflows/webdriver-firefox-sign.yml`. По умолчанию он собирает `Debug`, чтобы не зависеть от внешнего feed, ожидает Mozilla AMO API credentials в секретах `MOZILLA_AMO_JWT_ISSUER` и `MOZILLA_AMO_JWT_SECRET`, подписывает Firefox build output через `web-ext sign --channel unlisted`, выгружает готовый signed XPI как artifact и при желании может сразу запустить live smoke на Linux Firefox Stable через `ATOM_WEBDRIVER_FIREFOX_SIGNED_XPI_PATH`.
+
+Для локальной подписи добавлен helper `Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime/scripts/sign-firefox-package.sh`. Он повторяет тот же pipeline, но читает credentials из переменных окружения `WEB_EXT_API_KEY` и `WEB_EXT_API_SECRET`, сам вызывает `dotnet build -p:CreateFirefoxExtensionPackageOnBuild=true`, затем отправляет текущую Firefox-версию в AMO через `web-ext sign` без встроенного скачивания и сам доводит процесс до конца через AMO API: ждёт нужную unlisted-версию по текущему `manifest.version`, скачивает signed XPI в `obj/<Configuration>/<TargetFramework>/extension-packages/firefox/signed` и умеет восстановиться, если тот же upload уже был отправлен раньше. Если нужно, окно ожидания можно переопределить через `--approval-timeout <ms>`. Его можно запускать напрямую или через `npm --prefix Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime run sign:firefox -- --configuration Debug --target-framework net10.0`. Для удобства в VS Code добавлена задача `sign webdriver firefox xpi local`, а workflow подписи теперь использует тот же helper, чтобы локальный и CI-пути не расходились.
+
+Это не локальная CA-подпись: Firefox Stable доверяет только подписи, выданной Mozilla signing service через AMO API. Поэтому automation pipeline может быть полностью нашим, но шаг trust/signing всё равно проходит через Mozilla credentials.
+
+Поверх browser-family defaults в materialized profile теперь также подмешиваются runtime overrides из `WebBrowserSettings` и `Device`: Chromium effective arguments получают `--proxy-server`, `--lang` и `--user-agent`, а Firefox `user.js` получает proxy prefs, `general.useragent.override`, `intl.accept_languages` и `browser.privatebrowsing.autostart`, если это было запрошено настройками запуска.
+
+### Применение device preset ко всем новым вкладкам
 
 ```csharp
-var settings = TabContextSettings.CreateAntiDetectProfile(
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...",
-    proxy: "socks5://127.0.0.1:9050",
-    locale: "en-US",
-    timezone: "America/New_York");
+await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings
+{
+    Profile = WebBrowserProfile.Brave,
+    Device = Device.Pixel2,
+});
 ```
 
-Включает: CanvasNoise, AudioNoise, WebRTC disable, Battery/Permissions protection,
-HardwareConcurrency=4, DeviceMemory=8, стандартный набор шрифтов, Client Hints, Network Info,
-SpeechVoices, MediaDevices protection, DoNotTrack.
+### Применение device preset только к новой вкладке
 
-#### `SpeechVoiceSettings`
+```csharp
+var page = await browser.CurrentWindow.OpenPageAsync(new WebPageSettings
+{
+    Device = Device.MacBookPro14,
+});
+await page.NavigateAsync(new Uri("https://example.com"));
+```
 
-| Свойство | Тип | Описание |
-| -------- | --- | -------- |
-| `Name` | `string` | Имя голоса (`"Microsoft David"`) |
-| `Lang` | `string` | Язык BCP 47 (`"en-US"`) |
-| `LocalService` | `bool` | Локальный голос (по умолчанию `true`) |
+### Тонкая настройка полного fingerprint-профиля
 
-#### `WebGLParamsSettings`
+```csharp
+var device = Device.DesktopFullHd;
+device.Locale = "de-DE";
+device.Timezone = "Europe/Berlin";
+device.Languages = ["de-DE", "de", "en-US"];
+device.Geolocation = new GeolocationSettings
+{
+    Latitude = 52.5200,
+    Longitude = 13.4050,
+    Accuracy = 20,
+};
+device.NetworkInfo = new NetworkInfoSettings
+{
+    EffectiveType = "wifi",
+    Type = "wifi",
+    Downlink = 80,
+    Rtt = 12,
+};
 
-| Свойство | Тип | Описание |
-| -------- | --- | -------- |
-| `MaxTextureSize` | `int?` | `MAX_TEXTURE_SIZE` |
-| `MaxRenderbufferSize` | `int?` | `MAX_RENDERBUFFER_SIZE` |
-| `MaxViewportDims` | `IReadOnlyList<int>?` | `MAX_VIEWPORT_DIMS` (2 элемента) |
-| `MaxVaryingVectors` | `int?` | `MAX_VARYING_VECTORS` |
-| `MaxVertexUniformVectors` | `int?` | `MAX_VERTEX_UNIFORM_VECTORS` |
-| `MaxFragmentUniformVectors` | `int?` | `MAX_FRAGMENT_UNIFORM_VECTORS` |
+var page = await browser.CurrentWindow.OpenPageAsync(new WebPageSettings
+{
+    Device = device,
+});
+```
+
+`Device` теперь описывает не только viewport/mobile/touch, но и основные fingerprint-группы: `UserAgent`, `Platform`, `Locale`, `Timezone`, `Languages`, `Screen`, `ClientHints`, `Geolocation`, `NetworkInfo`, `WebGL`, `WebGLParams`, `SpeechVoices`, `VirtualMediaDevices`, а также privacy/noise-переключатели вроде `CanvasNoise`, `AudioNoise`, `FontFiltering`, `DoNotTrack` и `GlobalPrivacyControl`.
+
+### Навигация с локальной HTML-подстановкой
+
+```csharp
+await page.NavigateAsync(
+    new Uri("https://example.com"),
+    new NavigationSettings
+    {
+        Html = "<html><body>Hello from local fulfill</body></html>",
+    });
+```
 
 ### Матрица возможностей: Chromium vs Firefox
 
@@ -439,12 +517,14 @@ SpeechVoices, MediaDevices protection, DoNotTrack.
 | Device memory | `navigator.deviceMemory` override | `navigator.deviceMemory` override |
 | Battery API | `navigator.getBattery()` fake (charging, level=1) | `navigator.getBattery()` fake (charging, level=1) |
 | Permissions API | `permissions.query()` → "prompt" | `permissions.query()` → "prompt" |
-| Client Hints (HTTP) | `declarativeNetRequest` Sec-CH-UA-* | `webRequest.onBeforeSendHeaders` (TODO) |
+| Client Hints (HTTP) | `declarativeNetRequest` Sec-CH-UA-* | `webRequest.onBeforeSendHeaders` Sec-CH-UA-* |
 | Client Hints (JS) | `navigator.userAgentData` override | `navigator.userAgentData` override |
 | Network Information | `navigator.connection` override | `navigator.connection` override |
 | Speech Synthesis | `speechSynthesis.getVoices()` override | `speechSynthesis.getVoices()` override |
 | Media Devices | `enumerateDevices()` fake set | `enumerateDevices()` fake set |
 | Virtual Media Devices | Tab-local alias `enumerateDevices()` + routed `getUserMedia()` к browser-visible audio/video устройствам; audio output alias-only | Tab-local alias `enumerateDevices()` + routed `getUserMedia()` к browser-visible audio/video устройствам; audio output alias-only |
+
+Для Client Hints active readiness now means end-to-end, а не только наличие API surface: .NET payload contract, background request-header mutation, content/main-world `navigator.userAgentData` override и live Firefox Developer Edition wire proof закрыты одновременно.
 | WebGL params | `getParameter()` patch (MAX_TEXTURE_SIZE и др.) | `getParameter()` patch |
 | Do Not Track | `navigator.doNotTrack` override | `navigator.doNotTrack` override |
 | Global Privacy Control | `navigator.globalPrivacyControl` override | `navigator.globalPrivacyControl` override |

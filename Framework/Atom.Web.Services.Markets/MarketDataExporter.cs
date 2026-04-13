@@ -49,21 +49,31 @@ public sealed class MarketDataExporter : IMarketDataExporter
 
     private static string ExportPositionsCsv(IEnumerable<IMarketPosition> positions)
     {
-        var sb = new StringBuilder();
+        using var sb = new Atom.Text.ValueStringBuilder();
         sb.AppendLine("AssetId,Quantity,AverageCostBasis,CurrentPrice,MarketValue,UnrealizedPnL,UnrealizedPnLPercent,RealizedPnL,TotalFees,TradeCount,IsClosed");
 
         foreach (var pos in positions)
         {
-            sb.Append(CultureInfo.InvariantCulture, $"{EscapeCsv(pos.AssetId)},");
-            sb.Append(CultureInfo.InvariantCulture, $"{pos.Quantity:G},");
-            sb.Append(CultureInfo.InvariantCulture, $"{pos.AverageCostBasis:G},");
-            sb.Append(CultureInfo.InvariantCulture, $"{pos.CurrentPrice:G},");
-            sb.Append(CultureInfo.InvariantCulture, $"{pos.MarketValue:G},");
-            sb.Append(CultureInfo.InvariantCulture, $"{pos.UnrealizedPnL:G},");
-            sb.Append(CultureInfo.InvariantCulture, $"{pos.UnrealizedPnLPercent:G},");
-            sb.Append(CultureInfo.InvariantCulture, $"{pos.RealizedPnL:G},");
-            sb.Append(CultureInfo.InvariantCulture, $"{pos.TotalFees:G},");
-            sb.Append(CultureInfo.InvariantCulture, $"{pos.TradeCount},");
+            sb.Append(EscapeCsv(pos.AssetId));
+            sb.Append(',');
+            sb.Append(pos.Quantity.ToString("G", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(pos.AverageCostBasis.ToString("G", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(pos.CurrentPrice.ToString("G", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(pos.MarketValue.ToString("G", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(pos.UnrealizedPnL.ToString("G", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(pos.UnrealizedPnLPercent.ToString("G", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(pos.RealizedPnL.ToString("G", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(pos.TotalFees.ToString("G", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(pos.TradeCount.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
             sb.AppendLine(pos.IsClosed ? "true" : "false");
         }
 
@@ -72,17 +82,22 @@ public sealed class MarketDataExporter : IMarketDataExporter
 
     private static string ExportPnLCsv(IEnumerable<IMarketPnLSnapshot> snapshots)
     {
-        var sb = new StringBuilder();
+        using var sb = new Atom.Text.ValueStringBuilder();
         sb.AppendLine("Timestamp,TotalMarketValue,UnrealizedPnL,RealizedPnL,TotalFees,NetPnL");
 
         foreach (var snap in snapshots)
         {
-            sb.Append(CultureInfo.InvariantCulture, $"{snap.Timestamp:O},");
-            sb.Append(CultureInfo.InvariantCulture, $"{snap.TotalMarketValue:G},");
-            sb.Append(CultureInfo.InvariantCulture, $"{snap.UnrealizedPnL:G},");
-            sb.Append(CultureInfo.InvariantCulture, $"{snap.RealizedPnL:G},");
-            sb.Append(CultureInfo.InvariantCulture, $"{snap.TotalFees:G},");
-            sb.AppendLine($"{snap.NetPnL:G}");
+            sb.Append(snap.Timestamp.ToString("O", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(snap.TotalMarketValue.ToString("G", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(snap.UnrealizedPnL.ToString("G", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(snap.RealizedPnL.ToString("G", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(snap.TotalFees.ToString("G", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.AppendLine(snap.NetPnL.ToString("G", CultureInfo.InvariantCulture));
         }
 
         return sb.ToString();

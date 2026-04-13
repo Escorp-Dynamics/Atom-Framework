@@ -54,6 +54,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Atom.Media.Audio.Tests" />
+    <InternalsVisibleTo Include="Atom.Net.Browsing.WebDriver.Tests" />
   </ItemGroup>
 
   <ItemGroup>

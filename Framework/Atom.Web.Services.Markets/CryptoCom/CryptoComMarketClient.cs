@@ -1,6 +1,6 @@
-﻿using System.Collections.Concurrent;
+﻿using System.Buffers;
+using System.Collections.Concurrent;
 using System.Globalization;
-using System.Buffers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -307,7 +307,7 @@ public class CryptoComClient : ExchangeClientBase
 
     private static ReadOnlyMemory<byte> BuildCommandMessage(string method, int id, string[] marketIds)
     {
-        var builder = new StringBuilder();
+        using var builder = new Atom.Text.ValueStringBuilder();
         builder.Append("{\"id\":");
         builder.Append(id);
         builder.Append(",\"method\":\"");

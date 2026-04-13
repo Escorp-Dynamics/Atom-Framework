@@ -10,13 +10,13 @@ namespace Atom.SourceGeneration.PipeWire;
 internal static partial class SpaHeaderParser
 {
     [GeneratedRegex(@"enum\s+(?<name>\w+)\s*\{(?<body>.*?)\}", RegexOptions.Singleline | RegexOptions.ExplicitCapture | RegexOptions.NonBacktracking)]
-    private static partial Regex EnumPattern();
+    private static partial Regex EnumPattern { get; }
 
     [GeneratedRegex(@"/\*.*?\*/", RegexOptions.Singleline | RegexOptions.NonBacktracking)]
-    private static partial Regex CCommentPattern();
+    private static partial Regex CCommentPattern { get; }
 
     [GeneratedRegex(@"^[A-Za-z_]\w*$", RegexOptions.NonBacktracking)]
-    private static partial Regex IdentifierPattern();
+    private static partial Regex IdentifierPattern { get; }
 
     /// <summary>
     /// Представляет один член C enum.
@@ -33,14 +33,14 @@ internal static partial class SpaHeaderParser
     /// <returns>Имя enum и его члены.</returns>
     internal static (string EnumName, List<EnumEntry> Entries) Parse(string headerText)
     {
-        var enumMatch = EnumPattern().Match(headerText);
+        var enumMatch = EnumPattern.Match(headerText);
         if (!enumMatch.Success)
         {
             return (string.Empty, []);
         }
 
         var enumName = enumMatch.Groups["name"].Value;
-        var body = CCommentPattern().Replace(enumMatch.Groups["body"].Value, string.Empty);
+        var body = CCommentPattern.Replace(enumMatch.Groups["body"].Value, string.Empty);
         var entries = new List<EnumEntry>();
         var currentValue = 0u;
 
@@ -54,7 +54,7 @@ internal static partial class SpaHeaderParser
 
     private static void ParseLine(string rawLine, List<EnumEntry> entries, ref uint currentValue)
     {
-        var line = CCommentPattern().Replace(rawLine, string.Empty);
+        var line = CCommentPattern.Replace(rawLine, string.Empty);
 
         var cppCommentIdx = line.IndexOf("//", StringComparison.Ordinal);
         if (cppCommentIdx >= 0)
@@ -92,7 +92,7 @@ internal static partial class SpaHeaderParser
         var valStr = parts[1].Trim();
 
         // Пропускаем алиасы (ссылки на другие enum members)
-        if (IdentifierPattern().IsMatch(valStr))
+        if (IdentifierPattern.IsMatch(valStr))
         {
             return;
         }

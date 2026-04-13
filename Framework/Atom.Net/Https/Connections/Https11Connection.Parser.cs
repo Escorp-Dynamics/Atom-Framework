@@ -29,6 +29,10 @@ internal sealed partial class Https11Connection
                 return await BuildResponseMessageAsync(request, version, statusCode, reasonPhrase, headerBudget, headerToken, cancellationToken).ConfigureAwait(false);
             }
         }
+        catch (OperationCanceledException exception) when (timeoutCts is not null && timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Не удалось получить response headers за {options.ResponseHeadersTimeout}.", exception);
+        }
         finally
         {
             timeoutCts?.Dispose();
@@ -147,31 +151,50 @@ internal sealed partial class Https11Connection
             return [];
         }
 
-        if (state.TransferEncodingChunked)
-        {
-            state.BodyKind = ResponseBodyKind.Chunked;
-            return await ReadChunkedBodyAsync(cancellationToken).ConfigureAwait(false);
-        }
+        var bodyToken = CreateBodyToken(cancellationToken, out var timeoutCts);
 
-        if (state.ContentLength.HasValue)
+        try
         {
-            state.BodyKind = ResponseBodyKind.ContentLength;
-            return await ReadFixedLengthBodyAsync(state.ContentLength.Value, cancellationToken).ConfigureAwait(false);
-        }
+            if (state.TransferEncodingChunked)
+            {
+                state.BodyKind = ResponseBodyKind.Chunked;
+                return await ReadChunkedBodyAsync(bodyToken).ConfigureAwait(false);
+            }
 
-        state.BodyKind = ResponseBodyKind.CloseDelimited;
-        return await ReadToEndBodyAsync(cancellationToken).ConfigureAwait(false);
+            if (state.ContentLength.HasValue)
+            {
+                state.BodyKind = ResponseBodyKind.ContentLength;
+                return await ReadFixedLengthBodyAsync(state.ContentLength.Value, bodyToken).ConfigureAwait(false);
+            }
+
+            state.BodyKind = ResponseBodyKind.CloseDelimited;
+            return await ReadToEndBodyAsync(bodyToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (timeoutCts is not null && timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Не удалось получить response body за {options.ResponseBodyTimeout}.", exception);
+        }
+        finally
+        {
+            timeoutCts?.Dispose();
+        }
     }
 
     private CancellationToken CreateHeaderToken(CancellationToken cancellationToken, out CancellationTokenSource? timeoutCts)
+        => CreateTimeoutToken(options.ResponseHeadersTimeout, cancellationToken, out timeoutCts);
+
+    private CancellationToken CreateBodyToken(CancellationToken cancellationToken, out CancellationTokenSource? timeoutCts)
+        => CreateTimeoutToken(options.ResponseBodyTimeout, cancellationToken, out timeoutCts);
+
+    private static CancellationToken CreateTimeoutToken(TimeSpan timeout, CancellationToken cancellationToken, out CancellationTokenSource? timeoutCts)
     {
         timeoutCts = null;
 
-        if (options.ResponseHeadersTimeout <= TimeSpan.Zero || options.ResponseHeadersTimeout == Timeout.InfiniteTimeSpan)
+        if (timeout <= TimeSpan.Zero || timeout == Timeout.InfiniteTimeSpan)
             return cancellationToken;
 
         timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(options.ResponseHeadersTimeout);
+        timeoutCts.CancelAfter(timeout);
         return timeoutCts.Token;
     }
 

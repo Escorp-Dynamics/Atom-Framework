@@ -128,15 +128,61 @@ internal sealed class Vp8LDecoder : IDisposable
             return CodecResult.InvalidData;
         }
 
+        return DecodeImageStreamToFrame(vp8lData[Vp8LConstants.HeaderSize..], ref frame);
+    }
+
+    internal CodecResult DecodeAlphaImageStream(ReadOnlySpan<byte> imageStreamData, int imageWidth, int imageHeight, Span<byte> alphaOutput)
+    {
+        if (imageWidth < 1 || imageHeight < 1)
+        {
+            return CodecResult.InvalidData;
+        }
+
+        if (alphaOutput.Length < imageWidth * imageHeight)
+        {
+            return CodecResult.OutputBufferTooSmall;
+        }
+
+        width = imageWidth;
+        height = imageHeight;
+
+        var result = DecodeImageStream(imageStreamData);
+        if (result != CodecResult.Success)
+        {
+            return result;
+        }
+
+        ExtractGreenToAlpha(alphaOutput);
+        return CodecResult.Success;
+    }
+
+    private CodecResult DecodeImageStreamToFrame(ReadOnlySpan<byte> imageStreamData, ref VideoFrame frame)
+    {
+        var result = DecodeImageStream(imageStreamData);
+        if (result != CodecResult.Success)
+        {
+            return result;
+        }
+
+        WriteToFrame(ref frame);
+        return CodecResult.Success;
+    }
+
+    private CodecResult DecodeImageStream(ReadOnlySpan<byte> imageStreamData)
+    {
+        colorCache = null;
+        entropyImage = null;
+        entropyXSize = 0;
+        entropyBits = 0;
+
         // Создаём BitReader для VP8L данных (после 5-byte header), LSB-first.
         // VP8L потоки неявно дополнены нулями: libwebp возвращает 0 при чтении за пределами буфера.
         // Добавляем zero-padding, чтобы BitReader не бросал EndOfData на хвостовых Huffman-таблицах.
-        var payload = vp8lData[Vp8LConstants.HeaderSize..];
         const int zeroPadding = 4096; // покрывает чтение до 5 полных Huffman-таблиц за пределами данных
-        var paddedLen = payload.Length + zeroPadding;
+        var paddedLen = imageStreamData.Length + zeroPadding;
         var padded = ArrayPool<byte>.Shared.Rent(paddedLen);
-        payload.CopyTo(padded);
-        padded.AsSpan(payload.Length, padded.Length - payload.Length).Clear(); // zero-padding
+        imageStreamData.CopyTo(padded);
+        padded.AsSpan(imageStreamData.Length, padded.Length - imageStreamData.Length).Clear(); // zero-padding
         var reader = new BitReader(padded, lsbFirst: true);
 
         // Аллоцируем выходной буфер из ArrayPool (снижаем GC давление при покадровом декодировании)
@@ -205,13 +251,9 @@ internal sealed class Vp8LDecoder : IDisposable
             ApplyInverseTransforms();
 #if DEBUG
             DecInverseTransformsTicks = Elapsed(t0);
-            t0 = Mark();
 #endif
 
-            // 6. Конвертируем ARGB → VideoFrame
-            WriteToFrame(ref frame);
 #if DEBUG
-            DecWriteToFrameTicks = Elapsed(t0);
             DecTotalTicks = Elapsed(tTotal);
 #endif
 
@@ -221,6 +263,15 @@ internal sealed class Vp8LDecoder : IDisposable
         {
             DisposeHuffmanTables();
             ArrayPool<byte>.Shared.Return(padded);
+        }
+    }
+
+    private void ExtractGreenToAlpha(Span<byte> alphaOutput)
+    {
+        var pixels = pixelBuffer!.AsSpan(0, width * height);
+        for (var i = 0; i < pixels.Length; i++)
+        {
+            alphaOutput[i] = (byte)((pixels[i] >> 8) & 0xFF);
         }
     }
 

@@ -1,4 +1,4 @@
-#pragma warning disable CA1054, CA2000, CA2234, S4136, VSTHRD002
+﻿#pragma warning disable CA1054, CA2000, CA2234, S4136, VSTHRD002
 
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;

@@ -1,4 +1,4 @@
-namespace Atom.Net.Https.Headers;
+﻿namespace Atom.Net.Https.Headers;
 
 /// <summary>
 /// 
@@ -12,6 +12,8 @@ public class FirefoxHeadersFormattingPolicy : HeadersFormattingPolicy
     {
         { RequestKind.Navigation, defaultPseudoHeadersOrder },
         { RequestKind.Preload, defaultPseudoHeadersOrder },
+        { RequestKind.ModulePreload, defaultPseudoHeadersOrder },
+        { RequestKind.Prefetch, defaultPseudoHeadersOrder },
         { RequestKind.Fetch, defaultPseudoHeadersOrder },
         { RequestKind.ServiceWorker, defaultPseudoHeadersOrder },
         { RequestKind.Unknown, defaultPseudoHeadersOrder },

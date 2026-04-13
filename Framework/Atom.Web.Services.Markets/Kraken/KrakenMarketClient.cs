@@ -318,7 +318,7 @@ public class KrakenClient : ExchangeClientBase
 
     private static ReadOnlyMemory<byte> BuildCommandMessage(string method, string[] marketIds)
     {
-        var builder = new StringBuilder();
+        using var builder = new Atom.Text.ValueStringBuilder();
         builder.Append("{\"method\":\"");
         builder.Append(method);
         builder.Append("\",\"params\":{\"channel\":\"ticker\",\"symbol\":[");

@@ -5,6 +5,114 @@
             "name": ".NET Core Attach",
             "type": "coreclr",
             "request": "attach"
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom/Atom.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.SourceGeneration",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.SourceGeneration/Atom.SourceGeneration.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Compilers.JavaScript.SourceGeneration",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Compilers.JavaScript.SourceGeneration/Atom.Compilers.JavaScript.SourceGeneration.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Compilers.JavaScript",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Compilers.JavaScript/Atom.Compilers.JavaScript.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Debug",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Debug/Atom.Debug.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.IO.Compression",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.IO.Compression/Atom.IO.Compression.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Media",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Media/Atom.Media.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Media.Audio",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Media.Audio/Atom.Media.Audio.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Media.Video",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Media.Video/Atom.Media.Video.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Net",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Net/Atom.Net.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Net.Browsing",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Net.Browsing/Atom.Net.Browsing.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Web",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Web/Atom.Web.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Web.Services",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Web.Services/Atom.Web.Services.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Web.Services.Emails",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Web.Services.Emails/Atom.Web.Services.Emails.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Web.Services.Markets",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Web.Services.Markets/Atom.Web.Services.Markets.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Web.Services.Proxies",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Web.Services.Proxies/Atom.Web.Services.Proxies.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Testing",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Testing/Atom.Testing.csproj\""
+        },
+        {
+            "name": "Публикация пакета: Escorp.Atom.Net.Browsing.WebDriver",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj\""
         }
     ]
 }

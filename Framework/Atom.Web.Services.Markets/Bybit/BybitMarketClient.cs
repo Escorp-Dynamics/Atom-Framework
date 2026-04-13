@@ -294,7 +294,7 @@ public class BybitClient : ExchangeClientBase
 
     private static ReadOnlyMemory<byte> BuildCommandMessage(string operation, string[] marketIds)
     {
-        var builder = new StringBuilder();
+        using var builder = new Atom.Text.ValueStringBuilder();
         builder.Append("{\"op\":\"");
         builder.Append(operation);
         builder.Append("\",\"args\":[");

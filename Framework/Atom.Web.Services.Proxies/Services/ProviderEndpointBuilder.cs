@@ -19,7 +19,7 @@ internal static class ProviderEndpointBuilder
             return string.Empty;
         }
 
-        var builder = new StringBuilder(query.Count * 24);
+        using var builder = new Atom.Text.ValueStringBuilder(query.Count * 24);
         var isFirst = true;
         foreach (var pair in query)
         {

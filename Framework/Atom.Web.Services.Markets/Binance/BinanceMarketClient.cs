@@ -405,7 +405,7 @@ public class BinanceClient : ExchangeClientBase
 
     private static ReadOnlyMemory<byte> BuildCommandMessage(string method, string[] streams, int requestId)
     {
-        var builder = new StringBuilder();
+        using var builder = new Atom.Text.ValueStringBuilder();
         builder.Append("{\"method\":\"");
         builder.Append(method);
         builder.Append("\",\"params\":[");

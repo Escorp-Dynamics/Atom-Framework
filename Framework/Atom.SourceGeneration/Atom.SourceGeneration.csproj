@@ -12,10 +12,10 @@
 		<PreserveCompilationContext>true</PreserveCompilationContext>
 		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
 
-		<NoWarn>CA1031;CA1716;RS1041;NU5128</NoWarn>
+		<NoWarn>CA1031;CA1716;CA1724;RS1041;NU5128</NoWarn>
 
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.6.5</Version>
+		<Version>0.6.6</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -40,7 +40,8 @@
 		чтобы потребители получили их вместе с анализатором.
 	-->
 	<Target Name="_IncludeAnalyzerDependencies"
-		AfterTargets="GetTargetPathWithTargetPlatformMoniker">
+		AfterTargets="GetTargetPathWithTargetPlatformMoniker"
+		Condition="'$(DisableAnalyzerDependencyInclusion)' != 'true'">
 		<ItemGroup>
 			<TargetPathWithTargetPlatformMoniker
 				Include="$(MSBuildProjectDirectory)/$(OutputPath)Escorp.Atom.dll">
@@ -58,7 +59,8 @@
 	</PropertyGroup>
 
 	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
-		<ProjectReference Include="../Atom/Atom.csproj" />
+		<ProjectReference Include="../Atom/Atom.csproj"
+			AdditionalProperties="DisableAnalyzerDependencyInclusion=$(DisableAnalyzerDependencyInclusion)" />
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(Configuration)' == 'Release'">
@@ -93,26 +95,5 @@
 			PackagePath="analyzers/dotnet/cs" Visible="false"
 			Condition="Exists('$(OutputPath)\Escorp.Atom.dll')" />
 	</ItemGroup>
-
-	<Target Name="PublishPackages" AfterTargets="Pack"
-		Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
-		<PropertyGroup>
-			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
-		</PropertyGroup>
-
-		<ItemGroup>
-			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" />
-			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg"
-				Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
-		</ItemGroup>
-
-		<Exec
-			Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;"
-			Condition="'%(PackageFiles.Identity)' != ''"
-			IgnoreExitCode="true">
-			<Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
-		</Exec>
-
-	</Target>
 
 </Project>

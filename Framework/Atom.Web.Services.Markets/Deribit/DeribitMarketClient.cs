@@ -303,7 +303,7 @@ public class DeribitClient : ExchangeClientBase
 
     private static ReadOnlyMemory<byte> BuildCommandMessage(string method, int id, string[] marketIds)
     {
-        var builder = new StringBuilder();
+        using var builder = new Atom.Text.ValueStringBuilder();
         builder.Append("{\"jsonrpc\":\"2.0\",\"id\":");
         builder.Append(id);
         builder.Append(",\"method\":\"");
@@ -324,6 +324,7 @@ public class DeribitClient : ExchangeClientBase
         builder.Append("]}}");
         return Encoding.UTF8.GetBytes(builder.ToString());
     }
+
 }
 
 #endregion
@@ -415,15 +416,8 @@ public sealed class DeribitRestClient : IMarketRestClient, IDisposable
         var method = side == TradeSide.Buy ? "private/buy" : "private/sell";
         var orderType = price.HasValue ? "limit" : "market";
 
-        var sb = new StringBuilder();
-        sb.Append($"/api/v2/{method}?instrument_name={Uri.EscapeDataString(assetId)}");
-        sb.Append($"&amount={quantity.ToString("G", CultureInfo.InvariantCulture)}");
-        sb.Append($"&type={orderType}");
-
-        if (price.HasValue)
-            sb.Append($"&price={price.Value.ToString("G", CultureInfo.InvariantCulture)}");
-
-        var request = new HttpRequestMessage(HttpMethod.Get, sb.ToString());
+        var requestPath = BuildCreateOrderPath(method, assetId, quantity, orderType, price);
+        var request = new HttpRequestMessage(HttpMethod.Get, requestPath);
         request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {accessToken}");
 
         var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -441,6 +435,19 @@ public sealed class DeribitRestClient : IMarketRestClient, IDisposable
             && result.TryGetProperty("order", out var order)
             && order.TryGetProperty("order_id", out var orderId)
             ? orderId.GetString() : null;
+    }
+
+    private static string BuildCreateOrderPath(string method, string assetId, double quantity, string orderType, double? price)
+    {
+        using var sb = new Atom.Text.ValueStringBuilder();
+        sb.Append($"/api/v2/{method}?instrument_name={Uri.EscapeDataString(assetId)}");
+        sb.Append($"&amount={quantity.ToString("G", CultureInfo.InvariantCulture)}");
+        sb.Append($"&type={orderType}");
+
+        if (price.HasValue)
+            sb.Append($"&price={price.Value.ToString("G", CultureInfo.InvariantCulture)}");
+
+        return sb.ToString();
     }
 
     /// <inheritdoc />

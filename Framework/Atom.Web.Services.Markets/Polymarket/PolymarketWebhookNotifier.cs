@@ -241,7 +241,8 @@ public sealed class PolymarketWebhookNotifier : IDisposable
             if (WebhookSent is not null)
             {
                 await WebhookSent.Invoke(this, new PolymarketWebhookSentEventArgs(
-                    config, false, 0) { Error = ex }).ConfigureAwait(false);
+                    config, false, 0)
+                { Error = ex }).ConfigureAwait(false);
             }
         }
     }
@@ -315,7 +316,7 @@ public sealed class PolymarketWebhookNotifier : IDisposable
     /// </summary>
     private static string FormatAlertMessage(PolymarketAlertTriggeredEventArgs e)
     {
-        var sb = new StringBuilder();
+        using var sb = new Atom.Text.ValueStringBuilder();
         sb.Append("⚠ Алерт Polymarket: ");
         sb.Append(e.Alert.Description ?? e.Alert.Id);
         sb.Append(" | Условие: ").Append(e.Alert.Condition);
@@ -331,7 +332,7 @@ public sealed class PolymarketWebhookNotifier : IDisposable
     /// </summary>
     private static string FormatOrderMessage(PolymarketOrderExecutedEventArgs e)
     {
-        var sb = new StringBuilder();
+        using var sb = new Atom.Text.ValueStringBuilder();
         sb.Append(e.Success ? "✅ Ордер исполнен" : "❌ Ордер не исполнен");
         sb.Append(" | ").Append(e.Signal.Action);
         sb.Append(' ').Append(e.Signal.AssetId);

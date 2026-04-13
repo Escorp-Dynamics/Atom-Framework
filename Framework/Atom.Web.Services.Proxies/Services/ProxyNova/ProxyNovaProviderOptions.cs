@@ -6,6 +6,16 @@
 public sealed class ProxyNovaProviderOptions
 {
     /// <summary>
+    /// При отсутствии явного country/near проходит опубликованные country filters ProxyNova и собирает полный каталог по странам.
+    /// </summary>
+    public bool FetchPublishedCountries { get; init; }
+
+    /// <summary>
+    /// Максимальное количество стартов запросов в секунду для одного provider instance.
+    /// </summary>
+    public int RequestsPerSecondLimit { get; init; } = ProxyNovaProvider.DefaultRequestsPerSecondLimit;
+
+    /// <summary>
     /// ISO-2 код страны. Игнорируется, если указаны координаты near.
     /// </summary>
     public string? Country { get; init; }

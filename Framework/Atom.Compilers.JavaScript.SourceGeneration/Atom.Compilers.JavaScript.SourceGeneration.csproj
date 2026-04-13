@@ -1,0 +1,100 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <AssemblyName>Escorp.Atom.Compilers.JavaScript.SourceGeneration</AssemblyName>
+        <RootNamespace>Atom.Compilers.JavaScript.SourceGeneration</RootNamespace>
+
+        <IsRoslynComponent>true</IsRoslynComponent>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+        <IncludeBuildOutput>true</IncludeBuildOutput>
+        <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+        <CompilerGeneratedFilesOutputPath>generated</CompilerGeneratedFilesOutputPath>
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <PreserveCompilationContext>true</PreserveCompilationContext>
+        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+        <GenerateDependencyFile>false</GenerateDependencyFile>
+
+        <NoWarn>CA1031;CA1716;CA1724;RS1041;NU5128;CS1591;IDE0055</NoWarn>
+
+        <PackageId>$(AssemblyName)</PackageId>
+        <Version>0.0.1</Version>
+        <Authors>Yuriy Yesin, Escorp Labs</Authors>
+        <Company>Escorp Dynamics</Company>
+        <Product>Escorp.$(AssemblyName)</Product>
+        <RepositoryUrl>https://gitflic.ru/project/escorp-lab/atom</RepositoryUrl>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <PackageTags>
+            atom;framework;escorp;exomode;javascript;source-generation;roslyn;analyzer;aot;nativeaot</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Remove="$(CompilerGeneratedFilesOutputPath)/**" />
+    </ItemGroup>
+
+    <Target Name="_IncludeAnalyzerDependencies"
+        AfterTargets="GetTargetPathWithTargetPlatformMoniker"
+        Condition="'$(DisableAnalyzerDependencyInclusion)' != 'true'">
+        <ItemGroup>
+            <TargetPathWithTargetPlatformMoniker
+                Include="$(MSBuildProjectDirectory)/$(OutputPath)Escorp.Atom.dll">
+                <TargetFrameworkMoniker>$(TargetFrameworkMoniker)</TargetFrameworkMoniker>
+            </TargetPathWithTargetPlatformMoniker>
+            <TargetPathWithTargetPlatformMoniker
+                Include="$(MSBuildProjectDirectory)/$(OutputPath)Escorp.Atom.SourceGeneration.dll">
+                <TargetFrameworkMoniker>$(TargetFrameworkMoniker)</TargetFrameworkMoniker>
+            </TargetPathWithTargetPlatformMoniker>
+        </ItemGroup>
+    </Target>
+
+    <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+        <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    </PropertyGroup>
+
+    <ItemGroup
+        Condition="'$(Configuration)' == 'Debug' or '$(UseLocalJavaScriptSourceGenerationAnalyzerReference)' == 'true'">
+        <ProjectReference Include="../Atom/Atom.csproj" />
+        <ProjectReference Include="../Atom.SourceGeneration/Atom.SourceGeneration.csproj"
+            AdditionalProperties="DisableAnalyzerDependencyInclusion=$(DisableAnalyzerDependencyInclusion)" />
+    </ItemGroup>
+
+    <ItemGroup
+        Condition="'$(Configuration)' == 'Release' and '$(UseLocalJavaScriptSourceGenerationAnalyzerReference)' != 'true'">
+        <PackageReference Include="Escorp.Atom" Version="*" GeneratePathProperty="true" />
+        <PackageReference Include="Escorp.Atom.SourceGeneration" Version="*"
+            GeneratePathProperty="true" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="*" />
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Update="README.md" PackagePath="\" Pack="true" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true"
+            PackagePath="analyzers/dotnet/cs" Visible="false"
+            Condition="Exists('$(OutputPath)\$(AssemblyName).dll')" />
+        <None Include="$(OutputPath)\$(AssemblyName).pdb" Pack="true"
+            PackagePath="analyzers/dotnet/cs" Visible="false"
+            Condition="Exists('$(OutputPath)\$(AssemblyName).pdb')" />
+        <None Include="$(OutputPath)\$(AssemblyName).xml" Pack="true"
+            PackagePath="analyzers/dotnet/cs" Visible="false"
+            Condition="Exists('$(OutputPath)\$(AssemblyName).xml')" />
+        <None Include="$(OutputPath)\Escorp.Atom.dll" Pack="true"
+            PackagePath="analyzers/dotnet/cs" Visible="false"
+            Condition="Exists('$(OutputPath)\Escorp.Atom.dll')" />
+        <None Include="$(OutputPath)\Escorp.Atom.SourceGeneration.dll" Pack="true"
+            PackagePath="analyzers/dotnet/cs" Visible="false"
+            Condition="Exists('$(OutputPath)\Escorp.Atom.SourceGeneration.dll')" />
+    </ItemGroup>
+
+</Project>

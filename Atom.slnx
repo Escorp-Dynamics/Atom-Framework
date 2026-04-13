@@ -1,5 +1,8 @@
 <Solution>
   <Folder Name="/Framework/">
+    <Project Path="Framework/Atom.Compilers.JavaScript/Atom.Compilers.JavaScript.csproj" />
+    <Project
+      Path="Framework/Atom.Compilers.JavaScript.SourceGeneration/Atom.Compilers.JavaScript.SourceGeneration.csproj" />
     <Project Path="Framework/Atom.Debug/Atom.Debug.csproj" />
     <Project Path="Framework/Atom.IO.Compression/Atom.IO.Compression.csproj" />
     <Project Path="Framework/Atom.Media.Audio/Atom.Media.Audio.csproj" />
@@ -12,11 +15,13 @@
     <Project Path="Framework/Atom.Testing/Atom.Testing.csproj" />
     <Project Path="Framework/Atom.Web/Atom.Web.csproj" />
     <Project Path="Framework/Atom.Web.Services/Atom.Web.Services.csproj" />
+    <Project Path="Framework/Atom.Web.Services.Emails/Atom.Web.Services.Emails.csproj" />
     <Project Path="Framework/Atom.Web.Services.Proxies/Atom.Web.Services.Proxies.csproj" />
     <Project Path="Framework/Atom.Web.Services.Markets/Atom.Web.Services.Markets.csproj" />
     <Project Path="Framework/Atom/Atom.csproj" />
   </Folder>
   <Folder Name="/Tests/">
+    <Project Path="Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj" />
     <Project Path="Tests/Atom.Debug.Tests/Atom.Debug.Tests.csproj" />
     <Project Path="Tests/Atom.IO.Compression.Tests/Atom.IO.Compression.Tests.csproj" />
     <Project Path="Tests/Atom.Media.Audio.Tests/Atom.Media.Audio.Tests.csproj" />
@@ -24,11 +29,14 @@
     <Project Path="Tests/Atom.Media.Video.Tests/Atom.Media.Video.Tests.csproj" />
     <Project Path="Tests/Atom.Net.Browsing.Tests/Atom.Net.Browsing.Tests.csproj" />
     <Project Path="Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj" />
+    <Project
+      Path="Tests/Atom.Compilers.JavaScript.SourceGeneration.Tests/Atom.Compilers.JavaScript.SourceGeneration.Tests.csproj" />
     <Project Path="Tests/Atom.Net.Tests/Atom.Net.Tests.csproj" />
     <Project Path="Tests/Atom.SourceGeneration.Tests/Atom.SourceGeneration.Tests.csproj" />
     <Project Path="Tests/Atom.Tests/Atom.Tests.csproj" />
     <Project Path="Tests/Atom.Web.Tests/Atom.Web.Tests.csproj" />
     <Project Path="Tests/Atom.Web.Services.Tests/Atom.Web.Services.Tests.csproj" />
+    <Project Path="Tests/Atom.Web.Services.Emails.Tests/Atom.Web.Services.Emails.Tests.csproj" />
     <Project Path="Tests/Atom.Web.Services.Proxies.Tests/Atom.Web.Services.Proxies.Tests.csproj" />
     <Project Path="Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj" />
   </Folder>

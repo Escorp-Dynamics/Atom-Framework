@@ -57,6 +57,150 @@
 			"problemMatcher": "$msCompile"
 		},
 		{
+			"label": "publish package Escorp.Atom",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom/Atom.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.SourceGeneration",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.SourceGeneration/Atom.SourceGeneration.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Compilers.JavaScript.SourceGeneration",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Compilers.JavaScript.SourceGeneration/Atom.Compilers.JavaScript.SourceGeneration.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Compilers.JavaScript",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Compilers.JavaScript/Atom.Compilers.JavaScript.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Debug",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Debug/Atom.Debug.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.IO.Compression",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.IO.Compression/Atom.IO.Compression.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Media",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Media/Atom.Media.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Media.Audio",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Media.Audio/Atom.Media.Audio.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Media.Video",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Media.Video/Atom.Media.Video.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Net",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Net/Atom.Net.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Net.Browsing",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Net.Browsing/Atom.Net.Browsing.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Web",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Web/Atom.Web.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Web.Services",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Web.Services/Atom.Web.Services.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Web.Services.Emails",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Web.Services.Emails/Atom.Web.Services.Emails.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Web.Services.Markets",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Web.Services.Markets/Atom.Web.Services.Markets.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Web.Services.Proxies",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Web.Services.Proxies/Atom.Web.Services.Proxies.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Testing",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Testing/Atom.Testing.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "publish package Escorp.Atom.Net.Browsing.WebDriver",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
 			"label": "watch",
 			"command": "dotnet",
 			"type": "process",
@@ -67,6 +211,113 @@
 				"${workspaceFolder}/Atom.slnx"
 			],
 			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "typecheck extension runtime",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"--prefix",
+				"Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime",
+				"run",
+				"typecheck"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "test"
+		},
+		{
+			"label": "test extension runtime",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"--prefix",
+				"Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime",
+				"test"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "package webdriver firefox xpi",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj",
+				"-c",
+				"Debug",
+				"-p:CreateFirefoxExtensionPackageOnBuild=true"
+			],
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
+			"label": "sign webdriver firefox xpi local",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"--prefix",
+				"Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime",
+				"run",
+				"sign:firefox",
+				"--",
+				"--configuration",
+				"Debug",
+				"--target-framework",
+				"net10.0"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "smoke webdriver real browser runtime",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~RealBrowserLaunchKeepsWindowAndPageSurfaceOperational",
+				"--ignore-exit-code",
+				"8",
+				"--output",
+				"Normal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "smoke webdriver real browser window surface",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~RealBrowserWindowActivateAndCloseSurfaceStaysOperational",
+				"--ignore-exit-code",
+				"8",
+				"--output",
+				"Normal"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "smoke webdriver firefox dev bootstrap",
+			"type": "shell",
+			"command": "browser=\"${ATOM_TEST_WEBDRIVER_BROWSER_PATH:-${ATOM_TEST_WEBDRIVER_FIREFOX_DEV_BINARY:-}}\"; if [ -z \"$browser\" ]; then for candidate in /usr/bin/firefox-developer-edition /usr/bin/firefox-nightly; do if [ -x \"$candidate\" ]; then browser=\"$candidate\"; break; fi; done; fi; if [ -z \"$browser\" ] || [ ! -x \"$browser\" ]; then echo \"Firefox Developer Edition or Nightly not found. Set ATOM_TEST_WEBDRIVER_BROWSER_PATH to a dev-capable binary.\"; exit 1; fi; case \"$browser\" in *nightly*|*Nightly*) browser_name=firefox-nightly ;; *) browser_name=firefox-developer-edition ;; esac; ATOM_TEST_WEBDRIVER_BROWSER=\"$browser_name\" ATOM_TEST_WEBDRIVER_BROWSER_PATH=\"$browser\" ATOM_TEST_WEBDRIVER_HEADLESS=\"${ATOM_TEST_WEBDRIVER_HEADLESS:-true}\" dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter \"FullyQualifiedName~RealBrowserLaunchBootstrapsExtensionBackedDiscoverySurface\" -p:RunAnalyzers=false -p:EnableNETAnalyzers=false -p:AnalysisMode=None -p:EnforceCodeStyleInBuild=false -p:TreatWarningsAsErrors=false -p:CodeAnalysisTreatWarningsAsErrors=false --output Normal",
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
 		},
 		{
 			"label": "test webdriver fingerprint parity",
@@ -2210,6 +2461,1220 @@
 			"type": "shell",
 			"command": "dotnet test --project Tests/Atom.Net.Tests/Atom.Net.Tests.csproj --filter 'SendAsyncCanUseCustomTls12Transport|HttpClientWithHttpsClientHandlerCanSendHttps11RequestOverCustomTls'",
 			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "vp8 real diagnostic single",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"DumpProblemMacroblockDiagnosticsForRealWebp",
+				"--verbosity",
+				"minimal",
+				"--output",
+				"Detailed"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "vp8 real diagnostic filtered",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"dotnet test --project Tests/Atom.Media.Tests/Atom.Media.Tests.csproj --filter \"DumpProblemMacroblockDiagnosticsForRealWebp\" --verbosity minimal --output Detailed | rg \"diagnostic target macroblock|diagnostic public sample|diagnostic internal sample|diagnostic target y-subblock|diagnostic previous y-subblock|diagnostic earlier y-subblock|diagnostic left-boundary|diagnostic previous-macroblock top-right|diagnostic top-row block0|diagnostic top-row block1|diagnostic pre-suspicious top-row|diagnostic suspicious top-row|diagnostic target final Y 4x4|diagnostic target final U 2x2|diagnostic target final V 2x2|diagnostic target public final 4x4|diagnostic target internal final 4x4|diagnostic target public final rgba 4x4|diagnostic target internal final rgba 4x4|diagnostic top-row subblock \\(\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "vp8 real diagnostic concise",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"DumpProblemMacroblockDiagnosticsForRealWebp",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "vp8 real diagnostic concise detailed",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"DumpProblemMacroblockDiagnosticsForRealWebp",
+				"--verbosity",
+				"minimal",
+				"--output",
+				"Detailed"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "vp8 real reference pixels",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"DecodeRealLossyWebpMatchesReferencePixels|DecodeRealLossyWebpSuccess|CompareRealWebpPublicAndInternalSamples",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "vp8 real reference pixels single",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"DecodeRealLossyWebpMatchesReferencePixels",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "vp8 real reference pixels restore check",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"DecodeRealLossyWebpMatchesReferencePixels",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "vp8 concise failing diagnostic explicit",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"DumpProblemMacroblockConciseFailureForRealWebp",
+				"--verbosity",
+				"minimal",
+				"--",
+				"NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "vp8 concise failing diagnostic normal",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"DumpProblemMacroblockConciseFailureForRealWebp",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "vp8 dct reference and real pixels",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"dotnet test --project Tests/Atom.Media.Tests/Atom.Media.Tests.csproj --filter \"InverseDct4x4CapturedBlockMatchesReferenceImplementation|DecodeRealLossyWebpMatchesReferencePixels\" --verbosity minimal -- NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "vp8 real reference after idct fix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"DecodeRealLossyWebpMatchesReferencePixels",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "vp8 concise predictor inputs",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Tests/Atom.Media.Tests.csproj",
+				"--filter",
+				"DumpProblemMacroblockConciseFailureForRealWebp",
+				"--verbosity",
+				"minimal"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify microphone shutdown stress",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Audio.Tests/Atom.Media.Audio.Tests.csproj",
+				"--filter",
+				"Name~Dispose|Name~Capture",
+				"--no-restore"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify camera shutdown stress",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Media.Video.Tests/Atom.Media.Video.Tests.csproj",
+				"--filter",
+				"Name~Dispose|Name~Capture",
+				"--no-restore"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify virtual display stress",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Tests/Atom.Tests.csproj",
+				"--filter",
+				"Name~Display|Name~TabContext",
+				"--no-restore"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify webdriver tabcontext crash cleanup",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"Name~TabContext|Name~BridgeServer",
+				"--no-restore"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run microphone targeted tests quoted",
+			"type": "shell",
+			"command": "dotnet test --project Tests/Atom.Media.Audio.Tests/Atom.Media.Audio.Tests.csproj --filter 'Name~InitializeDisposeCyclesAreSafe|Name~StartStopDisposeCyclesAreSafe|Name~DoubleDisposeIsSafe' --no-restore",
+			"isBackground": false
+		},
+		{
+			"label": "run camera targeted tests quoted",
+			"type": "shell",
+			"command": "dotnet test --project Tests/Atom.Media.Video.Tests/Atom.Media.Video.Tests.csproj --filter 'Name~InitializeDisposeCyclesAreSafe|Name~StartStopDisposeCyclesAreSafe|Name~DoubleDisposeIsSafe' --no-restore",
+			"isBackground": false
+		},
+		{
+			"label": "run display tabcontext targeted tests quoted",
+			"type": "shell",
+			"command": "dotnet test --project Tests/Atom.Tests/Atom.Tests.csproj --filter 'Name~RepeatedCreateDisposeShouldNotLeaveArtifacts|Name~DisposeAfterProcessCrashShouldCleanupInputResources|Name~DoubleDisposeShouldBeSafe' --no-restore",
+			"isBackground": false
+		},
+		{
+			"label": "run webdriver tabcontext crash cleanup quoted",
+			"type": "shell",
+			"command": "dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter 'Name~DisposeAfterProcessCrashShouldCleanupInputResources|Name~DoubleDisposeShouldBeSafe|Name~BridgeServer' --no-restore",
+			"isBackground": false
+		},
+		{
+			"label": "run real sitekey test focused",
+			"type": "shell",
+			"command": "dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter 'Name~TurnstileRealSitekeyTest' --no-restore",
+			"isBackground": false
+		},
+		{
+			"label": "rerun real sitekey test focused",
+			"type": "shell",
+			"command": "dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter 'Name~TurnstileRealSitekeyTest' --no-restore",
+			"isBackground": false
+		},
+		{
+			"label": "rerun strict real sitekey test focused",
+			"type": "shell",
+			"command": "dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter 'Name~TurnstileRealSitekeyTest' --no-restore",
+			"isBackground": false
+		},
+		{
+			"label": "rerun multi-attempt real sitekey test focused",
+			"type": "shell",
+			"command": "dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter 'Name~TurnstileRealSitekeyTest' --no-restore",
+			"isBackground": false
+		},
+		{
+			"label": "turnstile targeted compare",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--no-restore",
+				"--filter",
+				"Name~TurnstileCheckboxClickInFrameTest|Name~TurnstileTestSitekeyOnExternalHttpsTest"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "parallel turnstile explicit check",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~TurnstileTestSitekeyOnExternalHttpsFiveParallelIsolatedTabsTest",
+				"-p:RunAnalyzers=false",
+				"--",
+				"NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "parallel turnstile explicit check project",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~TurnstileTestSitekeyOnExternalHttpsFiveParallelIsolatedTabsTest",
+				"-p:RunAnalyzers=false",
+				"--",
+				"NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "proxy live webdriver smoke",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"--",
+				"--filter",
+				"Name~WebDriverProxyLevelsUseSelectedProxyFromFactoryTest",
+				"NUnit.ExplicitMode=Relaxed"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify webdriver proxied cookie isolation after sync ack",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"--filter",
+				"Name=Изолированные вкладки держат свой proxy и свой cookie container",
+				"--",
+				"NUnit.ExplicitMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify webdriver proxied cookie isolation after sync ack corrected",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"--filter",
+				"Name=Изолированные вкладки держат свой proxy и свой cookie container",
+				"--",
+				"NUnit.ExplicitMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "verify webdriver proxied cookie isolation after sync ack filtered",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"--filter=Name=Изолированные вкладки держат свой proxy и свой cookie container",
+				"--",
+				"NUnit.ExplicitMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "build webdriver tests after cookie sync ack",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "run webdriver isolation test by method name",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"--filter",
+				"FullyQualifiedName~IsolatedTabsKeepProxyAndCookieContainerPerTabTest",
+				"--",
+				"NUnit.ExplicitMode=None"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "build webdriver tests after diagnostics instrumentation",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "test atom compilers javascript runtime",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript runtime project",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript runtime project final",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript runtime project rerun",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript runtime project conditional",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript runtime project destructuring",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript collision audit",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript block object audit",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript object contexts",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript string comment isolation",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript string comment isolation final",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript template isolation",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript template expressions",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript shorthand object gap",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript regex division",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "test atom compilers javascript regex division final",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj",
+				"--no-restore"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "parser benchmark release",
+			"type": "shell",
+			"command": "ATOM_RUN_BENCHMARKS=1 dotnet test --configuration Release --project Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj /p:UseLocalJavaScriptSourceGenerationAnalyzerReference=true /p:GeneratePackageOnBuild=false -p:RunAnalyzers=false -p:EnforceCodeStyleInBuild=false -p:EnableNETAnalyzers=false -p:AnalysisMode=None --filter \"FullyQualifiedName=Atom.Compilers.JavaScript.Tests.JavaScriptRuntimeParserBenchmarks.RunBenchmarks\"",
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "parser benchmark artifacts clean",
+			"type": "shell",
+			"command": "find Tests/Atom.Compilers.JavaScript.Tests/bin -path '*BenchmarkDotNet.Artifacts*' -type f \\( -name 'Atom.Compilers.JavaScript.Tests.JavaScriptRuntimeParserBenchmarkSuite-*' -o -name 'Atom.Compilers.JavaScript.Tests.JavaScriptRuntimeParserBenchmarks-*' -o -name 'Atom.Compilers.JavaScript.Tests.JavaScriptRuntimeParserBenchmarkSuite-report.*' -o -name 'Atom.Compilers.JavaScript.Tests.JavaScriptRuntimeParserBenchmarks-report.*' \\) -delete",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "parser benchmark compare",
+			"type": "shell",
+			"command": "find Tests/Atom.Compilers.JavaScript.Tests/bin -path '*BenchmarkDotNet.Artifacts*' -type f \\( -name 'Atom.Compilers.JavaScript.Tests.JavaScriptRuntimeParserBenchmarkSuite-*' -o -name 'Atom.Compilers.JavaScript.Tests.JavaScriptRuntimeParserBenchmarks-*' -o -name 'Atom.Compilers.JavaScript.Tests.JavaScriptRuntimeParserBenchmarkSuite-report.*' -o -name 'Atom.Compilers.JavaScript.Tests.JavaScriptRuntimeParserBenchmarks-report.*' \\) -delete && ATOM_RUN_BENCHMARKS=1 dotnet test --configuration Release --project Tests/Atom.Compilers.JavaScript.Tests/Atom.Compilers.JavaScript.Tests.csproj /p:UseLocalJavaScriptSourceGenerationAnalyzerReference=true /p:GeneratePackageOnBuild=false -p:RunAnalyzers=false -p:EnforceCodeStyleInBuild=false -p:EnableNETAnalyzers=false -p:AnalysisMode=None --filter \"FullyQualifiedName=Atom.Compilers.JavaScript.Tests.JavaScriptRuntimeParserBenchmarks.RunBenchmarks\" && printf '\nStable parser benchmark summary:\n' && cat Tests/Atom.Compilers.JavaScript.Tests/bin/Release/net10.0/parser-benchmark-summary.txt",
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "webdriver real browser matrix smoke",
+			"type": "shell",
+			"command": "browsers=\"${ATOM_TEST_WEBDRIVER_MATRIX_BROWSERS:-chrome edge brave opera vivaldi yandex firefox}\"; headless=\"${ATOM_TEST_WEBDRIVER_HEADLESS:-1}\"; for browser in $browsers; do printf '[%s]\\n' \"$browser\"; ATOM_TEST_WEBDRIVER_BROWSER=\"$browser\" ATOM_TEST_WEBDRIVER_HEADLESS=\"$headless\" dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --no-restore --filter \"LaunchAsyncStartsConfiguredRealBrowserProcessAndStopsItOnDispose\" --output Normal --no-progress || exit $?; printf '\\n'; done",
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify full webdriver tests mtp reproducible",
+			"type": "shell",
+			"command": "bash .vscode/scripts/run-webdriver-mtp-repro.sh",
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "inspect managed display leaks",
+			"type": "shell",
+			"command": "bash .vscode/scripts/inspect-managed-displays.sh",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "clean managed display leaks all",
+			"type": "shell",
+			"command": "bash .vscode/scripts/inspect-managed-displays.sh --clean --all",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "verify full webdriver tests mtp reproducible clean host",
+			"type": "shell",
+			"command": "bash -lc 'bash .vscode/scripts/inspect-managed-displays.sh --clean --all && bash .vscode/scripts/run-webdriver-mtp-repro.sh'",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "webdriver real browser matrix full",
+			"type": "shell",
+			"command": "browsers=\"${ATOM_TEST_WEBDRIVER_MATRIX_BROWSERS:-chrome edge brave opera vivaldi yandex firefox}\"; headless=\"${ATOM_TEST_WEBDRIVER_HEADLESS:-1}\"; for browser in $browsers; do printf '[%s]\\n' \"$browser\"; ATOM_TEST_WEBDRIVER_BROWSER=\"$browser\" ATOM_TEST_WEBDRIVER_HEADLESS=\"$headless\" dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --no-restore --filter \"FullyQualifiedName~WebDriverRealBrowserIntegrationTests\" --output Normal --no-progress || exit $?; printf '\\n'; done",
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify webdriver browser profile tests after stable chrome arg sync",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~WebDriverBrowserProfileTests"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify full webdriver tests clean env after stable chrome arg sync",
+			"type": "shell",
+			"command": "env",
+			"args": [
+				"-u",
+				"ATOM_TEST_WEBDRIVER_BROWSER",
+				"-u",
+				"ATOM_TEST_WEBDRIVER_BROWSER_PATH",
+				"-u",
+				"ATOM_TEST_WEBDRIVER_HEADLESS",
+				"dotnet",
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify canceled pending response close handshake",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~BridgeServerPostHandshakeRequestRoutingCancellationFailsPendingResponse"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify full webdriver tests clean env after close handshake fix",
+			"type": "shell",
+			"command": "env",
+			"args": [
+				"-u",
+				"ATOM_TEST_WEBDRIVER_BROWSER",
+				"-u",
+				"ATOM_TEST_WEBDRIVER_BROWSER_PATH",
+				"-u",
+				"ATOM_TEST_WEBDRIVER_HEADLESS",
+				"dotnet",
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify webdriver profile tests after linux policy path",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName~WebDriverBrowserProfileTests"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify request fulfill page firefox dev",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"browser=\"${ATOM_TEST_WEBDRIVER_BROWSER_PATH:-${ATOM_TEST_WEBDRIVER_FIREFOX_DEV_BINARY:-}}\"; if [ -z \"$browser\" ]; then for candidate in /usr/bin/firefox-developer-edition /usr/bin/firefox-nightly; do if [ -x \"$candidate\" ]; then browser=\"$candidate\"; break; fi; done; fi; if [ -z \"$browser\" ] || [ ! -x \"$browser\" ]; then echo \"Firefox Developer Edition or Nightly not found. Set ATOM_TEST_WEBDRIVER_BROWSER_PATH to a dev-capable binary.\"; exit 1; fi; case \"$browser\" in *nightly*|*Nightly*) browser_name=firefox-nightly ;; *) browser_name=firefox-developer-edition ;; esac; ATOM_TEST_WEBDRIVER_BROWSER=\"$browser_name\" ATOM_TEST_WEBDRIVER_BROWSER_PATH=\"$browser\" ATOM_TEST_WEBDRIVER_HEADLESS=\"${ATOM_TEST_WEBDRIVER_HEADLESS:-true}\" dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter \"FullyQualifiedName~RealBrowserPageRequestInterceptionFulfillReplacesFetchResponseWithoutLoopbackDelivery|FullyQualifiedName~RealBrowserOuterScopeRequestInterceptionFulfillReplacesFetchResponseWithoutLoopbackDelivery\" -p:RunAnalyzers=false -p:EnableNETAnalyzers=false -p:AnalysisMode=None -p:EnforceCodeStyleInBuild=false -p:TreatWarningsAsErrors=false -p:CodeAnalysisTreatWarningsAsErrors=false --output Normal"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify request fulfill page firefox dev",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"browser=\"${ATOM_TEST_WEBDRIVER_BROWSER_PATH:-${ATOM_TEST_WEBDRIVER_FIREFOX_DEV_BINARY:-}}\"; if [ -z \"$browser\" ]; then for candidate in /usr/bin/firefox-developer-edition /usr/bin/firefox-nightly; do if [ -x \"$candidate\" ]; then browser=\"$candidate\"; break; fi; done; fi; if [ -z \"$browser\" ] || [ ! -x \"$browser\" ]; then echo \"Firefox Developer Edition or Nightly not found. Set ATOM_TEST_WEBDRIVER_BROWSER_PATH to a dev-capable binary.\"; exit 1; fi; case \"$browser\" in *nightly*|*Nightly*) browser_name=firefox-nightly ;; *) browser_name=firefox-developer-edition ;; esac; ATOM_TEST_WEBDRIVER_BROWSER=\"$browser_name\" ATOM_TEST_WEBDRIVER_BROWSER_PATH=\"$browser\" ATOM_TEST_WEBDRIVER_HEADLESS=\"${ATOM_TEST_WEBDRIVER_HEADLESS:-true}\" dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter \"FullyQualifiedName~RealBrowserPageRequestInterceptionFulfillReplacesFetchResponseWithoutLoopbackDelivery|FullyQualifiedName~RealBrowserOuterScopeRequestInterceptionFulfillReplacesFetchResponseWithoutLoopbackDelivery\" -p:RunAnalyzers=false -p:EnableNETAnalyzers=false -p:AnalysisMode=None -p:EnforceCodeStyleInBuild=false -p:TreatWarningsAsErrors=false -p:CodeAnalysisTreatWarningsAsErrors=false --output Normal"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "build webdriver tests request fulfill fix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:TreatWarningsAsErrors=false",
+				"-p:CodeAnalysisTreatWarningsAsErrors=false"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "build webdriver tests request fulfill fix",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:TreatWarningsAsErrors=false",
+				"-p:CodeAnalysisTreatWarningsAsErrors=false"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "verify request fulfill page firefox dev",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"browser=\"${ATOM_TEST_WEBDRIVER_BROWSER_PATH:-${ATOM_TEST_WEBDRIVER_FIREFOX_DEV_BINARY:-}}\"; if [ -z \"$browser\" ]; then for candidate in /usr/bin/firefox-developer-edition /usr/bin/firefox-nightly; do if [ -x \"$candidate\" ]; then browser=\"$candidate\"; break; fi; done; fi; if [ -z \"$browser\" ] || [ ! -x \"$browser\" ]; then echo \"Firefox Developer Edition or Nightly not found. Set ATOM_TEST_WEBDRIVER_BROWSER_PATH to a dev-capable binary.\"; exit 1; fi; case \"$browser\" in *nightly*|*Nightly*) browser_name=firefox-nightly ;; *) browser_name=firefox-developer-edition ;; esac; ATOM_TEST_WEBDRIVER_BROWSER=\"$browser_name\" ATOM_TEST_WEBDRIVER_BROWSER_PATH=\"$browser\" ATOM_TEST_WEBDRIVER_HEADLESS=\"${ATOM_TEST_WEBDRIVER_HEADLESS:-true}\" dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter \"FullyQualifiedName~RealBrowserPageRequestInterceptionFulfillReplacesFetchResponseWithoutLoopbackDelivery|FullyQualifiedName~RealBrowserOuterScopeRequestInterceptionFulfillReplacesFetchResponseWithoutLoopbackDelivery\" -p:RunAnalyzers=false -p:EnableNETAnalyzers=false -p:AnalysisMode=None -p:EnforceCodeStyleInBuild=false -p:TreatWarningsAsErrors=false -p:CodeAnalysisTreatWarningsAsErrors=false --output Normal"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify outer request scopes firefox dev",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"browser=\"${ATOM_TEST_WEBDRIVER_BROWSER_PATH:-${ATOM_TEST_WEBDRIVER_FIREFOX_DEV_BINARY:-}}\"; if [ -z \"$browser\" ]; then for candidate in /usr/bin/firefox-developer-edition /usr/bin/firefox-nightly; do if [ -x \"$candidate\" ]; then browser=\"$candidate\"; break; fi; done; fi; if [ -z \"$browser\" ] || [ ! -x \"$browser\" ]; then echo \"Firefox Developer Edition or Nightly not found. Set ATOM_TEST_WEBDRIVER_BROWSER_PATH to a dev-capable binary.\"; exit 1; fi; case \"$browser\" in *nightly*|*Nightly*) browser_name=firefox-nightly ;; *) browser_name=firefox-developer-edition ;; esac; ATOM_TEST_WEBDRIVER_BROWSER=\"$browser_name\" ATOM_TEST_WEBDRIVER_BROWSER_PATH=\"$browser\" ATOM_TEST_WEBDRIVER_HEADLESS=\"${ATOM_TEST_WEBDRIVER_HEADLESS:-true}\" dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter \"FullyQualifiedName~RealBrowserOuterScopeRequestInterception\" -p:RunAnalyzers=false -p:EnableNETAnalyzers=false -p:AnalysisMode=None -p:EnforceCodeStyleInBuild=false -p:TreatWarningsAsErrors=false -p:CodeAnalysisTreatWarningsAsErrors=false --output Normal"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "shadow frame discovery unit test",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FrameChildDiscoveryRequestsShadowRootTraversalOnBridgeLookup"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "shadow frame discovery unit test fixed",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FrameChildDiscoveryRequestsShadowRootTraversalOnBridgeLookup"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "shadow frame discovery unit test analyzers off",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"--filter",
+				"FrameChildDiscoveryRequestsShadowRootTraversalOnBridgeLookup"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "existing shadow bridge test analyzers off",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"--filter",
+				"ShadowRootScopedCollectionAndWaitQueriesReuseResolvedHostContext"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "shadow hosted child frame live test",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"set -e\ncd /run/media/EXOMODE/STUDIO/Works/EscorpDynamics/Labs/Atom\nFIREFOX_BIN=\"\"\nfor candidate in firefox-developer-edition firefox-nightly firefox; do\n  if command -v \"$candidate\" >/dev/null 2>&1; then\n    FIREFOX_BIN=\"$(command -v \"$candidate\")\"\n    break\n  fi\ndone\ntest -n \"$FIREFOX_BIN\"\nATOM_TEST_WEBDRIVER_BROWSER=firefox ATOM_TEST_WEBDRIVER_BROWSER_PATH=\"$FIREFOX_BIN\" ATOM_TEST_WEBDRIVER_HEADLESS=true dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj -p:RunAnalyzers=false --filter RealBrowserCurrentPageChildIframeObjectModelMaterializesShadowHostedLiveFrameContext"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "shadow hosted child frame live test rerun",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"set -e\ncd /run/media/EXOMODE/STUDIO/Works/EscorpDynamics/Labs/Atom\nFIREFOX_BIN=\"\"\nfor candidate in firefox-developer-edition firefox-nightly firefox; do\n  if command -v \"$candidate\" >/dev/null 2>&1; then\n    FIREFOX_BIN=\"$(command -v \"$candidate\")\"\n    break\n  fi\ndone\ntest -n \"$FIREFOX_BIN\"\nATOM_TEST_WEBDRIVER_BROWSER=firefox ATOM_TEST_WEBDRIVER_BROWSER_PATH=\"$FIREFOX_BIN\" ATOM_TEST_WEBDRIVER_HEADLESS=true dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj -p:RunAnalyzers=false --filter RealBrowserCurrentPageChildIframeObjectModelMaterializesShadowHostedLiveFrameContext"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "shadow frame discovery live regression cluster",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"set -e\ncd /run/media/EXOMODE/STUDIO/Works/EscorpDynamics/Labs/Atom\nFIREFOX_BIN=\"\"\nfor candidate in firefox-developer-edition firefox-nightly firefox; do\n  if command -v \"$candidate\" >/dev/null 2>&1; then\n    FIREFOX_BIN=\"$(command -v \"$candidate\")\"\n    break\n  fi\ndone\ntest -n \"$FIREFOX_BIN\"\nFILTER='FullyQualifiedName~RealBrowserCurrentPageFrameExecutionSurfaceObservesChildIframe|FullyQualifiedName~RealBrowserCurrentPageFrameExecutionSurfaceObservesAboutBlankChildIframe|FullyQualifiedName~RealBrowserCurrentPageFrameExecutionSurfaceObservesIframeHostedInsideShadowRoot|FullyQualifiedName~RealBrowserCurrentPageClosedShadowRootRemainsOpaqueToShadowLookup|FullyQualifiedName~RealBrowserCurrentPageChildIframeObjectModelMaterializesLiveFrameContext|FullyQualifiedName~RealBrowserCurrentPageChildIframeObjectModelMaterializesShadowHostedLiveFrameContext|FullyQualifiedName~RealBrowserCurrentPageChildIframeObjectModelTreatsCrossOriginFrameAsOpaqueContext'\nATOM_TEST_WEBDRIVER_BROWSER=firefox ATOM_TEST_WEBDRIVER_BROWSER_PATH=\"$FIREFOX_BIN\" ATOM_TEST_WEBDRIVER_HEADLESS=true dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj -p:RunAnalyzers=false --filter \"$FILTER\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "shadow frame discovery live regression cluster fixed",
+			"type": "shell",
+			"command": "env",
+			"args": [
+				"ATOM_TEST_WEBDRIVER_BROWSER=firefox",
+				"ATOM_TEST_WEBDRIVER_BROWSER_PATH=/usr/bin/firefox-developer-edition",
+				"ATOM_TEST_WEBDRIVER_HEADLESS=true",
+				"dotnet",
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"--filter",
+				"FullyQualifiedName~RealBrowserCurrentPageFrameExecutionSurfaceObservesChildIframe|FullyQualifiedName~RealBrowserCurrentPageFrameExecutionSurfaceObservesAboutBlankChildIframe|FullyQualifiedName~RealBrowserCurrentPageFrameExecutionSurfaceObservesIframeHostedInsideShadowRoot|FullyQualifiedName~RealBrowserCurrentPageClosedShadowRootRemainsOpaqueToShadowLookup|FullyQualifiedName~RealBrowserCurrentPageChildIframeObjectModelMaterializesLiveFrameContext|FullyQualifiedName~RealBrowserCurrentPageChildIframeObjectModelMaterializesShadowHostedLiveFrameContext|FullyQualifiedName~RealBrowserCurrentPageChildIframeObjectModelTreatsCrossOriginFrameAsOpaqueContext"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "shadow frame discovery live regression cluster escaped",
+			"type": "shell",
+			"command": "env",
+			"args": [
+				"ATOM_TEST_WEBDRIVER_BROWSER=firefox",
+				"ATOM_TEST_WEBDRIVER_BROWSER_PATH=/usr/bin/firefox-developer-edition",
+				"ATOM_TEST_WEBDRIVER_HEADLESS=true",
+				"dotnet",
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"--filter",
+				"FullyQualifiedName~RealBrowserCurrentPageFrameExecutionSurfaceObservesChildIframe\\|FullyQualifiedName~RealBrowserCurrentPageFrameExecutionSurfaceObservesAboutBlankChildIframe\\|FullyQualifiedName~RealBrowserCurrentPageFrameExecutionSurfaceObservesIframeHostedInsideShadowRoot\\|FullyQualifiedName~RealBrowserCurrentPageClosedShadowRootRemainsOpaqueToShadowLookup\\|FullyQualifiedName~RealBrowserCurrentPageChildIframeObjectModelMaterializesLiveFrameContext\\|FullyQualifiedName~RealBrowserCurrentPageChildIframeObjectModelMaterializesShadowHostedLiveFrameContext\\|FullyQualifiedName~RealBrowserCurrentPageChildIframeObjectModelTreatsCrossOriginFrameAsOpaqueContext"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "typecheck extension runtime focused",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"--prefix",
+				"Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime",
+				"run",
+				"typecheck"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify main-frame fulfill firefox dev hidden xvfb",
+			"type": "shell",
+			"command": "browser=\"${ATOM_TEST_WEBDRIVER_BROWSER_PATH:-${ATOM_TEST_WEBDRIVER_FIREFOX_DEV_BINARY:-}}\"; if [ -z \"$browser\" ]; then for candidate in /usr/bin/firefox-developer-edition /usr/bin/firefox-nightly; do if [ -x \"$candidate\" ]; then browser=\"$candidate\"; break; fi; done; fi; if [ -z \"$browser\" ] || [ ! -x \"$browser\" ]; then echo \"Firefox Developer Edition or Nightly not found\"; exit 1; fi; case \"$browser\" in *nightly*|*Nightly*) browser_name=firefox-nightly ;; *) browser_name=firefox-developer-edition ;; esac; xvfb-run -a env ATOM_TEST_WEBDRIVER_BROWSER=\"$browser_name\" ATOM_TEST_WEBDRIVER_BROWSER_PATH=\"$browser\" ATOM_TEST_WEBDRIVER_HEADLESS=true dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter \"FullyQualifiedName~RealBrowserPageRequestInterceptionFulfillOverridesMainFrameWithoutChangingUrl\" -p:RunAnalyzers=false -p:EnableNETAnalyzers=false -p:AnalysisMode=None -p:EnforceCodeStyleInBuild=false -p:TreatWarningsAsErrors=false -p:CodeAnalysisTreatWarningsAsErrors=false --output Normal",
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "build webdriver tests targeted",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"-p:RunAnalyzers=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None",
+				"-p:EnforceCodeStyleInBuild=false"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "verify fetch fulfill firefox dev hidden xvfb",
+			"type": "shell",
+			"command": "browser=\"${ATOM_TEST_WEBDRIVER_BROWSER_PATH:-${ATOM_TEST_WEBDRIVER_FIREFOX_DEV_BINARY:-}}\"; if [ -z \"$browser\" ]; then for candidate in /usr/bin/firefox-developer-edition /usr/bin/firefox-nightly; do if [ -x \"$candidate\" ]; then browser=\"$candidate\"; break; fi; done; fi; if [ -z \"$browser\" ] || [ ! -x \"$browser\" ]; then echo \"Firefox Developer Edition or Nightly not found\"; exit 1; fi; case \"$browser\" in *nightly*|*Nightly*) browser_name=firefox-nightly ;; *) browser_name=firefox-developer-edition ;; esac; xvfb-run -a env ATOM_TEST_WEBDRIVER_BROWSER=\"$browser_name\" ATOM_TEST_WEBDRIVER_BROWSER_PATH=\"$browser\" ATOM_TEST_WEBDRIVER_HEADLESS=true dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter \"FullyQualifiedName~RealBrowserPageRequestInterceptionFulfillReplacesFetchResponseWithoutLoopbackDelivery\" -p:RunAnalyzers=false -p:EnableNETAnalyzers=false -p:AnalysisMode=None -p:EnforceCodeStyleInBuild=false -p:TreatWarningsAsErrors=false -p:CodeAnalysisTreatWarningsAsErrors=false --output Normal",
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "typecheck extension runtime proxyPort verify",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"--prefix",
+				"Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime",
+				"run",
+				"typecheck"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify extension runtime storage tests",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime/Tests/content-runtime-storage.test.mjs"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify bridge skeleton targeted tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"Name=BridgeServerStartAsyncAllocatesLoopbackPortAndServesDiscoveryEndpoint|Name=BridgeServerNavigationProxyAcceptsDirectUtilityCallbackPost"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify extension runtime storage tests fixed",
+			"type": "shell",
+			"command": "node --import tsx --test Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime/Tests/content-runtime-storage.test.mjs",
+			"isBackground": false
+		},
+		{
+			"label": "verify bridge skeleton targeted tests fixed",
+			"type": "shell",
+			"command": "dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter 'Name~BridgeServerStartAsyncAllocatesLoopbackPortAndServesDiscoveryEndpoint|Name~BridgeServerNavigationProxyAcceptsDirectUtilityCallbackPost' --no-restore",
+			"isBackground": false
+		},
+		{
+			"label": "verify extension runtime npm tests",
+			"type": "shell",
+			"command": "npm --prefix Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime test",
+			"isBackground": false
+		},
+		{
+			"label": "verify bridge skeleton targeted tests rerun",
+			"type": "shell",
+			"command": "dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter 'Name~BridgeServerStartAsyncAllocatesLoopbackPortAndServesDiscoveryEndpoint|Name~BridgeServerNavigationProxyAcceptsDirectUtilityCallbackPost' --no-restore",
+			"isBackground": false
+		},
+		{
+			"label": "verify bridge skeleton targeted tests final",
+			"type": "shell",
+			"command": "dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj --filter 'Name~BridgeServerStartAsyncAllocatesLoopbackPortAndServesDiscoveryEndpoint|Name~BridgeServerNavigationProxyAcceptsDirectUtilityCallbackPost' --no-restore",
+			"isBackground": false
+		},
+		{
+			"label": "verify bridge window bounds baseline test",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"PageBoundBridgeCommandsExposeRichDescribeElementAndWindowBounds"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify bridge window bounds baseline test analyzers off",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"PageBoundBridgeCommandsExposeRichDescribeElementAndWindowBounds",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "verify webdriver baseline without real browser",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--project",
+				"Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj",
+				"--filter",
+				"FullyQualifiedName!~WebDriverRealBrowserIntegrationTests",
+				"-p:RunAnalyzers=false",
+				"-p:EnforceCodeStyleInBuild=false",
+				"-p:EnableNETAnalyzers=false",
+				"-p:AnalysisMode=None"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
 			"group": "test"
 		}
 	]

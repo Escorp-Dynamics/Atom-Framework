@@ -317,7 +317,7 @@ public class CoinbaseClient : ExchangeClientBase
 
     private static ReadOnlyMemory<byte> BuildCommandMessage(string type, string[] marketIds)
     {
-        var builder = new StringBuilder();
+        using var builder = new Atom.Text.ValueStringBuilder();
         builder.Append("{\"type\":\"");
         builder.Append(type);
         builder.Append("\",\"product_ids\":[");

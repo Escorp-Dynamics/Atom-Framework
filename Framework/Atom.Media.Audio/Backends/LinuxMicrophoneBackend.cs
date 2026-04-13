@@ -18,6 +18,7 @@ namespace Atom.Media.Audio.Backends;
 [SupportedOSPlatform("linux")]
 internal sealed unsafe class LinuxMicrophoneBackend : IVirtualMicrophoneBackend
 {
+    private int cleanupState;
     private IntPtr threadLoop;
     private IntPtr context;
     private IntPtr core;
@@ -550,51 +551,76 @@ internal sealed unsafe class LinuxMicrophoneBackend : IVirtualMicrophoneBackend
 
     private void CleanupNativeResources()
     {
-        CleanupPipeWireObjects();
-        FreeNativeListeners();
+        if (Interlocked.Exchange(ref cleanupState, value: 1) != 0)
+            return;
 
-        if (selfHandle.IsAllocated)
+        Volatile.Write(ref isCapturing, value: false);
+
+        try
         {
-            selfHandle.Free();
+            CleanupPipeWireObjects();
         }
-
-        if (pendingBuffer is not null)
+        finally
         {
-            ArrayPool<byte>.Shared.Return(pendingBuffer);
-            pendingBuffer = null;
+            FreeNativeListeners();
+
+            if (selfHandle.IsAllocated)
+            {
+                selfHandle.Free();
+            }
+
+            if (pendingBuffer is not null)
+            {
+                ArrayPool<byte>.Shared.Return(pendingBuffer);
+                pendingBuffer = null;
+            }
+
+            pendingBufferSize = 0;
+            streamError = null;
         }
     }
 
     private void CleanupPipeWireObjects()
     {
-        if (threadLoop == IntPtr.Zero) return;
+        var loop = threadLoop;
+        var currentStream = stream;
+        var currentCore = core;
+        var currentContext = context;
 
-        pw_thread_loop_lock(threadLoop);
-
-        if (stream != IntPtr.Zero)
-        {
-            _ = pw_stream_disconnect(stream);
-            pw_stream_destroy(stream);
-            stream = IntPtr.Zero;
-        }
-
-        if (core != IntPtr.Zero)
-        {
-            _ = pw_core_disconnect(core);
-            core = IntPtr.Zero;
-        }
-
-        pw_thread_loop_unlock(threadLoop);
-        pw_thread_loop_stop(threadLoop);
-
-        if (context != IntPtr.Zero)
-        {
-            pw_context_destroy(context);
-            context = IntPtr.Zero;
-        }
-
-        pw_thread_loop_destroy(threadLoop);
         threadLoop = IntPtr.Zero;
+        stream = IntPtr.Zero;
+        core = IntPtr.Zero;
+        context = IntPtr.Zero;
+
+        if (loop == IntPtr.Zero) return;
+
+        pw_thread_loop_lock(loop);
+        try
+        {
+            if (currentStream != IntPtr.Zero)
+            {
+                _ = pw_stream_disconnect(currentStream);
+                pw_stream_destroy(currentStream);
+            }
+
+            if (currentCore != IntPtr.Zero)
+            {
+                _ = pw_core_disconnect(currentCore);
+            }
+        }
+        finally
+        {
+            pw_thread_loop_unlock(loop);
+        }
+
+        pw_thread_loop_stop(loop);
+
+        if (currentContext != IntPtr.Zero)
+        {
+            pw_context_destroy(currentContext);
+        }
+
+        pw_thread_loop_destroy(loop);
     }
 
     private void FreeNativeListeners()

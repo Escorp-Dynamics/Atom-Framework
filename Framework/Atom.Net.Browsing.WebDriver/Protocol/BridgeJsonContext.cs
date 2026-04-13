@@ -4,14 +4,18 @@ using System.Text.Json.Serialization;
 
 namespace Atom.Net.Browsing.WebDriver.Protocol;
 
-/// <summary>
-/// Контекст JSON-сериализации для протокола обмена сообщениями.
-/// </summary>
 [JsonSerializable(typeof(BridgeMessage))]
 [JsonSerializable(typeof(BridgeMessageType))]
 [JsonSerializable(typeof(BridgeCommand))]
 [JsonSerializable(typeof(BridgeEvent))]
 [JsonSerializable(typeof(BridgeStatus))]
+[JsonSerializable(typeof(BridgeHandshakeClientPayload))]
+[JsonSerializable(typeof(BridgeHandshakeAcceptPayload))]
+[JsonSerializable(typeof(BridgeHandshakeRejectPayload))]
+[JsonSerializable(typeof(BridgeManagedDeliveryHealthPayload))]
+[JsonSerializable(typeof(BridgeSecureTransportHealthPayload))]
+[JsonSerializable(typeof(BridgeNavigationProxyHealthPayload))]
+[JsonSerializable(typeof(BridgeServerHealthPayload))]
 [JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(JsonNode))]
 [JsonSerializable(typeof(JsonObject))]

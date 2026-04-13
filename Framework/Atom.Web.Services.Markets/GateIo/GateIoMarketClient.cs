@@ -329,7 +329,7 @@ public class GateIoClient : ExchangeClientBase
     private static ReadOnlyMemory<byte> BuildCommandMessage(string @event, string[] marketIds)
     {
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var builder = new StringBuilder();
+        using var builder = new Atom.Text.ValueStringBuilder();
         builder.Append("{\"time\":");
         builder.Append(timestamp);
         builder.Append(",\"channel\":\"spot.tickers\",\"event\":\"");

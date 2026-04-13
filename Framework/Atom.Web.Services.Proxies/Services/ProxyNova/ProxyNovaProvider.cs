@@ -1,20 +1,27 @@
 ﻿using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Atom.Net.Proxies;
 using Atom.Web.Analytics;
+using Microsoft.Extensions.Logging;
 
 namespace Atom.Web.Proxies.Services;
 
 /// <summary>
 /// Провайдер бесплатных HTTP proxy через публичный API ProxyNova.
 /// </summary>
-public sealed partial class ProxyNovaProvider : NetworkProxyProvider
+public sealed partial class ProxyNovaProvider : NetworkProxyProvider, IProxyPagedProvider, IProxyTargetedProvider
 {
     /// <summary>
     /// Базовый endpoint ProxyNova proxylist API.
     /// </summary>
     public const string DefaultEndpoint = "https://api.proxynova.com/proxylist";
+
+    /// <summary>
+    /// HTML-индекс опубликованных стран ProxyNova.
+    /// </summary>
+    public const string DefaultCountryIndexEndpoint = "https://www.proxynova.com/proxy-server-list/";
 
     /// <summary>
     /// Размер выборки по умолчанию, если limit не указан или невалиден.
@@ -26,8 +33,15 @@ public sealed partial class ProxyNovaProvider : NetworkProxyProvider
     /// </summary>
     public const int MaximumLimit = 1000;
 
+    /// <summary>
+    /// Рабочий дефолтный лимит старта запросов в секунду для ProxyNova.
+    /// </summary>
+    public const int DefaultRequestsPerSecondLimit = 2;
+
     private readonly HttpClient httpClient;
     private readonly bool disposeHttpClient;
+    private readonly bool fetchPublishedCountries;
+    private readonly int limit;
 
     /// <summary>
     /// Endpoint, из которого загружается список proxy.
@@ -37,19 +51,28 @@ public sealed partial class ProxyNovaProvider : NetworkProxyProvider
     /// <summary>
     /// Создаёт провайдер ProxyNova.
     /// </summary>
-    public ProxyNovaProvider(string endpoint = DefaultEndpoint, HttpClient? httpClient = null)
+    public ProxyNovaProvider(string endpoint = DefaultEndpoint, HttpClient? httpClient = null, ILogger? logger = null)
+        : base(logger)
     {
         Endpoint = endpoint;
         this.httpClient = httpClient ?? new HttpClient();
         disposeHttpClient = httpClient is null;
+        RequestsPerSecondLimit = DefaultRequestsPerSecondLimit;
+        limit = MaximumLimit;
     }
 
     /// <summary>
     /// Создаёт провайдер ProxyNova из явной конфигурации запроса.
     /// </summary>
-    public ProxyNovaProvider(ProxyNovaProviderOptions options, HttpClient? httpClient = null)
-        : this(CreateEndpoint(options), httpClient)
+    public ProxyNovaProvider(ProxyNovaProviderOptions options, HttpClient? httpClient = null, ILogger? logger = null)
+        : this(CreateEndpoint(options), httpClient, logger)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        RequestsPerSecondLimit = Math.Max(1, options.RequestsPerSecondLimit);
+        limit = NormalizeLimit(options.Limit.ToString(CultureInfo.InvariantCulture));
+        fetchPublishedCountries = options.FetchPublishedCountries
+                                 && !options.Near.HasValue
+                                 && string.IsNullOrWhiteSpace(options.Country);
     }
 
     /// <inheritdoc/>
@@ -66,14 +89,74 @@ public sealed partial class ProxyNovaProvider : NetworkProxyProvider
     /// <inheritdoc/>
     protected override async ValueTask<IEnumerable<ServiceProxy>> LoadPoolAsync(CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, BuildRequestUri(Endpoint));
-        request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (compatible; Atom.ProxyNovaProvider/1.0)");
+        return await LoadEndpointAsync(Endpoint, cancellationToken).ConfigureAwait(false);
+    }
 
-        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+    /// <inheritdoc/>
+    public async ValueTask<ProxyProviderFetchPage> FetchPageAsync(string? continuationToken, CancellationToken cancellationToken)
+    {
+        if (!fetchPublishedCountries)
+        {
+            var proxies = await LoadEndpointAsync(Endpoint, cancellationToken).ConfigureAwait(false);
+            return new ProxyProviderFetchPage([.. proxies]);
+        }
 
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        return ParseResponse(payload, response.Content.Headers.ContentType?.MediaType);
+        if (string.IsNullOrWhiteSpace(continuationToken))
+        {
+            var countryCodes = await LoadPublishedCountryCodesAsync(cancellationToken).ConfigureAwait(false);
+            if (countryCodes.Count == 0)
+            {
+                var fallback = await LoadEndpointAsync(Endpoint, cancellationToken).ConfigureAwait(false);
+                return new ProxyProviderFetchPage([.. fallback]);
+            }
+
+            return await LoadCountryPageAsync(countryCodes, 0, cancellationToken).ConfigureAwait(false);
+        }
+
+        var remainingCountries = continuationToken.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (remainingCountries.Length == 0)
+        {
+            return new ProxyProviderFetchPage([]);
+        }
+
+        return await LoadCountryPageAsync(remainingCountries, 0, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public async ValueTask<ProxyProviderFetchResult> FetchAsync(ProxyProviderFetchRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.Protocols.Count != 0 && !request.Protocols.Contains(ProxyType.Http)
+            || request.AnonymityLevels.Count != 0 && !request.AnonymityLevels.Contains(AnonymityLevel.Low))
+        {
+            return new ProxyProviderFetchResult([], IsPartial: request.AllowPartial, SourceExhausted: true);
+        }
+
+        var requestedCount = Math.Max(1, request.RequestedCount);
+        var explicitCountries = request.Countries
+            .Where(static country => country is not null)
+            .Select(static country => country.IsoCode2)
+            .Where(static code => !string.IsNullOrWhiteSpace(code))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (explicitCountries.Length != 0)
+        {
+            return await LoadTargetedCountriesAsync(explicitCountries, requestedCount, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!fetchPublishedCountries)
+        {
+            var endpoint = CreateEndpoint(new ProxyNovaProviderOptions
+            {
+                Limit = requestedCount,
+            });
+            var proxies = (await LoadEndpointAsync(endpoint, cancellationToken).ConfigureAwait(false)).Take(requestedCount).ToArray();
+            return new ProxyProviderFetchResult(proxies, IsPartial: proxies.Length < requestedCount, SourceExhausted: proxies.Length < requestedCount);
+        }
+
+        return await LoadTargetedPublishedCountriesAsync(requestedCount, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -100,6 +183,99 @@ public sealed partial class ProxyNovaProvider : NetworkProxyProvider
         ArgumentNullException.ThrowIfNull(options);
 
         return ProviderEndpointBuilder.Create(DefaultEndpoint, CreateQuery(options));
+    }
+
+    private async ValueTask<IReadOnlyList<string>> LoadPublishedCountryCodesAsync(CancellationToken cancellationToken)
+    {
+        var payload = await RunRateLimitedAsync(async token =>
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, DefaultCountryIndexEndpoint);
+            request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (compatible; Atom.ProxyNovaProvider/1.0)");
+
+            using var response = await httpClient.SendAsync(request, token).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
+
+        return ParsePublishedCountryCodes(payload);
+    }
+
+    private async ValueTask<IEnumerable<ServiceProxy>> LoadEndpointAsync(string endpoint, CancellationToken cancellationToken)
+    {
+        return await RunRateLimitedAsync(async token =>
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, BuildRequestUri(endpoint));
+            request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (compatible; Atom.ProxyNovaProvider/1.0)");
+
+            using var response = await httpClient.SendAsync(request, token).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            var payload = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+            return ParseResponse(payload, response.Content.Headers.ContentType?.MediaType);
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask<ProxyProviderFetchPage> LoadCountryPageAsync(IReadOnlyList<string> countryCodes, int index, CancellationToken cancellationToken)
+    {
+        var countryEndpoint = CreateEndpoint(new ProxyNovaProviderOptions
+        {
+            Country = countryCodes[index],
+            Limit = limit,
+        });
+
+        var proxies = await LoadEndpointAsync(countryEndpoint, cancellationToken).ConfigureAwait(false);
+        var nextToken = index + 1 < countryCodes.Count
+            ? string.Join(',', countryCodes.Skip(index + 1))
+            : null;
+
+        return new ProxyProviderFetchPage([.. proxies], nextToken);
+    }
+
+    private async ValueTask<ProxyProviderFetchResult> LoadTargetedCountriesAsync(IReadOnlyList<string> countryCodes, int requestedCount, CancellationToken cancellationToken)
+    {
+        var proxies = new List<ServiceProxy>(requestedCount);
+        for (var index = 0; index < countryCodes.Count && proxies.Count < requestedCount; index++)
+        {
+            var countryEndpoint = CreateEndpoint(new ProxyNovaProviderOptions
+            {
+                Country = countryCodes[index],
+                Limit = requestedCount,
+            });
+
+            var page = await LoadEndpointAsync(countryEndpoint, cancellationToken).ConfigureAwait(false);
+            proxies.AddRange(page.Take(requestedCount - proxies.Count));
+        }
+
+        return new ProxyProviderFetchResult(
+            [.. proxies],
+            IsPartial: proxies.Count < requestedCount,
+            SourceExhausted: proxies.Count < requestedCount);
+    }
+
+    private async ValueTask<ProxyProviderFetchResult> LoadTargetedPublishedCountriesAsync(int requestedCount, CancellationToken cancellationToken)
+    {
+        var collected = new List<ServiceProxy>(requestedCount);
+        string? continuationToken = null;
+        while (collected.Count < requestedCount)
+        {
+            var page = await FetchPageAsync(continuationToken, cancellationToken).ConfigureAwait(false);
+            if (page.Proxies.Count != 0)
+            {
+                collected.AddRange(page.Proxies.Take(requestedCount - collected.Count));
+            }
+
+            if (string.IsNullOrWhiteSpace(page.ContinuationToken))
+            {
+                return new ProxyProviderFetchResult(
+                    [.. collected],
+                    IsPartial: collected.Count < requestedCount,
+                    SourceExhausted: true);
+            }
+
+            continuationToken = page.ContinuationToken;
+        }
+
+        return new ProxyProviderFetchResult([.. collected], IsPartial: false, SourceExhausted: false);
     }
 
     private static IEnumerable<ServiceProxy> ParseResponse(string payload, string? mediaType)
@@ -144,6 +320,27 @@ public sealed partial class ProxyNovaProvider : NetworkProxyProvider
         }
 
         return proxies;
+    }
+
+    private static IReadOnlyList<string> ParsePublishedCountryCodes(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return [];
+        }
+
+        var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var matches = PublishedCountryRegex().Matches(payload);
+        for (var index = 0; index < matches.Count; index++)
+        {
+            var code = matches[index].Groups[1].Value;
+            if (code.Length == 2)
+            {
+                codes.Add(code.ToUpperInvariant());
+            }
+        }
+
+        return codes.OrderBy(static code => code, StringComparer.Ordinal).ToArray();
     }
 
     private static ServiceProxy? CreateProxy(ProxyNovaProxyListEntry item, DateTime now)
@@ -379,4 +576,7 @@ public sealed partial class ProxyNovaProvider : NetworkProxyProvider
 
     [GeneratedRegex(@"\b(?:\d{1,3}\.){3}\d{1,3}\b", RegexOptions.CultureInvariant)]
     private static partial Regex IpRegex();
+
+    [GeneratedRegex(@"/proxy-server-list/country-([a-z]{2})/", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex PublishedCountryRegex();
 }

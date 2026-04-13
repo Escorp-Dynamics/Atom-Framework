@@ -2,6 +2,7 @@
 
 	<PropertyGroup>
 		<AssemblyName>Escorp.Atom.Net.Browsing</AssemblyName>
+		<NoWarn>$(NoWarn);CA1040;S2094</NoWarn>
 
 		<PackageId>$(AssemblyName)</PackageId>
 		<Version>0.0.1</Version>
@@ -40,28 +41,13 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="*" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<PackageReference Include="Escorp.Atom.SourceGeneration" Version="*" PrivateAssets="all"
+			OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<None Update="icon.png" PackagePath="\" Pack="true" />
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
-
-	<Target Name="PublishPackages" AfterTargets="Pack" Condition="'$(PushPackages)' == 'true' AND '$(NUGET_API_KEY)' != ''">
-		<PropertyGroup>
-			<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">bin\$(Configuration)\</PackageOutputPath>
-		</PropertyGroup>
-
-		<ItemGroup>
-			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" />
-			<PackageFiles Include="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg" Condition="Exists('$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg')" />
-		</ItemGroup>
-
-		<Exec Command="dotnet nuget push &quot;%(PackageFiles.Identity)&quot; --source nuget.org --api-key &quot;$(NUGET_API_KEY)&quot;" Condition="'%(PackageFiles.Identity)' != ''" IgnoreExitCode="true">
-			<Output TaskParameter="ConsoleOutput" ItemName="ExecOutput" />
-		</Exec>
-
-	</Target>
 
 </Project>

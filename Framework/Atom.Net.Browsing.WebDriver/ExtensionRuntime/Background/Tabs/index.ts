@@ -1,0 +1,10 @@
+export type { ITabContextPublisher } from './TabContextPublisher';
+export type { ITabDiscoveryService, TabDiscoveryCandidate } from './TabDiscoveryService';
+export type { ITabRegistry, RegisteredTabRuntime } from './TabRegistry';
+export type { ITabRuntimeEndpoint } from './TabRuntimeEndpoint';
+export { closeTrackedTab } from './TabRuntimeLifecycle';
+export { closeTrackedWindowTabs } from './TabRuntimeLifecycle';
+export { ensureDiscoveryTab } from './DiscoveryTabLifecycle';
+export { InMemoryTabRegistry } from './InMemoryTabRegistry';
+export type { RuntimePortLike } from './RuntimePortTabEndpoint';
+export { RuntimePortTabEndpoint } from './RuntimePortTabEndpoint';

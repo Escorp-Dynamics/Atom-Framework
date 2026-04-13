@@ -1,4 +1,5 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
+using Atom.Net.Https.Profiles;
 
 namespace Atom.Net.Https;
 
@@ -9,5 +10,12 @@ public class UserAgentAdapter : IUserAgentAdapter
 {
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public HttpsClientHandler CreateHandler(string userAgent) => throw new NotImplementedException();   // TODO: Реализовать создание экземпляра хендлера на основе User-Agent.
+    public HttpsClientHandler CreateHandler(string userAgent)
+    {
+        var profile = BrowserProfileResolver.Resolve(userAgent);
+        return new HttpsClientHandler
+        {
+            BrowserProfile = profile,
+        };
+    }
 }

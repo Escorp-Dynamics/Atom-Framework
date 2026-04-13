@@ -12,6 +12,7 @@ namespace Atom.Media.Video.Backends;
 [SupportedOSPlatform("linux")]
 internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
 {
+    private int cleanupState;
     private IntPtr threadLoop;
     private IntPtr context;
     private IntPtr core;
@@ -405,47 +406,78 @@ internal sealed unsafe class LinuxCameraBackend : IVirtualCameraBackend
 
     private void CleanupNativeResources()
     {
-        if (threadLoop != IntPtr.Zero)
-        {
-            pw_thread_loop_lock(threadLoop);
+        if (Interlocked.Exchange(ref cleanupState, value: 1) != 0)
+            return;
 
-            exportedDevice?.DestroyExportProxy();
-            exportedNode?.DestroyExportProxy();
+        Volatile.Write(ref isCapturing, false);
 
-            if (core != IntPtr.Zero)
-            {
-                _ = pw_core_disconnect(core);
-                core = IntPtr.Zero;
-            }
-
-            pw_thread_loop_unlock(threadLoop);
-            pw_thread_loop_stop(threadLoop);
-
-            if (context != IntPtr.Zero)
-            {
-                pw_context_destroy(context);
-                context = IntPtr.Zero;
-            }
-
-            pw_thread_loop_destroy(threadLoop);
-            threadLoop = IntPtr.Zero;
-        }
-
-        exportedDevice?.Dispose();
+        var device = exportedDevice;
+        var node = exportedNode;
         exportedDevice = null;
-
-        exportedNode?.Dispose();
         exportedNode = null;
 
-        FreeNativeListeners();
-
-        if (selfHandle.IsAllocated)
+        try
         {
-            selfHandle.Free();
+            CleanupPipeWireObjects(device, node);
+        }
+        finally
+        {
+            device?.Dispose();
+            node?.Dispose();
+
+            FreeNativeListeners();
+
+            if (selfHandle.IsAllocated)
+            {
+                selfHandle.Free();
+            }
+
+            coreSyncCompleted.Dispose();
+            latestFrame = null;
+            coreError = null;
+            Volatile.Write(ref expectedCoreSyncSeq, int.MinValue);
+            Volatile.Write(ref lastCompletedCoreSyncSeq, int.MinValue);
+        }
+    }
+
+    private void CleanupPipeWireObjects(
+        PipeWireExportedVideoDevice? device,
+        PipeWireExportedVideoSourceNode? node)
+    {
+        var loop = threadLoop;
+        var currentCore = core;
+        var currentContext = context;
+
+        threadLoop = IntPtr.Zero;
+        core = IntPtr.Zero;
+        context = IntPtr.Zero;
+
+        if (loop == IntPtr.Zero) return;
+
+        pw_thread_loop_lock(loop);
+        try
+        {
+            device?.DestroyExportProxy();
+            node?.DestroyExportProxy();
+
+            if (currentCore != IntPtr.Zero)
+            {
+                _ = pw_core_disconnect(currentCore);
+            }
+        }
+        finally
+        {
+            pw_thread_loop_unlock(loop);
         }
 
-        coreSyncCompleted.Dispose();
-        latestFrame = null;
+        pw_thread_loop_stop(loop);
+
+        if (currentContext != IntPtr.Zero)
+        {
+            pw_context_destroy(currentContext);
+        }
+
+        pw_thread_loop_destroy(loop);
     }
 
     private uint WaitForCoreSyncAndGetDeviceBoundId()

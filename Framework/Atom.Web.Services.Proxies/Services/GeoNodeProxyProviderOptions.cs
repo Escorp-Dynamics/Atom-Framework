@@ -16,6 +16,26 @@ public sealed class GeoNodeProxyProviderOptions
     public int Page { get; init; } = 1;
 
     /// <summary>
+    /// Загружать все страницы GeoNode до исчерпания total.
+    /// </summary>
+    public bool FetchAllPages { get; init; }
+
+    /// <summary>
+    /// Максимальная частота старта page-request при FetchAllPages.
+    /// </summary>
+    public int RequestsPerSecondLimit { get; init; } = GeoNodeProxyProvider.DefaultRequestsPerSecondLimit;
+
+    /// <summary>
+    /// Максимальное число повторов при retryable ответах GeoNode вроде 429/5xx.
+    /// </summary>
+    public int RetryAttempts { get; init; } = GeoNodeProxyProvider.DefaultRetryAttempts;
+
+    /// <summary>
+    /// Базовая задержка между повторами, если upstream не прислал Retry-After.
+    /// </summary>
+    public int RetryDelayMilliseconds { get; init; } = GeoNodeProxyProvider.DefaultRetryDelayMilliseconds;
+
+    /// <summary>
     /// Поле сортировки.
     /// </summary>
     public string SortBy { get; init; } = "lastChecked";

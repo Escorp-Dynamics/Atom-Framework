@@ -60,7 +60,7 @@ public sealed class PolymarketTradeSignal
     public long TimestampTicks { get; init; } = Environment.TickCount64;
 
     // Явная реализация IMarketTradeSignal.Action (конверсия енумов)
-    TradeAction IMarketTradeSignal.Action => (TradeAction)(byte)Action;
+    TradeAction IMarketTradeSignal.Action => (TradeAction)Action;
 }
 
 /// <summary>
@@ -154,8 +154,10 @@ public abstract class PolymarketStrategyBase : IPolymarketStrategy
     /// </summary>
     protected PolymarketTradeSignal HoldSignal(string assetId, string reason) => new()
     {
-        AssetId = assetId, Action = PolymarketTradeAction.Hold,
-        Quantity = 0, Reason = reason
+        AssetId = assetId,
+        Action = PolymarketTradeAction.Hold,
+        Quantity = 0,
+        Reason = reason
     };
 
     /// <inheritdoc />

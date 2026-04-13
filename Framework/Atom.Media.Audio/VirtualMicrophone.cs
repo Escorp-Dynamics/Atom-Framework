@@ -34,6 +34,7 @@ namespace Atom.Media.Audio;
 /// </remarks>
 public sealed class VirtualMicrophone : IAsyncDisposable
 {
+    private static Func<IVirtualMicrophoneBackend>? backendFactoryOverride;
     private readonly IVirtualMicrophoneBackend backend;
     private bool isDisposed;
     private float currentLevel;
@@ -766,13 +767,38 @@ public sealed class VirtualMicrophone : IAsyncDisposable
     public static ValueTask<VirtualMicrophone> CreateAsync(VirtualMicrophoneSettings settings)
         => CreateAsync(settings, CancellationToken.None);
 
+    internal static IDisposable PushBackendFactoryOverride(Func<IVirtualMicrophoneBackend> backendFactory)
+    {
+        ArgumentNullException.ThrowIfNull(backendFactory);
+
+        if (Interlocked.CompareExchange(location1: ref backendFactoryOverride, value: backendFactory, comparand: null) is not null)
+        {
+            throw new InvalidOperationException("Virtual microphone backend factory override is already active.");
+        }
+
+        return new BackendFactoryOverrideScope(static () => Interlocked.Exchange(location1: ref backendFactoryOverride, value: null));
+    }
+
     private static IVirtualMicrophoneBackend CreateBackend()
     {
+        var overrideFactory = Volatile.Read(ref backendFactoryOverride);
+        if (overrideFactory is not null)
+        {
+            return overrideFactory();
+        }
+
         if (OperatingSystem.IsLinux()) return new LinuxMicrophoneBackend();
         if (OperatingSystem.IsMacOS()) return new MacOSMicrophoneBackend();
         if (OperatingSystem.IsWindows()) return new WindowsMicrophoneBackend();
 
         throw new PlatformNotSupportedException(
             "Виртуальный микрофон не поддерживается на текущей платформе.");
+    }
+
+    private sealed class BackendFactoryOverrideScope(Action dispose) : IDisposable
+    {
+        private Action? dispose = dispose;
+
+        public void Dispose() => Interlocked.Exchange(location1: ref dispose, value: null)?.Invoke();
     }
 }

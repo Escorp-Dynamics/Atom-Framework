@@ -1,5 +1,6 @@
 ﻿#pragma warning disable CA1861, MA0051
 
+using System.Diagnostics;
 using Atom.Media.Codecs.Webp.Vp8;
 
 namespace Atom.Media.Tests;
@@ -949,7 +950,6 @@ public sealed class Vp8DecoderTests(ILogger logger) : BenchmarkTests<Vp8DecoderT
         TestContext.Out.WriteLine($"internal Q3={FormatPixel(internalDecoded.AsReadOnlyFrame(), (info.Width * 3) / 4, (info.Height * 3) / 4)}");
     }
 
-    [Explicit]
     [TestCase(TestName = "VP8 internal: диагностика проблемного macroblock для real test.webp")]
     public void DumpProblemMacroblockDiagnosticsForRealWebp()
     {
@@ -1008,6 +1008,105 @@ public sealed class Vp8DecoderTests(ILogger logger) : BenchmarkTests<Vp8DecoderT
         TestContext.Out.WriteLine($"target mb final rgba: {diagnostics.FirstMacroblockFinalRgbaTopLeft}");
     }
 
+    [TestCase(TestName = "VP8 internal: concise diagnostics for real test.webp target subblock")]
+    public void DumpProblemMacroblockConciseFailureForRealWebp()
+    {
+        const int sampleX = 799;
+        const int sampleY = 477;
+        var targetMbX = sampleX / 16;
+        var targetMbY = sampleY / 16;
+        var targetSubblockX = (sampleX % 16) / 4;
+        var targetSubblockY = (sampleY % 16) / 4;
+
+        var data = File.ReadAllBytes(Path.Combine(AssetsDir, "test.webp"));
+        var vp8Data = ExtractVp8Chunk(data);
+
+        var infoResult = codec!.GetInfo(data, out var info);
+        Assert.That(infoResult, Is.EqualTo(CodecResult.Success));
+
+        codec.InitializeDecoder(new ImageCodecParameters(info.Width, info.Height, VideoPixelFormat.Rgba32));
+        using var publicDecoded = new VideoFrameBuffer(info.Width, info.Height, VideoPixelFormat.Rgba32);
+        var publicFrame = publicDecoded.AsFrame();
+        var publicResult = codec.Decode(data, ref publicFrame);
+        Assert.That(publicResult, Is.EqualTo(CodecResult.Success));
+
+        var targetDiagnostics = new Vp8DecodeDiagnostics
+        {
+            TargetMacroblockX = targetMbX,
+            TargetMacroblockY = targetMbY,
+            TargetSubblockX = targetSubblockX,
+            TargetSubblockY = targetSubblockY,
+        };
+
+        var internalDecoder = new Vp8Decoder();
+        using var internalDecoded = new VideoFrameBuffer(info.Width, info.Height, VideoPixelFormat.Rgba32);
+        var internalFrame = internalDecoded.AsFrame();
+        var internalResult = internalDecoder.Decode(vp8Data, ref internalFrame, targetDiagnostics);
+        Assert.That(internalResult, Is.EqualTo(CodecResult.Success));
+
+        var noCoeffUpdateDiagnostics = new Vp8DecodeDiagnostics
+        {
+            TargetMacroblockX = targetMbX,
+            TargetMacroblockY = targetMbY,
+            TargetSubblockX = targetSubblockX,
+            TargetSubblockY = targetSubblockY,
+            DisableCoeffProbUpdates = true,
+        };
+
+        var noCoeffUpdateDecoder = new Vp8Decoder();
+        using var noCoeffUpdateDecoded = new VideoFrameBuffer(info.Width, info.Height, VideoPixelFormat.Rgba32);
+        var noCoeffUpdateFrame = noCoeffUpdateDecoded.AsFrame();
+        var noCoeffUpdateResult = noCoeffUpdateDecoder.Decode(vp8Data, ref noCoeffUpdateFrame, noCoeffUpdateDiagnostics);
+        Assert.That(noCoeffUpdateResult, Is.EqualTo(CodecResult.Success));
+
+        var aboveBottomRowDiagnostics = new Vp8DecodeDiagnostics[4];
+        for (var blockX = 0; blockX < 4; blockX++)
+        {
+            aboveBottomRowDiagnostics[blockX] = new Vp8DecodeDiagnostics
+            {
+                TargetMacroblockX = targetMbX,
+                TargetMacroblockY = targetMbY - 1,
+                TargetSubblockX = blockX,
+                TargetSubblockY = 3,
+            };
+
+            var aboveDecoder = new Vp8Decoder();
+            using var aboveDecoded = new VideoFrameBuffer(info.Width, info.Height, VideoPixelFormat.Rgba32);
+            var aboveFrame = aboveDecoded.AsFrame();
+            var aboveResult = aboveDecoder.Decode(vp8Data, ref aboveFrame, aboveBottomRowDiagnostics[blockX]);
+            Assert.That(aboveResult, Is.EqualTo(CodecResult.Success));
+        }
+
+        var summary = string.Join(Environment.NewLine, [
+            $"sample=({sampleX},{sampleY}), macroblock=({targetMbX},{targetMbY}), subblock=({targetSubblockX},{targetSubblockY})",
+            $"public sample={FormatPixel(publicDecoded.AsReadOnlyFrame(), sampleX, sampleY)}",
+            $"internal sample={FormatPixel(internalDecoded.AsReadOnlyFrame(), sampleX, sampleY)}",
+            $"no-coeff-update sample={FormatPixel(noCoeffUpdateDecoded.AsReadOnlyFrame(), sampleX, sampleY)}",
+            $"target mode={targetDiagnostics.TargetYSubblockMode}, aboveMode={targetDiagnostics.TargetYSubblockAboveMode}, leftMode={targetDiagnostics.TargetYSubblockLeftMode}",
+            $"macroblock prediction above16={FormatByteVector(targetDiagnostics.FirstMacroblockPredictionAbove16)}",
+            $"macroblock prediction left16={FormatByteVector(targetDiagnostics.FirstMacroblockPredictionLeft16)}",
+            $"macroblock prediction aboveLeft={targetDiagnostics.FirstMacroblockPredictionAboveLeft}",
+            $"target predictor flags: hasAbove={targetDiagnostics.TargetYSubblockHasAbove}, hasLeft={targetDiagnostics.TargetYSubblockHasLeft}, aboveLeft={targetDiagnostics.TargetYSubblockAboveLeftSample}",
+            $"target contexts: above={targetDiagnostics.TargetYSubblockAboveNonZeroContext}, left={targetDiagnostics.TargetYSubblockLeftNonZeroContext}, initial={targetDiagnostics.TargetYSubblockInitialContext}",
+            $"target coeffs: nonZero={targetDiagnostics.TargetYSubblockNonZero}, rawDc={targetDiagnostics.TargetYSubblockRawDc}, dequantDc={targetDiagnostics.TargetYSubblockDequantDcBeforeY2}, injectedDc={targetDiagnostics.TargetYSubblockDcAfterY2Injection}",
+            $"target ref-style: nonZero={targetDiagnostics.TargetYSubblockReferenceStyleNonZero}, rawDc={targetDiagnostics.TargetYSubblockReferenceStyleRawDc}",
+            $"target forced ctx0: nonZero={targetDiagnostics.TargetYSubblockForcedContext0NonZero}, rawDc={targetDiagnostics.TargetYSubblockForcedContext0RawDc}",
+            $"target forced ctx1: nonZero={targetDiagnostics.TargetYSubblockForcedContext1NonZero}, rawDc={targetDiagnostics.TargetYSubblockForcedContext1RawDc}",
+            $"target forced ctx2: nonZero={targetDiagnostics.TargetYSubblockForcedContext2NonZero}, rawDc={targetDiagnostics.TargetYSubblockForcedContext2RawDc}",
+            $"target predicted top-left={targetDiagnostics.TargetYSubblockPredictedTopLeft}, output top-left={targetDiagnostics.TargetYSubblockOutputTopLeft}",
+            $"target U/V top-left={targetDiagnostics.TargetUBlockOutputTopLeft}/{targetDiagnostics.TargetVBlockOutputTopLeft}",
+            $"no-coeff-update contexts: above={noCoeffUpdateDiagnostics.TargetYSubblockAboveNonZeroContext}, left={noCoeffUpdateDiagnostics.TargetYSubblockLeftNonZeroContext}, initial={noCoeffUpdateDiagnostics.TargetYSubblockInitialContext}",
+            $"no-coeff-update coeffs: nonZero={noCoeffUpdateDiagnostics.TargetYSubblockNonZero}, rawDc={noCoeffUpdateDiagnostics.TargetYSubblockRawDc}, dequantDc={noCoeffUpdateDiagnostics.TargetYSubblockDequantDcBeforeY2}, injectedDc={noCoeffUpdateDiagnostics.TargetYSubblockDcAfterY2Injection}",
+            $"no-coeff-update predicted top-left={noCoeffUpdateDiagnostics.TargetYSubblockPredictedTopLeft}, output top-left={noCoeffUpdateDiagnostics.TargetYSubblockOutputTopLeft}",
+            $"above mb bottom row block0: ctx={aboveBottomRowDiagnostics[0].TargetYSubblockInitialContext}, predY={aboveBottomRowDiagnostics[0].TargetYSubblockPredictedTopLeft}, outY={aboveBottomRowDiagnostics[0].TargetYSubblockOutputTopLeft}, nonZero={aboveBottomRowDiagnostics[0].TargetYSubblockNonZero}, rawDc={aboveBottomRowDiagnostics[0].TargetYSubblockRawDc}, injectedDc={aboveBottomRowDiagnostics[0].TargetYSubblockDcAfterY2Injection}",
+            $"above mb bottom row block1: ctx={aboveBottomRowDiagnostics[1].TargetYSubblockInitialContext}, predY={aboveBottomRowDiagnostics[1].TargetYSubblockPredictedTopLeft}, outY={aboveBottomRowDiagnostics[1].TargetYSubblockOutputTopLeft}, nonZero={aboveBottomRowDiagnostics[1].TargetYSubblockNonZero}, rawDc={aboveBottomRowDiagnostics[1].TargetYSubblockRawDc}, injectedDc={aboveBottomRowDiagnostics[1].TargetYSubblockDcAfterY2Injection}",
+            $"above mb bottom row block2: ctx={aboveBottomRowDiagnostics[2].TargetYSubblockInitialContext}, predY={aboveBottomRowDiagnostics[2].TargetYSubblockPredictedTopLeft}, outY={aboveBottomRowDiagnostics[2].TargetYSubblockOutputTopLeft}, nonZero={aboveBottomRowDiagnostics[2].TargetYSubblockNonZero}, rawDc={aboveBottomRowDiagnostics[2].TargetYSubblockRawDc}, injectedDc={aboveBottomRowDiagnostics[2].TargetYSubblockDcAfterY2Injection}",
+            $"above mb bottom row block3: ctx={aboveBottomRowDiagnostics[3].TargetYSubblockInitialContext}, predY={aboveBottomRowDiagnostics[3].TargetYSubblockPredictedTopLeft}, outY={aboveBottomRowDiagnostics[3].TargetYSubblockOutputTopLeft}, nonZero={aboveBottomRowDiagnostics[3].TargetYSubblockNonZero}, rawDc={aboveBottomRowDiagnostics[3].TargetYSubblockRawDc}, injectedDc={aboveBottomRowDiagnostics[3].TargetYSubblockDcAfterY2Injection}",
+        ]);
+
+        Assert.Fail(summary);
+    }
+
     [Explicit]
     [TestCase(TestName = "VP8 internal: найти первый расходящийся macroblock для real test.webp")]
     public void FindFirstDivergentMacroblockForRealWebp()
@@ -1015,14 +1114,287 @@ public sealed class Vp8DecoderTests(ILogger logger) : BenchmarkTests<Vp8DecoderT
         FindAndDiagnoseFirstDivergentMacroblockForRealWebp(targetSevereIfAvailable: true);
     }
 
-    [Explicit]
     [TestCase(TestName = "VP8 internal: снять diagnostics earliest noticeable macroblock для real test.webp")]
     public void DiagnoseFirstNoticeableMacroblockForRealWebp()
     {
         FindAndDiagnoseFirstDivergentMacroblockForRealWebp(targetSevereIfAvailable: false);
     }
 
-    private void FindAndDiagnoseFirstDivergentMacroblockForRealWebp(bool targetSevereIfAvailable)
+    [TestCase(TestName = "VP8 internal: снять diagnostics known problem macroblock для real test.webp")]
+    public void DiagnoseKnownProblemMacroblockForRealWebp()
+    {
+        FindAndDiagnoseFirstDivergentMacroblockForRealWebp(
+            targetSevereIfAvailable: false,
+            forcedTarget: (49, 29, 799, 477));
+    }
+
+    [Explicit]
+    [TestCase(TestName = "VP8 internal: найти first external divergence macroblock against Magick для real test.webp")]
+    public void FindFirstExternalDivergentMacroblockAgainstMagickForRealWebp()
+    {
+        const int noticeableThreshold = 16;
+        const int severeThreshold = 64;
+
+        var data = File.ReadAllBytes(Path.Combine(AssetsDir, "test.webp"));
+        var vp8Data = ExtractVp8Chunk(data);
+
+        var infoResult = codec!.GetInfo(data, out var info);
+        Assert.That(infoResult, Is.EqualTo(CodecResult.Success));
+
+        var decoder = new Vp8Decoder();
+        using var decoded = new VideoFrameBuffer(info.Width, info.Height, VideoPixelFormat.Rgba32);
+        var frame = decoded.AsFrame();
+        var decodeResult = decoder.Decode(vp8Data, ref frame);
+        Assert.That(decodeResult, Is.EqualTo(CodecResult.Success));
+
+        var externalRgba = LoadMagickRgbaImage(Path.Combine(AssetsDir, "test.webp"), info.Width, info.Height);
+        var macroblockColumns = (info.Width + 15) / 16;
+        var macroblockRows = (info.Height + 15) / 16;
+
+        (int X, int Y, int MaxDiff, int AvgDiff, int SampleX, int SampleY) firstNoticeable = (-1, -1, -1, -1, -1, -1);
+        (int X, int Y, int MaxDiff, int AvgDiff, int SampleX, int SampleY) firstSevere = (-1, -1, -1, -1, -1, -1);
+
+        for (var mbY = 0; mbY < macroblockRows; mbY++)
+        {
+            for (var mbX = 0; mbX < macroblockColumns; mbX++)
+            {
+                var stats = GetMacroblockDiffStats(externalRgba, info.Width, info.Height, decoded.AsReadOnlyFrame(), mbX, mbY);
+
+                if (firstNoticeable.X < 0 && stats.MaxDiff > noticeableThreshold)
+                {
+                    firstNoticeable = (mbX, mbY, stats.MaxDiff, stats.AvgDiff, stats.SampleX, stats.SampleY);
+                }
+
+                if (firstSevere.X < 0 && stats.MaxDiff > severeThreshold)
+                {
+                    firstSevere = (mbX, mbY, stats.MaxDiff, stats.AvgDiff, stats.SampleX, stats.SampleY);
+                }
+
+                if (firstNoticeable.X >= 0 && firstSevere.X >= 0)
+                {
+                    break;
+                }
+            }
+
+            if (firstNoticeable.X >= 0 && firstSevere.X >= 0)
+            {
+                break;
+            }
+        }
+
+        Assert.That(firstNoticeable.X, Is.GreaterThanOrEqualTo(0), "Не найден даже заметный внешний расходящийся macroblock против Magick");
+
+        TestContext.Out.WriteLine($"first external noticeable macroblock=({firstNoticeable.X},{firstNoticeable.Y}), maxDiff={firstNoticeable.MaxDiff}, avgDiff={firstNoticeable.AvgDiff}, sample=({firstNoticeable.SampleX},{firstNoticeable.SampleY})");
+        TestContext.Out.WriteLine($"first external noticeable internal sample={FormatPixel(decoded.AsReadOnlyFrame(), firstNoticeable.SampleX, firstNoticeable.SampleY)}");
+        TestContext.Out.WriteLine($"first external noticeable Magick sample={FormatRgbaPixel(externalRgba, info.Width, firstNoticeable.SampleX, firstNoticeable.SampleY)}");
+
+        if (firstSevere.X >= 0)
+        {
+            TestContext.Out.WriteLine($"first external severe macroblock=({firstSevere.X},{firstSevere.Y}), maxDiff={firstSevere.MaxDiff}, avgDiff={firstSevere.AvgDiff}, sample=({firstSevere.SampleX},{firstSevere.SampleY})");
+            TestContext.Out.WriteLine($"first external severe internal sample={FormatPixel(decoded.AsReadOnlyFrame(), firstSevere.SampleX, firstSevere.SampleY)}");
+            TestContext.Out.WriteLine($"first external severe Magick sample={FormatRgbaPixel(externalRgba, info.Width, firstSevere.SampleX, firstSevere.SampleY)}");
+        }
+
+        Assert.Fail("temporary diagnostic failure to surface earliest external divergence against Magick");
+    }
+
+    [TestCase(TestName = "VP8 internal: снять diagnostics first external divergence macroblock для real test.webp")]
+    public void DiagnoseFirstExternalDivergenceMacroblockForRealWebp()
+    {
+        FindAndDiagnoseFirstDivergentMacroblockForRealWebp(
+            targetSevereIfAvailable: false,
+            forcedTarget: (3, 0, 52, 6));
+    }
+
+    [Explicit]
+    [TestCase(TestName = "VP8 internal: снять diagnostics current external divergence macroblock для real test.webp")]
+    public void DiagnoseCurrentExternalDivergenceMacroblockForRealWebp()
+    {
+        FindAndDiagnoseFirstDivergentMacroblockForRealWebp(
+            targetSevereIfAvailable: false,
+            forcedTarget: (1, 0, 22, 4));
+    }
+
+    [Explicit]
+    [TestCase(TestName = "VP8 internal: проверить symmetry remap для first external divergence macroblock")]
+    public void DiagnoseFirstExternalDivergenceSymmetryRemapForRealWebp()
+        => DiagnoseSymmetryRemapAgainstMagickForRealWebp(3, 0, 52, 6);
+
+    [Explicit]
+    [TestCase(TestName = "VP8 internal: проверить symmetry remap для known problem macroblock")]
+    public void DiagnoseKnownProblemSymmetryRemapForRealWebp()
+        => DiagnoseSymmetryRemapAgainstMagickForRealWebp(49, 29, 799, 477);
+
+    [Explicit]
+    [TestCase(TestName = "VP8 internal: проверить per-coefficient basis scan для first external divergence macroblock")]
+    public void DiagnoseFirstExternalDivergencePerCoefficientBasisForRealWebp()
+    {
+        var comparison = CaptureSubblockAgainstMagickForRealWebp(3, 0, 1, 1);
+        var baselineSad = ComputeBlockSad(comparison.Diagnostics.TargetYSubblockOutput4x4, comparison.ExternalRedBlock);
+
+        TestContext.Out.WriteLine($"basis scan target block origin=({comparison.BlockX},{comparison.BlockY}), macroblock=({comparison.MacroblockX},{comparison.MacroblockY}), subblock=({comparison.SubblockX},{comparison.SubblockY})");
+        TestContext.Out.WriteLine($"basis scan external red 4x4:\n{FormatByteMatrix4x4(comparison.ExternalRedBlock)}");
+        TestContext.Out.WriteLine($"basis scan predictor 4x4:\n{FormatByteMatrix4x4(comparison.Diagnostics.TargetYSubblockPredicted4x4)}");
+        TestContext.Out.WriteLine($"basis scan current output 4x4:\n{FormatByteMatrix4x4(comparison.Diagnostics.TargetYSubblockOutput4x4)}");
+        TestContext.Out.WriteLine($"basis scan current dequant coeffs 4x4:\n{FormatShortMatrix4x4(comparison.Diagnostics.TargetYSubblockDequantCoeffs)}");
+        TestContext.Out.WriteLine($"basis scan baseline sad={baselineSad}");
+
+        for (var sourceIndex = 0; sourceIndex < 16; sourceIndex++)
+        {
+            var coefficientValue = comparison.Diagnostics.TargetYSubblockDequantCoeffs[sourceIndex];
+            if (coefficientValue == 0)
+            {
+                continue;
+            }
+
+            var bestDestination = -1;
+            var bestSad = int.MaxValue;
+            byte[]? bestOutput = null;
+
+            for (var destinationIndex = 0; destinationIndex < 16; destinationIndex++)
+            {
+                var candidateCoeffs = comparison.Diagnostics.TargetYSubblockDequantCoeffs.ToArray();
+                candidateCoeffs[sourceIndex] = 0;
+                candidateCoeffs[destinationIndex] = coefficientValue;
+
+                var reconstructed = comparison.Diagnostics.TargetYSubblockPredicted4x4.ToArray();
+                Vp8Dct.InverseDct4x4(candidateCoeffs, reconstructed, 4);
+                var sad = ComputeBlockSad(reconstructed, comparison.ExternalRedBlock);
+                if (sad >= bestSad)
+                {
+                    continue;
+                }
+
+                bestSad = sad;
+                bestDestination = destinationIndex;
+                bestOutput = reconstructed;
+            }
+
+            TestContext.Out.WriteLine($"basis scan coeff[{sourceIndex}]={coefficientValue}: bestDestination={bestDestination}, baselineDelta={bestSad - baselineSad}");
+            if (bestOutput is not null)
+            {
+                TestContext.Out.WriteLine($"basis scan coeff[{sourceIndex}] best output 4x4:\n{FormatByteMatrix4x4(bestOutput)}");
+            }
+        }
+
+        Assert.Fail("temporary diagnostic failure to surface per-coefficient basis scan");
+    }
+
+    [Explicit]
+    [TestCase(TestName = "VP8 internal: протрассировать predictor chain для known problem macroblock")]
+    public void TraceKnownProblemPredictorChainAgainstMagickForRealWebp()
+    {
+        var chain = new[]
+        {
+            CaptureSubblockAgainstMagickForRealWebp(49, 29, 3, 3),
+            CaptureSubblockAgainstMagickForRealWebp(49, 29, 2, 3),
+            CaptureSubblockAgainstMagickForRealWebp(49, 29, 3, 2),
+            CaptureSubblockAgainstMagickForRealWebp(49, 29, 2, 2),
+            CaptureSubblockAgainstMagickForRealWebp(49, 28, 3, 3),
+            CaptureSubblockAgainstMagickForRealWebp(49, 28, 2, 3),
+            CaptureSubblockAgainstMagickForRealWebp(48, 29, 3, 3),
+        };
+
+        for (var index = 0; index < chain.Length; index++)
+        {
+            var block = chain[index];
+            var actualSad = ComputeBlockSad(block.Diagnostics.TargetYSubblockOutput4x4, block.ExternalRedBlock);
+            var predictorSad = ComputeBlockSad(block.Diagnostics.TargetYSubblockPredicted4x4, block.ExternalRedBlock);
+
+            TestContext.Out.WriteLine($"predictor chain block mb=({block.MacroblockX},{block.MacroblockY}) sb=({block.SubblockX},{block.SubblockY}) origin=({block.BlockX},{block.BlockY}) nonZero={block.Diagnostics.TargetYSubblockNonZero} rawDc={block.Diagnostics.TargetYSubblockRawDc} mode={block.Diagnostics.TargetYSubblockMode} aboveMode={block.Diagnostics.TargetYSubblockAboveMode} leftMode={block.Diagnostics.TargetYSubblockLeftMode} predictorSad={predictorSad} actualSad={actualSad}");
+            TestContext.Out.WriteLine($"predictor chain external red 4x4:\n{FormatByteMatrix4x4(block.ExternalRedBlock)}");
+            TestContext.Out.WriteLine($"predictor chain predictor 4x4:\n{FormatByteMatrix4x4(block.Diagnostics.TargetYSubblockPredicted4x4)}");
+            TestContext.Out.WriteLine($"predictor chain actual output 4x4:\n{FormatByteMatrix4x4(block.Diagnostics.TargetYSubblockOutput4x4)}");
+            TestContext.Out.WriteLine($"predictor chain dequant coeffs 4x4:\n{FormatShortMatrix4x4(block.Diagnostics.TargetYSubblockDequantCoeffs)}");
+        }
+
+        Assert.Fail("temporary diagnostic failure to surface predictor chain trace");
+    }
+
+    private void DiagnoseSymmetryRemapAgainstMagickForRealWebp(int targetMbX, int targetMbY, int targetSampleX, int targetSampleY)
+    {
+        var targetSubblockX = (targetSampleX - (targetMbX * 16)) / 4;
+        var targetSubblockY = (targetSampleY - (targetMbY * 16)) / 4;
+        var comparison = CaptureSubblockAgainstMagickForRealWebp(targetMbX, targetMbY, targetSubblockX, targetSubblockY);
+
+        var symmetryCandidates = new (string Name, Func<ReadOnlySpan<short>, short[]> Remap)[]
+        {
+            ("identity", static coeffs => coeffs.ToArray()),
+            ("transpose", Transpose4x4),
+            ("flip-horizontal", FlipHorizontal4x4),
+            ("flip-vertical", FlipVertical4x4),
+            ("rotate-180", Rotate1804x4),
+            ("rotate-90-cw", Rotate90Clockwise4x4),
+            ("rotate-90-ccw", Rotate90CounterClockwise4x4),
+            ("transpose-flip-horizontal", static coeffs => FlipHorizontal4x4(Transpose4x4(coeffs))),
+        };
+
+        var scoredCandidates = new List<(string Name, int Score, byte[] Output)>(symmetryCandidates.Length);
+        for (var index = 0; index < symmetryCandidates.Length; index++)
+        {
+            var remappedCoeffs = symmetryCandidates[index].Remap(comparison.Diagnostics.TargetYSubblockDequantCoeffs);
+            var reconstructed = comparison.Diagnostics.TargetYSubblockPredicted4x4.ToArray();
+            Vp8Dct.InverseDct4x4(remappedCoeffs, reconstructed, 4);
+            scoredCandidates.Add((
+                symmetryCandidates[index].Name,
+                ComputeBlockSad(reconstructed, comparison.ExternalRedBlock),
+                reconstructed));
+        }
+
+        var orderedCandidates = scoredCandidates.OrderBy(static candidate => candidate.Score).ToArray();
+
+        TestContext.Out.WriteLine($"symmetry remap target block origin=({comparison.BlockX},{comparison.BlockY}), sample=({targetSampleX},{targetSampleY}), macroblock=({comparison.MacroblockX},{comparison.MacroblockY}), subblock=({comparison.SubblockX},{comparison.SubblockY})");
+        TestContext.Out.WriteLine($"symmetry remap external red 4x4:\n{FormatByteMatrix4x4(comparison.ExternalRedBlock)}");
+        TestContext.Out.WriteLine($"symmetry remap predictor 4x4:\n{FormatByteMatrix4x4(comparison.Diagnostics.TargetYSubblockPredicted4x4)}");
+        TestContext.Out.WriteLine($"symmetry remap current output 4x4:\n{FormatByteMatrix4x4(comparison.Diagnostics.TargetYSubblockOutput4x4)}");
+        TestContext.Out.WriteLine($"symmetry remap current dequant coeffs 4x4:\n{FormatShortMatrix4x4(comparison.Diagnostics.TargetYSubblockDequantCoeffs)}");
+
+        for (var index = 0; index < orderedCandidates.Length; index++)
+        {
+            TestContext.Out.WriteLine($"symmetry remap candidate {orderedCandidates[index].Name} sad={orderedCandidates[index].Score}:\n{FormatByteMatrix4x4(orderedCandidates[index].Output)}");
+        }
+
+        Assert.Fail("temporary diagnostic failure to surface symmetry remap comparison");
+    }
+
+    private SubblockMagickComparison CaptureSubblockAgainstMagickForRealWebp(int macroblockX, int macroblockY, int subblockX, int subblockY)
+    {
+        var data = File.ReadAllBytes(Path.Combine(AssetsDir, "test.webp"));
+        var vp8Data = ExtractVp8Chunk(data);
+
+        var infoResult = codec!.GetInfo(data, out var info);
+        Assert.That(infoResult, Is.EqualTo(CodecResult.Success));
+
+        var diagnostics = new Vp8DecodeDiagnostics
+        {
+            TargetMacroblockX = macroblockX,
+            TargetMacroblockY = macroblockY,
+            TargetSubblockX = subblockX,
+            TargetSubblockY = subblockY,
+        };
+
+        var decoder = new Vp8Decoder();
+        using var decoded = new VideoFrameBuffer(info.Width, info.Height, VideoPixelFormat.Rgba32);
+        var frame = decoded.AsFrame();
+        var result = decoder.Decode(vp8Data, ref frame, diagnostics);
+        Assert.That(result, Is.EqualTo(CodecResult.Success));
+
+        var blockX = macroblockX * 16 + subblockX * 4;
+        var blockY = macroblockY * 16 + subblockY * 4;
+        var externalRgbaBlock = LoadMagickRgbaBlock4x4(Path.Combine(AssetsDir, "test.webp"), blockX, blockY);
+
+        return new SubblockMagickComparison(
+            macroblockX,
+            macroblockY,
+            subblockX,
+            subblockY,
+            blockX,
+            blockY,
+            diagnostics,
+            ExtractRedChannel4x4(externalRgbaBlock));
+    }
+
+    private void FindAndDiagnoseFirstDivergentMacroblockForRealWebp(bool targetSevereIfAvailable, (int MbX, int MbY, int SampleX, int SampleY)? forcedTarget = null)
     {
         const int noticeableThreshold = 16;
         const int severeThreshold = 64;
@@ -1051,20 +1423,28 @@ public sealed class Vp8DecoderTests(ILogger logger) : BenchmarkTests<Vp8DecoderT
         (int X, int Y, int MaxDiff, int AvgDiff, int SampleX, int SampleY) firstNoticeable = (-1, -1, -1, -1, -1, -1);
         (int X, int Y, int MaxDiff, int AvgDiff, int SampleX, int SampleY) firstSevere = (-1, -1, -1, -1, -1, -1);
 
-        for (var mbY = 0; mbY < macroblockRows; mbY++)
+        if (forcedTarget is null)
         {
-            for (var mbX = 0; mbX < macroblockColumns; mbX++)
+            for (var mbY = 0; mbY < macroblockRows; mbY++)
             {
-                var stats = GetMacroblockDiffStats(publicDecoded.AsReadOnlyFrame(), internalDecoded.AsReadOnlyFrame(), mbX, mbY);
-
-                if (firstNoticeable.X < 0 && stats.MaxDiff > noticeableThreshold)
+                for (var mbX = 0; mbX < macroblockColumns; mbX++)
                 {
-                    firstNoticeable = (mbX, mbY, stats.MaxDiff, stats.AvgDiff, stats.SampleX, stats.SampleY);
-                }
+                    var stats = GetMacroblockDiffStats(publicDecoded.AsReadOnlyFrame(), internalDecoded.AsReadOnlyFrame(), mbX, mbY);
 
-                if (firstSevere.X < 0 && stats.MaxDiff > severeThreshold)
-                {
-                    firstSevere = (mbX, mbY, stats.MaxDiff, stats.AvgDiff, stats.SampleX, stats.SampleY);
+                    if (firstNoticeable.X < 0 && stats.MaxDiff > noticeableThreshold)
+                    {
+                        firstNoticeable = (mbX, mbY, stats.MaxDiff, stats.AvgDiff, stats.SampleX, stats.SampleY);
+                    }
+
+                    if (firstSevere.X < 0 && stats.MaxDiff > severeThreshold)
+                    {
+                        firstSevere = (mbX, mbY, stats.MaxDiff, stats.AvgDiff, stats.SampleX, stats.SampleY);
+                    }
+
+                    if (firstNoticeable.X >= 0 && firstSevere.X >= 0)
+                    {
+                        break;
+                    }
                 }
 
                 if (firstNoticeable.X >= 0 && firstSevere.X >= 0)
@@ -1073,28 +1453,25 @@ public sealed class Vp8DecoderTests(ILogger logger) : BenchmarkTests<Vp8DecoderT
                 }
             }
 
-            if (firstNoticeable.X >= 0 && firstSevere.X >= 0)
+            Assert.That(firstNoticeable.X, Is.GreaterThanOrEqualTo(0), "Не найден даже заметный расходящийся macroblock");
+
+            TestContext.Out.WriteLine($"first noticeable macroblock=({firstNoticeable.X},{firstNoticeable.Y}), maxDiff={firstNoticeable.MaxDiff}, avgDiff={firstNoticeable.AvgDiff}, sample=({firstNoticeable.SampleX},{firstNoticeable.SampleY})");
+            TestContext.Out.WriteLine($"first noticeable public sample={FormatPixel(publicDecoded.AsReadOnlyFrame(), firstNoticeable.SampleX, firstNoticeable.SampleY)}");
+            TestContext.Out.WriteLine($"first noticeable internal sample={FormatPixel(internalDecoded.AsReadOnlyFrame(), firstNoticeable.SampleX, firstNoticeable.SampleY)}");
+
+            if (firstSevere.X >= 0)
             {
-                break;
+                TestContext.Out.WriteLine($"first severe macroblock=({firstSevere.X},{firstSevere.Y}), maxDiff={firstSevere.MaxDiff}, avgDiff={firstSevere.AvgDiff}, sample=({firstSevere.SampleX},{firstSevere.SampleY})");
+                TestContext.Out.WriteLine($"first severe public sample={FormatPixel(publicDecoded.AsReadOnlyFrame(), firstSevere.SampleX, firstSevere.SampleY)}");
+                TestContext.Out.WriteLine($"first severe internal sample={FormatPixel(internalDecoded.AsReadOnlyFrame(), firstSevere.SampleX, firstSevere.SampleY)}");
             }
         }
 
-        Assert.That(firstNoticeable.X, Is.GreaterThanOrEqualTo(0), "Не найден даже заметный расходящийся macroblock");
-
-        TestContext.Out.WriteLine($"first noticeable macroblock=({firstNoticeable.X},{firstNoticeable.Y}), maxDiff={firstNoticeable.MaxDiff}, avgDiff={firstNoticeable.AvgDiff}, sample=({firstNoticeable.SampleX},{firstNoticeable.SampleY})");
-        TestContext.Out.WriteLine($"first noticeable public sample={FormatPixel(publicDecoded.AsReadOnlyFrame(), firstNoticeable.SampleX, firstNoticeable.SampleY)}");
-        TestContext.Out.WriteLine($"first noticeable internal sample={FormatPixel(internalDecoded.AsReadOnlyFrame(), firstNoticeable.SampleX, firstNoticeable.SampleY)}");
-
-        if (firstSevere.X >= 0)
-        {
-            TestContext.Out.WriteLine($"first severe macroblock=({firstSevere.X},{firstSevere.Y}), maxDiff={firstSevere.MaxDiff}, avgDiff={firstSevere.AvgDiff}, sample=({firstSevere.SampleX},{firstSevere.SampleY})");
-            TestContext.Out.WriteLine($"first severe public sample={FormatPixel(publicDecoded.AsReadOnlyFrame(), firstSevere.SampleX, firstSevere.SampleY)}");
-            TestContext.Out.WriteLine($"first severe internal sample={FormatPixel(internalDecoded.AsReadOnlyFrame(), firstSevere.SampleX, firstSevere.SampleY)}");
-        }
-
-        var target = targetSevereIfAvailable && firstSevere.X >= 0
-            ? firstSevere
-            : firstNoticeable;
+        var target = forcedTarget is { } explicitTarget
+            ? (X: explicitTarget.MbX, Y: explicitTarget.MbY, MaxDiff: -1, AvgDiff: -1, SampleX: explicitTarget.SampleX, SampleY: explicitTarget.SampleY)
+            : targetSevereIfAvailable && firstSevere.X >= 0
+                ? firstSevere
+                : firstNoticeable;
 
         var targetMbX = target.X;
         var targetMbY = target.Y;
@@ -1366,6 +1743,38 @@ public sealed class Vp8DecoderTests(ILogger logger) : BenchmarkTests<Vp8DecoderT
         TestContext.Out.WriteLine($"diagnostic target macroblock=({targetMbX},{targetMbY}), subblock=({targetSubblockX},{targetSubblockY}), sample=({targetSampleX},{targetSampleY})");
         TestContext.Out.WriteLine($"diagnostic public sample={FormatPixel(publicDecoded.AsReadOnlyFrame(), targetSampleX, targetSampleY)}");
         TestContext.Out.WriteLine($"diagnostic internal sample={FormatPixel(diagnosedDecoded.AsReadOnlyFrame(), targetSampleX, targetSampleY)}");
+        TestContext.Out.WriteLine($"diagnostic concise target: ctx={targetDiagnostics.TargetYSubblockInitialContext}, predY={targetDiagnostics.TargetYSubblockPredictedTopLeft}, outY={targetDiagnostics.TargetYSubblockOutputTopLeft}, nonZero={targetDiagnostics.TargetYSubblockNonZero}, rawDc={targetDiagnostics.TargetYSubblockRawDc}, refStyleNonZero={targetDiagnostics.TargetYSubblockReferenceStyleNonZero}, refStyleRawDc={targetDiagnostics.TargetYSubblockReferenceStyleRawDc}");
+        TestContext.Out.WriteLine($"diagnostic concise target no coeff updates: ctx={noCoeffUpdateTargetDiagnostics.TargetYSubblockInitialContext}, predY={noCoeffUpdateTargetDiagnostics.TargetYSubblockPredictedTopLeft}, outY={noCoeffUpdateTargetDiagnostics.TargetYSubblockOutputTopLeft}, nonZero={noCoeffUpdateTargetDiagnostics.TargetYSubblockNonZero}, rawDc={noCoeffUpdateTargetDiagnostics.TargetYSubblockRawDc}");
+        if (previousSubblockDiagnostics is not null)
+        {
+            TestContext.Out.WriteLine($"diagnostic concise previous subblock: ctx={previousSubblockDiagnostics.TargetYSubblockInitialContext}, predY={previousSubblockDiagnostics.TargetYSubblockPredictedTopLeft}, outY={previousSubblockDiagnostics.TargetYSubblockOutputTopLeft}, nonZero={previousSubblockDiagnostics.TargetYSubblockNonZero}, rawDc={previousSubblockDiagnostics.TargetYSubblockRawDc}");
+        }
+
+        if (leftMacroblockBoundaryDiagnostics is not null)
+        {
+            TestContext.Out.WriteLine($"diagnostic concise left boundary: ctx={leftMacroblockBoundaryDiagnostics.TargetYSubblockInitialContext}, predY={leftMacroblockBoundaryDiagnostics.TargetYSubblockPredictedTopLeft}, outY={leftMacroblockBoundaryDiagnostics.TargetYSubblockOutputTopLeft}, nonZero={leftMacroblockBoundaryDiagnostics.TargetYSubblockNonZero}, rawDc={leftMacroblockBoundaryDiagnostics.TargetYSubblockRawDc}");
+        }
+
+        if (topRowBlock0Diagnostics is not null)
+        {
+            TestContext.Out.WriteLine($"diagnostic concise top-row block0: ctx={topRowBlock0Diagnostics.TargetYSubblockInitialContext}, predY={topRowBlock0Diagnostics.TargetYSubblockPredictedTopLeft}, outY={topRowBlock0Diagnostics.TargetYSubblockOutputTopLeft}, nonZero={topRowBlock0Diagnostics.TargetYSubblockNonZero}, rawDc={topRowBlock0Diagnostics.TargetYSubblockRawDc}");
+        }
+
+        if (topRowBlock1Diagnostics is not null)
+        {
+            TestContext.Out.WriteLine($"diagnostic concise top-row block1: ctx={topRowBlock1Diagnostics.TargetYSubblockInitialContext}, predY={topRowBlock1Diagnostics.TargetYSubblockPredictedTopLeft}, outY={topRowBlock1Diagnostics.TargetYSubblockOutputTopLeft}, nonZero={topRowBlock1Diagnostics.TargetYSubblockNonZero}, rawDc={topRowBlock1Diagnostics.TargetYSubblockRawDc}");
+        }
+
+        if (preSuspiciousTopRowDiagnostics is not null)
+        {
+            TestContext.Out.WriteLine($"diagnostic concise top-row block2: ctx={preSuspiciousTopRowDiagnostics.TargetYSubblockInitialContext}, predY={preSuspiciousTopRowDiagnostics.TargetYSubblockPredictedTopLeft}, outY={preSuspiciousTopRowDiagnostics.TargetYSubblockOutputTopLeft}, nonZero={preSuspiciousTopRowDiagnostics.TargetYSubblockNonZero}, rawDc={preSuspiciousTopRowDiagnostics.TargetYSubblockRawDc}");
+        }
+
+        if (suspiciousTopRowDiagnostics is not null)
+        {
+            TestContext.Out.WriteLine($"diagnostic concise top-row block3: ctx={suspiciousTopRowDiagnostics.TargetYSubblockInitialContext}, predY={suspiciousTopRowDiagnostics.TargetYSubblockPredictedTopLeft}, outY={suspiciousTopRowDiagnostics.TargetYSubblockOutputTopLeft}, nonZero={suspiciousTopRowDiagnostics.TargetYSubblockNonZero}, rawDc={suspiciousTopRowDiagnostics.TargetYSubblockRawDc}, refStyleNonZero={suspiciousTopRowDiagnostics.TargetYSubblockReferenceStyleNonZero}, refStyleRawDc={suspiciousTopRowDiagnostics.TargetYSubblockReferenceStyleRawDc}");
+        }
+
         TestContext.Out.WriteLine($"diagnostic filter: normal={targetDiagnostics.FilterUseNormal}, level={targetDiagnostics.FilterLevel}, sharpness={targetDiagnostics.FilterSharpness}, adjust={targetDiagnostics.FilterAdjustEnabled}, refDelta=[{string.Join(',', targetDiagnostics.FilterRefDelta)}], modeDelta=[{string.Join(',', targetDiagnostics.FilterModeDelta)}], segmentEnabled={targetDiagnostics.SegmentEnabled}, segmentFilter=[{string.Join(',', targetDiagnostics.SegmentFilterLevel)}]");
         TestContext.Out.WriteLine($"diagnostic quant: baseQp={targetDiagnostics.BaseQp}, segmentQuant=[{string.Join(',', targetDiagnostics.SegmentQuantizerLevel)}], targetY1=({targetDiagnostics.TargetY1DcDequant},{targetDiagnostics.TargetY1AcDequant}), targetY2=({targetDiagnostics.TargetY2DcDequant},{targetDiagnostics.TargetY2AcDequant}), targetUv=({targetDiagnostics.TargetUvDcDequant},{targetDiagnostics.TargetUvAcDequant})");
         TestContext.Out.WriteLine($"diagnostic mb segment={targetDiagnostics.TargetMacroblockSegment}, modes: Y={targetDiagnostics.FirstMacroblockYMode}, UV={targetDiagnostics.FirstMacroblockUvMode}, skip={targetDiagnostics.FirstMacroblockIsSkip}");
@@ -1933,6 +2342,194 @@ public sealed class Vp8DecoderTests(ILogger logger) : BenchmarkTests<Vp8DecoderT
         return transposed;
     }
 
+    private static short[] FlipHorizontal4x4(ReadOnlySpan<short> values)
+    {
+        var remapped = new short[16];
+        for (var row = 0; row < 4; row++)
+        {
+            for (var column = 0; column < 4; column++)
+            {
+                remapped[(row * 4) + column] = values[(row * 4) + (3 - column)];
+            }
+        }
+
+        return remapped;
+    }
+
+    private static short[] FlipVertical4x4(ReadOnlySpan<short> values)
+    {
+        var remapped = new short[16];
+        for (var row = 0; row < 4; row++)
+        {
+            for (var column = 0; column < 4; column++)
+            {
+                remapped[(row * 4) + column] = values[((3 - row) * 4) + column];
+            }
+        }
+
+        return remapped;
+    }
+
+    private static short[] Rotate1804x4(ReadOnlySpan<short> values)
+    {
+        var remapped = new short[16];
+        for (var row = 0; row < 4; row++)
+        {
+            for (var column = 0; column < 4; column++)
+            {
+                remapped[(row * 4) + column] = values[((3 - row) * 4) + (3 - column)];
+            }
+        }
+
+        return remapped;
+    }
+
+    private static short[] Rotate90Clockwise4x4(ReadOnlySpan<short> values)
+    {
+        var remapped = new short[16];
+        for (var row = 0; row < 4; row++)
+        {
+            for (var column = 0; column < 4; column++)
+            {
+                remapped[(row * 4) + column] = values[((3 - column) * 4) + row];
+            }
+        }
+
+        return remapped;
+    }
+
+    private static short[] Rotate90CounterClockwise4x4(ReadOnlySpan<short> values)
+    {
+        var remapped = new short[16];
+        for (var row = 0; row < 4; row++)
+        {
+            for (var column = 0; column < 4; column++)
+            {
+                remapped[(row * 4) + column] = values[(column * 4) + (3 - row)];
+            }
+        }
+
+        return remapped;
+    }
+
+    private static int ComputeBlockSad(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
+    {
+        var total = 0;
+        for (var index = 0; index < 16; index++)
+        {
+            total += Math.Abs(left[index] - right[index]);
+        }
+
+        return total;
+    }
+
+    private static byte[] ExtractRedChannel4x4(ReadOnlySpan<byte> rgbaBlock)
+    {
+        if (rgbaBlock.Length != 64)
+        {
+            throw new InvalidOperationException($"Expected 64 RGBA bytes for a 4x4 block, got {rgbaBlock.Length}.");
+        }
+
+        var red = new byte[16];
+        for (var index = 0; index < 16; index++)
+        {
+            red[index] = rgbaBlock[index * 4];
+        }
+
+        return red;
+    }
+
+    private static byte[] LoadMagickRgbaBlock4x4(string imagePath, int startX, int startY)
+    {
+        using var process = new Process();
+        process.StartInfo = new ProcessStartInfo
+        {
+            FileName = "magick",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        process.StartInfo.ArgumentList.Add(imagePath);
+        process.StartInfo.ArgumentList.Add("-crop");
+        process.StartInfo.ArgumentList.Add($"4x4+{startX}+{startY}");
+        process.StartInfo.ArgumentList.Add("rgba:-");
+
+        if (!process.Start())
+        {
+            throw new InvalidOperationException("Failed to start ImageMagick process.");
+        }
+
+        using var output = new MemoryStream();
+        process.StandardOutput.BaseStream.CopyTo(output);
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"ImageMagick failed with exit code {process.ExitCode}: {error}");
+        }
+
+        var bytes = output.ToArray();
+        if (bytes.Length != 64)
+        {
+            throw new InvalidOperationException($"Expected 64 RGBA bytes from ImageMagick, got {bytes.Length}.");
+        }
+
+        return bytes;
+    }
+
+    private static byte[] LoadMagickRgbaImage(string imagePath, int width, int height)
+    {
+        using var process = new Process();
+        process.StartInfo = new ProcessStartInfo
+        {
+            FileName = "magick",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        process.StartInfo.ArgumentList.Add(imagePath);
+        process.StartInfo.ArgumentList.Add("rgba:-");
+
+        if (!process.Start())
+        {
+            throw new InvalidOperationException("Failed to start ImageMagick process.");
+        }
+
+        using var output = new MemoryStream();
+        process.StandardOutput.BaseStream.CopyTo(output);
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"ImageMagick failed with exit code {process.ExitCode}: {error}");
+        }
+
+        var bytes = output.ToArray();
+        var expectedLength = width * height * 4;
+        if (bytes.Length != expectedLength)
+        {
+            throw new InvalidOperationException($"Expected {expectedLength} RGBA bytes from ImageMagick, got {bytes.Length}.");
+        }
+
+        return bytes;
+    }
+
+    private readonly record struct SubblockMagickComparison(
+        int MacroblockX,
+        int MacroblockY,
+        int SubblockX,
+        int SubblockY,
+        int BlockX,
+        int BlockY,
+        Vp8DecodeDiagnostics Diagnostics,
+        byte[] ExternalRedBlock);
+
     private static (int MaxDiff, int AvgDiff, int SampleX, int SampleY) GetMacroblockDiffStats(ReadOnlyVideoFrame expected, ReadOnlyVideoFrame actual, int macroblockX, int macroblockY)
     {
         var startX = macroblockX * 16;
@@ -1973,6 +2570,53 @@ public sealed class Vp8DecoderTests(ILogger logger) : BenchmarkTests<Vp8DecoderT
         }
 
         return (maxDiff, pixelCount > 0 ? diffSum / pixelCount : 0, sampleX, sampleY);
+    }
+
+    private static (int MaxDiff, int AvgDiff, int SampleX, int SampleY) GetMacroblockDiffStats(byte[] expectedRgba, int width, int height, ReadOnlyVideoFrame actual, int macroblockX, int macroblockY)
+    {
+        var startX = macroblockX * 16;
+        var startY = macroblockY * 16;
+        var endX = Math.Min(startX + 16, width);
+        var endY = Math.Min(startY + 16, height);
+        var maxDiff = 0;
+        var diffSum = 0;
+        var sampleX = startX;
+        var sampleY = startY;
+        var pixelCount = 0;
+
+        for (var y = startY; y < endY; y++)
+        {
+            var actualRow = actual.PackedData.GetRow(y);
+            for (var x = startX; x < endX; x++)
+            {
+                var offset = x * 4;
+                var diff = Math.Max(
+                    Math.Abs(expectedRgba[((y * width) + x) * 4] - actualRow[offset]),
+                    Math.Max(
+                        Math.Abs(expectedRgba[((y * width) + x) * 4 + 1] - actualRow[offset + 1]),
+                        Math.Abs(expectedRgba[((y * width) + x) * 4 + 2] - actualRow[offset + 2])));
+
+                diffSum += diff;
+                pixelCount++;
+
+                if (diff <= maxDiff)
+                {
+                    continue;
+                }
+
+                maxDiff = diff;
+                sampleX = x;
+                sampleY = y;
+            }
+        }
+
+        return (maxDiff, pixelCount > 0 ? diffSum / pixelCount : 0, sampleX, sampleY);
+    }
+
+    private static string FormatRgbaPixel(byte[] rgba, int width, int x, int y)
+    {
+        var offset = ((y * width) + x) * 4;
+        return $"{rgba[offset]},{rgba[offset + 1]},{rgba[offset + 2]},{rgba[offset + 3]}";
     }
 
     private static void AssertPixelCloseToSource(ReadOnlyVideoFrame expected, ReadOnlyVideoFrame actual, int x, int y, int tolerance)

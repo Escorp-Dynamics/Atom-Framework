@@ -6,6 +6,11 @@
 public sealed class ProxyScrapeProviderOptions
 {
     /// <summary>
+    /// Максимальное количество стартов запросов в секунду для одного provider instance.
+    /// </summary>
+    public int RequestsPerSecondLimit { get; init; } = ProxyScrapeProvider.DefaultRequestsPerSecondLimit;
+
+    /// <summary>
     /// Протокол прокси.
     /// </summary>
     public string Protocol { get; init; } = "http";

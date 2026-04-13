@@ -622,21 +622,7 @@ public sealed class MexcRestClient : IMarketRestClient, IDisposable
         var orderType = price.HasValue ? "LIMIT" : "MARKET";
         var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
 
-        var sb = new StringBuilder();
-        sb.Append("symbol=").Append(Uri.EscapeDataString(assetId));
-        sb.Append("&side=").Append(sideStr);
-        sb.Append("&type=").Append(orderType);
-        sb.Append("&quantity=").Append(quantity.ToString("G", CultureInfo.InvariantCulture));
-
-        if (price.HasValue)
-        {
-            sb.Append("&price=").Append(price.Value.ToString("G", CultureInfo.InvariantCulture));
-            sb.Append("&timeInForce=GTC");
-        }
-
-        sb.Append("&timestamp=").Append(ts);
-
-        var queryString = sb.ToString();
+        var queryString = BuildCreateOrderQueryString(assetId, sideStr, orderType, quantity, price, ts);
         var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v3/order?{queryString}");
         authenticator.SignRequest(request, queryString);
 
@@ -652,6 +638,24 @@ public sealed class MexcRestClient : IMarketRestClient, IDisposable
         using var doc = JsonDocument.Parse(json);
 
         return doc.RootElement.TryGetProperty("orderId", out var orderId) ? MarketJsonParsingHelpers.TryGetString(orderId) : null;
+    }
+
+    private static string BuildCreateOrderQueryString(string assetId, string side, string orderType, double quantity, double? price, string timestamp)
+    {
+        using var sb = new Atom.Text.ValueStringBuilder();
+        sb.Append("symbol=").Append(Uri.EscapeDataString(assetId));
+        sb.Append("&side=").Append(side);
+        sb.Append("&type=").Append(orderType);
+        sb.Append("&quantity=").Append(quantity.ToString("G", CultureInfo.InvariantCulture));
+
+        if (price.HasValue)
+        {
+            sb.Append("&price=").Append(price.Value.ToString("G", CultureInfo.InvariantCulture));
+            sb.Append("&timeInForce=GTC");
+        }
+
+        sb.Append("&timestamp=").Append(timestamp);
+        return sb.ToString();
     }
 
     /// <inheritdoc />
