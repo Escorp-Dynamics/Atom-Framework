@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<AssemblyName>Escorp.Atom.Net.Browsing.WebDriver</AssemblyName>
@@ -92,22 +92,45 @@
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
 
+	<Target Name="EnsureNodeAvailable"
+			BeforeTargets="PrepareExtensionRuntimeDependencies;PrepareExtensionRuntimeWorkingDirectories"
+			Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')">
+		<!-- Hard fail early with a human-readable message instead of mysterious MSB3073 + exit 127.
+		     This is the most common cause when people run `dotnet build/pack/publish -c Release`
+		     on a machine that has .NET but Node.js/npm is not in PATH or not installed. -->
+		<Exec Command="node --version"
+		      ConsoleToMSBuild="true"
+		      StandardOutputImportance="high"
+		      StandardErrorImportance="high" />
+		<Exec Command="npm --version"
+		      ConsoleToMSBuild="true"
+		      StandardOutputImportance="high"
+		      StandardErrorImportance="high" />
+	</Target>
+
 	<Target Name="PrepareExtensionRuntimeDependencies" BeforeTargets="Build"
-		Condition="Exists('$(ExtensionRuntimeDirectory)/package.json') AND (!Exists('$(ExtensionRuntimeDirectory)/node_modules/typescript/package.json') OR !Exists('$(ExtensionRuntimeDirectory)/node_modules/esbuild/package.json') OR !Exists('$(ExtensionRuntimeDirectory)/node_modules/web-ext/package.json'))">
-		<Exec Command="npm --prefix &quot;$(ExtensionRuntimeDirectory)&quot; install" />
+			Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')">
+		<!-- Use 'ci' (reproducible from package-lock.json). Trigger if lock marker or tsc binary are missing.
+		     This fixes the previous brittle condition that only looked for typescript/esbuild package.json files
+		     (which could survive a failed/partial install and still cause "tsc: not found" → exit 127). -->
+		<Exec Command="npm --prefix &quot;$(ExtensionRuntimeDirectory)&quot; ci"
+		      Condition="!Exists('$(ExtensionRuntimeDirectory)/node_modules/.package-lock.json') OR !Exists('$(ExtensionRuntimeDirectory)/node_modules/.bin/tsc')" />
 	</Target>
 
 	<Target Name="PrepareExtensionRuntimeWorkingDirectories"
 		BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems;Build"
 		DependsOnTargets="PrepareExtensionRuntimeDependencies"
 		Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')">
-		<Exec Command="npm --prefix &quot;$(ExtensionRuntimeDirectory)&quot; run typecheck" />
+		<!-- Use npm exec so that tsc is resolved from local node_modules/.bin even if global PATH is incomplete.
+		     This prevents exit code 127 "command not found" after a partial or skipped npm install. -->
+		<Exec Command="npm --prefix &quot;$(ExtensionRuntimeDirectory)&quot; exec -- tsc -p tsconfig.json --pretty false" />
+		<!-- Use `npm exec` so that the exact Node binary that `npm` discovered is used.
+		     Prevents "node: not found" / exit 127 when only npm is in PATH but the full node is not. -->
+		<Exec Command="npm --prefix &quot;$(ExtensionRuntimeDirectory)&quot; exec -- node &quot;$(ExtensionRuntimeDirectory)/scripts/build-background-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;" />
 		<Exec
-			Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/build-background-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;" />
+			Command="npm --prefix &quot;$(ExtensionRuntimeDirectory)&quot; exec -- node &quot;$(ExtensionRuntimeDirectory)/scripts/build-content-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;" />
 		<Exec
-			Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/build-content-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;" />
-		<Exec
-			Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/sync-working-layout.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot; --chrome-working-dir &quot;$(ExtensionWorkingDirectory)&quot; --firefox-working-dir &quot;$(ExtensionFirefoxWorkingDirectory)&quot;" />
+			Command="npm --prefix &quot;$(ExtensionRuntimeDirectory)&quot; exec -- node &quot;$(ExtensionRuntimeDirectory)/scripts/sync-working-layout.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot; --chrome-working-dir &quot;$(ExtensionWorkingDirectory)&quot; --firefox-working-dir &quot;$(ExtensionFirefoxWorkingDirectory)&quot;" />
 		<ItemGroup>
 			<GeneratedChromeExtensionFiles Include="$(ExtensionWorkingDirectory)\**\*" />
 			<GeneratedFirefoxExtensionFiles Include="$(ExtensionFirefoxWorkingDirectory)\**\*" />
