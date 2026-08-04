@@ -40,6 +40,13 @@ jobs:
         # (missing local source) в ошибку restore. Пустые каталоги устраняют проблему.
         run: mkdir -p .tmp/local-nuget-feed .tmp/nuget-packages
 
+      - name: Install virtual display backend
+        # Значительная часть legacy NUnit-suite запускает WebBrowser.LaunchAsync,
+        # а VirtualDisplay uses xpra + Xvfb on Linux. ubuntu-latest no longer ships xpra.
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends xpra xvfb
+
       - name: Restore WebDriver test suite
         run: dotnet restore Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj
 
