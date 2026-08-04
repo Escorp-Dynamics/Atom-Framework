@@ -710,8 +710,9 @@ public sealed class VirtualDisplay : IAsyncDisposable
             {
                 "start",
                 display,
-                    "--daemon=no",
-                    "--splash=no",
+                "--daemon=no",
+                // --splash появился не во всех поддерживаемых пакетах xpra (в частности,
+                // его нет в Ubuntu 24.04). Для non-interactive server-сеанса он не нужен.
                 "--attach=no",
                 "--mdns=no",
                 "--notifications=no",
