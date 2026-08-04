@@ -50,6 +50,13 @@ jobs:
           cache: npm
           cache-dependency-path: Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime/package-lock.json
 
+      - name: Prepare local NuGet feed directories
+        # NuGet.config указывает локальный фид .tmp/local-nuget-feed, который игнорируется
+        # git и отсутствует в чистом checkout; TreatWarningsAsErrors превращает NU1301
+        # (missing local source) в ошибку implicit restore внутри dotnet build.
+        # Пустые каталоги устраняют проблему.
+        run: mkdir -p .tmp/local-nuget-feed .tmp/nuget-packages
+
       - name: Build WebDriver and materialize unsigned Firefox package
         run: dotnet build "$PROJECT_PATH" -c "${{ inputs.configuration }}" -f "${{ inputs.targetFramework }}" -p:CreateFirefoxExtensionPackageOnBuild=true
 
