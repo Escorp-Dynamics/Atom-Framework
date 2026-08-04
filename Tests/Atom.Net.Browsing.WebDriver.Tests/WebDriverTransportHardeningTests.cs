@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Net.WebSockets;
@@ -149,7 +149,12 @@ public sealed class WebDriverTransportHardeningTests
         {
             foreignRequest.Headers.Host = "hardening-evil.example.test";
             using var foreignResponse = await client.SendAsync(foreignRequest).ConfigureAwait(false);
-            Assert.That(foreignResponse.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden), "DNS-rebinding через чужой Host должен отклоняться");
+            // На Unix HttpListener с точным loopback-prefix может отвергнуть чужой Host
+            // ещё до managed handler и вернуть 404; в обоих случаях маршрут недоступен и
+            // DNS-rebinding не достигает utility/bridge endpoint-ов.
+            Assert.That(foreignResponse.StatusCode,
+                Is.EqualTo(HttpStatusCode.Forbidden).Or.EqualTo(HttpStatusCode.NotFound),
+                "DNS-rebinding через чужой Host должен отклоняться");
         }
 
         using (var loopbackRequest = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{server.Port}/health"))
@@ -795,32 +800,36 @@ public sealed class WebDriverTransportHardeningTests
             }
         }
 
-        private static async Task<byte[]?> ReadHeadersAsync(NetworkStream stream)
+        private static async Task<byte[]?> ReadHeadersAsync(System.Net.Sockets.NetworkStream stream)
         {
             using var buffer = new MemoryStream();
-            var chunk = new byte[1024];
+            var single = new byte[1];
             while (true)
             {
-                var read = await stream.ReadAsync(chunk).ConfigureAwait(false);
+                var read = await stream.ReadAsync(single).ConfigureAwait(false);
                 if (read <= 0)
                     return buffer.Length == 0 ? null : buffer.ToArray();
 
-                buffer.Write(chunk.AsSpan(0, read));
-                var accumulated = buffer.ToArray();
-                for (var index = 3; index < accumulated.Length; index++)
+                // Не читаем крупным буфером: TCP вправе отдать часть chunked-body в том же
+                // ReadAsync, что и заголовки. Эти байты должны остаться в NetworkStream для
+                // ReadRequestBodyAsync, иначе loopback-origin ждёт уже потерянный первый chunk.
+                buffer.WriteByte(single[0]);
+                if (buffer.Length < 4)
+                    continue;
+
+                var accumulated = buffer.GetBuffer();
+                var length = checked((int)buffer.Length);
+                if (accumulated[length - 1] == (byte)'\n'
+                    && accumulated[length - 2] == (byte)'\r'
+                    && accumulated[length - 3] == (byte)'\n'
+                    && accumulated[length - 4] == (byte)'\r')
                 {
-                    if (accumulated[index] == (byte)'\n'
-                        && accumulated[index - 1] == (byte)'\r'
-                        && accumulated[index - 2] == (byte)'\n'
-                        && accumulated[index - 3] == (byte)'\r')
-                    {
-                        return accumulated;
-                    }
+                    return buffer.ToArray();
                 }
             }
         }
 
-        private static async Task<byte[]> ReadRequestBodyAsync(NetworkStream stream, string headers)
+        private static async Task<byte[]> ReadRequestBodyAsync(System.Net.Sockets.NetworkStream stream, string headers)
         {
             if (headers.Contains("Transfer-Encoding: chunked", StringComparison.OrdinalIgnoreCase))
                 return await ReadChunkedAsync(stream).ConfigureAwait(false);
@@ -856,7 +865,7 @@ public sealed class WebDriverTransportHardeningTests
             return int.TryParse(rawValue, out var parsed) ? parsed : 0;
         }
 
-        private static async Task<byte[]> ReadChunkedAsync(NetworkStream stream)
+        private static async Task<byte[]> ReadChunkedAsync(System.Net.Sockets.NetworkStream stream)
         {
             using var body = new MemoryStream();
             while (true)
@@ -901,7 +910,7 @@ public sealed class WebDriverTransportHardeningTests
             return body.ToArray();
         }
 
-        private static async Task<string> ReadAsciiLineAsync(NetworkStream stream)
+        private static async Task<string> ReadAsciiLineAsync(System.Net.Sockets.NetworkStream stream)
         {
             using var line = new MemoryStream();
             var single = new byte[1];

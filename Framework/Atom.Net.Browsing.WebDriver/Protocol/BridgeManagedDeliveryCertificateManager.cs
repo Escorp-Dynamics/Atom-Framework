@@ -229,7 +229,18 @@ internal sealed class BridgeManagedDeliveryCertificateManager
         var serialNumber = new byte[16];
         RandomNumberGenerator.Fill(serialNumber);
 
-        using var created = request.Create(authorityCertificate, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(2), serialNumber);
+        // CertificateRequest.Create(X509Certificate2, ...) допускает только leaf с тем же
+        // алгоритмом открытого ключа, что и issuer. Root намеренно RSA, а hot-path leaf —
+        // ECDSA, поэтому подпись создаётся явным RSA generator-ом root-ключа.
+        using var authorityKey = authorityCertificate.GetRSAPrivateKey()
+            ?? throw new CryptographicException("Корневой сертификат managed-delivery не содержит RSA закрытый ключ.");
+        var signatureGenerator = X509SignatureGenerator.CreateForRSA(authorityKey, RSASignaturePadding.Pkcs1);
+        using var created = request.Create(
+            authorityCertificate.SubjectName,
+            signatureGenerator,
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddYears(2),
+            serialNumber);
         using var withPrivateKey = created.CopyWithPrivateKey(key);
         var export = withPrivateKey.Export(X509ContentType.Pfx);
         PersistCertificateFile(path, export);

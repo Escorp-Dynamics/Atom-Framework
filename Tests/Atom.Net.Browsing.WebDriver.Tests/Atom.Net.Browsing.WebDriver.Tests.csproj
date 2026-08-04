@@ -11,6 +11,9 @@
         <IsPackable>false</IsPackable>
         <IsTestProject>true</IsTestProject>
         <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+        <!-- .NET 10 по умолчанию скрывает детали test failures в отдельном .log;
+             оставляем их в stdout, чтобы обязательный CI-check был диагностируемым. -->
+        <TestingPlatformShowTestsFailure>true</TestingPlatformShowTestsFailure>
         <TrimMode>link</TrimMode>
     </PropertyGroup>
 
