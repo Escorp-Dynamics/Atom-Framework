@@ -12,17 +12,9 @@ on:
       - 'Directory.Build.props'
       - 'Directory.Build.targets'
       - 'NuGet.config'
+  # Без path-фильтра: обязательные проверки ruleset должны приходить на ЛЮБОЙ PR в master,
+  # иначе PR без WebDriver-изменений зависнет в состоянии Expected.
   pull_request:
-    paths:
-      - 'Framework/Atom.Net.Browsing.WebDriver/**'
-      - 'Tests/Atom.Net.Browsing.WebDriver.Tests/**'
-      - 'Tests/Atom.Net.Browsing.Tests/**'
-      - '.github/workflows/webdriver-tests.yml'
-      - 'global.json'
-      - 'Framework/Directory.Build.props'
-      - 'Directory.Build.props'
-      - 'Directory.Build.targets'
-      - 'NuGet.config'
   workflow_dispatch:
 
 permissions:
@@ -41,6 +33,12 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
+      - name: Prepare local NuGet feed directories
+        # NuGet.config указывает локальный фид .tmp/local-nuget-feed, который игнорируется
+        # git и отсутствует в чистом checkout; TreatWarningsAsErrors превращает NU1301
+        # (missing local source) в ошибку restore. Пустые каталоги устраняют проблему.
+        run: mkdir -p .tmp/local-nuget-feed .tmp/nuget-packages
 
       - name: Restore WebDriver test suite
         run: dotnet restore Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj
