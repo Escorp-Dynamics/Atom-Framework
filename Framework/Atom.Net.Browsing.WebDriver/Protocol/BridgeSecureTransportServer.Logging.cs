@@ -24,4 +24,7 @@ internal static partial class BridgeSecureTransportServerLogs
 
     [LoggerMessage(EventId = 1845, Level = LogLevel.Warning, Message = "WSS transport клиент отключился до завершения upgrade на порту {Port}")]
     public static partial void LogSecureTransportClientDisconnected(this ILogger logger, int port, Exception exception);
+
+    [LoggerMessage(EventId = 1849, Level = LogLevel.Warning, Message = "WSS transport обработчик соединения завершился непредвиденной ошибкой на порту {Port}")]
+    public static partial void LogSecureTransportConnectionFailed(this ILogger logger, int port, Exception exception);
 }

@@ -6,6 +6,10 @@ export class InMemoryRequestCorrelationStore implements IRequestCorrelationStore
 
     public register(message: BridgeMessage, timeoutMs: number): PendingBridgeRequest {
         const now = Date.now();
+        // Амортизированная уборка: каждая регистрация заодно вычищает просроченные записи,
+        // чтобы хранилище не разрасталось, даже если внешний вызывающий не делает sweep.
+        this.sweepExpired(now);
+
         const request: PendingBridgeRequest = {
             messageId: message.id,
             tabId: message.tabId,
@@ -51,6 +55,19 @@ export class InMemoryRequestCorrelationStore implements IRequestCorrelationStore
         }
 
         return failedRequests;
+    }
+
+    public sweepExpired(now: number = Date.now()): readonly PendingBridgeRequest[] {
+        const expiredRequests: PendingBridgeRequest[] = [];
+
+        for (const [messageId, request] of this.pendingRequests) {
+            if (request.timeoutAt <= now) {
+                this.pendingRequests.delete(messageId);
+                expiredRequests.push(request);
+            }
+        }
+
+        return expiredRequests;
     }
 
     public get(messageId: string): PendingBridgeRequest | null {

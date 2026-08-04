@@ -97,6 +97,7 @@ internal sealed class BridgeManagedDeliveryCertificateManager
 
         var directory = Path.Combine(basePath, "Escorp", "Atom", "WebDriver");
         Directory.CreateDirectory(directory);
+        TryRestrictDirectoryPermissions(directory);
         certificateDirectory = directory;
         return directory;
     }
@@ -149,24 +150,66 @@ internal sealed class BridgeManagedDeliveryCertificateManager
 
         using var created = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(5));
         var export = created.Export(X509ContentType.Pfx);
-        File.WriteAllBytes(path, export);
+        PersistCertificateFile(path, export);
         return X509CertificateLoader.LoadPkcs12(export, password: null);
+    }
+
+    private static void PersistCertificateFile(string path, byte[] export)
+    {
+        File.WriteAllBytes(path, export);
+        TryRestrictFilePermissions(path);
+    }
+
+    // PFX содержит закрытый ключ без пароля, поэтому на Unix доступ ограничивается владельцем
+    // (best-effort: на Windows файл уже защищён DACL профиля пользователя).
+    private static void TryRestrictFilePermissions(string path)
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        try
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PlatformNotSupportedException)
+        {
+            Observe(ex);
+        }
+    }
+
+    // Каталог с PFX на Unix делается доступным только владельцу (best-effort).
+    private static void TryRestrictDirectoryPermissions(string directory)
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        try
+        {
+            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PlatformNotSupportedException)
+        {
+            Observe(ex);
+        }
     }
 
     private static X509Certificate2 CreateAndPersistServerCertificate(string path, X509Certificate2 authorityCertificate, string host)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
-        using var rsa = RSA.Create(2048);
-        var request = new CertificateRequest("CN=Atom Local WebDriver Loopback", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        // ECDSA P-256: сертификат хоста генерируется на hot-path CONNECT под общим gate,
+        // поэтому длительная генерация RSA-2048 (сотни миллисекунд на хост) сериализовала бы
+        // установление туннелей всех вкладок. ECDHE-ECDSA покрывается DigitalSignature;
+        // KeyEncipherment для ECDSA-ключа неприменим.
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest("CN=Atom Local WebDriver Loopback", key, HashAlgorithmName.SHA256);
         request.CertificateExtensions.Add(new X509BasicConstraintsExtension(
             certificateAuthority: false,
             hasPathLengthConstraint: false,
             pathLengthConstraint: 0,
             critical: true));
         request.CertificateExtensions.Add(new X509KeyUsageExtension(
-            X509KeyUsageFlags.DigitalSignature |
-            X509KeyUsageFlags.KeyEncipherment,
+            X509KeyUsageFlags.DigitalSignature,
             critical: true));
         request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(
             key: request.PublicKey,
@@ -187,9 +230,9 @@ internal sealed class BridgeManagedDeliveryCertificateManager
         RandomNumberGenerator.Fill(serialNumber);
 
         using var created = request.Create(authorityCertificate, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(2), serialNumber);
-        using var withPrivateKey = created.CopyWithPrivateKey(rsa);
+        using var withPrivateKey = created.CopyWithPrivateKey(key);
         var export = withPrivateKey.Export(X509ContentType.Pfx);
-        File.WriteAllBytes(path, export);
+        PersistCertificateFile(path, export);
         return X509CertificateLoader.LoadPkcs12(export, password: null);
     }
 

@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -20,13 +21,17 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 {
     private const int MaxExtensionDebugEvents = 200;
     private const int MaxConnectedMessageBytes = 16 * 1024 * 1024;
+    private const int MaxSettledFulfillmentAgeMinutes = 10;
+    private static readonly TimeSpan ConnectionDrainTimeout = TimeSpan.FromSeconds(5);
     private string HostName { get; } = settings.Host;
     private readonly HttpListener listener = new();
     private readonly CancellationTokenSource cts = new();
     private readonly BridgeServerState state = new(settings.Logger);
     private readonly ConcurrentQueue<string> extensionDebugEvents = new();
     private readonly ConcurrentDictionary<string, BridgePendingFulfillment> pendingFulfillments = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, WebSocket> sessionSockets = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, BridgeSessionTransport> sessionSockets = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<long, Task> inFlightConnections = new();
+    private long nextConnectionEpoch;
     private readonly BridgeManagedDeliveryServer managedDeliveryServer = new(
         settings.Host,
         settings.ManagedDeliveryPort,
@@ -138,7 +143,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             settings.Host,
             settings.SecureTransportPort,
             settings.Secret,
-            HandleAcceptedWebSocketConnectionAsync,
+            (socket, token) => TrackConnectionAsync(HandleAcceptedWebSocketConnectionAsync(socket, token)),
             settings.Logger);
         navigationProxyServer ??= new BridgeNavigationProxyServer(
             settings.Host,
@@ -477,7 +482,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(request);
         ValidateOutboundRequest(request);
 
-        if (!sessionSockets.TryGetValue(sessionId, out var socket) || socket.State is not WebSocketState.Open)
+        if (!sessionSockets.TryGetValue(sessionId, out var transport) || transport.Socket.State is not WebSocketState.Open)
             throw new InvalidOperationException($"Сеанс '{sessionId}' не подключён");
 
         var tabId = request.TabId!;
@@ -496,7 +501,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         try
         {
-            await SendBridgeMessageAsync(socket, request, cancellationToken).ConfigureAwait(false);
+            await transport.SendAsync(request).ConfigureAwait(false);
         }
         catch
         {
@@ -853,30 +858,115 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
                 break;
             }
 
-            _ = Task.Run(() => HandleConnectionAsync(context), CancellationToken.None);
+            _ = Task.Run(() => TrackConnectionAsync(HandleConnectionAsync(context)), CancellationToken.None);
+        }
+    }
+
+    private async Task TrackConnectionAsync(Task connectionTask)
+    {
+        var connectionId = Interlocked.Increment(ref nextConnectionEpoch);
+        inFlightConnections[connectionId] = connectionTask;
+
+        try
+        {
+            await connectionTask.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            settings.Logger?.LogBridgeServerConnectionFailed(exception);
+        }
+        finally
+        {
+            inFlightConnections.TryRemove(connectionId, out _);
         }
     }
 
     private async Task HandleConnectionAsync(HttpListenerContext context)
     {
         var path = context.Request.Url?.AbsolutePath ?? "/";
-        settings.Logger?.LogBridgeServerConnectionHandlingStarted(context.Request.HttpMethod, path);
 
-        if (await TryHandleUtilityHttpRouteAsync(context, path).ConfigureAwait(false))
-            return;
-
-        if (await TryHandleManagedExtensionRouteAsync(context, path).ConfigureAwait(false))
-            return;
-
-        if (context.Request.IsWebSocketRequest)
+        try
         {
-            await HandleWebSocketConnectionAsync(context).ConfigureAwait(false);
-            return;
+            if (!IsAllowedRequestHost(context.Request))
+            {
+                settings.Logger?.LogBridgeServerRequestRejectedHost(context.Request.HttpMethod, path, context.Request.Headers["Host"] ?? string.Empty);
+                context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
+                context.Response.Close();
+                return;
+            }
+
+            settings.Logger?.LogBridgeServerConnectionHandlingStarted(context.Request.HttpMethod, path);
+
+            if (await TryHandleUtilityHttpRouteAsync(context, path).ConfigureAwait(false))
+                return;
+
+            if (await TryHandleManagedExtensionRouteAsync(context, path).ConfigureAwait(false))
+                return;
+
+            if (context.Request.IsWebSocketRequest)
+            {
+                await HandleWebSocketConnectionAsync(context).ConfigureAwait(false);
+                return;
+            }
+
+            settings.Logger?.LogBridgeServerHttpRequestUnsupported(context.Request.HttpMethod, path);
+            context.Response.StatusCode = (int)HttpStatusCode.NotFound;
+            context.Response.Close();
+        }
+        catch (HttpListenerException)
+        {
+            // Клиент разорвал соединение до завершения ответа.
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Никакое исключение обработчиков не должно оставлять HTTP-соединение подвисшим.
+            settings.Logger?.LogBridgeServerHttpRouteFailed(context.Request.HttpMethod, path, exception);
+            BestEffortAbort(context.Response);
+        }
+    }
+
+    private bool IsAllowedRequestHost(HttpListenerRequest request)
+    {
+        var hostHeader = request.Headers["Host"];
+        if (string.IsNullOrWhiteSpace(hostHeader))
+            return true; // HTTP/1.0 без Host — поведение прежнего локального канала.
+
+        if (HostName is "0.0.0.0" or "::")
+            return true; // Явный wildcard-биндинг остаётся ответственностью администратора.
+
+        var host = ExtractHostName(hostHeader.Trim());
+        return string.Equals(host, HostName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(host, "::1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ExtractHostName(string hostHeader)
+    {
+        if (hostHeader.StartsWith('['))
+        {
+            var closingBracketIndex = hostHeader.IndexOf(']');
+            return closingBracketIndex > 0 ? hostHeader[1..closingBracketIndex] : hostHeader;
         }
 
-        settings.Logger?.LogBridgeServerHttpRequestUnsupported(context.Request.HttpMethod, path);
-        context.Response.StatusCode = (int)HttpStatusCode.NotFound;
-        context.Response.Close();
+        var portSeparatorIndex = hostHeader.LastIndexOf(':');
+        return portSeparatorIndex > 0 ? hostHeader[..portSeparatorIndex] : hostHeader;
+    }
+
+    private static void BestEffortAbort(HttpListenerResponse response)
+    {
+        try
+        {
+            response.Abort();
+        }
+        catch (InvalidOperationException)
+        {
+            // Ответ уже завершён или недоступен.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Ответ уже завершён или недоступен.
+        }
     }
 
     private async Task<bool> TryHandleUtilityHttpRouteAsync(HttpListenerContext context, string path)
@@ -1173,7 +1263,14 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         {
             foreach (var entry in handlers.GetInvocationList())
             {
-                await ((BridgeObservedRequestHeadersHandler)entry)(observed, CancellationToken.None).ConfigureAwait(false);
+                try
+                {
+                    await ((BridgeObservedRequestHeadersHandler)entry)(observed, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    settings.Logger?.LogBridgeServerHandlerInvocationFailed("headers-observed", exception);
+                }
             }
         }
 
@@ -1218,14 +1315,26 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         {
             if (string.Equals(key, "Content-Type", StringComparison.OrdinalIgnoreCase))
             {
-                response.ContentType = value;
+                if (IsSafeHeaderValue(value))
+                    response.ContentType = value;
+
                 continue;
             }
 
             if (string.Equals(key, "Content-Length", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            response.AddHeader(key, value);
+            if (!IsSafeHeaderValue(key) || !IsSafeHeaderValue(value))
+                continue;
+
+            try
+            {
+                response.AddHeader(key, value);
+            }
+            catch (HttpListenerException)
+            {
+                // Заголовки, недопустимые для HttpListener (hop-by-hop и т.п.), пропускаем.
+            }
         }
 
         var bodyBytes = fulfillment.Body;
@@ -1307,8 +1416,13 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
     private bool TryAuthorizeUtilitySecret(string? secret, string path)
     {
-        if (string.Equals(secret, settings.Secret, StringComparison.Ordinal))
+        if (!string.IsNullOrEmpty(secret)
+            && CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(secret),
+                Encoding.UTF8.GetBytes(settings.Secret)))
+        {
             return true;
+        }
 
         RecordSyntheticDebugEvent("utility-post-rejected", new JsonObject
         {
@@ -1340,7 +1454,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         foreach (var entry in handlers.GetInvocationList())
         {
-            response = await ((BridgeRequestInterceptionHandler)entry)(request, cancellationToken).ConfigureAwait(false);
+            response = await InvokeSafelyAsync(() => ((BridgeRequestInterceptionHandler)entry)(request, cancellationToken), BridgeInterceptHttpResponse.Continue, "request-interception").ConfigureAwait(false);
         }
 
         return RegisterRequestFulfillment(request.RequestId, response);
@@ -1354,7 +1468,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         foreach (var entry in handlers.GetInvocationList())
         {
-            response = await ((BridgeCallbackHandler)entry)(request, cancellationToken).ConfigureAwait(false);
+            response = await InvokeSafelyAsync(() => ((BridgeCallbackHandler)entry)(request, cancellationToken), BridgeCallbackHttpResponse.Continue, "callback").ConfigureAwait(false);
         }
 
         return response;
@@ -1368,10 +1482,27 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         foreach (var entry in handlers.GetInvocationList())
         {
-            response = await ((BridgeResponseInterceptionHandler)entry)(responsePayload, cancellationToken).ConfigureAwait(false);
+            response = await InvokeSafelyAsync(() => ((BridgeResponseInterceptionHandler)entry)(responsePayload, cancellationToken), BridgeInterceptHttpResponse.Continue, "response-interception").ConfigureAwait(false);
         }
 
         return response;
+    }
+
+    /// <summary>
+    /// Изолирует пользовательские обработчики от транспорта: исключение превращается в
+    /// безопасное continue-решение вместо подвисшего HTTP/webRequest запроса.
+    /// </summary>
+    private async ValueTask<TResponse> InvokeSafelyAsync<TResponse>(Func<ValueTask<TResponse>> invocation, Func<TResponse> fallbackFactory, string operationKind)
+    {
+        try
+        {
+            return await invocation().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            settings.Logger?.LogBridgeServerHandlerInvocationFailed(operationKind, exception);
+            return fallbackFactory();
+        }
     }
 
     private static bool TryParseJsonObject(string payload, [NotNullWhen(true)] out JsonObject? value)
@@ -1846,8 +1977,8 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         response.StatusCode = (int)HttpStatusCode.OK;
         response.ContentType = "text/html; charset=utf-8";
         response.ContentEncoding = Encoding.UTF8;
-        response.AddHeader("Access-Control-Allow-Origin", "*");
-        response.AddHeader("Content-Security-Policy", "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;");
+        response.AddHeader("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval';");
+        response.AddHeader("Cross-Origin-Resource-Policy", "same-origin");
 
         var port = Port.ToString(CultureInfo.InvariantCulture);
         var proxyPortMeta = NavigationProxyPort > 0
@@ -1860,7 +1991,6 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             <head>
             <meta name="atom-bridge-port" content="{{port}}">
             {{proxyPortMeta}}
-            <meta name="atom-bridge-secret" content="{{settings.Secret}}">
             <title>Atom Bridge Discovery</title>
             <script>
             new MutationObserver(function(muts){
@@ -1948,18 +2078,19 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
     private async Task HandleAcceptedWebSocketConnectionAsync(WebSocket socket, CancellationToken cancellationToken)
     {
-
+        var connectionEpoch = Interlocked.Increment(ref nextConnectionEpoch);
+        var transport = new BridgeSessionTransport(socket) { ConnectionEpoch = connectionEpoch };
         string? sessionId = null;
 
         try
         {
-            sessionId = await RunHandshakeAsync(socket, cancellationToken).ConfigureAwait(false);
+            sessionId = await RunHandshakeAsync(transport, connectionEpoch, cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(sessionId))
                 return;
 
-            sessionSockets[sessionId] = socket;
+            sessionSockets[sessionId] = transport;
             settings.Logger?.LogBridgeServerSessionConnected(sessionId);
-            await RunConnectedSessionAsync(socket, sessionId, cancellationToken).ConfigureAwait(false);
+            await RunConnectedSessionAsync(transport.Socket, sessionId, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -1969,17 +2100,23 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         {
             settings.Logger?.LogBridgeServerWebSocketDisconnected(DescribeSessionForLogging(sessionId), exception);
         }
+        catch (Exception exception)
+        {
+            settings.Logger?.LogBridgeServerSessionFailed(DescribeSessionForLogging(sessionId), exception);
+        }
         finally
         {
             if (!string.IsNullOrWhiteSpace(sessionId))
             {
-                sessionSockets.TryRemove(sessionId, out _);
-                _ = await state.RemoveSessionAsync(sessionId).ConfigureAwait(false);
+                if (sessionSockets.TryGetValue(sessionId, out var currentTransport) && ReferenceEquals(currentTransport, transport))
+                    sessionSockets.TryRemove(sessionId, out _);
+
+                _ = await state.RemoveSessionAsync(sessionId, connectionEpoch).ConfigureAwait(false);
                 await RefreshConnectionCountAsync().ConfigureAwait(false);
                 settings.Logger?.LogBridgeServerSessionDisconnected(sessionId);
             }
 
-            socket.Dispose();
+            transport.Dispose();
         }
     }
 
@@ -1996,45 +2133,61 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         }
     }
 
-    private async Task<string?> RunHandshakeAsync(WebSocket socket, CancellationToken cancellationToken)
+    private async Task<string?> RunHandshakeAsync(BridgeSessionTransport transport, long connectionEpoch, CancellationToken cancellationToken)
     {
-        var validation = await ReceiveAndValidateHandshakeAsync(socket, cancellationToken).ConfigureAwait(false);
+        var validation = await ReceiveAndValidateHandshakeAsync(transport.Socket, cancellationToken).ConfigureAwait(false);
         if (validation.IsRejected)
         {
             settings.Logger?.LogBridgeServerHandshakeRejected(validation.CorrelationId ?? "без-идентификатора", validation.RejectCode ?? BridgeProtocolErrorCodes.InvalidPayload);
-            await SendHandshakeRejectAsync(socket, validation).ConfigureAwait(false);
+            await SendHandshakeRejectAsync(transport, validation).ConfigureAwait(false);
             return null;
         }
 
-        var registrationFailure = await TryRegisterSessionAsync(validation).ConfigureAwait(false);
+        var registrationFailure = await TryRegisterSessionAsync(validation, connectionEpoch).ConfigureAwait(false);
         if (registrationFailure is not null)
         {
             settings.Logger?.LogBridgeServerHandshakeRejected(registrationFailure.CorrelationId ?? "без-идентификатора", registrationFailure.RejectCode ?? BridgeProtocolErrorCodes.InvalidPayload);
-            await SendHandshakeRejectAsync(socket, registrationFailure).ConfigureAwait(false);
+            await SendHandshakeRejectAsync(transport, registrationFailure).ConfigureAwait(false);
             return null;
         }
 
         await RefreshConnectionCountAsync().ConfigureAwait(false);
-        await SendHandshakeAcceptAsync(socket, validation).ConfigureAwait(false);
+        await SendHandshakeAcceptAsync(transport, validation).ConfigureAwait(false);
         settings.Logger?.LogBridgeServerHandshakeAccepted(validation.ClientPayload!.SessionId);
         return validation.ClientPayload!.SessionId;
     }
 
     private async Task<BridgeHandshakeValidationResult> ReceiveAndValidateHandshakeAsync(WebSocket socket, CancellationToken cancellationToken)
     {
-        var firstMessage = await ReceiveBridgeMessageAsync(socket, cancellationToken).ConfigureAwait(false);
+        var readResult = await ReceiveTextMessageAsync(socket, cancellationToken).ConfigureAwait(false);
+        var firstMessage = readResult.Outcome is ConnectedMessageReadOutcome.Message
+            ? TryDeserializeConnectedMessage(readResult.Buffer, readResult.Count)
+            : null;
         return BridgeHandshakeValidator.Validate(firstMessage, settings);
     }
 
-    private async Task<BridgeHandshakeValidationResult?> TryRegisterSessionAsync(BridgeHandshakeValidationResult validation)
+    private async Task<BridgeHandshakeValidationResult?> TryRegisterSessionAsync(BridgeHandshakeValidationResult validation, long connectionEpoch)
     {
         var payload = validation.ClientPayload!;
-        var createResult = await state.CreateSessionAsync(new BridgeSessionDescriptor(
+        var descriptor = new BridgeSessionDescriptor(
             SessionId: payload.SessionId,
             ProtocolVersion: payload.ProtocolVersion,
             BrowserFamily: payload.BrowserFamily,
             ExtensionVersion: payload.ExtensionVersion,
-            BrowserVersion: payload.BrowserVersion)).ConfigureAwait(false);
+            BrowserVersion: payload.BrowserVersion,
+            ConnectionEpoch: connectionEpoch);
+
+        var createResult = await state.CreateSessionAsync(descriptor).ConfigureAwait(false);
+        if (createResult.Outcome is SessionCreateResultKind.DuplicateSessionId)
+        {
+            // Быстрый реконнект с тем же sessionId: вытесняем «зомби»-сессию прежнего соединения.
+            // Удаление со стороны прежнего коннекта станет no-op благодаря несовпадению эпох.
+            if (sessionSockets.TryRemove(payload.SessionId, out var staleTransport))
+                staleTransport.Dispose();
+
+            _ = await state.RemoveSessionAsync(payload.SessionId).ConfigureAwait(false);
+            createResult = await state.CreateSessionAsync(descriptor).ConfigureAwait(false);
+        }
 
         if (createResult.Outcome is SessionCreateResultKind.DuplicateSessionId)
             return CreateRejectFromValidation(validation, payload, BridgeProtocolErrorCodes.DuplicateSessionId);
@@ -2063,81 +2216,90 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         ConnectionCount = snapshot.SessionCount;
     }
 
-    private static async Task<BridgeMessage?> ReceiveBridgeMessageAsync(WebSocket socket, CancellationToken cancellationToken)
+    /// <summary>
+    /// Читает одно текстовое сообщение с ростом буфера до <see cref="MaxConnectedMessageBytes"/>.
+    /// Никогда не вызывает <see cref="WebSocket.ReceiveAsync(Memory{byte}, CancellationToken)"/> с пустым буфером:
+    /// по семантике ManagedWebSocket пустой буфер мгновенно возвращает 0 байт без поглощения данных,
+    /// что приводит к десериализации урезанного JSON или к бесконечному циклу.
+    /// </summary>
+    private static async Task<ConnectedMessageReadResult> ReceiveTextMessageAsync(WebSocket socket, CancellationToken cancellationToken)
     {
-        var buffer = new byte[16 * 1024];
+        const int initialCapacityBytes = 4096;
+        var buffer = new byte[initialCapacityBytes];
         var totalBytes = 0;
 
-        while (socket.State is WebSocketState.Open)
+        while (socket.State is WebSocketState.Open or WebSocketState.CloseSent)
         {
+            if (totalBytes == buffer.Length)
+            {
+                if (buffer.Length >= MaxConnectedMessageBytes)
+                    return new(ConnectedMessageReadOutcome.InvalidPayload, buffer, totalBytes);
+
+                Array.Resize(ref buffer, Math.Min(buffer.Length * 2, MaxConnectedMessageBytes));
+            }
+
             var result = await socket.ReceiveAsync(buffer.AsMemory(totalBytes), cancellationToken).ConfigureAwait(false);
             if (result.MessageType is WebSocketMessageType.Close)
-                return null;
+                return new(ConnectedMessageReadOutcome.Close, buffer, totalBytes);
 
             if (result.MessageType is not WebSocketMessageType.Text)
-                return null;
+                return new(ConnectedMessageReadOutcome.InvalidPayload, buffer, totalBytes);
 
             totalBytes += result.Count;
             if (result.EndOfMessage)
-            {
-                return JsonSerializer.Deserialize(
-                    buffer.AsSpan(0, totalBytes),
-                    BridgeJsonContext.Default.BridgeMessage);
-            }
+                return new(ConnectedMessageReadOutcome.Message, buffer, totalBytes);
         }
 
-        return null;
+        return new(ConnectedMessageReadOutcome.Close, buffer, totalBytes);
     }
 
-    private static async Task SendHandshakeAcceptAsync(WebSocket socket, BridgeHandshakeValidationResult validation)
+    private static async Task SendHandshakeAcceptAsync(BridgeSessionTransport transport, BridgeHandshakeValidationResult validation)
     {
         var message = BridgeHandshakeMessageFactory.CreateAcceptMessage(validation);
-        await SendBridgeMessageAsync(socket, message, CancellationToken.None).ConfigureAwait(false);
+        await transport.SendAsync(message).ConfigureAwait(false);
     }
 
-    private static async Task SendHandshakeRejectAsync(WebSocket socket, BridgeHandshakeValidationResult validation)
+    private static async Task SendHandshakeRejectAsync(BridgeSessionTransport transport, BridgeHandshakeValidationResult validation)
     {
         var message = BridgeHandshakeMessageFactory.CreateRejectMessage(validation);
         if (message is null)
         {
-            await socket.CloseOutputAsync(WebSocketCloseStatus.ProtocolError, validation.RejectCode ?? BridgeProtocolErrorCodes.InvalidPayload, CancellationToken.None).ConfigureAwait(false);
+            await transport.CloseOutputAsync(WebSocketCloseStatus.ProtocolError, validation.RejectCode ?? BridgeProtocolErrorCodes.InvalidPayload).ConfigureAwait(false);
             return;
         }
 
-        await SendBridgeMessageAsync(socket, message, CancellationToken.None).ConfigureAwait(false);
-        await socket.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, validation.RejectCode, CancellationToken.None).ConfigureAwait(false);
-    }
-
-    private static async Task SendBridgeMessageAsync(WebSocket socket, BridgeMessage message, CancellationToken cancellationToken)
-    {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(message, BridgeJsonContext.Default.BridgeMessage);
-        await socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, endOfMessage: true, cancellationToken).ConfigureAwait(false);
+        await transport.SendAsync(message).ConfigureAwait(false);
+        await transport.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, validation.RejectCode).ConfigureAwait(false);
     }
 
     private async Task RunConnectedSessionAsync(WebSocket socket, string sessionId, CancellationToken cancellationToken)
     {
         while (socket.State is WebSocketState.Open or WebSocketState.CloseSent)
         {
-            var shouldContinue = await HandleConnectedFrameAsync(socket, sessionId, cancellationToken).ConfigureAwait(false);
+            if (!sessionSockets.TryGetValue(sessionId, out var transport) || !ReferenceEquals(transport.Socket, socket))
+                return;
+
+            var shouldContinue = await HandleConnectedFrameAsync(transport, sessionId, cancellationToken).ConfigureAwait(false);
             if (!shouldContinue)
                 break;
         }
     }
 
-    private async Task<bool> HandleConnectedFrameAsync(WebSocket socket, string sessionId, CancellationToken cancellationToken)
+    private async Task<bool> HandleConnectedFrameAsync(BridgeSessionTransport transport, string sessionId, CancellationToken cancellationToken)
     {
-        var receiveResult = await ReceiveConnectedMessageAsync(socket, cancellationToken).ConfigureAwait(false);
+        var socket = transport.Socket;
+        var receiveResult = await ReceiveTextMessageAsync(socket, cancellationToken).ConfigureAwait(false);
         if (receiveResult.Outcome is ConnectedMessageReadOutcome.Close)
         {
             settings.Logger?.LogBridgeServerSessionDisconnected(sessionId);
-            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, BridgeProtocolErrorCodes.Closing, CancellationToken.None).ConfigureAwait(false);
+            await transport.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, BridgeProtocolErrorCodes.Closing).ConfigureAwait(false);
             return false;
         }
 
         if (receiveResult.Outcome is not ConnectedMessageReadOutcome.Message)
         {
             settings.Logger?.LogBridgeServerProtocolViolation(sessionId, BridgeProtocolErrorCodes.InvalidPayload);
-            await socket.CloseOutputAsync(WebSocketCloseStatus.ProtocolError, BridgeProtocolErrorCodes.InvalidPayload, CancellationToken.None).ConfigureAwait(false);
+            await transport.CloseOutputAsync(WebSocketCloseStatus.ProtocolError, BridgeProtocolErrorCodes.InvalidPayload).ConfigureAwait(false);
             return false;
         }
 
@@ -2145,11 +2307,11 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         if (message is null)
         {
             settings.Logger?.LogBridgeServerProtocolViolation(sessionId, BridgeProtocolErrorCodes.InvalidPayload);
-            await socket.CloseOutputAsync(WebSocketCloseStatus.ProtocolError, BridgeProtocolErrorCodes.InvalidPayload, CancellationToken.None).ConfigureAwait(false);
+            await transport.CloseOutputAsync(WebSocketCloseStatus.ProtocolError, BridgeProtocolErrorCodes.InvalidPayload).ConfigureAwait(false);
             return false;
         }
 
-        return await HandlePostHandshakeMessageAsync(socket, sessionId, message).ConfigureAwait(false);
+        return await HandlePostHandshakeMessageAsync(transport, sessionId, message).ConfigureAwait(false);
     }
 
     private static BridgeMessage? TryDeserializeConnectedMessage(byte[] buffer, int count)
@@ -2164,7 +2326,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         }
     }
 
-    private async Task<bool> HandlePostHandshakeMessageAsync(WebSocket socket, string sessionId, BridgeMessage message)
+    private async Task<bool> HandlePostHandshakeMessageAsync(BridgeSessionTransport transport, string sessionId, BridgeMessage message)
     {
         if (message.Type is BridgeMessageType.Handshake)
         {
@@ -2176,8 +2338,14 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
                 RejectCode: BridgeProtocolErrorCodes.InvalidPayload,
                 RejectPayload: null);
             settings.Logger?.LogBridgeServerHandshakeRejected(validation.CorrelationId ?? "без-идентификатора", validation.RejectCode ?? BridgeProtocolErrorCodes.InvalidPayload);
-            await SendHandshakeRejectAsync(socket, validation).ConfigureAwait(false);
+            await SendHandshakeRejectAsync(transport, validation).ConfigureAwait(false);
             return false;
+        }
+
+        if (message.Type is BridgeMessageType.Ping)
+        {
+            await transport.SendAsync(CreatePongMessage(message)).ConfigureAwait(false);
+            return true;
         }
 
         if (message.Type is BridgeMessageType.Response)
@@ -2187,7 +2355,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
                 return true;
 
             settings.Logger?.LogBridgeServerProtocolViolation(sessionId, BridgeProtocolErrorCodes.InvalidPayload);
-            await socket.CloseOutputAsync(WebSocketCloseStatus.ProtocolError, BridgeProtocolErrorCodes.InvalidPayload, CancellationToken.None).ConfigureAwait(false);
+            await transport.CloseOutputAsync(WebSocketCloseStatus.ProtocolError, BridgeProtocolErrorCodes.InvalidPayload).ConfigureAwait(false);
             return false;
         }
 
@@ -2199,9 +2367,18 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             return true;
 
         settings.Logger?.LogBridgeServerProtocolViolation(sessionId, BridgeProtocolErrorCodes.InvalidPayload);
-        await socket.CloseOutputAsync(WebSocketCloseStatus.ProtocolError, BridgeProtocolErrorCodes.InvalidPayload, CancellationToken.None).ConfigureAwait(false);
+        await transport.CloseOutputAsync(WebSocketCloseStatus.ProtocolError, BridgeProtocolErrorCodes.InvalidPayload).ConfigureAwait(false);
         return false;
     }
+
+    private static BridgeMessage CreatePongMessage(BridgeMessage ping)
+        => new()
+        {
+            Id = ping.Id,
+            Type = BridgeMessageType.Pong,
+            WindowId = ping.WindowId,
+            TabId = ping.TabId,
+        };
 
     private async Task<bool> HandlePostHandshakeResponseAsync(BridgeMessage message)
     {
@@ -2236,36 +2413,6 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             settings.Logger?.LogBridgeServerResponseRejected(message.Id, "ответ пришёл для неизвестного запроса");
 
         return result.Outcome is PendingRequestCompletionResultKind.Completed or PendingRequestCompletionResultKind.AlreadyCompleted;
-    }
-
-    private static async Task<ConnectedMessageReadResult> ReceiveConnectedMessageAsync(WebSocket socket, CancellationToken cancellationToken)
-    {
-        var buffer = new byte[4096];
-        var totalBytes = 0;
-
-        while (socket.State is WebSocketState.Open or WebSocketState.CloseSent)
-        {
-            if (totalBytes == buffer.Length)
-            {
-                if (buffer.Length >= MaxConnectedMessageBytes)
-                    return new(ConnectedMessageReadOutcome.InvalidPayload, buffer, totalBytes);
-
-                Array.Resize(ref buffer, Math.Min(buffer.Length * 2, MaxConnectedMessageBytes));
-            }
-
-            var result = await socket.ReceiveAsync(buffer.AsMemory(totalBytes), cancellationToken).ConfigureAwait(false);
-            if (result.MessageType is WebSocketMessageType.Close)
-                return new(ConnectedMessageReadOutcome.Close, buffer, totalBytes);
-
-            if (result.MessageType is not WebSocketMessageType.Text)
-                return new(ConnectedMessageReadOutcome.InvalidPayload, buffer, totalBytes);
-
-            totalBytes += result.Count;
-            if (result.EndOfMessage)
-                return new(ConnectedMessageReadOutcome.Message, buffer, totalBytes);
-        }
-
-        return new(ConnectedMessageReadOutcome.Close, buffer, totalBytes);
     }
 
     private static bool IsValidResponsePayloadForCommand(BridgeCommand command, BridgeMessage message)
@@ -2881,6 +3028,8 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             // Listener already disposed.
         }
 
+        // Дожидаемся активных HTTP/WebSocket обработчиков, чтобы их finally-ветки
+        // завершились до удаления состояния (иначе — ObjectDisposedException в тасках).
         if (secureTransportServer is not null)
             await secureTransportServer.DisposeAsync().ConfigureAwait(false);
 
@@ -2888,10 +3037,36 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             await navigationProxyServer.DisposeAsync().ConfigureAwait(false);
 
         await managedDeliveryServer.DisposeAsync().ConfigureAwait(false);
+
+        if (!inFlightConnections.IsEmpty)
+        {
+            try
+            {
+                await Task.WhenAll([.. inFlightConnections.Values]).WaitAsync(ConnectionDrainTimeout).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // Best-effort drain: зависшие соединения закрываются распорядком listener.Close().
+            }
+        }
+
         cts.Dispose();
         pendingFulfillments.Clear();
         await state.DisposeAsync().ConfigureAwait(false);
         settings.Logger?.LogBridgeServerStopped(settings.Host, Port);
+    }
+
+    private static bool IsSafeHeaderValue(string? value)
+        => value is not null && !value.Contains('\r') && !value.Contains('\n');
+
+    private void PurgeExpiredFulfillments(DateTimeOffset nowUtc)
+    {
+        var maxAge = TimeSpan.FromMinutes(MaxSettledFulfillmentAgeMinutes);
+        foreach (var (requestId, fulfillment) in pendingFulfillments)
+        {
+            if (nowUtc - fulfillment.CreatedAtUtc > maxAge)
+                pendingFulfillments.TryRemove(requestId, out _);
+        }
     }
 
     private BridgeInterceptHttpResponse RegisterRequestFulfillment(string requestId, BridgeInterceptHttpResponse response)
@@ -2899,6 +3074,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         if (!string.Equals(response.Action, "fulfill", StringComparison.OrdinalIgnoreCase))
             return response;
 
+        PurgeExpiredFulfillments(DateTimeOffset.UtcNow);
         var effectiveRequestId = string.IsNullOrWhiteSpace(requestId) ? Guid.NewGuid().ToString("N") : requestId;
         pendingFulfillments[effectiveRequestId] = new BridgePendingFulfillment
         {
@@ -2944,6 +3120,52 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         public required IReadOnlyDictionary<string, string> Headers { get; init; }
 
         public byte[]? Body { get; init; }
+
+        public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
+    /// Сериализует все исходящие кадры сеанса через один gate: <see cref="WebSocket"/> не допускает
+    /// параллельных операций записи, а внешний токен отмены в <see cref="WebSocket.SendAsync(ReadOnlyMemory{byte}, WebSocketMessageType, bool, CancellationToken)"/>
+    /// способен аварийно завершить сокет целиком, поэтому отправка всегда выполняется без токена отмены.
+    /// </summary>
+    private sealed class BridgeSessionTransport(WebSocket socket)
+    {
+        private readonly SemaphoreSlim sendGate = new(1, 1);
+
+        public WebSocket Socket { get; } = socket;
+
+        public long ConnectionEpoch { get; init; }
+
+        public async ValueTask SendAsync(BridgeMessage message)
+        {
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(message, BridgeJsonContext.Default.BridgeMessage);
+            await sendGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await Socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                sendGate.Release();
+            }
+        }
+
+        public async ValueTask CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription)
+        {
+            await sendGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (Socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+                    await Socket.CloseOutputAsync(closeStatus, statusDescription, CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                sendGate.Release();
+            }
+        }
+
+        public void Dispose() => Socket.Dispose();
     }
 
     private void LogManagedDeliveryTrustState()

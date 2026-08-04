@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Net;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using Atom.Hardware.Display;
 using Atom.Hardware.Input;
@@ -723,9 +724,106 @@ public sealed partial class WebBrowser : IWebBrowser
         ArgumentNullException.ThrowIfNull(page);
         ArgumentException.ThrowIfNullOrWhiteSpace(contextId);
 
-        return page.OwnerWindow.OwnerBrowser.ProxyNavigationDecisions.TryResolveToken(contextId, out _)
+        var browser = page.OwnerWindow.OwnerBrowser;
+
+        // Proxy-режим активируется только для страниц с включённым перехватом запросов:
+        // именно тогда навигационные fulfill/abort решаются мостом, и только тогда main_frame
+        // гарантированно получает отложенное решение. Остальные страницы остаются на webrequest,
+        // чтобы их навигации не проходили через локальный MITM-прокси без необходимости.
+        if (page.GetEffectiveRequestInterceptionState()?.Enabled == true)
+        {
+            browser.EnsureBridgeNavigationProxyRoute(page, contextId);
+        }
+        else if (browser.ProxyNavigationDecisions.TryResolveToken(contextId, out var existingToken)
+            && existingToken.StartsWith(AutoNavigationProxyRouteTokenPrefix, StringComparison.Ordinal))
+        {
+            // Перехват выключен: снимаем только маршруты, созданные автоматически
+            // (внешние маршруты с пользовательскими токенами не трогаем).
+            browser.ProxyNavigationDecisions.RemoveRouteByContextId(contextId);
+        }
+
+        return browser.ProxyNavigationDecisions.TryResolveToken(contextId, out _)
             ? "proxy"
             : "webrequest";
+    }
+
+    private void EnsureBridgeNavigationProxyRoute(WebPage page, string contextId)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        ArgumentException.ThrowIfNullOrWhiteSpace(contextId);
+
+        if (bridgeServer is null
+            || bridgeServer.NavigationProxyPort <= 0
+            || string.IsNullOrWhiteSpace(bridgeSessionId)
+            || string.IsNullOrWhiteSpace(contextId))
+        {
+            return;
+        }
+
+        if (ProxyNavigationDecisions.TryResolveToken(contextId, out _))
+            return;
+
+        ProxyNavigationDecisions.UpsertRoute(new ProxyNavigationRoute
+        {
+            SessionId = bridgeSessionId,
+            TabId = page.BoundBridgeTabId ?? page.TabId,
+            ContextId = contextId,
+            RouteToken = CreateBridgeNavigationProxyRouteToken(),
+            UpstreamProxy = ResolveBridgeNavigationProxyUpstream(page),
+            Revision = 1,
+        });
+    }
+
+    // Префикс помечает маршруты, зарегистрированные автоматически при включении перехвата:
+    // такие маршруты снимаются при его выключении, а зарегистрированные снаружи — сохраняются.
+    private const string AutoNavigationProxyRouteTokenPrefix = "nav-";
+
+    // Случайный некороткий токен: он же — учётный параметр локального прокси (username
+    // в Proxy-Authorization), поэтому должен быть непредсказуем для постороннего контента вкладки.
+    private static string CreateBridgeNavigationProxyRouteToken()
+        => string.Concat(AutoNavigationProxyRouteTokenPrefix, Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant());
+
+    private static string? ResolveBridgeNavigationProxyUpstream(WebPage page)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        var proxy = ResolveBridgeProxy(page);
+        if (proxy is null)
+            return null;
+
+        try
+        {
+            // Типовой случай — WebProxy с фиксированным адресом; для остальных IWebProxy
+            // берём адрес, который вернулся бы для условной навигационной цели.
+            var address = proxy is WebProxy webProxy
+                ? webProxy.Address
+                : proxy.GetProxy(new Uri("http://upstream.invalid/", UriKind.Absolute));
+
+            if (address is not { IsAbsoluteUri: true })
+                return null;
+
+            if (!string.Equals(address.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(address.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (proxy.Credentials is NetworkCredential credential && !string.IsNullOrEmpty(credential.UserName))
+            {
+                var builder = new UriBuilder(address)
+                {
+                    UserName = credential.UserName,
+                    Password = credential.Password ?? string.Empty,
+                };
+                return builder.Uri.AbsoluteUri;
+            }
+
+            return address.AbsoluteUri;
+        }
+        catch (Exception exception) when (exception is NotSupportedException or InvalidOperationException or UriFormatException)
+        {
+            return null;
+        }
     }
 
     private static string? ResolveBridgeNavigationProxyRouteToken(WebPage page, string contextId)
@@ -963,7 +1061,7 @@ public sealed partial class WebBrowser : IWebBrowser
         return payload;
     }
 
-    private static async ValueTask ApplyBridgeTabContextAsync(WebPage page, CancellationToken cancellationToken)
+    internal static async ValueTask ApplyBridgeTabContextAsync(WebPage page, CancellationToken cancellationToken)
     {
         var bridgeCommands = page.BridgeCommands
             ?? throw new InvalidOperationException("Bridge-backed page is not bound to command transport");

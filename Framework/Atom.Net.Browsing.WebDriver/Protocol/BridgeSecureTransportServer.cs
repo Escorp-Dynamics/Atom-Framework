@@ -20,6 +20,9 @@ internal sealed class BridgeSecureTransportServer(
     ILogger? diagnosticsLogger = null) : IAsyncDisposable
 {
     private const string WebSocketAcceptGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    private const int MaxUpgradeRequestLines = 128;
+    private const int MaxUpgradeHeaderChars = 128 * 1024;
+    private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(30);
 
     private readonly TcpListener listener = new(ResolveBindableAddress(host), port);
     private readonly CancellationTokenSource cts = new();
@@ -117,6 +120,10 @@ internal sealed class BridgeSecureTransportServer(
         SslStream? stream = null;
         WebSocket? socket = null;
 
+        // Зависший клиент не должен удерживать поток вечно: TLS + upgrade получают общий бюджет.
+        using var handshakeTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        handshakeTimeout.CancelAfter(HandshakeTimeout);
+
         try
         {
             stream = new SslStream(client.GetStream(), leaveInnerStreamOpen: false);
@@ -126,27 +133,27 @@ internal sealed class BridgeSecureTransportServer(
                 ClientCertificateRequired = false,
                 EnabledSslProtocols = SslProtocols.None,
                 CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
-            }, cancellationToken).ConfigureAwait(false);
+            }, handshakeTimeout.Token).ConfigureAwait(false);
 
-            var request = await ReadUpgradeRequestAsync(stream, cancellationToken).ConfigureAwait(false);
+            var request = await ReadUpgradeRequestAsync(stream, handshakeTimeout.Token).ConfigureAwait(false);
             if (request is null)
                 return;
 
             if (!TryValidateUpgradeRequest(request.Value, out var webSocketKey, out var statusCode, out var reason))
             {
                 logger?.LogSecureTransportRequestRejected(request.Value.Method, request.Value.Path, (int)statusCode, reason);
-                await WriteResponseAsync(stream, statusCode, reason, cancellationToken).ConfigureAwait(false);
+                await WriteResponseAsync(stream, statusCode, reason, handshakeTimeout.Token).ConfigureAwait(false);
                 return;
             }
 
-            await WriteUpgradeAcceptedResponseAsync(stream, webSocketKey, cancellationToken).ConfigureAwait(false);
+            await WriteUpgradeAcceptedResponseAsync(stream, webSocketKey, handshakeTimeout.Token).ConfigureAwait(false);
             socket = WebSocket.CreateFromStream(stream, isServer: true, subProtocol: null, keepAliveInterval: Timeout.InfiniteTimeSpan);
             stream = null;
             await connectionHandler(socket, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            // Server shutdown.
+            // Остановка сервера или истекший бюджет TLS/upgrade рукопожатия.
         }
         catch (IOException ex)
         {
@@ -156,6 +163,10 @@ internal sealed class BridgeSecureTransportServer(
         {
             logger?.LogSecureTransportTlsHandshakeFailed(Port, ex);
             logger?.LogSecureTransportTlsHandshakeDetail(Port, DescribeTlsAuthenticationException(ex), ex);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogSecureTransportConnectionFailed(Port, ex);
         }
         finally
         {
@@ -172,7 +183,7 @@ internal sealed class BridgeSecureTransportServer(
     {
         using var reader = new StreamReader(stream, Encoding.ASCII, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true);
         var requestLine = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(requestLine))
+        if (string.IsNullOrWhiteSpace(requestLine) || requestLine.Length > 8192)
             return null;
 
         var requestLineParts = requestLine.Split(' ', 3, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -182,12 +193,17 @@ internal sealed class BridgeSecureTransportServer(
         if (!Uri.TryCreate(string.Concat("https://bridge.local", requestLineParts[1]), UriKind.Absolute, out var requestUri))
             return null;
 
+        var totalChars = requestLine.Length;
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        while (true)
+        for (var lineCount = 0; lineCount < MaxUpgradeRequestLines; lineCount++)
         {
             var headerLine = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrEmpty(headerLine))
                 break;
+
+            totalChars += headerLine.Length;
+            if (totalChars > MaxUpgradeHeaderChars)
+                return null;
 
             var separatorIndex = headerLine.IndexOf(':', StringComparison.Ordinal);
             if (separatorIndex <= 0)
