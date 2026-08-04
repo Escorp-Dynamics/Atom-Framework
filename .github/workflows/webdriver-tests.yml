@@ -1,0 +1,82 @@
+name: WebDriver Tests
+
+on:
+  push:
+    paths:
+      - 'Framework/Atom.Net.Browsing.WebDriver/**'
+      - 'Tests/Atom.Net.Browsing.WebDriver.Tests/**'
+      - 'Tests/Atom.Net.Browsing.Tests/**'
+      - '.github/workflows/webdriver-tests.yml'
+      - 'global.json'
+      - 'Framework/Directory.Build.props'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
+      - 'NuGet.config'
+  pull_request:
+    paths:
+      - 'Framework/Atom.Net.Browsing.WebDriver/**'
+      - 'Tests/Atom.Net.Browsing.WebDriver.Tests/**'
+      - 'Tests/Atom.Net.Browsing.Tests/**'
+      - '.github/workflows/webdriver-tests.yml'
+      - 'global.json'
+      - 'Framework/Directory.Build.props'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
+      - 'NuGet.config'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  webdriver-nunit-tests:
+    name: NUnit (Atom.Net.Browsing.WebDriver.Tests)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore WebDriver test suite
+        run: dotnet restore Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj
+
+      - name: Run WebDriver NUnit suite
+        run: >-
+          dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj
+          --verbosity minimal
+          -p:RunAnalyzers=false
+          -p:EnforceCodeStyleInBuild=false
+          -p:EnableNETAnalyzers=false
+          -p:AnalysisMode=None
+
+  extension-runtime-tests:
+    name: Node (ExtensionRuntime typecheck + tests)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime/package-lock.json
+
+      - name: Install ExtensionRuntime dependencies
+        working-directory: Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime
+        run: npm ci
+
+      - name: Typecheck ExtensionRuntime
+        working-directory: Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime
+        run: npm run typecheck
+
+      - name: Run ExtensionRuntime tests
+        working-directory: Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime
+        run: npm test
