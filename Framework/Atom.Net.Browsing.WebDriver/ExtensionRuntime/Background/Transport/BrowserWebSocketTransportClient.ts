@@ -5,6 +5,8 @@ import {
 } from '../../Shared/Protocol';
 import type {
     BridgeInboundMessageHandler,
+    BridgeTransportCloseHandler,
+    BridgeTransportCloseInfo,
     BridgeTransportConnectionInfo,
     BridgeTransportSubscription,
     IBridgeTransportClient,
@@ -14,6 +16,7 @@ export class BrowserWebSocketTransportClient implements IBridgeTransportClient {
     private socket: WebSocket | null = null;
     private connectionPromise: Promise<void> | null = null;
     private readonly handlers = new Set<BridgeInboundMessageHandler>();
+    private readonly closeHandlers = new Set<BridgeTransportCloseHandler>();
 
     public get connected(): boolean {
         return this.socket?.readyState === WebSocket.OPEN;
@@ -71,6 +74,14 @@ export class BrowserWebSocketTransportClient implements IBridgeTransportClient {
             this.handleInboundMessage(event);
         });
 
+        socket.addEventListener('error', () => {
+            // Ошибка без последующего close оставляла «полумёртвый» сокет текущим:
+            // считаем его недействительным сразу (рендер close обработается отдельно).
+            if (this.socket === socket) {
+                this.socket = null;
+            }
+        });
+
         socket.addEventListener('close', (event) => {
             if (this.socket === socket) {
                 this.socket = null;
@@ -78,6 +89,13 @@ export class BrowserWebSocketTransportClient implements IBridgeTransportClient {
 
             this.connectionPromise = null;
             console.info('[мостовой канал] Соединение закрыто', {
+                url: connection.url,
+                code: event.code,
+                reason: event.reason,
+                wasClean: event.wasClean,
+            });
+
+            this.notifyClosed({
                 url: connection.url,
                 code: event.code,
                 reason: event.reason,
@@ -118,6 +136,24 @@ export class BrowserWebSocketTransportClient implements IBridgeTransportClient {
                 this.handlers.delete(handler);
             },
         };
+    }
+
+    public subscribeClosed(handler: BridgeTransportCloseHandler): BridgeTransportSubscription {
+        this.closeHandlers.add(handler);
+
+        return {
+            dispose: () => {
+                this.closeHandlers.delete(handler);
+            },
+        };
+    }
+
+    private notifyClosed(info: BridgeTransportCloseInfo): void {
+        for (const handler of this.closeHandlers) {
+            void Promise.resolve(handler(info)).catch((error) => {
+                console.error('[мостовой канал] Обработчик закрытия соединения завершился с ошибкой', error);
+            });
+        }
     }
 
     private handleInboundMessage(event: MessageEvent): void {

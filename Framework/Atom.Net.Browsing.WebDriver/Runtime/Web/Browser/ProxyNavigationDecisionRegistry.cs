@@ -59,6 +59,10 @@ internal sealed record ProxyNavigationPendingDecision
 
 internal sealed class ProxyNavigationDecisionRegistry
 {
+    // Один общий замок сериализует составные операции над парой словарей:
+    // без него конкурентный Upsert/Remove мог «воскресить» отображение contextId -> token
+    // для уже удалённого маршрута или снять маршрут, разделяемый несколькими контекстами.
+    private readonly Lock registryGate = new();
     private readonly ConcurrentDictionary<string, ProxyNavigationRouteState> routesByToken = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> tokensByContextId = new(StringComparer.Ordinal);
 
@@ -78,24 +82,36 @@ internal sealed class ProxyNavigationDecisionRegistry
         if (string.IsNullOrWhiteSpace(route.RouteToken))
             throw new ArgumentException("Route RouteToken cannot be null or whitespace", nameof(route));
 
-        if (tokensByContextId.TryGetValue(route.ContextId, out var existingToken)
-            && !string.Equals(existingToken, route.RouteToken, StringComparison.Ordinal)
-            && routesByToken.TryRemove(existingToken, out var removedState))
+        lock (registryGate)
         {
-            removedState.Clear();
-        }
-
-        var state = routesByToken.AddOrUpdate(
-            route.RouteToken,
-            static (_, nextRoute) => new ProxyNavigationRouteState(nextRoute),
-            static (_, existingState, nextRoute) =>
+            if (tokensByContextId.TryGetValue(route.ContextId, out var existingToken)
+                && string.Equals(existingToken, route.RouteToken, StringComparison.Ordinal))
             {
-                existingState.Update(nextRoute);
-                return existingState;
-            },
-            route);
+                // Тот же маршрут: обновляем данные, счётчик контекстов не меняется.
+                if (routesByToken.TryGetValue(existingToken, out var currentState))
+                    currentState.Update(route);
 
-        tokensByContextId[route.ContextId] = state.Route.RouteToken;
+                return;
+            }
+
+            if (existingToken is not null)
+                DetachContextCore(route.ContextId, existingToken);
+
+            var state = routesByToken.AddOrUpdate(
+                route.RouteToken,
+                static (_, nextRoute) => new ProxyNavigationRouteState(nextRoute),
+                static (_, existingState, nextRoute) =>
+                {
+                    existingState.Update(nextRoute);
+                    return existingState;
+                },
+                route);
+
+            // Токен может использоваться несколькими контекстами: снимать маршрут можно,
+            // только когда от него отвязался последний контекст.
+            state.AttachContext();
+            tokensByContextId[route.ContextId] = state.Route.RouteToken;
+        }
     }
 
     public bool TryResolveRoute(string routeToken, [NotNullWhen(true)] out ProxyNavigationRoute? route)
@@ -156,13 +172,30 @@ internal sealed class ProxyNavigationDecisionRegistry
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(contextId);
 
-        if (!tokensByContextId.TryRemove(contextId, out var routeToken))
-            return false;
+        lock (registryGate)
+        {
+            if (!tokensByContextId.TryGetValue(contextId, out var routeToken))
+                return false;
 
-        if (routesByToken.TryRemove(routeToken, out var state))
-            state.Clear();
+            DetachContextCore(contextId, routeToken);
+            return true;
+        }
+    }
 
-        return true;
+    // Вызывается строго под registryGate: пара (контекст -> токен) и счётчик привязок
+    // маршрута изменяются атомарно относительно UpsertRoute/RemoveRouteByContextId.
+    private void DetachContextCore(string contextId, string routeToken)
+    {
+        tokensByContextId.TryRemove(contextId, out _);
+
+        if (!routesByToken.TryGetValue(routeToken, out var state))
+            return;
+
+        if (state.DetachContext() <= 0
+            && routesByToken.TryRemove(routeToken, out var removedState))
+        {
+            removedState.Clear();
+        }
     }
 
     private static void ValidateDecision(ProxyNavigationPendingDecision decision)
@@ -186,7 +219,16 @@ internal sealed class ProxyNavigationDecisionRegistry
         private readonly Lock gate = new();
         private readonly List<ProxyNavigationPendingDecision> pendingDecisions = [];
 
+        // Изменяется только под registryGate владеющего реестра.
+        public int AttachedContextCount { get; private set; }
+
         public ProxyNavigationRoute Route { get; private set; } = route;
+
+        public void AttachContext()
+            => AttachedContextCount++;
+
+        public int DetachContext()
+            => --AttachedContextCount;
 
         public void Update(ProxyNavigationRoute route)
         {

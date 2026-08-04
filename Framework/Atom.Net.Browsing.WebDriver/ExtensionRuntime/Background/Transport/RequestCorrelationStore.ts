@@ -19,6 +19,12 @@ export interface IRequestCorrelationStore {
 
     failAllForTab(tabId: string, status: BridgeStatus, error?: string): readonly PendingBridgeRequest[];
 
+    /**
+     * Удаляет и возвращает запросы, у которых истёк timeoutAt.
+     * Без периодического вызова просроченные записи копились бы бесконечно.
+     */
+    sweepExpired(now?: number): readonly PendingBridgeRequest[];
+
     get(messageId: string): PendingBridgeRequest | null;
 
     count(): number;

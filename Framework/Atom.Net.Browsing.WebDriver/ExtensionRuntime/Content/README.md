@@ -4,7 +4,7 @@ Content слой живёт внутри вкладки и общается с b
 
 Reference runtime уже задаёт минимальный bootstrap path:
 
-- discovery-документ читает atom-bridge-port и atom-bridge-secret из meta и отправляет configure в background
+- bootstrap-конфигурация поставляется через packaged config/managed storage (секрет в DOM discovery-страницы не публикуется)
 - после старта документа content заново подтягивает tab context и применяет override до пользовательских команд
 - content публикует DomContentLoaded, PageLoaded, ScriptError и ConsoleMessage как tab-local события
 - body override, main-world bridge и command dispatch остаются внутренней задачей content слоя

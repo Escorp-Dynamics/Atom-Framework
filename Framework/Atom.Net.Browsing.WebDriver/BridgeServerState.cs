@@ -6,6 +6,13 @@ namespace Atom.Net.Browsing.WebDriver;
 
 internal sealed class BridgeServerState : IAsyncDisposable
 {
+    /// <summary>
+    /// Сколько идентификаторов недавно завершённых запросов удерживается для различения
+    /// «уже завершён» / «не найден» и дубликат-защиты. Старые вытесняются по очереди,
+    /// чтобы долгоживущий сервер не накапливал идентификаторы бесконечно.
+    /// </summary>
+    private const int MaxSettledRequestIds = 16 * 1024;
+
     private readonly ILogger? logger;
     private readonly Channel<BridgeServerStateOperation> operations = Channel.CreateUnbounded<BridgeServerStateOperation>(new UnboundedChannelOptions
     {
@@ -17,6 +24,7 @@ internal sealed class BridgeServerState : IAsyncDisposable
     private readonly Dictionary<string, BridgeTabChannel> tabs = new(StringComparer.Ordinal);
     private readonly Dictionary<string, BridgePendingRequest> pendingRequests = new(StringComparer.Ordinal);
     private readonly HashSet<string> settledRequestIds = new(StringComparer.Ordinal);
+    private readonly Queue<string> settledRequestOrder = new();
     private readonly Task processingTask;
     private long completedRequestCount;
     private long failedRequestCount;
@@ -32,7 +40,15 @@ internal sealed class BridgeServerState : IAsyncDisposable
         => EnqueueAsync(descriptor, static (owner, state) => owner.CreateSessionCore(state));
 
     public ValueTask<SessionRemovalResult> RemoveSessionAsync(string sessionId)
-        => EnqueueAsync(sessionId, static (owner, state) => owner.RemoveSessionCore(state));
+        => EnqueueAsync((sessionId, expectedEpoch: (long?)null), static (owner, state) => owner.RemoveSessionCore(state.sessionId, state.expectedEpoch));
+
+    /// <summary>
+    /// Удаляет сессию только если она всё ещё принадлежит соединению с эпохой
+    /// <paramref name="expectedEpoch"/>; иначе no-op (защита от гонки вытеснения
+    /// при мгновенном реконнекте с тем же sessionId).
+    /// </summary>
+    public ValueTask<SessionRemovalResult> RemoveSessionAsync(string sessionId, long expectedEpoch)
+        => EnqueueAsync((sessionId, expectedEpoch: (long?)expectedEpoch), static (owner, state) => owner.RemoveSessionCore(state.sessionId, state.expectedEpoch));
 
     public ValueTask<BridgeBrowserSessionSnapshot?> CreateSessionSnapshotAsync(string sessionId)
         => EnqueueAsync(sessionId, static (owner, state) => owner.CreateSessionSnapshotCore(state));
@@ -113,19 +129,25 @@ internal sealed class BridgeServerState : IAsyncDisposable
             connectedAtUtc,
             descriptor.BrowserFamily,
             descriptor.ExtensionVersion,
-            descriptor.BrowserVersion);
+            descriptor.BrowserVersion,
+            descriptor.ConnectionEpoch ?? 0);
 
         sessions.Add(session.SessionId, session);
         return new(Outcome: SessionCreateResultKind.Created, Session: CreateSessionSnapshotNoLock(session));
     }
 
-    private SessionRemovalResult RemoveSessionCore(string sessionId)
+    private SessionRemovalResult RemoveSessionCore(string sessionId, long? expectedEpoch)
     {
         if (string.IsNullOrWhiteSpace(sessionId))
             return new(Outcome: SessionRemovalResultKind.SessionNotFound, Session: null, RemovedTabCount: 0, FailedPendingRequestCount: 0);
 
-        if (!sessions.Remove(sessionId, out var session))
+        if (!sessions.TryGetValue(sessionId, out var session)
+            || (expectedEpoch is not null && session.ConnectionEpoch != expectedEpoch.Value))
+        {
             return new(Outcome: SessionRemovalResultKind.SessionNotFound, Session: null, RemovedTabCount: 0, FailedPendingRequestCount: 0);
+        }
+
+        sessions.Remove(sessionId);
 
         session.IsConnected = false;
         session.LastSeenAtUtc = DateTimeOffset.UtcNow;
@@ -269,7 +291,7 @@ internal sealed class BridgeServerState : IAsyncDisposable
                 : new(Outcome: PendingRequestCompletionResultKind.RequestNotFound, Request: null);
         }
 
-        settledRequestIds.Add(messageId);
+        MarkSettledNoLock(messageId);
         pendingRequest.IsCompleted = true;
         completedRequestCount++;
         pendingRequest.CompletionSource.TrySetResult(response);
@@ -285,7 +307,7 @@ internal sealed class BridgeServerState : IAsyncDisposable
                 : new(Outcome: PendingRequestCompletionResultKind.RequestNotFound, Request: null);
         }
 
-        settledRequestIds.Add(messageId);
+        MarkSettledNoLock(messageId);
         pendingRequest.IsCompleted = true;
         failedRequestCount++;
         pendingRequest.CompletionSource.TrySetResult(CreateFailureResponse(messageId, status, error));
@@ -327,13 +349,25 @@ internal sealed class BridgeServerState : IAsyncDisposable
             if (!pendingRequests.Remove(messageId, out var pendingRequest))
                 continue;
 
-            settledRequestIds.Add(messageId);
+            MarkSettledNoLock(messageId);
             pendingRequest.IsCompleted = true;
             failedRequestCount++;
             pendingRequest.CompletionSource.TrySetResult(CreateFailureResponse(messageId, status, error));
         }
 
         return matchedIds.Count;
+    }
+
+    private void MarkSettledNoLock(string messageId)
+    {
+        settledRequestIds.Add(messageId);
+        settledRequestOrder.Enqueue(messageId);
+
+        while (settledRequestOrder.Count > MaxSettledRequestIds)
+        {
+            var evicted = settledRequestOrder.Dequeue();
+            settledRequestIds.Remove(evicted);
+        }
     }
 
     private static BridgeMessage CreateFailureResponse(string messageId, BridgeStatus status, string? error)

@@ -6,4 +6,5 @@ internal sealed record BridgeSessionDescriptor(
     string BrowserFamily,
     string ExtensionVersion,
     string? BrowserVersion = null,
-    DateTimeOffset? ConnectedAtUtc = null);
+    DateTimeOffset? ConnectedAtUtc = null,
+    long? ConnectionEpoch = null);

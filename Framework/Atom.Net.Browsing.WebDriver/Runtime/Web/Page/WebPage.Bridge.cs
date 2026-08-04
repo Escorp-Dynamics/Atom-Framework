@@ -33,6 +33,10 @@ public sealed partial class WebPage
             cancellationToken).ConfigureAwait(false);
 
         appliedRequestInterceptionState = effectiveState;
+
+        // Навигационный режим (proxy/webrequest) вычисляется в момент отправки контекста вкладки,
+        // поэтому после включения/выключения перехвата контекст нужно переотправить.
+        await WebBrowser.ApplyBridgeTabContextAsync(this, cancellationToken).ConfigureAwait(false);
     }
 
     internal void BindBridgeCommands(string sessionId, BridgeCommandClient commands)

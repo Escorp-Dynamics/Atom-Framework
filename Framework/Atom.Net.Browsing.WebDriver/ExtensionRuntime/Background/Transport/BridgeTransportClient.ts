@@ -13,6 +13,15 @@ export interface BridgeTransportConnectionInfo {
     maxMessageSize?: number;
 }
 
+export interface BridgeTransportCloseInfo {
+    url: string;
+    code: number;
+    reason: string;
+    wasClean: boolean;
+}
+
+export type BridgeTransportCloseHandler = (info: BridgeTransportCloseInfo) => Promise<void> | void;
+
 export interface IBridgeTransportClient {
     readonly connected: boolean;
 
@@ -23,4 +32,10 @@ export interface IBridgeTransportClient {
     send(message: BridgeMessage): Promise<void>;
 
     subscribe(handler: BridgeInboundMessageHandler): BridgeTransportSubscription;
+
+    /**
+     * Подписка на закрытие канала (штатное, аварийное и инициированное удалённой стороной).
+     * Без неё координатор сеанса не узнавал о смерти сокета вне явного disconnect().
+     */
+    subscribeClosed(handler: BridgeTransportCloseHandler): BridgeTransportSubscription;
 }

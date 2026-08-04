@@ -124,7 +124,9 @@ public sealed class WebDriverBridgeServerSkeletonTests
             Assert.That(discoveryBody, Does.Contain("Atom Bridge Discovery"));
             Assert.That(discoveryBody, Does.Contain("atom-bridge-port"));
             Assert.That(discoveryBody, Does.Contain("atom-bridge-proxy-port"));
-            Assert.That(discoveryBody, Does.Contain("atom-bridge-secret"));
+            // Discovery-страница публична для любого origin: секрет моста больше не публикуется в DOM.
+            Assert.That(discoveryBody, Does.Not.Contain("atom-bridge-secret"));
+            Assert.That(discoveryBody, Does.Not.Contain("test-secret"));
             Assert.That(missingResponse.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
         });
     }

@@ -89,6 +89,7 @@ import {
     addWebRequestListener,
     pruneExpiredVirtualCookies,
     releaseTabContext,
+    type BridgeTransportCloseInfo,
     type BrowserCookie,
     type BrowserHost,
     type BrowserTab,
@@ -105,8 +106,20 @@ import {
 type JsonRecord = Record<string, unknown>;
 type HeaderMap = Record<string, string>;
 type InterceptionRoute = { tabId: string; windowId?: string };
-type ProxyRequestDetails = { readonly tabId?: number; readonly url?: string };
-type ProxyAuthRequiredDetails = ProxyRequestDetails & { readonly isProxy?: boolean };
+type ProxyRequestDetails = {
+    readonly tabId?: number;
+    readonly url?: string;
+    readonly type?: string;
+};
+type ProxyAuthRequiredDetails = ProxyRequestDetails & {
+    readonly isProxy?: boolean;
+    readonly challengingProxy?: boolean;
+    readonly proxyInfo?: {
+        readonly type?: string;
+        readonly host?: string;
+        readonly port?: number;
+    };
+};
 type ProxyRoutingResult =
     | { type: 'direct' }
     | { type: 'http'; host: string; port: number }
@@ -155,6 +168,8 @@ type BackgroundRuntimeGlobalState = typeof globalThis & {
 
 const bridgeEventNameSet = new Set(bridgeEventNames);
 const maxLateNavigateRetryCount = 4;
+const transportReconnectBaseDelayMs = 500;
+const transportReconnectMaxDelayMs = 30_000;
 
 export class BackgroundRuntimeHost {
     private readonly browserHost = getBrowserHost();
@@ -175,6 +190,9 @@ export class BackgroundRuntimeHost {
     private config: RuntimeConfig | null = null;
     private cookieIsolationListenersInitialized = false;
     private proxyRoutingListenersInitialized = false;
+    private transportReconnectAttempts = 0;
+    private transportReconnectTimerId: ReturnType<typeof globalThis.setTimeout> | null = null;
+    private transportReconnectInFlight = false;
 
     private readonly onConnect = (port: RuntimePortLike) => {
         void this.handlePortConnected(port);
@@ -238,9 +256,15 @@ export class BackgroundRuntimeHost {
             return undefined;
         }
 
-        const navigationProxyRoute = this.resolveNavigationProxyRoutingResult(context);
-        if (navigationProxyRoute !== undefined) {
-            return navigationProxyRoute;
+        // Через локальный навигационный прокси проходят только навигационные main_frame запросы:
+        // отложенными решениями прокси-сервер владеет только по main_frame, MITM-туннель требует
+        // доверия к нашему корню в профиле браузера, а сабресурсы страницы обслуживаются штатной
+        // маршрутизацией (пользовательский upstream proxy / direct).
+        if (isNavigationProxyRequestCandidate(details)) {
+            const navigationProxyRoute = this.resolveNavigationProxyRoutingResult(context);
+            if (navigationProxyRoute !== undefined) {
+                return navigationProxyRoute;
+            }
         }
 
         if (context.proxy === null) {
@@ -259,7 +283,10 @@ export class BackgroundRuntimeHost {
 
         const context = this.resolveProxyContext(details.tabId);
         const navigationProxyRouteToken = this.resolveNavigationProxyRouteToken(context);
-        if (navigationProxyRouteToken !== undefined) {
+        const localProxyChallenge = this.isLocalNavigationProxyChallenge(details);
+
+        // Вызов подтверждённо от локального навигационного прокси: отвечаем route token.
+        if (navigationProxyRouteToken !== undefined && localProxyChallenge === true) {
             return {
                 authCredentials: {
                     username: navigationProxyRouteToken,
@@ -268,15 +295,46 @@ export class BackgroundRuntimeHost {
             };
         }
 
-        if (context?.proxy === undefined || context.proxy === null) {
-            return {};
+        // Вызов от внешнего (upstream) прокси: подставляются его собственные учётные данные,
+        // route token наружу не передаётся.
+        if (context?.proxy !== undefined && context.proxy !== null) {
+            const authCredentials = resolveProxyAuthCredentials(context.proxy);
+            return authCredentials === null ? {} : { authCredentials };
         }
 
-        const authCredentials = resolveProxyAuthCredentials(context.proxy);
-        return authCredentials === null ? {} : { authCredentials };
+        // Браузер не сообщил инициатора вызова, а upstream прокси у вкладки нет:
+        // единственный возможный источник 407 для неё — локальный навигационный прокси.
+        if (navigationProxyRouteToken !== undefined && localProxyChallenge !== false) {
+            return {
+                authCredentials: {
+                    username: navigationProxyRouteToken,
+                    password: '',
+                },
+            };
+        }
+
+        return {};
     };
 
+    private isLocalNavigationProxyChallenge(details: ProxyAuthRequiredDetails): boolean | undefined {
+        const config = this.config;
+        const proxyInfo = details.proxyInfo;
+        if (config === null || proxyInfo === undefined) {
+            return undefined;
+        }
+
+        if (typeof proxyInfo.host !== 'string' || typeof proxyInfo.port !== 'number') {
+            return undefined;
+        }
+
+        return proxyInfo.host.toLowerCase() === config.host.toLowerCase()
+            && proxyInfo.port === (config.proxyPort ?? config.port);
+    }
+
     public constructor() {
+        // Канал может закрыться без явного disconnect() со стороны хоста (серверный реджект,
+        // обрыв сети, перезапуск моста): переводим координатор в Degraded и включаем реконнект.
+        this.transport.subscribeClosed((info) => this.handleTransportConnectionClosed(info));
     }
 
     public get state() {
@@ -375,6 +433,10 @@ export class BackgroundRuntimeHost {
     }
 
     public async stop(reason: string): Promise<void> {
+        // Снимаем флаг до закрытия сокета: иначе событие close во время stop() привело бы
+        // к планированию реконнекта для заведомо остановленного сеанса.
+        this.started = false;
+        this.cancelTransportReconnect();
         this.runtime.onConnect?.removeListener?.(this.onConnect);
 
         for (const runtime of this.tabs.list()) {
@@ -384,7 +446,6 @@ export class BackgroundRuntimeHost {
         await this.coordinator.stop(reason);
         this.tabContexts.clear();
         this.virtualCookies.clear();
-        this.started = false;
     }
 
     public snapshot() {
@@ -405,8 +466,108 @@ export class BackgroundRuntimeHost {
             eventRouter: new PassiveEventRouter(),
             health: this.health,
             correlation: new InMemoryRequestCorrelationStore(),
-            keepAlive: new IntervalKeepAliveController(),
+            keepAlive: new IntervalKeepAliveController({
+                onUnhealthy: (missedPongCount) => this.handleKeepAliveUnhealthy(missedPongCount),
+            }),
         }, sessionId);
+    }
+
+    private handleTransportConnectionClosed(info: BridgeTransportCloseInfo): void {
+        if (!this.started) {
+            return;
+        }
+
+        const reason = `Мостовой канал закрыт: url=${info.url}, code=${info.code}, reason=${info.reason || 'без причины'}, clean=${info.wasClean}`;
+        void this.coordinator.handleTransportClosed(reason).catch((error) => {
+            console.error('[фоновый вход] Не удалось обработать закрытие мостового канала', error);
+        });
+        this.scheduleTransportReconnect(reason);
+    }
+
+    private handleKeepAliveUnhealthy(missedPongCount: number): void {
+        if (!this.started) {
+            return;
+        }
+
+        emitBackgroundDebugEvent(this.config, 'transport-keepalive-unhealthy', {
+            missedPongCount,
+        });
+
+        // Пропущенные Pong означают, что сокет мог умереть «тихо» (TCP half-open снаружи
+        // выглядит OPEN): принудительно закрываем его — обработчик close вынесет координатор
+        // в Degraded и запланирует переподключение.
+        void this.transport.disconnect('Нездоровый мостовой канал: пропущены контрольные ответы').catch((error) => {
+            console.error('[фоновый вход] Не удалось закрыть нездоровый мостовой канал', error);
+        });
+
+        // Если событие close не дойдёт (браузер завис на мёртвом TCP), запускаем реконнект
+        // напрямую: повторные побудители идемпотентны благодаря guard в scheduleTransportReconnect.
+        const reason = `Мостовой канал нездоров: пропущено контрольных ответов ${missedPongCount}`;
+        void this.coordinator.handleTransportClosed(reason).catch((error) => {
+            console.error('[фоновый вход] Не удалось обработать нездоровое состояние мостового канала', error);
+        });
+        this.scheduleTransportReconnect(reason);
+    }
+
+    private scheduleTransportReconnect(reason: string): void {
+        if (!this.started || this.config === null || this.transportReconnectTimerId !== null) {
+            return;
+        }
+
+        const delayMs = Math.min(
+            transportReconnectBaseDelayMs * 2 ** this.transportReconnectAttempts,
+            transportReconnectMaxDelayMs,
+        );
+        this.transportReconnectAttempts += 1;
+        emitBackgroundDebugEvent(this.config, 'transport-reconnect-scheduled', {
+            reason,
+            delayMs,
+            attempt: this.transportReconnectAttempts,
+        });
+
+        this.transportReconnectTimerId = globalThis.setTimeout(() => {
+            this.transportReconnectTimerId = null;
+            void this.attemptTransportReconnect(reason);
+        }, delayMs);
+    }
+
+    private async attemptTransportReconnect(reason: string): Promise<void> {
+        if (!this.started || this.config === null || this.transportReconnectInFlight) {
+            return;
+        }
+
+        if (this.transport.connected) {
+            // Канал уже восстановлен параллельным побудителем.
+            this.transportReconnectAttempts = 0;
+            return;
+        }
+
+        this.transportReconnectInFlight = true;
+        try {
+            const startResult = await this.coordinator.start(this.config);
+            this.transportReconnectAttempts = 0;
+            emitBackgroundDebugEvent(this.config, 'transport-reconnected', {
+                reason,
+                startResult,
+            });
+
+            // Сервер обрабатывает переподключение с тем же sessionId как новую сессию:
+            // зарегистрированные вкладки публикуются заново.
+            await this.publishRegisteredTabsToBridge();
+            console.info('[фоновый вход] Сеанс мостового слоя восстановлен', startResult);
+        } catch (error) {
+            console.error('[фоновый вход] Не удалось восстановить мостовой канал', error);
+            this.scheduleTransportReconnect(reason);
+        } finally {
+            this.transportReconnectInFlight = false;
+        }
+    }
+
+    private cancelTransportReconnect(): void {
+        if (this.transportReconnectTimerId !== null) {
+            globalThis.clearTimeout(this.transportReconnectTimerId);
+            this.transportReconnectTimerId = null;
+        }
     }
 
     private async handlePortConnected(port: RuntimePortLike): Promise<void> {
@@ -2908,6 +3069,12 @@ function resolveProxyRoutingResult(proxy: string): ProxyRoutingResult {
     } catch {
         return { type: 'direct' };
     }
+}
+
+function isNavigationProxyRequestCandidate(details: ProxyRequestDetails): boolean {
+    // Отсутствие типа трактуем как совместимость со старыми вызовами: реальный браузерный
+    // proxy.onRequest всегда передаёт webRequest type, поэтому сабресурсы отфильтровываются.
+    return details.type === undefined || details.type === 'main_frame';
 }
 
 function resolveProxyAuthCredentials(proxy: string): { username: string; password: string } | null {

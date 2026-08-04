@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+﻿using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 namespace Atom.Net.Browsing.WebDriver.Protocol;
 
@@ -80,8 +82,12 @@ internal static class BridgeHandshakeValidator
         if (string.IsNullOrWhiteSpace(payload.BrowserFamily) || string.IsNullOrWhiteSpace(payload.ExtensionVersion))
             return Reject(correlationId: correlationId, rejectCode: BridgeProtocolErrorCodes.InvalidPayload, rejectPayload: null);
 
-        if (!string.Equals(payload.Secret, settings.Secret, StringComparison.Ordinal))
+        if (!CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(payload.Secret),
+            Encoding.UTF8.GetBytes(settings.Secret)))
+        {
             return Reject(correlationId: correlationId, rejectCode: BridgeProtocolErrorCodes.SecretMismatch, rejectPayload: null);
+        }
 
         if (payload.ProtocolVersion != supportedProtocolVersion)
         {

@@ -6,9 +6,16 @@ internal sealed class BridgeBrowserSession(
     DateTimeOffset connectedAtUtc,
     string browserFamily,
     string extensionVersion,
-    string? browserVersion)
+    string? browserVersion,
+    long connectionEpoch = 0)
 {
     public string SessionId { get; } = sessionId;
+
+    /// <summary>
+    /// Поколение транспортного соединения, владеющего записью сессии. Удаление чужого
+    /// поколения (например, от прежнего, вытесненного реконнектом соединения) игнорируется.
+    /// </summary>
+    public long ConnectionEpoch { get; } = connectionEpoch;
 
     public int ProtocolVersion { get; } = protocolVersion;
 

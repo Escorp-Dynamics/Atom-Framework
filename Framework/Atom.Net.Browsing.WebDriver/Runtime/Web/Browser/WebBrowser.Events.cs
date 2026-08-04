@@ -5,6 +5,12 @@ namespace Atom.Net.Browsing.WebDriver;
 
 public sealed partial class WebBrowser
 {
+    // Время жизни отложенного proxy-решения: за это время браузер обязан довести навигацию
+    // до локального прокси. Отсчитывается от момента регистрации решения на сервере (а не от
+    // timestamp запроса на стороне расширения — тот может отставать/опережать и преждевременно
+    // «протухнуть»), и должно покрывать медленный стек навигации, а не только таймаут ответа моста.
+    private static readonly TimeSpan ProxyNavigationDecisionLifetime = TimeSpan.FromMinutes(2);
+
     public event MutableEventHandler<IWebBrowser, WebLifecycleEventArgs>? DomContentLoaded;
 
     public event MutableEventHandler<IWebBrowser, WebLifecycleEventArgs>? NavigationCompleted;
@@ -320,8 +326,8 @@ public sealed partial class WebBrowser
             return null;
         }
 
-        var issuedAtUtc = request.Timestamp == default ? DateTimeOffset.UtcNow : request.Timestamp;
-        var expiresAtUtc = issuedAtUtc + (bridgeServer?.RequestTimeout ?? TimeSpan.FromSeconds(5));
+        var issuedAtUtc = DateTimeOffset.UtcNow;
+        var expiresAtUtc = issuedAtUtc + ProxyNavigationDecisionLifetime;
 
         return decision.Action switch
         {
@@ -349,34 +355,50 @@ public sealed partial class WebBrowser
                 ResponseHeaders = ToHeaderDictionary(fulfillment.Response),
                 ResponseBody = fulfillment.Body,
             },
-            InterceptAction.Continue when decision.Continuation is { } continuation => CreateProxyContinuationPendingDecision(request, effectiveRequest, issuedAtUtc, expiresAtUtc, continuation),
+            InterceptAction.Continue when decision.Continuation is { } continuation => CreateProxyContinuationPendingDecision(request, issuedAtUtc, expiresAtUtc, continuation),
+
+            // main_frame навигация в proxy-режиме обязана оставить решение даже для обычного
+            // «продолжить без изменений»: иначе запрос дойдёт до локального прокси без решения.
+            InterceptAction.Continue => CreateProxyContinuePendingDecision(request, issuedAtUtc, expiresAtUtc),
             _ => null,
         };
     }
 
-    private static ProxyNavigationPendingDecision? CreateProxyContinuationPendingDecision(
+    private static ProxyNavigationPendingDecision CreateProxyContinuePendingDecision(
         BridgeInterceptedRequestPayload request,
-        HttpsRequestMessage effectiveRequest,
+        DateTimeOffset issuedAtUtc,
+        DateTimeOffset expiresAtUtc)
+        => new()
+        {
+            RequestId = request.RequestId,
+            Method = request.Method,
+            AbsoluteUrl = request.Url,
+            IssuedAtUtc = issuedAtUtc,
+            ExpiresAtUtc = expiresAtUtc,
+            Action = ProxyNavigationDecisionAction.Continue,
+        };
+
+    private static ProxyNavigationPendingDecision CreateProxyContinuationPendingDecision(
+        BridgeInterceptedRequestPayload request,
         DateTimeOffset issuedAtUtc,
         DateTimeOffset expiresAtUtc,
         InterceptedRequestContinuation continuation)
     {
         ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(effectiveRequest);
         ArgumentNullException.ThrowIfNull(continuation);
 
         var effectiveUrl = continuation.Request?.RequestUri?.ToString();
         var redirectUrl = continuation.RedirectUrl?.ToString();
-        var requestHeaders = ToHeaderDictionary(continuation.Request ?? effectiveRequest);
-        var requestBody = continuation.Body;
 
-        if (redirectUrl is null
-            && (effectiveUrl is null || string.Equals(effectiveUrl, request.Url, StringComparison.Ordinal))
-            && requestHeaders is null
-            && (requestBody is null || requestBody.Length == 0))
-        {
-            return null;
-        }
+        // Подменённые заголовки применяются, только если вызывающий передал собственный запрос;
+        // заголовки исходного запроса прокси возьмёт из реального запроса браузера.
+        var requestHeaders = continuation.Request is null ? null : ToHeaderDictionary(continuation.Request);
+        var requestBody = continuation.Body is { Length: > 0 } ? continuation.Body : null;
+        var forwardUrl = redirectUrl is null
+            && !string.IsNullOrWhiteSpace(effectiveUrl)
+            && !string.Equals(effectiveUrl, request.Url, StringComparison.Ordinal)
+                ? effectiveUrl
+                : null;
 
         return new ProxyNavigationPendingDecision
         {
@@ -389,9 +411,7 @@ public sealed partial class WebBrowser
                 ? ProxyNavigationDecisionAction.Redirect
                 : ProxyNavigationDecisionAction.Continue,
             RedirectUrl = redirectUrl,
-            ForwardUrl = redirectUrl is null && !string.IsNullOrWhiteSpace(effectiveUrl) && !string.Equals(effectiveUrl, request.Url, StringComparison.Ordinal)
-                ? effectiveUrl
-                : null,
+            ForwardUrl = forwardUrl,
             RequestHeaders = requestHeaders,
             RequestBody = requestBody,
         };

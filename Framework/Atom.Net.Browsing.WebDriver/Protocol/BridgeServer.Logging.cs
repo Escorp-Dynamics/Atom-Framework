@@ -96,4 +96,25 @@ internal static partial class BridgeServerLogs
 
     [LoggerMessage(EventId = 1836, Level = LogLevel.Debug, Message = "Мостовой сервер завершил callback HTTP-запрос {RequestId} для вкладки {TabId}, callback {CallbackName}, действие {Action}")]
     public static partial void LogBridgeServerCallbackRequestCompleted(this ILogger logger, string requestId, string tabId, string callbackName, string action);
+
+    [LoggerMessage(EventId = 1837, Level = LogLevel.Warning, Message = "Мостовой сервер отклонил HTTP-запрос {Method} {Path} из-за недопустимого Host заголовка '{HostHeader}'")]
+    public static partial void LogBridgeServerRequestRejectedHost(this ILogger logger, string method, string path, string hostHeader);
+
+    [LoggerMessage(EventId = 1838, Level = LogLevel.Warning, Message = "Мостовой сервер получил сбой при обработке HTTP-маршрута {Method} {Path}")]
+    public static partial void LogBridgeServerHttpRouteFailed(this ILogger logger, string method, string path, Exception exception);
+
+    [LoggerMessage(EventId = 1839, Level = LogLevel.Warning, Message = "Пользовательский обработчик мостового сервера завершился ошибкой (операция {OperationKind}); применено безопасное решение continue")]
+    public static partial void LogBridgeServerHandlerInvocationFailed(this ILogger logger, string operationKind, Exception exception);
+
+    [LoggerMessage(EventId = 1847, Level = LogLevel.Warning, Message = "Сеанс мостового сервера {Session} завершился непредвиденной ошибкой")]
+    public static partial void LogBridgeServerSessionFailed(this ILogger logger, string session, Exception exception);
+
+    [LoggerMessage(EventId = 1848, Level = LogLevel.Warning, Message = "Фоновый HTTP/WebSocket обработчик мостового сервера завершился непредвиденной ошибкой")]
+    public static partial void LogBridgeServerConnectionFailed(this ILogger logger, Exception exception);
+
+    [LoggerMessage(EventId = 1850, Level = LogLevel.Warning, Message = "Navigation proxy обработчик соединения завершился непредвиденной ошибкой")]
+    public static partial void LogBridgeServerNavigationProxyConnectionFailed(this ILogger logger, Exception exception);
+
+    [LoggerMessage(EventId = 1851, Level = LogLevel.Warning, Message = "Navigation proxy не смог перенаправить upstream-запрос {Method} {Url}")]
+    public static partial void LogBridgeServerNavigationProxyForwardFailed(this ILogger logger, string method, string url, Exception exception);
 }

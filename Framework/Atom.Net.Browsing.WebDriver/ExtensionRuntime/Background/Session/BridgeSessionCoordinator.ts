@@ -48,6 +48,14 @@ export class BridgeSessionCoordinator implements ISessionCoordinator {
 
     public async start(config: RuntimeConfig): Promise<SessionStartResult> {
         this.ensureTransportSubscription();
+
+        // Перезапуск из не-начального состояния (например, Degraded после обрыва транспорта)
+        // начинается с чистого состояния: автомат переходов не имеет дуги Degraded -> ConfigLoaded.
+        if (this.runtimeState.state !== 'Idle') {
+            this.runtimeState = createInitialSessionRuntimeState(this.runtimeState.sessionId);
+            this.dependencies.health.reportState(this.runtimeState.state);
+        }
+
         this.transitionTo('ConfigLoaded');
         this.transitionTo('TransportConnecting');
 
@@ -112,6 +120,9 @@ export class BridgeSessionCoordinator implements ISessionCoordinator {
 
         if (message.type === 'Response') {
             this.dependencies.correlation.complete(message);
+            // Исходящие запросы без ответа висят до успешного отклика; по приходу любого
+            // ответа заодно вычищаем записи с истёкшим таймаутом, чтобы счётчики не врали.
+            this.dependencies.correlation.sweepExpired();
             this.dependencies.health.reportPendingRequestCount(this.dependencies.correlation.count());
             return;
         }
