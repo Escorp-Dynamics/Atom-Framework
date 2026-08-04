@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -46,6 +46,17 @@ function syncManifest(sourcePath, workingDirectory) {
 function syncReferenceBaseline(workingDirectory) {
     const iconsWorkingDirectory = path.join(workingDirectory, 'icons');
     ensureDirectory(iconsWorkingDirectory);
+
+    // Legacy-референс WebDriver.Reference не коммитится в репозиторий
+    // (см. .github/workflows/webdriver-artifact-guard.yml), поэтому на чистом checkout
+    // и в CI его нет. Отсутствие референса — валидное состояние: пропускаем копирование
+    // иконок с предупреждением вместо падения сборки с ENOENT.
+    if (!existsSync(referenceIconsDirectory)) {
+        console.warn(
+            `[extension-runtime] Пропуск синхронизации иконок: каталог референса не найден ${referenceIconsDirectory}`,
+        );
+        return;
+    }
 
     for (const iconName of readdirSync(referenceIconsDirectory)) {
         copyFileSync(
