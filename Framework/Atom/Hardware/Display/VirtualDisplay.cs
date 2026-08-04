@@ -728,10 +728,10 @@ public sealed class VirtualDisplay : IAsyncDisposable
                 "--input-method=none",
                 "--start-new-commands=no",
                 "--exit-with-children=no",
-                "--exit-with-windows=no",
+                // --exit-with-windows и --dbus-launch отсутствуют в distro xpra 3.x.
+                // Их default behaviour подходит для изолированного browser-сеанса.
                 "--start-via-proxy=no",
                 "--systemd-run=no",
-                "--dbus-launch=no",
                 "--windows=yes",
                 "--resize-display=" + settings.Resolution.Width.ToString(CultureInfo.InvariantCulture) + "x" + settings.Resolution.Height.ToString(CultureInfo.InvariantCulture),
                 "--pixel-depth=" + settings.ColorDepth.ToString(CultureInfo.InvariantCulture),
