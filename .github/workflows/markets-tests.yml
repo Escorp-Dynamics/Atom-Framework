@@ -46,6 +46,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Prepare local NuGet feed directories
+        # NuGet.config указывает локальный фид .tmp/local-nuget-feed, который игнорируется
+        # git и отсутствует в чистом checkout; TreatWarningsAsErrors превращает NU1301
+        # (missing local source) в ошибку restore. Пустые каталоги устраняют проблему.
+        run: mkdir -p .tmp/local-nuget-feed .tmp/nuget-packages
+
       - name: Restore dedicated Markets suite
         run: dotnet restore Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj
 
