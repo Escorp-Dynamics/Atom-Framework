@@ -119,7 +119,7 @@ public sealed class VirtualDisplay : IAsyncDisposable
 
         try
         {
-            await WaitForDisplayReadyAsync(displayNumber, serverName, cancellationToken).ConfigureAwait(false);
+            await WaitForDisplayReadyAsync(displayNumber, serverName, process, serverLogs, cancellationToken).ConfigureAwait(false);
             logger?.LogVirtualDisplayX11SocketReady(displayName);
 
             if (settings.IsVisible)
@@ -710,8 +710,9 @@ public sealed class VirtualDisplay : IAsyncDisposable
             {
                 "start",
                 display,
-                    "--daemon=no",
-                    "--splash=no",
+                "--daemon=no",
+                // --splash появился не во всех поддерживаемых пакетах xpra (в частности,
+                // его нет в Ubuntu 24.04). Для non-interactive server-сеанса он не нужен.
                 "--attach=no",
                 "--mdns=no",
                 "--notifications=no",
@@ -727,10 +728,10 @@ public sealed class VirtualDisplay : IAsyncDisposable
                 "--input-method=none",
                 "--start-new-commands=no",
                 "--exit-with-children=no",
-                "--exit-with-windows=no",
+                // --exit-with-windows и --dbus-launch отсутствуют в distro xpra 3.x.
+                // Их default behaviour подходит для изолированного browser-сеанса.
                 "--start-via-proxy=no",
                 "--systemd-run=no",
-                "--dbus-launch=no",
                 "--windows=yes",
                 "--resize-display=" + settings.Resolution.Width.ToString(CultureInfo.InvariantCulture) + "x" + settings.Resolution.Height.ToString(CultureInfo.InvariantCulture),
                 "--pixel-depth=" + settings.ColorDepth.ToString(CultureInfo.InvariantCulture),
@@ -829,11 +830,17 @@ public sealed class VirtualDisplay : IAsyncDisposable
             "--desktop-scaling=off",
         ];
 
-    private static async ValueTask WaitForDisplayReadyAsync(int displayNumber, string serverName, CancellationToken cancellationToken)
+    private static async ValueTask WaitForDisplayReadyAsync(
+        int displayNumber,
+        string serverName,
+        Process serverProcess,
+        ProcessLogBuffer logBuffer,
+        CancellationToken cancellationToken)
     {
         var socketPath = "/tmp/.X11-unix/X" + displayNumber.ToString(CultureInfo.InvariantCulture);
 
-        // Ожидаем появления Unix-сокета X-сервера (до 3 секунд).
+        // Ожидаем появления Unix-сокета X-сервера (до 3 секунд), но не скрываем
+        // настоящую причину раннего падения xpra/Xvfb за общим timeout-сообщением.
         for (var attempt = 0; attempt < 30; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -841,11 +848,19 @@ public sealed class VirtualDisplay : IAsyncDisposable
             if (File.Exists(socketPath))
                 return;
 
+            if (serverProcess.HasExited)
+            {
+                throw new VirtualDisplayException(
+                    serverName + " завершился до создания сокета " + socketPath
+                    + ". Stderr: " + logBuffer.GetBufferedStderr());
+            }
+
             await Task.Delay(100, cancellationToken).ConfigureAwait(false);
         }
 
         throw new VirtualDisplayException(
-            serverName + " не создал сокет " + socketPath + " за 3 секунды.");
+            serverName + " не создал сокет " + socketPath + " за 3 секунды. Stderr: "
+            + logBuffer.GetBufferedStderr());
     }
 
     private static async ValueTask WaitForXpraControlSocketReadyAsync(int displayNumber, Process xpraServerProcess, ProcessLogBuffer logBuffer, CancellationToken cancellationToken)

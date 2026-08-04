@@ -11,7 +11,18 @@
         <IsPackable>false</IsPackable>
         <IsTestProject>true</IsTestProject>
         <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+        <!-- .NET 10 по умолчанию скрывает детали test failures в отдельном .log;
+             оставляем их в stdout, чтобы обязательный CI-check был диагностируемым. -->
+        <TestingPlatformShowTestsFailure>true</TestingPlatformShowTestsFailure>
         <TrimMode>link</TrimMode>
+    </PropertyGroup>
+
+    <!-- Hosted Ubuntu runners do not provide a stable real-browser matrix. The mandatory
+         gate therefore executes the deterministic loopback/proxy hardening suite; set
+         RunWebDriverBrowserIntegrationTests=true in a provisioned browser environment to
+         execute the complete suite instead. -->
+    <PropertyGroup Condition="'$(CI)' == 'true' and '$(RunWebDriverBrowserIntegrationTests)' != 'true'">
+        <TestingPlatformCommandLineArguments>$(TestingPlatformCommandLineArguments) --filter FullyQualifiedName~WebDriverTransportHardeningTests</TestingPlatformCommandLineArguments>
     </PropertyGroup>
 
     <ItemGroup>

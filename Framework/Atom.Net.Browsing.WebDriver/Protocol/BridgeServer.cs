@@ -959,11 +959,11 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         {
             response.Abort();
         }
-        catch (InvalidOperationException)
+        catch (ObjectDisposedException)
         {
             // Ответ уже завершён или недоступен.
         }
-        catch (ObjectDisposedException)
+        catch (InvalidOperationException)
         {
             // Ответ уже завершён или недоступен.
         }
@@ -1454,7 +1454,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         foreach (var entry in handlers.GetInvocationList())
         {
-            response = await InvokeSafelyAsync(() => ((BridgeRequestInterceptionHandler)entry)(request, cancellationToken), BridgeInterceptHttpResponse.Continue, "request-interception").ConfigureAwait(false);
+            response = await InvokeSafelyAsync(() => ((BridgeRequestInterceptionHandler)entry)(request, cancellationToken), () => BridgeInterceptHttpResponse.Continue(), "request-interception").ConfigureAwait(false);
         }
 
         return RegisterRequestFulfillment(request.RequestId, response);
@@ -1468,7 +1468,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         foreach (var entry in handlers.GetInvocationList())
         {
-            response = await InvokeSafelyAsync(() => ((BridgeCallbackHandler)entry)(request, cancellationToken), BridgeCallbackHttpResponse.Continue, "callback").ConfigureAwait(false);
+            response = await InvokeSafelyAsync(() => ((BridgeCallbackHandler)entry)(request, cancellationToken), () => BridgeCallbackHttpResponse.Continue(), "callback").ConfigureAwait(false);
         }
 
         return response;
@@ -1482,7 +1482,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         foreach (var entry in handlers.GetInvocationList())
         {
-            response = await InvokeSafelyAsync(() => ((BridgeResponseInterceptionHandler)entry)(responsePayload, cancellationToken), BridgeInterceptHttpResponse.Continue, "response-interception").ConfigureAwait(false);
+            response = await InvokeSafelyAsync(() => ((BridgeResponseInterceptionHandler)entry)(responsePayload, cancellationToken), () => BridgeInterceptHttpResponse.Continue(), "response-interception").ConfigureAwait(false);
         }
 
         return response;
