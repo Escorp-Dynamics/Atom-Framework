@@ -193,6 +193,14 @@
 			"group": "build"
 		},
 		{
+			"label": "pack local dependencies for WebDriver Release",
+			"type": "shell",
+			"command": "bash \"${workspaceFolder}/.vscode/scripts/pack-webdriver-local-dependencies.sh\"",
+			"isBackground": false,
+			"problemMatcher": "$msCompile",
+			"group": "build"
+		},
+		{
 			"label": "publish package Escorp.Atom.Net.Browsing.WebDriver",
 			"type": "shell",
 			"command": "bash \"${workspaceFolder}/.vscode/scripts/publish-framework-package.sh\" \"${workspaceFolder}/Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj\"",

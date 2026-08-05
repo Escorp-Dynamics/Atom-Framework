@@ -78,10 +78,12 @@ public sealed class YandexProfile : ChromeProfile
         };
 
     private static IEnumerable<string> GetLinuxCandidates(WebBrowserChannel channel)
-        => channel switch
-        {
-            WebBrowserChannel.Beta => ["yandex-browser-beta", "yandex-browser-corporate", "yandex-browser"],
-            WebBrowserChannel.Dev => ["yandex-browser-dev", "yandex-browser-beta", "yandex-browser-corporate", "yandex-browser"],
-            _ => ["yandex-browser-corporate", "yandex-browser", "/opt/yandex/browser/yandex-browser", "yandex-browser-beta", "yandex-browser-dev"],
-        };
+        => AppendSandboxedInstallCandidates(
+            channel switch
+            {
+                WebBrowserChannel.Beta => ["yandex-browser-beta", "yandex-browser-corporate", "yandex-browser"],
+                WebBrowserChannel.Dev => ["yandex-browser-dev", "yandex-browser-beta", "yandex-browser-corporate", "yandex-browser"],
+                _ => ["yandex-browser-corporate", "yandex-browser", "/opt/yandex/browser/yandex-browser", "yandex-browser-beta", "yandex-browser-dev"],
+            },
+            flatpakApplicationId: "ru.yandex.Browser");
 }

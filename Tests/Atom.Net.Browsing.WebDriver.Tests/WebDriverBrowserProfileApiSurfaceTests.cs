@@ -18,6 +18,7 @@ public sealed class WebDriverBrowserProfileApiSurfaceTests
             AssertPresetProperty(profile, nameof(WebBrowserProfile.Edge));
             AssertPresetProperty(profile, nameof(WebBrowserProfile.Brave));
             AssertPresetProperty(profile, nameof(WebBrowserProfile.Opera));
+            AssertPresetProperty(profile, nameof(WebBrowserProfile.OperaGx));
             AssertPresetProperty(profile, nameof(WebBrowserProfile.Vivaldi));
             AssertPresetProperty(profile, nameof(WebBrowserProfile.Yandex));
             AssertPresetProperty(profile, nameof(WebBrowserProfile.Firefox));
@@ -38,6 +39,7 @@ public sealed class WebDriverBrowserProfileApiSurfaceTests
             AssertConstructors(typeof(EdgeProfile));
             AssertConstructors(typeof(BraveProfile));
             AssertConstructors(typeof(OperaProfile));
+            AssertConstructors(typeof(OperaGxProfile));
             AssertConstructors(typeof(VivaldiProfile));
             AssertConstructors(typeof(YandexProfile));
             AssertConstructors(typeof(FirefoxProfile));

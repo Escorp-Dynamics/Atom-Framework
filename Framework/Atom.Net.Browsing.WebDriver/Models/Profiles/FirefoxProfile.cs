@@ -78,10 +78,13 @@ public class FirefoxProfile : WebBrowserProfile
         };
 
     private static IEnumerable<string> GetLinuxCandidates(WebBrowserChannel channel)
-        => channel switch
-        {
-            WebBrowserChannel.Beta => ["firefox-beta", "firefox"],
-            WebBrowserChannel.Dev => ["firefox-developer-edition", "firefox-beta", "firefox"],
-            _ => ["firefox", "firefox-beta", "firefox-developer-edition"],
-        };
+        => AppendSandboxedInstallCandidates(
+            channel switch
+            {
+                WebBrowserChannel.Beta => ["firefox-beta", "firefox"],
+                WebBrowserChannel.Dev => ["firefox-developer-edition", "firefox-beta", "firefox"],
+                _ => ["firefox", "firefox-beta", "firefox-developer-edition"],
+            },
+            flatpakApplicationId: "org.mozilla.firefox",
+            snapPackageName: "firefox");
 }

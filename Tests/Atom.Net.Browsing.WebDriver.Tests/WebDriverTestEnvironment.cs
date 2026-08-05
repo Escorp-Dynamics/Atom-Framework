@@ -136,10 +136,11 @@ internal static class WebDriverTestEnvironment
             "edge" or "microsoft-edge" => new EdgeProfile(channel),
             "brave" => new BraveProfile(channel),
             "opera" => new OperaProfile(channel),
+            "opera-gx" or "operagx" or "opera gx" or "opera-gx-stable" => new OperaGxProfile(channel),
             "vivaldi" => new VivaldiProfile(channel),
             "yandex" or "yandex-browser" => new YandexProfile(channel),
             "firefox" or "firefox-beta" or "firefox-developer-edition" or "firefox-dev" or "firefox-nightly" => new FirefoxProfile(channel),
-            _ => throw new InvalidOperationException($"Неизвестное значение {BrowserVariableName}: '{browserName}'. Ожидался один из браузеров Chrome, Edge, Brave, Opera, Vivaldi, Yandex или Firefox."),
+            _ => throw new InvalidOperationException($"Неизвестное значение {BrowserVariableName}: '{browserName}'. Ожидался один из браузеров Chrome, Edge, Brave, Opera, Opera GX, Vivaldi, Yandex или Firefox."),
         };
 
         if (!string.IsNullOrWhiteSpace(browserPath))

@@ -9,7 +9,13 @@
 TestResult.xml
 **/*.pem
 .github/instructions/
-/.tmp/
+/.tmp/*
+# Маркер локального NuGet-фида закоммичен: NuGet.config указывает source на
+# .tmp/local-nuget-feed, и без существующего каталога restore на свежем клоне
+# падает с NU1301 (при TreatWarningsAsErrors это ошибка, а не предупреждение).
+!/.tmp/local-nuget-feed/
+/.tmp/local-nuget-feed/*
+!/.tmp/local-nuget-feed/.gitkeep
 /.venv/
 /.worktrees/
 /Reference/WebDriver.Reference/

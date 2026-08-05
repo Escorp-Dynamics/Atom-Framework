@@ -78,10 +78,12 @@ public sealed class EdgeProfile : ChromeProfile
         };
 
     private static IEnumerable<string> GetLinuxCandidates(WebBrowserChannel channel)
-        => channel switch
-        {
-            WebBrowserChannel.Beta => ["microsoft-edge-beta", "microsoft-edge-stable", "microsoft-edge"],
-            WebBrowserChannel.Dev => ["microsoft-edge-dev", "microsoft-edge-beta", "microsoft-edge-stable", "microsoft-edge"],
-            _ => ["microsoft-edge-stable", "microsoft-edge", "microsoft-edge-beta", "microsoft-edge-dev"],
-        };
+        => AppendSandboxedInstallCandidates(
+            channel switch
+            {
+                WebBrowserChannel.Beta => ["microsoft-edge-beta", "microsoft-edge-stable", "microsoft-edge"],
+                WebBrowserChannel.Dev => ["microsoft-edge-dev", "microsoft-edge-beta", "microsoft-edge-stable", "microsoft-edge"],
+                _ => ["microsoft-edge-stable", "microsoft-edge", "microsoft-edge-beta", "microsoft-edge-dev"],
+            },
+            flatpakApplicationId: "com.microsoft.Edge");
 }

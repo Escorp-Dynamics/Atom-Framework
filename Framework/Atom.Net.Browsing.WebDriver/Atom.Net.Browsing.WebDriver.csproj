@@ -26,12 +26,13 @@
 		<ExtensionWorkingLayoutDirectory>$(ExtensionBuildArtifactsRoot)/ExtensionWorkingLayout</ExtensionWorkingLayoutDirectory>
 		<ExtensionWorkingDirectory>$(ExtensionWorkingLayoutDirectory)/Extension</ExtensionWorkingDirectory>
 		<ExtensionFirefoxWorkingDirectory>$(ExtensionWorkingLayoutDirectory)/Extension.Firefox</ExtensionFirefoxWorkingDirectory>
-		<ExtensionPackageArtifactsDirectory>
-			$(ExtensionBuildArtifactsRoot)/$(Configuration)/$(TargetFramework)/extension-packages</ExtensionPackageArtifactsDirectory>
+		<!-- Одиночные path-свойства обязаны оставаться однострочными: MSBuild сохраняет
+		     пробельные символы в значениях, а ведущий "\n\t" превращает абсолютный путь
+		     в относительный мусорный, в который web-ext молча складывает unsigned zip. -->
+		<ExtensionPackageArtifactsDirectory>$(ExtensionBuildArtifactsRoot)/$(Configuration)/$(TargetFramework)/extension-packages</ExtensionPackageArtifactsDirectory>
 		<ExtensionFirefoxPackageDirectory>$(ExtensionPackageArtifactsDirectory)/firefox</ExtensionFirefoxPackageDirectory>
 		<ExtensionFirefoxUnsignedPackageName>atom-webdriver-firefox-$(Version)-unsigned.zip</ExtensionFirefoxUnsignedPackageName>
-		<ExtensionFirefoxUnsignedPackagePath>
-			$(ExtensionFirefoxPackageDirectory)/$(ExtensionFirefoxUnsignedPackageName)</ExtensionFirefoxUnsignedPackagePath>
+		<ExtensionFirefoxUnsignedPackagePath>$(ExtensionFirefoxPackageDirectory)/$(ExtensionFirefoxUnsignedPackageName)</ExtensionFirefoxUnsignedPackagePath>
 		<CreateFirefoxExtensionPackageOnBuild
 			Condition="'$(CreateFirefoxExtensionPackageOnBuild)' == '' and '$(Configuration)' == 'Release'">
 			true</CreateFirefoxExtensionPackageOnBuild>
@@ -95,24 +96,41 @@
 	<Target Name="EnsureNodeAvailable"
 			BeforeTargets="PrepareExtensionRuntimeDependencies;PrepareExtensionRuntimeWorkingDirectories"
 			Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')">
-		<!-- Hard fail early with a human-readable message instead of mysterious MSB3073 + exit 127.
-		     This is the most common cause when people run `dotnet build/pack/publish -c Release`
-		     on a machine that has .NET but Node.js/npm is not in PATH or not installed. -->
+		<!-- Понятная диагностика вместо загадочного MSB3073 + exit code 127.
+		     Самая частая причина падения сборки на свежем клоне: .NET есть,
+		     а Node.js/npm не установлены или отсутствуют в PATH. -->
 		<Exec Command="node --version"
+		      IgnoreExitCode="true"
 		      ConsoleToMSBuild="true"
 		      StandardOutputImportance="high"
-		      StandardErrorImportance="high" />
+		      StandardErrorImportance="high">
+			<Output TaskParameter="ExitCode" PropertyName="_AtomNodeVersionExitCode" />
+		</Exec>
+		<Error Condition="'$(_AtomNodeVersionExitCode)' != '0'"
+		       Text="Node.js не найден в PATH (node --version завершился с кодом $(_AtomNodeVersionExitCode)). Для сборки ExtensionRuntime требуется Node.js >= 22 и npm: установите Node.js LTS (https://nodejs.org/) и перезапустите shell. Подробности — в README.md проекта." />
 		<Exec Command="npm --version"
+		      IgnoreExitCode="true"
 		      ConsoleToMSBuild="true"
 		      StandardOutputImportance="high"
-		      StandardErrorImportance="high" />
+		      StandardErrorImportance="high">
+			<Output TaskParameter="ExitCode" PropertyName="_AtomNpmVersionExitCode" />
+		</Exec>
+		<Error Condition="'$(_AtomNpmVersionExitCode)' != '0'"
+		       Text="npm не найден в PATH (npm --version завершился с кодом $(_AtomNpmVersionExitCode)). Для сборки ExtensionRuntime требуется Node.js >= 22 вместе с npm: установите Node.js LTS (https://nodejs.org/) и перезапустите shell." />
 	</Target>
 
 	<Target Name="PrepareExtensionRuntimeDependencies" BeforeTargets="Build"
-			Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')">
-		<!-- Always ensure a clean, reproducible install of the ExtensionRuntime dependencies.
-		     This guarantees that node_modules/.bin/tsc and node exist. -->
+		Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')"
+		Inputs="$(ExtensionRuntimeDirectory)/package.json;$(ExtensionRuntimeDirectory)/package-lock.json"
+		Outputs="$(ExtensionRuntimeDirectory)/node_modules/.atom-npm-ci.stamp">
+		<!-- Воспроизводимая установка зависимостей ExtensionRuntime (npm ci), но только
+		     когда она реально нужна: на свежем клоне node_modules отсутствует, а stamp-файл
+		     лежит внутри node_modules и исчезает вместе с ним. Пока package.json и
+		     package-lock.json не новее последней установки, повторные сборки (в т.ч.
+		     офлайн) не трогают сеть и существующие node_modules. -->
 		<Exec Command="npm --prefix &quot;$(ExtensionRuntimeDirectory)&quot; ci" />
+		<Touch Files="$(ExtensionRuntimeDirectory)/node_modules/.atom-npm-ci.stamp"
+		       AlwaysCreate="true" />
 	</Target>
 
 	<Target Name="PrepareExtensionRuntimeWorkingDirectories"
@@ -124,20 +142,20 @@
 
 		<Message Importance="high" Text="=== Running TypeScript typecheck for ExtensionRuntime ===" />
 
-		<Exec Command="cd &quot;$(ExtensionRuntimeDirectory)&quot; &amp;&amp; &quot;$(ExtensionRuntimeDirectory)/node_modules/.bin/node&quot; &quot;$(ExtensionRuntimeDirectory)/node_modules/typescript/bin/tsc&quot; --project &quot;$(ExtensionRuntimeDirectory)/tsconfig.json&quot; --pretty false"
+		<Exec Command="cd &quot;$(ExtensionRuntimeDirectory)&quot; &amp;&amp; node &quot;$(ExtensionRuntimeDirectory)/node_modules/typescript/bin/tsc&quot; --project &quot;$(ExtensionRuntimeDirectory)/tsconfig.json&quot; --pretty false"
 		      WorkingDirectory="$(ExtensionRuntimeDirectory)"
 		      ConsoleToMSBuild="true" />
 
 		<!-- background runtime -->
-		<Exec Command="&quot;$(ExtensionRuntimeDirectory)/node_modules/.bin/node&quot; &quot;$(ExtensionRuntimeDirectory)/scripts/build-background-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;"
+		<Exec Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/build-background-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;"
 		      WorkingDirectory="$(ExtensionRuntimeDirectory)" />
 
 		<!-- content runtime -->
-		<Exec Command="&quot;$(ExtensionRuntimeDirectory)/node_modules/.bin/node&quot; &quot;$(ExtensionRuntimeDirectory)/scripts/build-content-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;"
+		<Exec Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/build-content-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;"
 		      WorkingDirectory="$(ExtensionRuntimeDirectory)" />
 
 		<!-- sync working layout -->
-		<Exec Command="&quot;$(ExtensionRuntimeDirectory)/node_modules/.bin/node&quot; &quot;$(ExtensionRuntimeDirectory)/scripts/sync-working-layout.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot; --chrome-working-dir &quot;$(ExtensionWorkingDirectory)&quot; --firefox-working-dir &quot;$(ExtensionFirefoxWorkingDirectory)&quot;"
+		<Exec Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/sync-working-layout.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot; --chrome-working-dir &quot;$(ExtensionWorkingDirectory)&quot; --firefox-working-dir &quot;$(ExtensionFirefoxWorkingDirectory)&quot;"
 		      WorkingDirectory="$(ExtensionRuntimeDirectory)" />
 		<ItemGroup>
 			<GeneratedChromeExtensionFiles Include="$(ExtensionWorkingDirectory)\**\*" />

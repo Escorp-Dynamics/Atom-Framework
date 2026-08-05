@@ -32,6 +32,8 @@ public class WebDriverBrowserProfileTests
             .SetName("Brave materializes Chromium automation defaults");
         yield return new TestCaseData(new Func<string, WebBrowserProfile>(static path => new OperaProfile(path, WebBrowserChannel.Stable)), "Opera", false, false)
             .SetName("Opera materializes Chromium automation defaults");
+        yield return new TestCaseData(new Func<string, WebBrowserProfile>(static path => new OperaGxProfile(path, WebBrowserChannel.Stable)), "OperaGx", false, false)
+            .SetName("Opera GX materializes Chromium automation defaults");
         yield return new TestCaseData(new Func<string, WebBrowserProfile>(static path => new VivaldiProfile(path, WebBrowserChannel.Stable)), "Vivaldi", false, true)
             .SetName("Vivaldi materializes Chromium automation defaults");
         yield return new TestCaseData(new Func<string, WebBrowserProfile>(static path => new YandexProfile(path, WebBrowserChannel.Stable)), "Yandex", false, false)
@@ -49,6 +51,7 @@ public class WebDriverBrowserProfileTests
             Assert.That(WebBrowserProfile.Edge, Is.TypeOf<EdgeProfile>());
             Assert.That(WebBrowserProfile.Brave, Is.TypeOf<BraveProfile>());
             Assert.That(WebBrowserProfile.Opera, Is.TypeOf<OperaProfile>());
+            Assert.That(WebBrowserProfile.OperaGx, Is.TypeOf<OperaGxProfile>());
             Assert.That(WebBrowserProfile.Vivaldi, Is.TypeOf<VivaldiProfile>());
             Assert.That(WebBrowserProfile.Yandex, Is.TypeOf<YandexProfile>());
             Assert.That(WebBrowserProfile.Firefox, Is.TypeOf<FirefoxProfile>());
@@ -72,6 +75,7 @@ public class WebDriverBrowserProfileTests
             AssertConstructorSurface(typeof(EdgeProfile));
             AssertConstructorSurface(typeof(BraveProfile));
             AssertConstructorSurface(typeof(OperaProfile));
+            AssertConstructorSurface(typeof(OperaGxProfile));
             AssertConstructorSurface(typeof(VivaldiProfile));
             AssertConstructorSurface(typeof(YandexProfile));
             AssertConstructorSurface(typeof(FirefoxProfile));
@@ -296,6 +300,7 @@ public class WebDriverBrowserProfileTests
         var betaChrome = new ChromeProfile("/tmp/chrome-beta", WebBrowserChannel.Beta);
         var stableEdge = new EdgeProfile("/tmp/edge", WebBrowserChannel.Stable);
         var stableOpera = new OperaProfile("/tmp/opera", WebBrowserChannel.Stable);
+        var stableOperaGx = new OperaGxProfile("/tmp/opera-gx", WebBrowserChannel.Stable);
         var stableVivaldi = new VivaldiProfile("/tmp/vivaldi", WebBrowserChannel.Stable);
 
         if (!OperatingSystem.IsLinux())
@@ -312,6 +317,7 @@ public class WebDriverBrowserProfileTests
             Assert.That(BridgeExtensionBootstrap.ShouldUseSecureTransport(betaChrome), Is.True);
             Assert.That(BridgeExtensionBootstrap.ShouldUseSecureTransport(stableEdge), Is.True);
             Assert.That(BridgeExtensionBootstrap.ShouldUseSecureTransport(stableOpera), Is.True);
+            Assert.That(BridgeExtensionBootstrap.ShouldUseSecureTransport(stableOperaGx), Is.True);
             Assert.That(BridgeExtensionBootstrap.ShouldUseSecureTransport(stableVivaldi), Is.True);
         });
     }
@@ -337,6 +343,7 @@ public class WebDriverBrowserProfileTests
         var betaChrome = new ChromeProfile("/tmp/chrome-beta", WebBrowserChannel.Beta);
         var stableEdge = new EdgeProfile("/tmp/edge", WebBrowserChannel.Stable);
         var stableOpera = new OperaProfile("/tmp/opera", WebBrowserChannel.Stable);
+        var stableOperaGx = new OperaGxProfile("/tmp/opera-gx", WebBrowserChannel.Stable);
         var stableVivaldi = new VivaldiProfile("/tmp/vivaldi", WebBrowserChannel.Stable);
 
         var stableChromeStrategy = BridgeExtensionBootstrap.ResolveChromiumBootstrapStrategy(stableChrome);
@@ -344,6 +351,7 @@ public class WebDriverBrowserProfileTests
         var betaChromeStrategy = BridgeExtensionBootstrap.ResolveChromiumBootstrapStrategy(betaChrome);
         var stableEdgeStrategy = BridgeExtensionBootstrap.ResolveChromiumBootstrapStrategy(stableEdge);
         var stableOperaStrategy = BridgeExtensionBootstrap.ResolveChromiumBootstrapStrategy(stableOpera);
+        var stableOperaGxStrategy = BridgeExtensionBootstrap.ResolveChromiumBootstrapStrategy(stableOperaGx);
         var stableVivaldiStrategy = BridgeExtensionBootstrap.ResolveChromiumBootstrapStrategy(stableVivaldi);
 
         if (!OperatingSystem.IsLinux())
@@ -365,6 +373,10 @@ public class WebDriverBrowserProfileTests
                 Assert.That(stableOperaStrategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.ProfileSeeded));
                 Assert.That(stableOperaStrategy.TransportMode, Is.EqualTo(ChromiumBootstrapTransportMode.WebSocket));
                 Assert.That(stableOperaStrategy.UseCommandLineExtensionLoad, Is.True);
+
+                Assert.That(stableOperaGxStrategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.ProfileSeeded));
+                Assert.That(stableOperaGxStrategy.TransportMode, Is.EqualTo(ChromiumBootstrapTransportMode.WebSocket));
+                Assert.That(stableOperaGxStrategy.UseCommandLineExtensionLoad, Is.True);
 
                 Assert.That(stableVivaldiStrategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.ProfileSeeded));
                 Assert.That(stableVivaldiStrategy.TransportMode, Is.EqualTo(ChromiumBootstrapTransportMode.WebSocket));
@@ -394,6 +406,10 @@ public class WebDriverBrowserProfileTests
             Assert.That(stableOperaStrategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.SystemManagedPolicy));
             Assert.That(stableOperaStrategy.TransportMode, Is.EqualTo(ChromiumBootstrapTransportMode.SecureWebSocket));
             Assert.That(stableOperaStrategy.UseCommandLineExtensionLoad, Is.False);
+
+            Assert.That(stableOperaGxStrategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.ProfileSeeded));
+            Assert.That(stableOperaGxStrategy.TransportMode, Is.EqualTo(ChromiumBootstrapTransportMode.SecureWebSocket));
+            Assert.That(stableOperaGxStrategy.UseCommandLineExtensionLoad, Is.True);
 
             Assert.That(stableVivaldiStrategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.SystemManagedPolicy));
             Assert.That(stableVivaldiStrategy.TransportMode, Is.EqualTo(ChromiumBootstrapTransportMode.SecureWebSocket));
@@ -444,6 +460,7 @@ public class WebDriverBrowserProfileTests
         var stableEdge = new EdgeProfile("/tmp/edge", WebBrowserChannel.Stable);
         var stableBrave = new BraveProfile("/tmp/brave", WebBrowserChannel.Stable);
         var stableOpera = new OperaProfile("/tmp/opera", WebBrowserChannel.Stable);
+        var stableOperaGx = new OperaGxProfile("/tmp/opera-gx", WebBrowserChannel.Stable);
         var stableVivaldi = new VivaldiProfile("/tmp/vivaldi", WebBrowserChannel.Stable);
 
         if (!OperatingSystem.IsLinux())
@@ -459,6 +476,7 @@ public class WebDriverBrowserProfileTests
             Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableEdge), Is.EqualTo("/etc/opt/edge/policies/managed/atom-webdriver-extension.json"));
             Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableBrave), Is.EqualTo("/etc/opt/BraveSoftware/Brave-Browser/policies/managed/atom-webdriver-extension.json"));
             Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableOpera), Is.EqualTo("/etc/opt/opera/policies/managed/atom-webdriver-extension.json"));
+            Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableOperaGx), Is.Null);
             Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableVivaldi), Is.EqualTo("/etc/opt/vivaldi/policies/managed/atom-webdriver-extension.json"));
         });
     }
@@ -484,6 +502,7 @@ public class WebDriverBrowserProfileTests
         var stableEdge = new EdgeProfile("/tmp/edge", WebBrowserChannel.Stable);
         var stableBrave = new BraveProfile("/tmp/brave", WebBrowserChannel.Stable);
         var stableOpera = new OperaProfile("/tmp/opera", WebBrowserChannel.Stable);
+        var stableOperaGx = new OperaGxProfile("/tmp/opera-gx", WebBrowserChannel.Stable);
         var stableVivaldi = new VivaldiProfile("/tmp/vivaldi", WebBrowserChannel.Stable);
 
         if (!OperatingSystem.IsLinux())
@@ -499,6 +518,7 @@ public class WebDriverBrowserProfileTests
             Assert.That(BridgeExtensionBootstrap.ShouldSeedChromiumProfileExtensionSettings(stableEdge), Is.False);
             Assert.That(BridgeExtensionBootstrap.ShouldSeedChromiumProfileExtensionSettings(stableBrave), Is.False);
             Assert.That(BridgeExtensionBootstrap.ShouldSeedChromiumProfileExtensionSettings(stableOpera), Is.False);
+            Assert.That(BridgeExtensionBootstrap.ShouldSeedChromiumProfileExtensionSettings(stableOperaGx), Is.True);
             Assert.That(BridgeExtensionBootstrap.ShouldSeedChromiumProfileExtensionSettings(stableVivaldi), Is.False);
         });
     }
@@ -2041,6 +2061,7 @@ public class WebDriverBrowserProfileTests
     [TestCase(typeof(BraveProfile), "brave", TestName = "Brave profile resolves Arch stable binary name")]
     [TestCase(typeof(VivaldiProfile), "vivaldi-stable", TestName = "Vivaldi profile resolves Arch stable binary name")]
     [TestCase(typeof(YandexProfile), "yandex-browser-corporate", TestName = "Yandex profile resolves Arch stable binary name")]
+    [TestCase(typeof(OperaGxProfile), "opera-gx", TestName = "Opera GX profile resolves Linux binary name")]
     public void ChromiumProfileResolvesInstalledLinuxDistributionBinaryNames(Type profileType, string binaryName)
     {
         if (!OperatingSystem.IsLinux())
@@ -2066,6 +2087,382 @@ public class WebDriverBrowserProfileTests
         {
             Environment.SetEnvironmentVariable("PATH", originalPath);
             DeleteDirectoryIfExists(directory);
+        }
+    }
+
+    [Test]
+    public void OperaGxProfileResolvesLinuxBinaryFromPathUsingChannelPriority()
+    {
+        if (!OperatingSystem.IsLinux())
+            Assert.Ignore("Тест рассчитан на Linux PATH resolution.");
+
+        var directory = CreateTemporaryDirectory();
+        var binary = CreateBinary(directory, "opera-gx");
+        var stableAlias = CreateBinary(directory, "opera-gx-stable");
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", directory + IOPath.PathSeparator + originalPath);
+
+            var profile = new OperaGxProfile(WebBrowserChannel.Stable);
+
+            using (Assert.EnterMultipleScope())
+            {
+                Assert.That(profile.BinaryPath, Is.EqualTo(binary));
+                Assert.That(profile.BinaryPath, Is.Not.EqualTo(stableAlias));
+                Assert.That(profile.IsInstalled, Is.True);
+                Assert.That(profile.InstallationKind, Is.EqualTo(BrowserInstallationKind.Native));
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            DeleteDirectoryIfExists(directory);
+        }
+    }
+
+    [Test]
+    public void ChromeProfileResolvesFlatpakExportFromSystemExportsDirectory()
+    {
+        if (!OperatingSystem.IsLinux())
+            Assert.Ignore("Тест рассчитан на Linux flatpak exports resolution.");
+
+        var exportsDirectory = CreateTemporaryDirectory();
+        var emptyExportsDirectory = CreateTemporaryDirectory();
+        var pathDirectory = CreateTemporaryDirectory();
+        var flatpakBinary = CreateBinary(exportsDirectory, "com.google.Chrome");
+        var originalSystemExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR");
+        var originalUserExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR");
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", exportsDirectory);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", emptyExportsDirectory);
+            Environment.SetEnvironmentVariable("PATH", pathDirectory);
+
+            var profile = new ChromeProfile(WebBrowserChannel.Stable);
+
+            using (Assert.EnterMultipleScope())
+            {
+                Assert.That(profile.BinaryPath, Is.EqualTo(flatpakBinary));
+                Assert.That(profile.IsInstalled, Is.True);
+                Assert.That(profile.InstallationKind, Is.EqualTo(BrowserInstallationKind.Flatpak));
+                Assert.That(profile.SandboxedPackageId, Is.EqualTo("com.google.Chrome"));
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", originalSystemExports);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", originalUserExports);
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            DeleteDirectoryIfExists(exportsDirectory);
+            DeleteDirectoryIfExists(emptyExportsDirectory);
+            DeleteDirectoryIfExists(pathDirectory);
+        }
+    }
+
+    [Test]
+    public void VivaldiProfileResolvesFlatpakExportFromUserExportsDirectory()
+    {
+        if (!OperatingSystem.IsLinux())
+            Assert.Ignore("Тест рассчитан на Linux flatpak exports resolution.");
+
+        var systemExportsDirectory = CreateTemporaryDirectory();
+        var userExportsDirectory = CreateTemporaryDirectory();
+        var pathDirectory = CreateTemporaryDirectory();
+        var flatpakBinary = CreateBinary(userExportsDirectory, "com.vivaldi.Vivaldi");
+        var originalSystemExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR");
+        var originalUserExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR");
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", systemExportsDirectory);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", userExportsDirectory);
+            Environment.SetEnvironmentVariable("PATH", pathDirectory);
+
+            var profile = new VivaldiProfile(WebBrowserChannel.Stable);
+
+            using (Assert.EnterMultipleScope())
+            {
+                Assert.That(profile.BinaryPath, Is.EqualTo(flatpakBinary));
+                Assert.That(profile.IsInstalled, Is.True);
+                Assert.That(profile.InstallationKind, Is.EqualTo(BrowserInstallationKind.Flatpak));
+                Assert.That(profile.SandboxedPackageId, Is.EqualTo("com.vivaldi.Vivaldi"));
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", originalSystemExports);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", originalUserExports);
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            DeleteDirectoryIfExists(systemExportsDirectory);
+            DeleteDirectoryIfExists(userExportsDirectory);
+            DeleteDirectoryIfExists(pathDirectory);
+        }
+    }
+
+    [Test]
+    public void FirefoxProfileResolvesSnapBinaryFromSnapDirectory()
+    {
+        if (!OperatingSystem.IsLinux())
+            Assert.Ignore("Тест рассчитан на Linux snap binary resolution.");
+
+        var snapDirectory = CreateTemporaryDirectory();
+        var emptyExportsDirectory = CreateTemporaryDirectory();
+        var pathDirectory = CreateTemporaryDirectory();
+        var snapBinary = CreateBinary(snapDirectory, "firefox");
+        var originalSnapDirectory = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_SNAP_BIN_DIR");
+        var originalSystemExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR");
+        var originalUserExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR");
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_SNAP_BIN_DIR", snapDirectory);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", emptyExportsDirectory);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", emptyExportsDirectory);
+            Environment.SetEnvironmentVariable("PATH", pathDirectory);
+
+            var profile = new FirefoxProfile(WebBrowserChannel.Stable);
+
+            using (Assert.EnterMultipleScope())
+            {
+                Assert.That(profile.BinaryPath, Is.EqualTo(snapBinary));
+                Assert.That(profile.IsInstalled, Is.True);
+                Assert.That(profile.InstallationKind, Is.EqualTo(BrowserInstallationKind.Snap));
+                Assert.That(profile.SandboxedPackageId, Is.EqualTo("firefox"));
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_SNAP_BIN_DIR", originalSnapDirectory);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", originalSystemExports);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", originalUserExports);
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            DeleteDirectoryIfExists(snapDirectory);
+            DeleteDirectoryIfExists(emptyExportsDirectory);
+            DeleteDirectoryIfExists(pathDirectory);
+        }
+    }
+
+    [Test]
+    public void ExplicitBinaryPathClassifiesSandboxedInstallationKind()
+    {
+        if (!OperatingSystem.IsLinux())
+            Assert.Ignore("Тест рассчитан на Linux sandboxed installation classification.");
+
+        var exportsDirectory = CreateTemporaryDirectory();
+        var emptyExportsDirectory = CreateTemporaryDirectory();
+        var nativeDirectory = CreateTemporaryDirectory();
+        var flatpakBinary = CreateBinary(exportsDirectory, "com.brave.Browser");
+        var nativeBinary = CreateBinary(nativeDirectory, "brave");
+        var originalSystemExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR");
+        var originalUserExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", exportsDirectory);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", emptyExportsDirectory);
+
+            var flatpakProfile = new BraveProfile(flatpakBinary, WebBrowserChannel.Stable);
+            var nativeProfile = new BraveProfile(nativeBinary, WebBrowserChannel.Stable);
+
+            using (Assert.EnterMultipleScope())
+            {
+                Assert.That(flatpakProfile.InstallationKind, Is.EqualTo(BrowserInstallationKind.Flatpak));
+                Assert.That(flatpakProfile.SandboxedPackageId, Is.EqualTo("com.brave.Browser"));
+                Assert.That(nativeProfile.InstallationKind, Is.EqualTo(BrowserInstallationKind.Native));
+                Assert.That(nativeProfile.SandboxedPackageId, Is.Null);
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", originalSystemExports);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", originalUserExports);
+            DeleteDirectoryIfExists(exportsDirectory);
+            DeleteDirectoryIfExists(emptyExportsDirectory);
+            DeleteDirectoryIfExists(nativeDirectory);
+        }
+    }
+
+    [Test]
+    public void ExpandCandidatePathExpandsHomeDirectoryPrefix()
+    {
+        var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(homeDirectory))
+            Assert.Ignore("Домашний каталог пользователя недоступен.");
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(WebBrowserProfile.ExpandCandidatePath("~/browser/bin"), Is.EqualTo(IOPath.Combine(homeDirectory, "browser/bin")));
+            Assert.That(WebBrowserProfile.ExpandCandidatePath("/usr/bin/opera"), Is.EqualTo("/usr/bin/opera"));
+            Assert.That(WebBrowserProfile.ExpandCandidatePath("~user/bin"), Is.EqualTo("~user/bin"));
+        }
+    }
+
+    [Test]
+    public void FlatpakInstallationSkipsLinuxSystemManagedPolicy()
+    {
+        if (!OperatingSystem.IsLinux())
+            Assert.Ignore("Тест рассчитан на Linux flatpak policy resolution.");
+
+        var exportsDirectory = CreateTemporaryDirectory();
+        var emptyExportsDirectory = CreateTemporaryDirectory();
+        var flatpakBinary = CreateBinary(exportsDirectory, "com.google.Chrome");
+        var originalSystemExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR");
+        var originalUserExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", exportsDirectory);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", emptyExportsDirectory);
+
+            var profile = new ChromeProfile(flatpakBinary, WebBrowserChannel.Stable);
+            var strategy = BridgeExtensionBootstrap.ResolveChromiumBootstrapStrategy(profile);
+
+            using (Assert.EnterMultipleScope())
+            {
+                Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(profile), Is.Null);
+                Assert.That(strategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.ProfileSeeded));
+                Assert.That(strategy.TransportMode, Is.EqualTo(ChromiumBootstrapTransportMode.SecureWebSocket));
+                Assert.That(BridgeExtensionBootstrap.ShouldSeedChromiumProfileExtensionSettings(profile), Is.True);
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", originalSystemExports);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", originalUserExports);
+            DeleteDirectoryIfExists(exportsDirectory);
+            DeleteDirectoryIfExists(emptyExportsDirectory);
+        }
+    }
+
+    [Test]
+    public async Task ProfileMaterializationUsesFlatpakVisibleProfileRootForFlatpakInstallationAsync()
+    {
+        if (!OperatingSystem.IsLinux())
+            Assert.Ignore("Тест рассчитан на Linux flatpak profile root resolution.");
+
+        var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(homeDirectory))
+            Assert.Ignore("Домашний каталог пользователя недоступен.");
+
+        var exportsDirectory = CreateTemporaryDirectory();
+        var emptyExportsDirectory = CreateTemporaryDirectory();
+        var flatpakBinary = CreateBinary(exportsDirectory, "com.google.Chrome");
+        var originalSystemExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR");
+        var originalUserExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR");
+        var expectedRoot = IOPath.Combine(homeDirectory, ".var", "app", "com.google.Chrome", "atom-webdriver");
+        string? materializedPath = null;
+
+        try
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", exportsDirectory);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", emptyExportsDirectory);
+
+            var profile = new ChromeProfile(flatpakBinary, WebBrowserChannel.Stable);
+            var materialization = await ProfileMaterialization.MaterializeAsync(
+                new WebBrowserSettings { Profile = profile },
+                bridgeBootstrapPreparation: null,
+                CancellationToken.None);
+            materializedPath = profile.Path;
+
+            using (Assert.EnterMultipleScope())
+            {
+                Assert.That(profile.InstallationKind, Is.EqualTo(BrowserInstallationKind.Flatpak));
+                Assert.That(profile.Path, Does.StartWith(expectedRoot + IOPath.DirectorySeparatorChar));
+                Assert.That(materialization.MaterializedProfilePath, Is.EqualTo(profile.Path));
+                Assert.That(File.Exists(IOPath.Combine(profile.Path, "profile.json")), Is.True);
+            }
+
+            if (!string.IsNullOrWhiteSpace(materializedPath))
+                DeleteDirectoryIfExists(materializedPath);
+
+            TryDeleteEmptyDirectory(expectedRoot);
+            TryDeleteEmptyDirectory(IOPath.GetDirectoryName(expectedRoot)!);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", originalSystemExports);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", originalUserExports);
+            DeleteDirectoryIfExists(exportsDirectory);
+            DeleteDirectoryIfExists(emptyExportsDirectory);
+        }
+    }
+
+    [Test]
+    public async Task ProfileMaterializationUsesSnapVisibleProfileRootForSnapInstallationAsync()
+    {
+        if (!OperatingSystem.IsLinux())
+            Assert.Ignore("Тест рассчитан на Linux snap profile root resolution.");
+
+        var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(homeDirectory))
+            Assert.Ignore("Домашний каталог пользователя недоступен.");
+
+        var snapDirectory = CreateTemporaryDirectory();
+        var emptyExportsDirectory = CreateTemporaryDirectory();
+        var snapBinary = CreateBinary(snapDirectory, "firefox");
+        var originalSnapDirectory = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_SNAP_BIN_DIR");
+        var originalSystemExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR");
+        var originalUserExports = Environment.GetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR");
+        var expectedRoot = IOPath.Combine(homeDirectory, "snap", "firefox", "common", "atom-webdriver");
+        string? materializedPath = null;
+
+        try
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_SNAP_BIN_DIR", snapDirectory);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", emptyExportsDirectory);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", emptyExportsDirectory);
+
+            var profile = new FirefoxProfile(snapBinary, WebBrowserChannel.Stable);
+            var materialization = await ProfileMaterialization.MaterializeAsync(
+                new WebBrowserSettings { Profile = profile },
+                bridgeBootstrapPreparation: null,
+                CancellationToken.None);
+            materializedPath = profile.Path;
+
+            using (Assert.EnterMultipleScope())
+            {
+                Assert.That(profile.InstallationKind, Is.EqualTo(BrowserInstallationKind.Snap));
+                Assert.That(profile.Path, Does.StartWith(expectedRoot + IOPath.DirectorySeparatorChar));
+                Assert.That(materialization.MaterializedProfilePath, Is.EqualTo(profile.Path));
+                Assert.That(File.Exists(IOPath.Combine(profile.Path, "profile.json")), Is.True);
+            }
+
+            if (!string.IsNullOrWhiteSpace(materializedPath))
+                DeleteDirectoryIfExists(materializedPath);
+
+            TryDeleteEmptyDirectory(expectedRoot);
+            TryDeleteEmptyDirectory(IOPath.GetDirectoryName(expectedRoot)!);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_SNAP_BIN_DIR", originalSnapDirectory);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR", originalSystemExports);
+            Environment.SetEnvironmentVariable("ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR", originalUserExports);
+            DeleteDirectoryIfExists(snapDirectory);
+            DeleteDirectoryIfExists(emptyExportsDirectory);
+        }
+    }
+
+    private static void TryDeleteEmptyDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: false);
+        }
+        catch (IOException)
+        {
+            // Каталог не пуст — оставляем его на месте, чтобы не трогать чужие данные.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Нет прав на удаление каталога — cleanup остаётся best-effort.
         }
     }
 

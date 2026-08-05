@@ -25,7 +25,7 @@ internal static class ProfileMaterialization
 
         var shouldCleanup = string.IsNullOrWhiteSpace(profile.Path);
         var profilePath = shouldCleanup
-            ? IOPath.Combine(IOPath.GetTempPath(), Guid.NewGuid().ToString("N"))
+            ? ResolveTemporaryProfilePath(profile)
             : profile.Path;
 
         settings.Logger?.LogProfileMaterializationStarted(profile.Channel.ToString(), shouldCleanup, profilePath);
@@ -55,6 +55,40 @@ internal static class ProfileMaterialization
         return new ProfileMaterializationResult(
             MaterializedProfilePath: shouldCleanup ? profilePath : null,
             BridgeBootstrap: bridgeBootstrap);
+    }
+
+    /// <summary>
+    /// Разрешает путь к временному профилю браузера.
+    /// Для sandboxed-установок (Flatpak/Snap) профиль размещается в per-app каталоге,
+    /// который виден внутри sandbox по тому же пути, что и на хосте: эти окружения
+    /// монтируют приватный /tmp, поэтому обычный временный каталог недоступен браузеру.
+    /// </summary>
+    private static string ResolveTemporaryProfilePath(WebBrowserProfile profile)
+    {
+        var rootDirectory = ResolveSandboxedProfileRoot(profile);
+        if (string.IsNullOrWhiteSpace(rootDirectory))
+            rootDirectory = IOPath.GetTempPath();
+
+        return IOPath.Combine(rootDirectory, Guid.NewGuid().ToString("N"));
+    }
+
+    private static string? ResolveSandboxedProfileRoot(WebBrowserProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (!OperatingSystem.IsLinux() || string.IsNullOrWhiteSpace(profile.SandboxedPackageId))
+            return null;
+
+        var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(homeDirectory))
+            return null;
+
+        return profile.InstallationKind switch
+        {
+            BrowserInstallationKind.Flatpak => IOPath.Combine(homeDirectory, ".var", "app", profile.SandboxedPackageId, "atom-webdriver"),
+            BrowserInstallationKind.Snap => IOPath.Combine(homeDirectory, "snap", profile.SandboxedPackageId, "common", "atom-webdriver"),
+            _ => null,
+        };
     }
 
     private static void LogManagedPolicyDiagnostics(ILogger? logger, BridgeBootstrapPlan? bridgeBootstrap)
