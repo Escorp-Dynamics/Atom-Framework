@@ -26,12 +26,13 @@
 		<ExtensionWorkingLayoutDirectory>$(ExtensionBuildArtifactsRoot)/ExtensionWorkingLayout</ExtensionWorkingLayoutDirectory>
 		<ExtensionWorkingDirectory>$(ExtensionWorkingLayoutDirectory)/Extension</ExtensionWorkingDirectory>
 		<ExtensionFirefoxWorkingDirectory>$(ExtensionWorkingLayoutDirectory)/Extension.Firefox</ExtensionFirefoxWorkingDirectory>
-		<ExtensionPackageArtifactsDirectory>
-			$(ExtensionBuildArtifactsRoot)/$(Configuration)/$(TargetFramework)/extension-packages</ExtensionPackageArtifactsDirectory>
+		<!-- Одиночные path-свойства обязаны оставаться однострочными: MSBuild сохраняет
+		     пробельные символы в значениях, а ведущий "\n\t" превращает абсолютный путь
+		     в относительный мусорный, в который web-ext молча складывает unsigned zip. -->
+		<ExtensionPackageArtifactsDirectory>$(ExtensionBuildArtifactsRoot)/$(Configuration)/$(TargetFramework)/extension-packages</ExtensionPackageArtifactsDirectory>
 		<ExtensionFirefoxPackageDirectory>$(ExtensionPackageArtifactsDirectory)/firefox</ExtensionFirefoxPackageDirectory>
 		<ExtensionFirefoxUnsignedPackageName>atom-webdriver-firefox-$(Version)-unsigned.zip</ExtensionFirefoxUnsignedPackageName>
-		<ExtensionFirefoxUnsignedPackagePath>
-			$(ExtensionFirefoxPackageDirectory)/$(ExtensionFirefoxUnsignedPackageName)</ExtensionFirefoxUnsignedPackagePath>
+		<ExtensionFirefoxUnsignedPackagePath>$(ExtensionFirefoxPackageDirectory)/$(ExtensionFirefoxUnsignedPackageName)</ExtensionFirefoxUnsignedPackagePath>
 		<CreateFirefoxExtensionPackageOnBuild
 			Condition="'$(CreateFirefoxExtensionPackageOnBuild)' == '' and '$(Configuration)' == 'Release'">
 			true</CreateFirefoxExtensionPackageOnBuild>
