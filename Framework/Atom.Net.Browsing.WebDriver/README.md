@@ -35,7 +35,7 @@ dotnet pack Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.cs
 NUGET_API_KEY=... bash .vscode/scripts/publish-framework-package.sh Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj
 ```
 
-Готовая CI-джоба, воспроизводящая этот сценарий от чистого клона до проверки состава пакета, лежит фрагментом в `.github/ci-fragments/webdriver-release-pack.yml` — перенеси её в `.github/workflows/webdriver-tests.yml`, когда у используемого токена/App появится permission `workflows`.
+CI воспроизводит этот сценарий от чистого клона до проверки состава пакета джобой `Pack (Escorp.Atom.Net.Browsing.WebDriver, Release)` в `.github/workflows/webdriver-tests.yml`.
 
 Подробности про ExtensionRuntime — в `ExtensionRuntime/README.md`.
 
