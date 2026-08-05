@@ -2,13 +2,42 @@
 
 Драйвер браузера через WebSocket-мост и расширение-коннектор. В отличие от Selenium/Puppeteer не использует CDP и отладочный API браузера: связь идёт через расширение браузера, а DOM-команды выполняются через изолированный канал вкладки. Пользовательский ввод при этом больше не синтетический: действия по селектору и точке идут через доверенные `VirtualMouse` и `VirtualKeyboard` в изолированном контексте дисплея.
 
-> **Важно для сборки (dotnet build / pack / publish -c Release)**  
-> Пакет содержит `ExtensionRuntime` (TypeScript + Node).  
-> На машине **обязательно** должен быть установлен **Node.js ≥ 22** + npm.  
-> При первой сборке или после очистки выполняется `npm ci`.  
-> Если увидишь `exit code 127` / "tsc: not found" / "npm: not found" — это именно отсутствие Node.js в PATH.
+## Требования
 
-См. подробности в `ExtensionRuntime/README.md`.
+- **.NET SDK 10** — закреплён в `global.json` (`rollForward: latestFeature`); проверка: `dotnet --version` → `10.0.1xx+`.
+- **Node.js ≥ 22** и **npm** в PATH — обязательны для любой конфигурации сборки: в пакет входит браузерный `ExtensionRuntime` (TypeScript), который собирается автоматически из `.csproj`. При отсутствии Node.js сборка остановится рано с понятной ошибкой вместо загадочного `exit code 127`.
+- Опционально, только для real-browser интеграционных тестов: установленный браузер (см. «Поддерживаемые браузеры»), а на Linux — `xpra` + `xvfb`. Выбор браузера — через `ATOM_TEST_WEBDRIVER_BROWSER` и `ATOM_TEST_WEBDRIVER_BROWSER_PATH`; без них браузерные тесты пропускаются.
+
+## Быстрый старт после клона
+
+```bash
+# Сборка (Debug). На свежем клоне автоматически выполнится npm ci для ExtensionRuntime;
+# повторные сборки используют уже установленные node_modules, пока не изменился lock-файл.
+dotnet build Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj
+
+# Тесты
+dotnet test Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj
+```
+
+## Публикация пакета (Release)
+
+Release-конфигурация ссылается на пакеты `Escorp.Atom.*` плавающей версией `*`. Часть цепочки может быть ещё не опубликована на nuget.org (например, `Escorp.Atom.Media.Audio`), поэтому перед Release-сборкой наполни локальный фид `.tmp/local-nuget-feed` (source уже подключён в `NuGet.config`):
+
+```bash
+# Собирает цепочку зависимостей в порядке публикации и кладёт nupkg в .tmp/local-nuget-feed
+bash .vscode/scripts/pack-webdriver-local-dependencies.sh
+
+# Release-сборка и упаковка (.nupkg + .snupkg, включая contentFiles расширений Chromium/Firefox)
+dotnet pack Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj -c Release
+
+# Push на nuget.org (нужен NUGET_API_KEY или сохранённые креды); цепочку публикуй снизу вверх
+# тем же publish-framework-package.sh, вебдрайвер — последним
+NUGET_API_KEY=... bash .vscode/scripts/publish-framework-package.sh Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj
+```
+
+Готовая CI-джоба, воспроизводящая этот сценарий от чистого клона до проверки состава пакета, лежит фрагментом в `.github/ci-fragments/webdriver-release-pack.yml` — перенеси её в `.github/workflows/webdriver-tests.yml`, когда у используемого токена/App появится permission `workflows`.
+
+Подробности про ExtensionRuntime — в `ExtensionRuntime/README.md`.
 
 ## Архитектура
 
