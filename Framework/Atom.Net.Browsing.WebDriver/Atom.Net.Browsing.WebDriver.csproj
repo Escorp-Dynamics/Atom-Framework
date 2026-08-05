@@ -109,9 +109,10 @@
 	</Target>
 
 	<Target Name="PrepareExtensionRuntimeDependencies" BeforeTargets="Build"
-			Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')">
+		Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')">
 		<!-- Always ensure a clean, reproducible install of the ExtensionRuntime dependencies.
-		     This guarantees that node_modules/.bin/tsc and node exist. -->
+		     This guarantees that the local TypeScript compiler exists under node_modules.
+		     The node executable itself is expected on PATH and is verified above. -->
 		<Exec Command="npm --prefix &quot;$(ExtensionRuntimeDirectory)&quot; ci" />
 	</Target>
 
@@ -124,20 +125,20 @@
 
 		<Message Importance="high" Text="=== Running TypeScript typecheck for ExtensionRuntime ===" />
 
-		<Exec Command="cd &quot;$(ExtensionRuntimeDirectory)&quot; &amp;&amp; &quot;$(ExtensionRuntimeDirectory)/node_modules/.bin/node&quot; &quot;$(ExtensionRuntimeDirectory)/node_modules/typescript/bin/tsc&quot; --project &quot;$(ExtensionRuntimeDirectory)/tsconfig.json&quot; --pretty false"
+		<Exec Command="cd &quot;$(ExtensionRuntimeDirectory)&quot; &amp;&amp; node &quot;$(ExtensionRuntimeDirectory)/node_modules/typescript/bin/tsc&quot; --project &quot;$(ExtensionRuntimeDirectory)/tsconfig.json&quot; --pretty false"
 		      WorkingDirectory="$(ExtensionRuntimeDirectory)"
 		      ConsoleToMSBuild="true" />
 
 		<!-- background runtime -->
-		<Exec Command="&quot;$(ExtensionRuntimeDirectory)/node_modules/.bin/node&quot; &quot;$(ExtensionRuntimeDirectory)/scripts/build-background-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;"
+		<Exec Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/build-background-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;"
 		      WorkingDirectory="$(ExtensionRuntimeDirectory)" />
 
 		<!-- content runtime -->
-		<Exec Command="&quot;$(ExtensionRuntimeDirectory)/node_modules/.bin/node&quot; &quot;$(ExtensionRuntimeDirectory)/scripts/build-content-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;"
+		<Exec Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/build-content-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;"
 		      WorkingDirectory="$(ExtensionRuntimeDirectory)" />
 
 		<!-- sync working layout -->
-		<Exec Command="&quot;$(ExtensionRuntimeDirectory)/node_modules/.bin/node&quot; &quot;$(ExtensionRuntimeDirectory)/scripts/sync-working-layout.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot; --chrome-working-dir &quot;$(ExtensionWorkingDirectory)&quot; --firefox-working-dir &quot;$(ExtensionFirefoxWorkingDirectory)&quot;"
+		<Exec Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/sync-working-layout.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot; --chrome-working-dir &quot;$(ExtensionWorkingDirectory)&quot; --firefox-working-dir &quot;$(ExtensionFirefoxWorkingDirectory)&quot;"
 		      WorkingDirectory="$(ExtensionRuntimeDirectory)" />
 		<ItemGroup>
 			<GeneratedChromeExtensionFiles Include="$(ExtensionWorkingDirectory)\**\*" />
