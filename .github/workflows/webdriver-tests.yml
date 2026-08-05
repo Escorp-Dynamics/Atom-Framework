@@ -100,6 +100,16 @@ jobs:
           -p:TreatWarningsAsErrors=false
           -p:CodeAnalysisTreatWarningsAsErrors=false
 
+      - name: Verify unsigned Firefox package
+        # Тот же gate, что у AMO-пути: sign:firefox читает именно этот unsigned zip
+        # сразу после build, поэтому его наличие и состав проверяем сразу после build.
+        run: |
+          set -euo pipefail
+          unsigned_zip="$(find Framework/Atom.Net.Browsing.WebDriver/obj/Release/net10.0/extension-packages/firefox -maxdepth 1 -type f -name '*-unsigned.zip' | head -n 1)"
+          test -n "$unsigned_zip" || { echo "Unsigned Firefox package not produced"; exit 1; }
+          echo "Unsigned Firefox package: $unsigned_zip"
+          unzip -l "$unsigned_zip"
+
       - name: Pack WebDriver (Release)
         run: >-
           dotnet pack Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj
@@ -113,7 +123,7 @@ jobs:
           -p:TreatWarningsAsErrors=false
           -p:CodeAnalysisTreatWarningsAsErrors=false
 
-      - name: Verify produced artifacts
+      - name: Verify produced package (nupkg)
         run: |
           set -euo pipefail
           nupkg="$(find .tmp/webdriver-pack-check -maxdepth 1 -type f -name '*.nupkg' | head -n 1)"
@@ -127,9 +137,10 @@ jobs:
           unzip -l "$nupkg" | grep -q 'contentFiles/any/any/Extension.Firefox/content.js' \
             || { echo "Firefox Extension contentFiles missing from package"; exit 1; }
 
-          unsigned_zip="$(find Framework/Atom.Net.Browsing.WebDriver/obj/Release/net10.0/extension-packages/firefox -maxdepth 1 -type f -name '*-unsigned.zip' | head -n 1)"
-          test -n "$unsigned_zip" || { echo "Unsigned Firefox package not produced"; exit 1; }
-          echo "Unsigned Firefox package: $unsigned_zip"
+          # Диагностика: видно, что пережило pack (firefox unsigned zip проверен выше,
+          # сразу после build — это зеркало потока sign:firefox).
+          echo "--- unsigned artifacts after pack ---"
+          find Framework/Atom.Net.Browsing.WebDriver/obj -type f -name '*unsigned*' -print || true
 
   extension-runtime-tests:
     name: Node (ExtensionRuntime typecheck + tests)
