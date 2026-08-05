@@ -1,0 +1,59 @@
+name: Markets Tests
+
+on:
+  push:
+    paths:
+      - 'Framework/Atom/**'
+      - 'Framework/Atom.Debug/**'
+      - 'Framework/Atom.IO.Compression/**'
+      - 'Framework/Atom.Net/**'
+      - 'Framework/Atom.Testing/**'
+      - 'Framework/Atom.Web/**'
+      - 'Framework/Atom.Web.Services.Markets/**'
+      - 'Framework/Atom.Web.Services/**'
+      - 'Tests/Atom.Tests/**'
+      - 'Tests/Atom.Web.Services.Markets.Tests/**'
+      - '.github/workflows/markets-tests.yml'
+      - 'global.json'
+      - 'Framework/Directory.Build.props'
+  pull_request:
+    paths:
+      - 'Framework/Atom/**'
+      - 'Framework/Atom.Debug/**'
+      - 'Framework/Atom.IO.Compression/**'
+      - 'Framework/Atom.Net/**'
+      - 'Framework/Atom.Testing/**'
+      - 'Framework/Atom.Web/**'
+      - 'Framework/Atom.Web.Services.Markets/**'
+      - 'Framework/Atom.Web.Services/**'
+      - 'Tests/Atom.Tests/**'
+      - 'Tests/Atom.Web.Services.Markets.Tests/**'
+      - '.github/workflows/markets-tests.yml'
+      - 'global.json'
+      - 'Framework/Directory.Build.props'
+  workflow_dispatch:
+
+jobs:
+  dedicated-markets-suite:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dedicated Markets suite
+        run: dotnet restore Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj
+
+      - name: Run dedicated Markets suite
+        run: >-
+          dotnet test --project Tests/Atom.Web.Services.Markets.Tests/Atom.Web.Services.Markets.Tests.csproj
+          --verbosity minimal
+          -p:RunAnalyzers=false
+          -p:EnforceCodeStyleInBuild=false
+          -p:EnableNETAnalyzers=false
+          -p:AnalysisMode=None

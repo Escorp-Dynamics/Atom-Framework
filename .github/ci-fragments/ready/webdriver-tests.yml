@@ -1,0 +1,128 @@
+name: WebDriver Tests
+
+on:
+  push:
+    paths:
+      - 'Framework/Atom.Net.Browsing.WebDriver/**'
+      - 'Tests/Atom.Net.Browsing.WebDriver.Tests/**'
+      - 'Tests/Atom.Net.Browsing.Tests/**'
+      - '.github/workflows/webdriver-tests.yml'
+      - 'global.json'
+      - 'Framework/Directory.Build.props'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
+      - 'NuGet.config'
+  # Без path-фильтра: обязательные проверки ruleset должны приходить на ЛЮБОЙ PR в master,
+  # иначе PR без WebDriver-изменений зависнет в состоянии Expected.
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  webdriver-nunit-tests:
+    name: NUnit (Atom.Net.Browsing.WebDriver.Tests)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install virtual display backend
+        # Значительная часть legacy NUnit-suite запускает WebBrowser.LaunchAsync,
+        # а VirtualDisplay uses xpra + Xvfb on Linux. ubuntu-latest no longer ships xpra.
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends xpra xvfb
+
+      - name: Restore WebDriver test suite
+        run: dotnet restore Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj
+
+      - name: Run WebDriver NUnit suite
+        run: >-
+          dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj
+          --verbosity minimal
+          -p:RunAnalyzers=false
+          -p:EnforceCodeStyleInBuild=false
+          -p:EnableNETAnalyzers=false
+          -p:AnalysisMode=None
+
+  webdriver-release-pack:
+    name: Pack (Escorp.Atom.Net.Browsing.WebDriver, Release)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime/package-lock.json
+
+      - name: Pack framework dependency chain into local NuGet feed
+        # Release-конфигурация вебдрайвера ссылается на Escorp.Atom.* плавающей версией "*",
+        # а часть цепочки (напр., Escorp.Atom.Media.Audio) не опубликована на nuget.org:
+        # без local feed свежий клон не пройдёт restore. Этот шаг воспроизводит ровно тот
+        # путь, по которому проходит пользователь после клонирования.
+        run: bash .vscode/scripts/pack-webdriver-local-dependencies.sh
+
+      - name: Build and pack WebDriver (Release)
+        run: >-
+          dotnet pack Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj
+          -c Release --nologo
+          --output .tmp/webdriver-pack-check
+
+      - name: Verify produced package layout
+        run: |
+          set -euo pipefail
+          nupkg="$(find .tmp/webdriver-pack-check -maxdepth 1 -type f -name '*.nupkg' | head -n 1)"
+          test -n "$nupkg" || { echo "WebDriver nupkg not produced"; exit 1; }
+          echo "Produced package: $nupkg"
+          unzip -l "$nupkg"
+          unzip -l "$nupkg" | grep -q 'icon.png' \
+            || { echo "icon.png missing from package"; exit 1; }
+          unzip -l "$nupkg" | grep -q 'contentFiles/any/any/Extension/content.js' \
+            || { echo "Chromium Extension contentFiles missing from package"; exit 1; }
+          unzip -l "$nupkg" | grep -q 'contentFiles/any/any/Extension.Firefox/content.js' \
+            || { echo "Firefox Extension contentFiles missing from package"; exit 1; }
+
+  extension-runtime-tests:
+    name: Node (ExtensionRuntime typecheck + tests)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime/package-lock.json
+
+      - name: Install ExtensionRuntime dependencies
+        working-directory: Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime
+        run: npm ci
+
+      - name: Typecheck ExtensionRuntime
+        working-directory: Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime
+        run: npm run typecheck
+
+      - name: Run ExtensionRuntime tests
+        working-directory: Framework/Atom.Net.Browsing.WebDriver/ExtensionRuntime
+        run: npm test
