@@ -80,13 +80,25 @@ jobs:
         # путь, по которому проходит пользователь после клонирования.
         run: bash .vscode/scripts/pack-webdriver-local-dependencies.sh
 
-      - name: Build and pack WebDriver (Release)
+      - name: Build WebDriver (Release) and materialize unsigned Firefox package
+        # Та же последовательность, что в publish-framework-package.sh и VS Code-задачах:
+        # сначала build, затем pack --no-build. В Release заодно materialize'ится
+        # неподписанный Firefox-пакет (его подпись/отправка в AMO — webdriver-firefox-sign
+        # workflow и локальная задача "sign webdriver firefox xpi local").
+        run: >-
+          dotnet build Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj
+          -c Release --nologo
+          -p:GeneratePackageOnBuild=false
+          -p:CreateFirefoxExtensionPackageOnBuild=true
+
+      - name: Pack WebDriver (Release)
         run: >-
           dotnet pack Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj
-          -c Release --nologo
+          -c Release --no-build --nologo
           --output .tmp/webdriver-pack-check
+          -p:GeneratePackageOnBuild=false
 
-      - name: Verify produced package layout
+      - name: Verify produced artifacts
         run: |
           set -euo pipefail
           nupkg="$(find .tmp/webdriver-pack-check -maxdepth 1 -type f -name '*.nupkg' | head -n 1)"
@@ -99,6 +111,10 @@ jobs:
             || { echo "Chromium Extension contentFiles missing from package"; exit 1; }
           unzip -l "$nupkg" | grep -q 'contentFiles/any/any/Extension.Firefox/content.js' \
             || { echo "Firefox Extension contentFiles missing from package"; exit 1; }
+
+          unsigned_zip="$(find Framework/Atom.Net.Browsing.WebDriver/obj/Release/net10.0/extension-packages/firefox -maxdepth 1 -type f -name '*-unsigned.zip' | head -n 1)"
+          test -n "$unsigned_zip" || { echo "Unsigned Firefox package not produced"; exit 1; }
+          echo "Unsigned Firefox package: $unsigned_zip"
 
   extension-runtime-tests:
     name: Node (ExtensionRuntime typecheck + tests)
