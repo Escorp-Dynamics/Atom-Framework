@@ -99,6 +99,7 @@ WebBrowser
 | ------- | ------ | ---------- |
 | Brave | ✅ | Полная поддержка |
 | Opera | ✅ | Полная поддержка |
+| Opera GX | ✅ | Полная поддержка |
 | Vivaldi | ✅ | Полная поддержка |
 | Firefox | ⚠️ | На Linux Stable неподписанный profile-local bootstrap не гарантируется; stable-path требует подписанный XPI через ATOM_WEBDRIVER_FIREFOX_SIGNED_XPI_PATH, для живой проверки без подписи используйте Developer Edition или Nightly |
 | Chrome | ✅ | Полная поддержка |
@@ -273,7 +274,7 @@ var result = await page.EvaluateAsync<string>("document.cookie");
 
 Тесты реального браузера в `Tests/Atom.Net.Browsing.WebDriver.Tests` не включаются по умолчанию. Для них требуется явное переопределение окружения:
 
-- `ATOM_TEST_WEBDRIVER_BROWSER` — имя браузера: `chrome`, `edge`, `brave`, `opera`, `vivaldi`, `yandex` или `firefox`
+- `ATOM_TEST_WEBDRIVER_BROWSER` — имя браузера: `chrome`, `edge`, `brave`, `opera`, `opera-gx`, `vivaldi`, `yandex` или `firefox`
 - `ATOM_TEST_WEBDRIVER_BROWSER_PATH` — опциональный путь к исполняемому файлу, если нужен не автоматически найденный браузер
 - `ATOM_TEST_WEBDRIVER_HEADLESS` — опциональное переопределение headless-режима: `true` или `false`
 
@@ -417,6 +418,15 @@ await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings
 ```
 
 `WebBrowserProfile` здесь отвечает только за выбор бинарника, канала и runtime profile path. Временные файлы профиля materialize-ятся внутри `LaunchAsync` уже после того, как собраны все `WebBrowserSettings` и `Device`-данные.
+
+### Автопоиск установленного браузера (включая Flatpak и Snap)
+
+Профили браузеров сами ищут установленный бинарный файл: сначала проверяются нативные пути установки и имена в `PATH` с приоритетом запрошенного канала, а затем — sandboxed-установки. На Linux дополнительно опрашиваются Flatpak exports (`/var/lib/flatpak/exports/bin/<app-id>` и `~/.local/share/flatpak/exports/bin/<app-id>`) и Snap launcher-скрипты (`/snap/bin/<name>`). Нативная установка всегда выигрывает у sandboxed. Задействованные app id: `com.google.Chrome`, `com.microsoft.Edge`, `com.brave.Browser`, `com.opera.Opera`, `com.opera.OperaGX` (flatpak-релиз Opera GX пока в разработке), `com.vivaldi.Vivaldi`, `ru.yandex.Browser`, `org.mozilla.firefox`, плюс snap-пакет `firefox`. Каталоги поиска можно переопределить через `ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR`, `ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR` и `ATOM_WEBDRIVER_SNAP_BIN_DIR`; префикс `~/` в путях-кандидатах раскрывается в домашний каталог пользователя.
+
+Разрешённый способ установки доступен через `WebBrowserProfile.InstallationKind` (`Native`/`Flatpak`/`Snap`). От него зависят две ветки runtime-поведения на Linux:
+
+- временный профиль материализуется не в общем `/tmp`, а в каталоге, видимом внутри sandbox по тому же пути, что и на хосте (`~/.var/app/<app-id>/atom-webdriver/<guid>` для Flatpak и `~/snap/<name>/common/atom-webdriver/<guid>` для Snap), потому что Flatpak и Snap монтируют приватный `/tmp`;
+- для sandboxed stable Chromium-профилей bootstrap расширения не использует системные managed policy хоста (`/etc/opt/...`), которые внутри sandbox не читаются, а остаётся в profile-seeded режиме — так же, как при opt-in `UseRootlessChromiumBootstrap`.
 
 При materialization драйвер теперь не ограничивается одним `profile.json`: под каждый browser family заранее раскладываются automation-oriented profile files. Для Chromium-профилей создаются `Default/Preferences`, `Local State` и `First Run` с отключёнными welcome/FRE, background networking, sync, autofill, translate, Safe Browsing и password-manager фичами. Для Firefox создаётся `user.js` с отключёнными telemetry/new tab/discovery/pocket/GPU-heavy флагами и с базовой automation-конфигурацией. Browser-specific ветки тоже учитываются: например, Edge получает anti-FRE disable-features, а Vivaldi — pre-seeded startup/welcome prefs.
 

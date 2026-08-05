@@ -44,5 +44,5 @@ public sealed class OperaProfile : ChromeProfile
     /// </summary>
     [SuppressMessage("Major Code Smell", "S1075:URIs should not be hardcoded", Justification = "Browser install candidates are intentional OS-specific defaults.")]
     private static new string GetDefaultBinaryPath(WebBrowserChannel channel)
-        => ResolveInstalledBinary(GetChromiumCandidates(channel, @"C:\Users\%USERNAME%\AppData\Local\Programs\Opera\opera.exe", @"C:\Users\%USERNAME%\AppData\Local\Programs\Opera beta\opera.exe", @"C:\Users\%USERNAME%\AppData\Local\Programs\Opera developer\opera.exe", "/Applications/Opera.app/Contents/MacOS/Opera", "/Applications/Opera Beta.app/Contents/MacOS/Opera Beta", "/Applications/Opera Developer.app/Contents/MacOS/Opera Developer", "opera", "opera-beta", "opera-developer"));
+        => ResolveInstalledBinary(GetChromiumCandidates(channel, @"C:\Users\%USERNAME%\AppData\Local\Programs\Opera\opera.exe", @"C:\Users\%USERNAME%\AppData\Local\Programs\Opera beta\opera.exe", @"C:\Users\%USERNAME%\AppData\Local\Programs\Opera developer\opera.exe", "/Applications/Opera.app/Contents/MacOS/Opera", "/Applications/Opera Beta.app/Contents/MacOS/Opera Beta", "/Applications/Opera Developer.app/Contents/MacOS/Opera Developer", "opera", "opera-beta", "opera-developer", flatpakApplicationId: "com.opera.Opera"));
 }

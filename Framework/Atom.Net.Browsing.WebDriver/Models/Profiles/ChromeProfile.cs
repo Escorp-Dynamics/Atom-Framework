@@ -78,10 +78,12 @@ public class ChromeProfile : WebBrowserProfile
         };
 
     private static IEnumerable<string> GetLinuxCandidates(WebBrowserChannel channel)
-        => channel switch
-        {
-            WebBrowserChannel.Beta => ["google-chrome-beta", "google-chrome-stable", "google-chrome"],
-            WebBrowserChannel.Dev => ["google-chrome-unstable", "google-chrome-dev", "google-chrome-beta", "google-chrome-stable", "google-chrome"],
-            _ => ["google-chrome-stable", "google-chrome", "google-chrome-beta", "google-chrome-unstable", "google-chrome-dev"],
-        };
+        => AppendSandboxedInstallCandidates(
+            channel switch
+            {
+                WebBrowserChannel.Beta => ["google-chrome-beta", "google-chrome-stable", "google-chrome"],
+                WebBrowserChannel.Dev => ["google-chrome-unstable", "google-chrome-dev", "google-chrome-beta", "google-chrome-stable", "google-chrome"],
+                _ => ["google-chrome-stable", "google-chrome", "google-chrome-beta", "google-chrome-unstable", "google-chrome-dev"],
+            },
+            flatpakApplicationId: "com.google.Chrome");
 }

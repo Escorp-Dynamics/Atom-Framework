@@ -73,10 +73,12 @@ public sealed class VivaldiProfile : ChromeProfile
         };
 
     private static IEnumerable<string> GetLinuxCandidates(WebBrowserChannel channel)
-        => channel switch
-        {
-            WebBrowserChannel.Beta => ["vivaldi-snapshot", "vivaldi-stable", "vivaldi"],
-            WebBrowserChannel.Dev => ["vivaldi-snapshot", "vivaldi-stable", "vivaldi"],
-            _ => ["vivaldi-stable", "vivaldi", "vivaldi-snapshot"],
-        };
+        => AppendSandboxedInstallCandidates(
+            channel switch
+            {
+                WebBrowserChannel.Beta => ["vivaldi-snapshot", "vivaldi-stable", "vivaldi"],
+                WebBrowserChannel.Dev => ["vivaldi-snapshot", "vivaldi-stable", "vivaldi"],
+                _ => ["vivaldi-stable", "vivaldi", "vivaldi-snapshot"],
+            },
+            flatpakApplicationId: "com.vivaldi.Vivaldi");
 }

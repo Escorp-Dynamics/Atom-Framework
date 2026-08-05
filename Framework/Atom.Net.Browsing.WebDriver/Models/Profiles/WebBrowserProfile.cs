@@ -7,6 +7,10 @@ namespace Atom.Net.Browsing.WebDriver;
 /// </summary>
 public abstract class WebBrowserProfile
 {
+    private const string FlatpakSystemExportsDirVariableName = "ATOM_WEBDRIVER_FLATPAK_SYSTEM_EXPORTS_DIR";
+    private const string FlatpakUserExportsDirVariableName = "ATOM_WEBDRIVER_FLATPAK_USER_EXPORTS_DIR";
+    private const string SnapBinDirVariableName = "ATOM_WEBDRIVER_SNAP_BIN_DIR";
+
     private string binaryPath;
 
     /// <summary>
@@ -28,6 +32,11 @@ public abstract class WebBrowserProfile
     /// Получает профиль Opera по умолчанию.
     /// </summary>
     public static WebBrowserProfile Opera { get; } = new OperaProfile();
+
+    /// <summary>
+    /// Получает профиль Opera GX по умолчанию.
+    /// </summary>
+    public static WebBrowserProfile OperaGx { get; } = new OperaGxProfile();
 
     /// <summary>
     /// Получает профиль Vivaldi по умолчанию.
@@ -91,6 +100,17 @@ public abstract class WebBrowserProfile
     public bool IsInstalled { get; protected set; }
 
     /// <summary>
+    /// Получает способ установки браузера, определённый по разрешённому пути бинарного файла.
+    /// </summary>
+    public BrowserInstallationKind InstallationKind { get; protected set; }
+
+    /// <summary>
+    /// Получает идентификатор пакета sandboxed-установки (Flatpak app id или имя snap-пакета),
+    /// если бинарный файл разрешён через такую установку.
+    /// </summary>
+    internal string? SandboxedPackageId { get; private set; }
+
+    /// <summary>
     /// Разрешает путь к бинарному файлу через набор кандидатов и системный PATH.
     /// </summary>
     protected static string ResolveInstalledBinary(IEnumerable<string> candidates)
@@ -120,7 +140,9 @@ public abstract class WebBrowserProfile
         string devMacPath,
         string stableLinuxBinary,
         string betaLinuxBinary,
-        string devLinuxBinary)
+        string devLinuxBinary,
+        string? flatpakApplicationId = null,
+        string? snapPackageName = null)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -142,23 +164,171 @@ public abstract class WebBrowserProfile
             };
         }
 
-        return channel switch
-        {
-            WebBrowserChannel.Beta => [betaLinuxBinary, stableLinuxBinary],
-            WebBrowserChannel.Dev => [devLinuxBinary, betaLinuxBinary, stableLinuxBinary],
-            _ => [stableLinuxBinary, betaLinuxBinary, devLinuxBinary],
-        };
+        return AppendSandboxedInstallCandidates(
+            channel switch
+            {
+                WebBrowserChannel.Beta => [betaLinuxBinary, stableLinuxBinary],
+                WebBrowserChannel.Dev => [devLinuxBinary, betaLinuxBinary, stableLinuxBinary],
+                _ => [stableLinuxBinary, betaLinuxBinary, devLinuxBinary],
+            },
+            flatpakApplicationId,
+            snapPackageName);
     }
 
+    /// <summary>
+    /// Добавляет к нативным Linux-кандидатам пути sandboxed-установок (Flatpak exports и Snap launcher-скрипты).
+    /// Нативные кандидаты сохраняют приоритет разрешения над sandboxed.
+    /// </summary>
+    protected static IEnumerable<string> AppendSandboxedInstallCandidates(
+        IEnumerable<string> nativeCandidates,
+        string? flatpakApplicationId = null,
+        string? snapPackageName = null)
+    {
+        ArgumentNullException.ThrowIfNull(nativeCandidates);
+
+        foreach (var candidate in nativeCandidates)
+            yield return candidate;
+
+        if (!string.IsNullOrWhiteSpace(flatpakApplicationId))
+        {
+            foreach (var candidate in GetFlatpakCandidates(flatpakApplicationId))
+                yield return candidate;
+        }
+
+        if (!string.IsNullOrWhiteSpace(snapPackageName))
+        {
+            foreach (var candidate in GetSnapCandidates(snapPackageName))
+                yield return candidate;
+        }
+    }
+
+    /// <summary>
+    /// Формирует кандидатов Flatpak для экспортированных launcher-скриптов приложения
+    /// из системного и пользовательского exports-каталогов.
+    /// </summary>
+    protected static IEnumerable<string> GetFlatpakCandidates(params string[] applicationIds)
+    {
+        ArgumentNullException.ThrowIfNull(applicationIds);
+
+        foreach (var applicationId in applicationIds)
+        {
+            if (string.IsNullOrWhiteSpace(applicationId))
+                continue;
+
+            yield return IOPath.Combine(GetFlatpakSystemExportsDirectory(), applicationId);
+            yield return IOPath.Combine(GetFlatpakUserExportsDirectory(), applicationId);
+        }
+    }
+
+    /// <summary>
+    /// Формирует кандидатов Snap для launcher-скриптов пакета из каталога бинарных файлов snap.
+    /// </summary>
+    protected static IEnumerable<string> GetSnapCandidates(params string[] packageNames)
+    {
+        ArgumentNullException.ThrowIfNull(packageNames);
+
+        foreach (var packageName in packageNames)
+        {
+            if (string.IsNullOrWhiteSpace(packageName))
+                continue;
+
+            yield return IOPath.Combine(GetSnapBinaryDirectory(), packageName);
+        }
+    }
+
+    /// <summary>
+    /// Раскрывает переменные окружения и префикс домашнего каталога '~' в пути-кандидате.
+    /// </summary>
+    internal static string ExpandCandidatePath(string candidate)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+
+        var expanded = Environment.ExpandEnvironmentVariables(candidate);
+
+        if (!expanded.StartsWith('~'))
+            return expanded;
+
+        if (expanded.Length > 1 && expanded[1] is not ('/' or '\\'))
+            return expanded;
+
+        var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(homeDirectory))
+            return expanded;
+
+        return expanded.Length == 1
+            ? homeDirectory
+            : IOPath.Combine(homeDirectory, expanded[2..]);
+    }
+
+    internal static string GetFlatpakSystemExportsDirectory()
+        => GetDirectoryOverride(FlatpakSystemExportsDirVariableName) ?? "/var/lib/flatpak/exports/bin";
+
+    internal static string GetFlatpakUserExportsDirectory()
+        => GetDirectoryOverride(FlatpakUserExportsDirVariableName) ?? "~/.local/share/flatpak/exports/bin";
+
+    internal static string GetSnapBinaryDirectory()
+        => GetDirectoryOverride(SnapBinDirVariableName) ?? "/snap/bin";
+
     private void RefreshInstallationState()
-        => IsInstalled = !string.IsNullOrWhiteSpace(binaryPath) && File.Exists(binaryPath);
+    {
+        IsInstalled = !string.IsNullOrWhiteSpace(binaryPath) && File.Exists(binaryPath);
+        (InstallationKind, SandboxedPackageId) = ClassifyInstallation(binaryPath);
+    }
+
+    private static string? GetDirectoryOverride(string variableName)
+    {
+        var value = Environment.GetEnvironmentVariable(variableName);
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static (BrowserInstallationKind Kind, string? PackageId) ClassifyInstallation(string resolvedBinaryPath)
+    {
+        if (string.IsNullOrWhiteSpace(resolvedBinaryPath) || !OperatingSystem.IsLinux())
+            return (BrowserInstallationKind.Native, null);
+
+        var fullPath = IOPath.GetFullPath(resolvedBinaryPath);
+
+        if (TryMatchDirectoryEntry(fullPath, GetFlatpakSystemExportsDirectory(), out var packageId)
+            || TryMatchDirectoryEntry(fullPath, GetFlatpakUserExportsDirectory(), out packageId))
+        {
+            return (BrowserInstallationKind.Flatpak, packageId);
+        }
+
+        if (TryMatchDirectoryEntry(fullPath, GetSnapBinaryDirectory(), out packageId))
+            return (BrowserInstallationKind.Snap, packageId);
+
+        return (BrowserInstallationKind.Native, null);
+    }
+
+    private static bool TryMatchDirectoryEntry(string fullPath, string directory, out string? entryName)
+    {
+        entryName = null;
+
+        if (string.IsNullOrWhiteSpace(directory))
+            return false;
+
+        var fullDirectory = IOPath.GetFullPath(ExpandCandidatePath(directory));
+        var directoryWithSeparator = fullDirectory.EndsWith(IOPath.DirectorySeparatorChar)
+            ? fullDirectory
+            : fullDirectory + IOPath.DirectorySeparatorChar;
+
+        if (!fullPath.StartsWith(directoryWithSeparator, StringComparison.Ordinal))
+            return false;
+
+        var relativeName = fullPath[directoryWithSeparator.Length..];
+        if (relativeName.Length == 0 || ContainsDirectorySeparators(relativeName))
+            return false;
+
+        entryName = relativeName;
+        return true;
+    }
 
     private static string TryResolveCandidate(string candidate)
     {
         if (string.IsNullOrWhiteSpace(candidate))
             return string.Empty;
 
-        var expanded = Environment.ExpandEnvironmentVariables(candidate);
+        var expanded = ExpandCandidatePath(candidate);
         if (File.Exists(expanded))
             return expanded;
 

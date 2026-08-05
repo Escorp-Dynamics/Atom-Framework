@@ -78,10 +78,12 @@ public sealed class BraveProfile : ChromeProfile
         };
 
     private static IEnumerable<string> GetLinuxCandidates(WebBrowserChannel channel)
-        => channel switch
-        {
-            WebBrowserChannel.Beta => ["brave-browser-beta", "brave", "brave-browser", "brave-browser-stable"],
-            WebBrowserChannel.Dev => ["brave-browser-nightly", "brave-nightly", "brave-browser-beta", "brave", "brave-browser", "brave-browser-stable"],
-            _ => ["brave", "brave-browser", "brave-browser-stable", "brave-browser-beta", "brave-browser-nightly"],
-        };
+        => AppendSandboxedInstallCandidates(
+            channel switch
+            {
+                WebBrowserChannel.Beta => ["brave-browser-beta", "brave", "brave-browser", "brave-browser-stable"],
+                WebBrowserChannel.Dev => ["brave-browser-nightly", "brave-nightly", "brave-browser-beta", "brave", "brave-browser", "brave-browser-stable"],
+                _ => ["brave", "brave-browser", "brave-browser-stable", "brave-browser-beta", "brave-browser-nightly"],
+            },
+            flatpakApplicationId: "com.brave.Browser");
 }

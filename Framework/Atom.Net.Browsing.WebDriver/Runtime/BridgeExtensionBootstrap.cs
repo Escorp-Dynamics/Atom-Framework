@@ -1501,6 +1501,11 @@ internal static class BridgeExtensionBootstrap
         if (!OperatingSystem.IsLinux() || profile.Channel is not WebBrowserChannel.Stable)
             return null;
 
+        // Sandboxed-установки (Flatpak/Snap) не читают системные policy-каталоги хоста,
+        // поэтому для них bootstrap остаётся profile-seeded.
+        if (profile.InstallationKind is not BrowserInstallationKind.Native)
+            return null;
+
         return profile switch
         {
             EdgeProfile => LinuxEdgeManagedPolicyDirectory,
