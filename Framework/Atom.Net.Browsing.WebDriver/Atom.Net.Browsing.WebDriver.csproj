@@ -119,33 +119,10 @@
 		BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems;Build"
 		DependsOnTargets="PrepareExtensionRuntimeDependencies"
 		Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')">
-		<!-- 
-		     Extremely robust invocation (fixes both "exit 127" and "TS5058: The specified path does not exist: 'tsconfig.json'").
-		     Problems solved:
-		       - When the project lives in a path with brackets/special chars like [Atom.Net]
-		       - When the MSBuild process cwd is not the ExtensionRuntime folder
-		       - When only a local (not global) tsc exists
-
-		     We do:
-		       1. cd into ExtensionRuntime (very important for weird paths)
-		       2. Pass the **absolute** path to tsconfig.json with --project
-		       3. Use "npm exec" → always the local ./node_modules/.bin/tsc
-		       4. Set WorkingDirectory as additional safety
-		-->
 		<Error Condition="!Exists('$(ExtensionRuntimeDirectory)/tsconfig.json')"
 		       Text="tsconfig.json is missing from $(ExtensionRuntimeDirectory). The ExtensionRuntime folder is incomplete." />
 
 		<Message Importance="high" Text="=== Running TypeScript typecheck for ExtensionRuntime ===" />
-
-		<!-- 
-		     Most bullet-proof tsc invocation (fixes TS5058 + exit 127).
-		     We run everything in one command:
-		       cd <full path to ExtensionRuntime> && <full path to node> <full path to tsc> --project <full path to tsconfig.json>
-		     This works even if the project folder name contains brackets or other special characters ([Atom.Net], etc.)
-		     and regardless of what the current working directory of MSBuild is.
-		-->
-		<Error Condition="!Exists('$(ExtensionRuntimeDirectory)/node_modules/typescript/bin/tsc')"
-		       Text="TypeScript compiler not found. Please run: cd $(ExtensionRuntimeDirectory) && npm ci" />
 
 		<Exec Command="cd &quot;$(ExtensionRuntimeDirectory)&quot; &amp;&amp; &quot;$(ExtensionRuntimeDirectory)/node_modules/.bin/node&quot; &quot;$(ExtensionRuntimeDirectory)/node_modules/typescript/bin/tsc&quot; --project &quot;$(ExtensionRuntimeDirectory)/tsconfig.json&quot; --pretty false"
 		      WorkingDirectory="$(ExtensionRuntimeDirectory)"
