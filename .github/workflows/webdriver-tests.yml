@@ -85,11 +85,20 @@ jobs:
         # сначала build, затем pack --no-build. В Release заодно materialize'ится
         # неподписанный Firefox-пакет (его подпись/отправка в AMO — webdriver-firefox-sign
         # workflow и локальная задача "sign webdriver firefox xpi local").
+        # Анализаторы глушим так же, как все остальные CI-задачи репозитория: версии
+        # анализаторов плавающие ("*"), и их свежие диагностики не должны ломать
+        # проверку упаковочного пути.
         run: >-
           dotnet build Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj
           -c Release --nologo
           -p:GeneratePackageOnBuild=false
           -p:CreateFirefoxExtensionPackageOnBuild=true
+          -p:RunAnalyzers=false
+          -p:EnforceCodeStyleInBuild=false
+          -p:EnableNETAnalyzers=false
+          -p:AnalysisMode=None
+          -p:TreatWarningsAsErrors=false
+          -p:CodeAnalysisTreatWarningsAsErrors=false
 
       - name: Pack WebDriver (Release)
         run: >-
@@ -97,6 +106,12 @@ jobs:
           -c Release --no-build --nologo
           --output .tmp/webdriver-pack-check
           -p:GeneratePackageOnBuild=false
+          -p:RunAnalyzers=false
+          -p:EnforceCodeStyleInBuild=false
+          -p:EnableNETAnalyzers=false
+          -p:AnalysisMode=None
+          -p:TreatWarningsAsErrors=false
+          -p:CodeAnalysisTreatWarningsAsErrors=false
 
       - name: Verify produced artifacts
         run: |
