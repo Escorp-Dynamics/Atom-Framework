@@ -27,8 +27,17 @@ Release-конфигурация ссылается на пакеты `Escorp.At
 # Собирает цепочку зависимостей в порядке публикации и кладёт nupkg в .tmp/local-nuget-feed
 bash .vscode/scripts/pack-webdriver-local-dependencies.sh
 
-# Release-сборка и упаковка (.nupkg + .snupkg, включая contentFiles расширений Chromium/Firefox)
-dotnet pack Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj -c Release
+# Release-сборка (здесь же materialize'ится неподписанный Firefox-пакет для последующей
+# подписи через AMO) и упаковка .nupkg + .snupkg, включая contentFiles расширений.
+# Та же последовательность, что в publish-framework-package.sh и VS Code-задачах:
+# сначала build, затем pack --no-build. Голый `dotnet pack -c Release` без предварительной
+# сборки не используй — из-за переплетения GeneratePackageOnBuild/pack-таргетов проекта
+# он завершается NU5026 (dll не найден) и не проверяет путь, по которому публикует команда.
+dotnet build Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj -c Release -p:GeneratePackageOnBuild=false
+dotnet pack Framework/Atom.Net.Browsing.WebDriver/Atom.Net.Browsing.WebDriver.csproj -c Release --no-build -p:GeneratePackageOnBuild=false
+
+# Подпись и отправка Firefox XPI в AMO (нужны для release Firefox):
+# workflow webdriver-firefox-sign.yml или локальная VS Code-задача `sign webdriver firefox xpi local`.
 
 # Push на nuget.org (нужен NUGET_API_KEY или сохранённые креды); цепочку публикуй снизу вверх
 # тем же publish-framework-package.sh, вебдрайвер — последним
