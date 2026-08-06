@@ -270,18 +270,20 @@ public sealed partial class WebBrowser : IWebBrowser
             var resolutionSource = Volatile.Read(ref mouseResolutionSource);
             if (resolutionSource is null)
             {
-                var createdSource = new TaskCompletionSource<VirtualMouse>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var createdSource = LazyInitializer.EnsureInitialized(ref mouseResolutionSource, () => new TaskCompletionSource<VirtualMouse>(TaskCreationOptions.RunContinuationsAsynchronously));
+#pragma warning disable MA0173 // Use LazyInitializer.EnsureInitialize
                 if (Interlocked.CompareExchange(ref mouseResolutionSource, createdSource, comparand: null) is null)
                 {
                     return await CompleteMouseResolutionAsync(createdSource, cancellationToken).ConfigureAwait(false);
                 }
+#pragma warning restore MA0173 // Use LazyInitializer.EnsureInitialize
 
                 resolutionSource = Volatile.Read(ref mouseResolutionSource);
             }
 
             try
             {
-                return await resolutionSource!.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                return await resolutionSource.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
             catch when (resolutionSource.Task.IsCompleted)
             {
@@ -303,18 +305,20 @@ public sealed partial class WebBrowser : IWebBrowser
             var resolutionSource = Volatile.Read(ref keyboardResolutionSource);
             if (resolutionSource is null)
             {
-                var createdSource = new TaskCompletionSource<VirtualKeyboard>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var createdSource = LazyInitializer.EnsureInitialized(ref keyboardResolutionSource, () => new TaskCompletionSource<VirtualKeyboard>(TaskCreationOptions.RunContinuationsAsynchronously));
+#pragma warning disable MA0173 // Use LazyInitializer.EnsureInitialize
                 if (Interlocked.CompareExchange(ref keyboardResolutionSource, createdSource, comparand: null) is null)
                 {
                     return await CompleteKeyboardResolutionAsync(createdSource, cancellationToken).ConfigureAwait(false);
                 }
+#pragma warning restore MA0173 // Use LazyInitializer.EnsureInitialize
 
                 resolutionSource = Volatile.Read(ref keyboardResolutionSource);
             }
 
             try
             {
-                return await resolutionSource!.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                return await resolutionSource.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
             catch when (resolutionSource.Task.IsCompleted)
             {
@@ -455,8 +459,8 @@ public sealed partial class WebBrowser : IWebBrowser
         if (!initialPage.IsDisposed)
         {
             initialPage.BindBridgeCommands(bridgeBootstrap.SessionId, initialTab.TabId, bridgeServer.Commands);
-            await ApplyBridgeTabContextAsync(initialPage, cancellationToken: default).ConfigureAwait(false);
-            await initialPage.ApplyEffectiveRequestInterceptionAsync(default).ConfigureAwait(false);
+            await ApplyBridgeTabContextAsync(initialPage, CancellationToken.None).ConfigureAwait(false);
+            await initialPage.ApplyEffectiveRequestInterceptionAsync(CancellationToken.None).ConfigureAwait(false);
         }
 
         return !initialWindow.IsDisposed && !initialPage.IsDisposed;
@@ -488,7 +492,7 @@ public sealed partial class WebBrowser : IWebBrowser
 
         try
         {
-            await bridgeBootstrapTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+            await bridgeBootstrapTask.WaitAsync(TimeSpan.FromSeconds(1), CancellationToken.None).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
@@ -516,7 +520,7 @@ public sealed partial class WebBrowser : IWebBrowser
         await bridgeServer.DisposeAsync().ConfigureAwait(false);
     }
 
-    private void OnBridgeServerRuntimeEventReceived(string sessionId, Protocol.BridgeMessage message)
+    private void OnBridgeServerRuntimeEventReceived(string sessionId, BridgeMessage message)
     {
         if (string.IsNullOrWhiteSpace(bridgeSessionId)
             || !string.Equals(sessionId, bridgeSessionId, StringComparison.Ordinal))
@@ -527,7 +531,7 @@ public sealed partial class WebBrowser : IWebBrowser
         _ = RelayBridgeServerRuntimeEventAsync(message);
     }
 
-    private async Task RelayBridgeServerRuntimeEventAsync(Protocol.BridgeMessage message)
+    private async Task RelayBridgeServerRuntimeEventAsync(BridgeMessage message)
     {
         if (IsDisposed)
             return;
@@ -663,7 +667,9 @@ public sealed partial class WebBrowser : IWebBrowser
     private async ValueTask PrepareBridgeWindowAsync(WebPage sourcePage, WebWindow window, CancellationToken cancellationToken)
     {
         var currentPage = (WebPage)window.CurrentPage;
-        var (openedTabId, openedWindowId) = await sourcePage.BridgeCommands!.OpenWindowAsync(window.Settings?.Position, cancellationToken).ConfigureAwait(false);
+#pragma warning disable CS8602 // Разыменование вероятной пустой ссылки.
+        var (openedTabId, openedWindowId) = await sourcePage.BridgeCommands.OpenWindowAsync(window.Settings?.Position, cancellationToken).ConfigureAwait(false);
+#pragma warning restore CS8602 // Разыменование вероятной пустой ссылки.
         var registeredTab = await WaitForRegisteredTabAsync(openedTabId, cancellationToken).ConfigureAwait(false);
         window.BindBridgeWindowId(registeredTab.WindowId ?? openedWindowId);
         currentPage.BindBridgeCommands(bridgeSessionId!, registeredTab.TabId, bridgeServer!.Commands);
@@ -675,7 +681,9 @@ public sealed partial class WebBrowser : IWebBrowser
     {
         var bridgeWindowId = window.BoundBridgeWindowId
             ?? throw new InvalidOperationException("Bridge-backed OpenPageAsync requires a bound browser window identifier");
-        var (openedTabId, _) = await sourcePage.BridgeCommands!.OpenTabAsync(bridgeWindowId, cancellationToken).ConfigureAwait(false);
+#pragma warning disable CS8602 // Разыменование вероятной пустой ссылки.
+        var (openedTabId, _) = await sourcePage.BridgeCommands.OpenTabAsync(bridgeWindowId, cancellationToken).ConfigureAwait(false);
+#pragma warning restore CS8602 // Разыменование вероятной пустой ссылки.
         var registeredTab = await WaitForRegisteredTabAsync(openedTabId, cancellationToken).ConfigureAwait(false);
 
         if (!string.IsNullOrWhiteSpace(registeredTab.WindowId))
@@ -797,7 +805,7 @@ public sealed partial class WebBrowser : IWebBrowser
             // берём адрес, который вернулся бы для условной навигационной цели.
             var address = proxy is WebProxy webProxy
                 ? webProxy.Address
-                : proxy.GetProxy(new Uri("http://upstream.invalid/", UriKind.Absolute));
+                : proxy.GetProxy(new UriBuilder { Scheme = Uri.UriSchemeHttps, Host = "upstream.invalid", Path = "/" }.Uri);
 
             if (address is not { IsAbsoluteUri: true })
                 return null;
@@ -1257,7 +1265,7 @@ public sealed partial class WebBrowser : IWebBrowser
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
 
-        return ValueTask.FromResult<IWebWindow?>(ReferenceEquals(element.Page.Window.Browser, this) ? element.Page.Window : null);
+        return ValueTask.FromResult(ReferenceEquals(element.Page.Window.Browser, this) ? element.Page.Window : null);
     }
 
     public ValueTask<IWebWindow?> GetWindowAsync(IElement element)
@@ -1286,7 +1294,7 @@ public sealed partial class WebBrowser : IWebBrowser
         ArgumentNullException.ThrowIfNull(element);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
-        return ValueTask.FromResult<IWebPage?>(ReferenceEquals(element.Page.Window.Browser, this) ? element.Page : null);
+        return ValueTask.FromResult(ReferenceEquals(element.Page.Window.Browser, this) ? element.Page : null);
     }
 
     public ValueTask<IWebPage?> GetPageAsync(IElement element)

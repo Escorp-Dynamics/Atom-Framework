@@ -15,8 +15,8 @@ public sealed class UdpStreamTests
     {
         var (leftSocket, rightSocket) = await Within(LoopbackSocketFactory.CreateUdpPairAsync()).ConfigureAwait(false);
 
-        using var left = new Atom.Net.Udp.UdpStream(leftSocket, new Atom.Net.Udp.UdpSettings { UsePacketInfo = false }, ownsSocket: true);
-        using var right = new Atom.Net.Udp.UdpStream(rightSocket, new Atom.Net.Udp.UdpSettings { UsePacketInfo = false }, ownsSocket: true);
+        using var left = new Net.Udp.UdpStream(leftSocket, new Net.Udp.UdpSettings { UsePacketInfo = false }, ownsSocket: true);
+        using var right = new Net.Udp.UdpStream(rightSocket, new Net.Udp.UdpSettings { UsePacketInfo = false }, ownsSocket: true);
 
         var request = "udp-left"u8.ToArray();
         await Within(left.WriteAsync(request)).ConfigureAwait(false);
@@ -47,13 +47,13 @@ public sealed class UdpStreamTests
         await Within(leftSocket.ConnectAsync((IPEndPoint)rightSocket.LocalEndPoint!)).ConfigureAwait(false);
         await Within(rightSocket.ConnectAsync((IPEndPoint)leftSocket.LocalEndPoint!)).ConfigureAwait(false);
 
-        using var left = new Atom.Net.Udp.UdpStream(leftSocket, new Atom.Net.Udp.UdpSettings
+        using var left = new Net.Udp.UdpStream(leftSocket, new Net.Udp.UdpSettings
         {
             Dscp = 11,
             UseEcn = true,
             UsePacketInfo = false,
         }, ownsSocket: true);
-        using var right = new Atom.Net.Udp.UdpStream(rightSocket, new Atom.Net.Udp.UdpSettings { UsePacketInfo = false }, ownsSocket: true);
+        using var right = new Net.Udp.UdpStream(rightSocket, new Net.Udp.UdpSettings { UsePacketInfo = false }, ownsSocket: true);
 
         var payload = "udp-traffic-class"u8.ToArray();
         await Within(left.WriteAsync(payload)).ConfigureAwait(false);
@@ -73,8 +73,8 @@ public sealed class UdpStreamTests
     {
         var (leftSocket, rightSocket) = await Within(LoopbackSocketFactory.CreateUdpPairAsync()).ConfigureAwait(false);
 
-        using var left = new Atom.Net.Udp.UdpStream(leftSocket, new Atom.Net.Udp.UdpSettings { UsePacketInfo = false }, ownsSocket: true);
-        using var right = new Atom.Net.Udp.UdpStream(rightSocket, new Atom.Net.Udp.UdpSettings { UsePacketInfo = false }, ownsSocket: true);
+        using var left = new Net.Udp.UdpStream(leftSocket, new Net.Udp.UdpSettings { UsePacketInfo = false }, ownsSocket: true);
+        using var right = new Net.Udp.UdpStream(rightSocket, new Net.Udp.UdpSettings { UsePacketInfo = false }, ownsSocket: true);
 
         for (var i = 0; i < DatagramBurstCount; i++)
         {
@@ -94,8 +94,8 @@ public sealed class UdpStreamTests
     {
         var (leftSocket, rightSocket) = await Within(LoopbackSocketFactory.CreateUdpPairAsync()).ConfigureAwait(false);
 
-        using var left = new Atom.Net.Udp.UdpStream(leftSocket, new Atom.Net.Udp.UdpSettings { UsePacketInfo = true }, ownsSocket: true);
-        using var right = new Atom.Net.Udp.UdpStream(rightSocket, new Atom.Net.Udp.UdpSettings { UsePacketInfo = false }, ownsSocket: true);
+        using var left = new Net.Udp.UdpStream(leftSocket, new Net.Udp.UdpSettings { UsePacketInfo = true }, ownsSocket: true);
+        using var right = new Net.Udp.UdpStream(rightSocket, new Net.Udp.UdpSettings { UsePacketInfo = false }, ownsSocket: true);
 
         var payload = "pktinfo"u8.ToArray();
         await Within(right.WriteAsync(payload)).ConfigureAwait(false);
@@ -112,7 +112,7 @@ public sealed class UdpStreamTests
     [Test]
     public void ConnectAsyncHonorsPreCanceledToken()
     {
-        using var stream = new Atom.Net.Udp.UdpStream(new Atom.Net.Udp.UdpSettings
+        using var stream = new Net.Udp.UdpStream(new Net.Udp.UdpSettings
         {
             AttemptTimeout = TimeSpan.FromSeconds(2),
         });
@@ -126,7 +126,7 @@ public sealed class UdpStreamTests
     [Test]
     public void ConnectAsyncWithUnresolvableHostThrowsSocketException()
     {
-        using var stream = new Atom.Net.Udp.UdpStream(new Atom.Net.Udp.UdpSettings
+        using var stream = new Net.Udp.UdpStream(new Net.Udp.UdpSettings
         {
             AttemptTimeout = TimeSpan.FromSeconds(2),
         });
@@ -144,7 +144,7 @@ public sealed class UdpStreamTests
         receiver.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.IPv6Only, true);
         receiver.Bind(new IPEndPoint(IPAddress.IPv6Loopback, 0));
 
-        using var stream = new Atom.Net.Udp.UdpStream(new Atom.Net.Udp.UdpSettings
+        using var stream = new Net.Udp.UdpStream(new Net.Udp.UdpSettings
         {
             AttemptTimeout = TimeSpan.FromSeconds(2),
             UsePacketInfo = false,
@@ -171,7 +171,7 @@ public sealed class UdpStreamTests
         try { receiver.DualMode = true; } catch { }
         receiver.Bind(new IPEndPoint(IPAddress.IPv6Loopback, 0));
 
-        using var stream = new Atom.Net.Udp.UdpStream(new Atom.Net.Udp.UdpSettings
+        using var stream = new Net.Udp.UdpStream(new Net.Udp.UdpSettings
         {
             AttemptTimeout = TimeSpan.FromSeconds(2),
             UsePacketInfo = false,

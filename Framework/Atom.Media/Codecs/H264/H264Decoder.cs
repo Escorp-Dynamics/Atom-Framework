@@ -39,7 +39,7 @@ internal sealed class H264Decoder
     /// <summary>
     /// Decodes an H.264 Annex B bitstream (one or more NAL units) into RGBA32 pixels.
     /// </summary>
-    public unsafe CodecResult Decode(ReadOnlySpan<byte> data, ref VideoFrame frame)
+    public CodecResult Decode(ReadOnlySpan<byte> data, ref VideoFrame frame)
     {
         if (data.Length < 4)
         {
@@ -100,7 +100,7 @@ internal sealed class H264Decoder
     /// <summary>
     /// Decodes AVCC-formatted NAL units (length-prefixed, used inside MP4/MKV containers).
     /// </summary>
-    public unsafe CodecResult DecodeAvcc(
+    public CodecResult DecodeAvcc(
         ReadOnlySpan<byte> data,
         int nalLengthSize,
         H264Sps sps,
@@ -244,7 +244,7 @@ internal sealed class H264Decoder
 
     #region Macroblock Decoding
 
-    private unsafe CodecResult DecodeMacroblock(
+    private CodecResult DecodeMacroblock(
         ref BitReader reader, int mbX, int mbY,
         ref int currentQp, H264Sps sps, H264Pps pps)
     {
@@ -302,7 +302,7 @@ internal sealed class H264Decoder
         return CodecResult.Success;
     }
 
-    private unsafe void DecodeIntra4x4Modes(
+    private void DecodeIntra4x4Modes(
         ref BitReader reader, int mbX, int mbY, ref H264Macroblock.MbInfo mb)
     {
         for (var blkIdx = 0; blkIdx < 16; blkIdx++)
@@ -316,7 +316,7 @@ internal sealed class H264Decoder
         }
     }
 
-    private unsafe int GetNeighborIntra4x4Mode(int mbX, int mbY, int blkIdx, bool isLeft)
+    private int GetNeighborIntra4x4Mode(int mbX, int mbY, int blkIdx, bool isLeft)
     {
         // 4×4 block position within MB
         var bx = blkIdx % 4;
@@ -370,7 +370,7 @@ internal sealed class H264Decoder
         return neighborMb.Intra4x4PredMode[neighborBlkIdx];
     }
 
-    private unsafe CodecResult DecodePcmMb(
+    private CodecResult DecodePcmMb(
         ref BitReader reader, int mbX, int mbY, ref H264Macroblock.MbInfo mb)
     {
         mb.IsPcm = true;
@@ -428,7 +428,7 @@ internal sealed class H264Decoder
     // Per-MB residual storage
     private short[]? _residualBuffer;
 
-    private unsafe void DecodeResidual(
+    private void DecodeResidual(
         ref BitReader reader, int mbX, int mbY,
         ref H264Macroblock.MbInfo mb, int qp)
     {
@@ -543,7 +543,7 @@ internal sealed class H264Decoder
         }
     }
 
-    private unsafe int GetLumaNc(int mbX, int mbY, int blkIdx)
+    private int GetLumaNc(int mbX, int mbY, int blkIdx)
     {
         var bx = blkIdx % 4;
         var by = blkIdx / 4;
@@ -596,7 +596,7 @@ internal sealed class H264Decoder
 
     #region Prediction
 
-    private unsafe void ApplyPrediction(int mbX, int mbY, ref H264Macroblock.MbInfo mb)
+    private void ApplyPrediction(int mbX, int mbY, ref H264Macroblock.MbInfo mb)
     {
         if (mb.IsPcm)
         {
@@ -806,7 +806,7 @@ internal sealed class H264Decoder
 
     #region Residual Addition
 
-    private unsafe void AddResidualToFrame(
+    private void AddResidualToFrame(
         int mbX, int mbY, ref H264Macroblock.MbInfo mb, int qp)
     {
         if (mb.IsPcm)
@@ -938,7 +938,7 @@ internal sealed class H264Decoder
 
     #region Deblocking
 
-    private unsafe void ApplyDeblocking(int qp)
+    private void ApplyDeblocking(int qp)
     {
         Span<int> bsVert = stackalloc int[4];
         Span<int> bsHoriz = stackalloc int[4];

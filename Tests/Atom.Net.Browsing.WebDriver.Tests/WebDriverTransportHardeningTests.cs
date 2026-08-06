@@ -1,5 +1,4 @@
 ﻿using System.Net;
-using System.Net.Http;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography.X509Certificates;
@@ -157,12 +156,10 @@ public sealed class WebDriverTransportHardeningTests
                 "DNS-rebinding через чужой Host должен отклоняться");
         }
 
-        using (var loopbackRequest = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{server.Port}/health"))
-        {
-            loopbackRequest.Headers.Host = $"127.0.0.1:{server.Port}";
-            using var loopbackResponse = await client.SendAsync(loopbackRequest).ConfigureAwait(false);
-            Assert.That(loopbackResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
-        }
+        using var loopbackRequest = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{server.Port}/health");
+        loopbackRequest.Headers.Host = $"127.0.0.1:{server.Port}";
+        using var loopbackResponse = await client.SendAsync(loopbackRequest).ConfigureAwait(false);
+        Assert.That(loopbackResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
     }
 
     [Test]
@@ -304,7 +301,7 @@ public sealed class WebDriverTransportHardeningTests
                 {
                     var contextId = $"ctx-{worker % 4}";
                     var token = iteration % 2 == 0 ? "token-even" : "token-odd";
-                    registry.UpsertRoute(CreateRoute("session-1", $"tab-{worker}", contextId, token, worker * 1000L + iteration));
+                    registry.UpsertRoute(CreateRoute("session-1", $"tab-{worker}", contextId, token, (worker * 1000L) + iteration));
 
                     if (iteration % 3 == 0)
                         registry.RemoveRouteByContextId(contextId);
@@ -554,7 +551,10 @@ public sealed class WebDriverTransportHardeningTests
     public void ManagedDeliveryCertificateFileIsOwnerOnlyOnUnix()
     {
         if (OperatingSystem.IsWindows())
+        {
             Assert.Ignore("Проверка прав 0600 применима только к Unix-хостам");
+            return;
+        }
 
         var host = $"hardening-{Guid.NewGuid():N}.invalid";
         using var leaf = BridgeManagedDeliveryCertificateManager.Instance.GetOrCreateCertificate(host);
@@ -690,7 +690,6 @@ public sealed class WebDriverTransportHardeningTests
         private readonly CancellationTokenSource shutdown = new();
         private readonly Task acceptLoop;
         private int requestCount;
-        private string? lastRequestBody;
 
         private TestLoopbackOrigin(string? fixedBody, bool readBody)
         {
@@ -705,7 +704,7 @@ public sealed class WebDriverTransportHardeningTests
 
         public int RequestCount => Volatile.Read(ref requestCount);
 
-        public string? LastRequestBody => lastRequestBody;
+        public string? LastRequestBody { get; private set; }
 
         public static TestLoopbackOrigin Start(string fixedBody)
             => new(fixedBody, readBody: false);
@@ -773,7 +772,7 @@ public sealed class WebDriverTransportHardeningTests
                     {
                         var headers = Encoding.ASCII.GetString(headerBytes);
                         var body = await ReadRequestBodyAsync(stream, headers).ConfigureAwait(false);
-                        lastRequestBody = Encoding.UTF8.GetString(body);
+                        LastRequestBody = Encoding.UTF8.GetString(body);
                     }
 
                     var bodyText = fixedBody ?? "atom-origin-echo";

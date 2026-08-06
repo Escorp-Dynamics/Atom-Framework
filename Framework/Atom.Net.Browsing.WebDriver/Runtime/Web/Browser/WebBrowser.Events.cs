@@ -262,7 +262,7 @@ public sealed partial class WebBrowser
             return false;
         }
 
-        var response = new HttpsResponseMessage((System.Net.HttpStatusCode)payload.StatusCode)
+        var response = new HttpsResponseMessage((HttpStatusCode)payload.StatusCode)
         {
             ReasonPhrase = payload.ReasonPhrase,
             RequestMessage = new HttpRequestMessage(new HttpMethod(payload.Method), url),

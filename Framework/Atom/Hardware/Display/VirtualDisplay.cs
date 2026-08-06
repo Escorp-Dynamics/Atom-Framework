@@ -1,4 +1,6 @@
-﻿using System.Diagnostics;
+﻿#pragma warning disable S5443
+
+using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.Runtime.Versioning;
@@ -125,7 +127,9 @@ public sealed class VirtualDisplay : IAsyncDisposable
             if (settings.IsVisible)
             {
                 await WaitForXpraControlSocketReadyAsync(displayNumber, process, serverLogs, cancellationToken).ConfigureAwait(false);
+#pragma warning disable CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
                 logger?.LogVirtualDisplayControlSocketReady(displayName, GetXpraSocketDiagnostics(displayNumber));
+#pragma warning restore CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
                 attachProcess = await StartVisibleAttachAsync(displayNumber, displayName, logger, cancellationToken).ConfigureAwait(false);
             }
         }
@@ -672,6 +676,7 @@ public sealed class VirtualDisplay : IAsyncDisposable
             + "x" + settings.Resolution.Height.ToString(CultureInfo.InvariantCulture)
             + "x" + settings.ColorDepth.ToString(CultureInfo.InvariantCulture);
 
+#pragma warning disable S4036 // OS commands should not rely on PATH resolution
         return new ProcessStartInfo
         {
             FileName = "Xvfb",
@@ -692,6 +697,7 @@ public sealed class VirtualDisplay : IAsyncDisposable
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+#pragma warning restore S4036 // OS commands should not rely on PATH resolution
     }
 
     private static ProcessStartInfo CreateXpraServerStartInfo(VirtualDisplaySettings settings, int displayNumber)
@@ -703,6 +709,7 @@ public sealed class VirtualDisplay : IAsyncDisposable
         var display = ":" + displayNumber.ToString(CultureInfo.InvariantCulture);
         var socketDirectory = GetXpraSocketDirectory();
 
+#pragma warning disable S4036 // OS commands should not rely on PATH resolution
         var startInfo = new ProcessStartInfo
         {
             FileName = "xpra",
@@ -743,6 +750,7 @@ public sealed class VirtualDisplay : IAsyncDisposable
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+#pragma warning restore S4036 // OS commands should not rely on PATH resolution
 
         if (!string.IsNullOrWhiteSpace(socketDirectory))
         {
@@ -756,6 +764,7 @@ public sealed class VirtualDisplay : IAsyncDisposable
     private static (Process Process, ProcessLogBuffer Logs) StartXpraAttach(int displayNumber, ILogger? logger)
     {
         var socketDirectory = GetXpraSocketDirectory();
+#pragma warning disable S4036 // OS commands should not rely on PATH resolution
         var psi = new ProcessStartInfo
         {
             FileName = "xpra",
@@ -764,6 +773,7 @@ public sealed class VirtualDisplay : IAsyncDisposable
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+#pragma warning restore S4036 // OS commands should not rely on PATH resolution
 
         foreach (var argument in GetXpraAttachArguments(displayNumber))
             psi.ArgumentList.Add(argument);

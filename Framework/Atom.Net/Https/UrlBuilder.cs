@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Atom.Architect.Builders;
 using Atom.Buffers;
@@ -14,7 +14,7 @@ public partial class UrlBuilder : IBuilder<Uri, UrlBuilder>
     private const string DefaultScheme = "http";
     private const string DefaultHost = "localhost";
 
-    private readonly Dictionary<string, List<string>> parameters = [];
+    private readonly Dictionary<string, List<string>> parameters = [with(StringComparer.Ordinal)];
     private readonly List<string> paths = [];
     private string scheme = DefaultScheme;
     private string host = DefaultHost;
@@ -117,10 +117,13 @@ public partial class UrlBuilder : IBuilder<Uri, UrlBuilder>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual UrlBuilder WithParameter(string name, params IEnumerable<string> values)
     {
-        if (!parameters.TryGetValue(name, out var v)) v = [];
+        if (!parameters.TryGetValue(name, out var v))
+        {
+            v = [];
+            parameters.Add(name, v);
+        }
 
         v.AddRange(values);
-        parameters.Add(name, v);
 
         return this;
     }

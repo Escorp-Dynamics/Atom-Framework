@@ -7,7 +7,7 @@ namespace Atom.Media.Audio.Backends.PipeWire;
 /// <summary>
 /// P/Invoke привязки к libpipewire-0.3 для аудио.
 /// </summary>
-internal static unsafe partial class PipeWireAudioNative
+internal static unsafe class PipeWireAudioNative
 {
     private const string Lib = "libpipewire-0.3.so.0";
 

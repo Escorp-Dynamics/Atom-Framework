@@ -284,9 +284,9 @@ public interface IWebPage : IDomContext, IAsyncDisposable
     /// Возвращает фрейм по связанному DOM-элементу.
     /// После <see cref="IAsyncDisposable.DisposeAsync"/> выбрасывает <see cref="ObjectDisposedException"/>.
     /// </summary>
-    ValueTask<IFrame?> GetFrameAsync(IElement element, CancellationToken cancellationToken);
+    IFrame? GetFrame(IElement element);
 
-    /// <inheritdoc cref="GetFrameAsync(IElement, CancellationToken)"/>
+    /// <inheritdoc cref="GetFrame(IElement, CancellationToken)"/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    ValueTask<IFrame?> GetFrameAsync(IElement element) => GetFrameAsync(element, CancellationToken.None);
+    ValueTask<IFrame?> GetFrameAsync(IElement element) => ValueTask.FromResult(GetFrame(element));
 }

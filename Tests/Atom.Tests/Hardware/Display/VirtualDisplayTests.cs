@@ -489,7 +489,7 @@ public class VirtualDisplayTests
 
         Assert.That(method, Is.Not.Null, "Не удалось найти private static CaptureDisplayProcessIds.");
 
-        return new HashSet<int>((HashSet<int>)method!.Invoke(obj: null, [displayNumber])!);
+        return [with((HashSet<int>)method!.Invoke(obj: null, [displayNumber])!)];
     }
 
 }

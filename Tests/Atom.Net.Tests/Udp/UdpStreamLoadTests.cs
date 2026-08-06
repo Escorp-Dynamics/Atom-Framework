@@ -102,7 +102,7 @@ public class UdpStreamLoadTests(ILogger logger) : BenchmarkTests<UdpStreamLoadTe
 
         var (leftSocket, rightSocket) = await Within(LoopbackSocketFactory.CreateUdpPairAsync()).ConfigureAwait(false);
 
-        using var left = new Atom.Net.Udp.UdpStream(leftSocket, new Atom.Net.Udp.UdpSettings { UsePacketInfo = true }, ownsSocket: true);
+        using var left = new Net.Udp.UdpStream(leftSocket, new Net.Udp.UdpSettings { UsePacketInfo = true }, ownsSocket: true);
         using var right = CreateStream(rightSocket);
 
         var payload = CreatePayload(PayloadSize);
@@ -120,8 +120,8 @@ public class UdpStreamLoadTests(ILogger logger) : BenchmarkTests<UdpStreamLoadTe
         }
     }
 
-    private static Atom.Net.Udp.UdpStream CreateStream(Socket socket)
-        => new(socket, new Atom.Net.Udp.UdpSettings
+    private static Net.Udp.UdpStream CreateStream(Socket socket)
+        => new(socket, new Net.Udp.UdpSettings
         {
             UsePacketInfo = false,
             AttemptTimeout = TimeSpan.FromSeconds(2),

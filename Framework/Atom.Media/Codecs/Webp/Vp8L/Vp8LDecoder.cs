@@ -268,7 +268,7 @@ internal sealed class Vp8LDecoder : IDisposable
 
     private void ExtractGreenToAlpha(Span<byte> alphaOutput)
     {
-        var pixels = pixelBuffer!.AsSpan(0, width * height);
+        var pixels = pixelBuffer.AsSpan(0, width * height);
         for (var i = 0; i < pixels.Length; i++)
         {
             alphaOutput[i] = (byte)((pixels[i] >> 8) & 0xFF);
@@ -793,7 +793,7 @@ internal sealed class Vp8LDecoder : IDisposable
                     if (groupIdx != lastGroupIdx)
                     {
                         lastGroupIdx = groupIdx;
-                        var g = prefixGroups![groupIdx];
+                        var g = prefixGroups[groupIdx];
                         greenP = g.Green!.ToTable().PackedPtr;
                         redP = g.Red!.ToTable().PackedPtr;
                         blueP = g.Blue!.ToTable().PackedPtr;

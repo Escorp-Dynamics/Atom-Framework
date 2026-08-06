@@ -118,7 +118,7 @@ internal sealed unsafe class DeflateDecoder : IDisposable
     public void CopyToStream(System.IO.Stream destination)
     {
         // Pre-size MemoryStream to avoid resize cascade
-        if (destination is System.IO.MemoryStream ms && ms.Position == 0 && ms.Length == 0)
+        if (destination is MemoryStream ms && ms.Position == 0 && ms.Length == 0)
         {
             var needed = ws.UnifiedCapacity - WindowSize;
             if (ms.Capacity < needed)

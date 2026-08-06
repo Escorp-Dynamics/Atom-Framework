@@ -260,7 +260,7 @@ internal static class HtmlFallbackDomQuery
             }
 
             if (!string.IsNullOrWhiteSpace(classSegment))
-                classes.Add(classSegment!);
+                classes.Add(classSegment);
         }
 
         return new CssSelectorParts(TagName: tagName, Id: id, Classes: classes);

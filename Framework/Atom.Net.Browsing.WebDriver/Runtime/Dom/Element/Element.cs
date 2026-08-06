@@ -1025,7 +1025,7 @@ return true;
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
-        if (this.Frame is global::Atom.Net.Browsing.WebDriver.Frame concreteFrame)
+        if (this.Frame is Frame concreteFrame)
             return await concreteFrame.EvaluateScriptCoreAsync(script, preferPageContextOnNull, cancellationToken).ConfigureAwait(false);
 
         return await this.Frame.EvaluateAsync(script, cancellationToken).ConfigureAwait(false);

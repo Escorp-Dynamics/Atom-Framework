@@ -7,7 +7,7 @@ namespace Atom.Media.Video.Backends.PipeWire;
 /// <summary>
 /// P/Invoke привязки к libpipewire-0.3 и базовым ABI SPA.
 /// </summary>
-internal static unsafe partial class PipeWireNative
+internal static unsafe class PipeWireNative
 {
     private const string Lib = "libpipewire-0.3.so.0";
     private const string LibC = "libc.so.6";

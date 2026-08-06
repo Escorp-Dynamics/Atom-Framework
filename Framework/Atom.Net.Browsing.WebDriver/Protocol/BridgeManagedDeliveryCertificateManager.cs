@@ -74,7 +74,7 @@ internal sealed class BridgeManagedDeliveryCertificateManager
 
         var authorityCertificatePath = ResolveAuthorityCertificatePath();
         authorityCertificate = LoadExistingCertificate(authorityCertificatePath) ?? CreateAndPersistAuthorityCertificate(authorityCertificatePath);
-        Volatile.Write(ref this.authorityCertificate, authorityCertificate);
+        Volatile.Write(ref authorityCertificate, authorityCertificate);
         return authorityCertificate;
     }
 
@@ -199,7 +199,7 @@ internal sealed class BridgeManagedDeliveryCertificateManager
 
         // ECDSA P-256: сертификат хоста генерируется на hot-path CONNECT под общим gate,
         // поэтому длительная генерация RSA-2048 (сотни миллисекунд на хост) сериализовала бы
-        // установление туннелей всех вкладок. ECDHE-ECDSA покрывается DigitalSignature;
+        // установление туннелей всех вкладок. ECDHE-ECDSA покрывается DigitalSignature
         // KeyEncipherment для ECDSA-ключа неприменим.
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var request = new CertificateRequest("CN=Atom Local WebDriver Loopback", key, HashAlgorithmName.SHA256);

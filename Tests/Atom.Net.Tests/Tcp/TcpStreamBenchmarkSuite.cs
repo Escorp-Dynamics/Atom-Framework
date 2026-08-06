@@ -21,7 +21,7 @@ public class TcpStreamBenchmarkSuite
 
         try
         {
-            using var stream = new Atom.Net.Tcp.TcpStream(new Atom.Net.Tcp.TcpSettings
+            using var stream = new Net.Tcp.TcpStream(new Net.Tcp.TcpSettings
             {
                 AttemptTimeout = TimeSpan.FromSeconds(2),
             });

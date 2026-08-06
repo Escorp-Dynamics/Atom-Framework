@@ -147,8 +147,8 @@ public class TcpStreamLoadTests(ILogger logger) : BenchmarkTests<TcpStreamLoadTe
         Assert.That(clientsPerSecond, Is.GreaterThanOrEqualTo(MinParallelClientsPerSecond));
     }
 
-    private static Atom.Net.Tcp.TcpStream CreateStream()
-        => new(new Atom.Net.Tcp.TcpSettings
+    private static Net.Tcp.TcpStream CreateStream()
+        => new(new Net.Tcp.TcpSettings
         {
             AttemptTimeout = TimeSpan.FromSeconds(2),
         });

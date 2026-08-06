@@ -168,7 +168,9 @@ internal sealed class PageNavigationState : IPageTransport
             return CreateErrorResponse(request, BridgeStatus.Error, "Локальный транспорт страницы требует команду моста");
         }
 
+#pragma warning disable CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
         logger?.LogPageTransportRequestReceived(command.ToString(), windowId, tabId);
+#pragma warning restore CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
 
         if (!string.IsNullOrWhiteSpace(request.WindowId) && !string.Equals(request.WindowId, windowId, StringComparison.Ordinal))
         {
@@ -331,7 +333,9 @@ internal sealed class PageNavigationState : IPageTransport
         }
 
         EnqueueNavigationEvents(currentEntry);
+#pragma warning disable CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
         logger?.LogPageTransportNavigationApplied(settings.Kind.ToString(), url.ToString(), windowId, tabId);
+#pragma warning restore CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
 
         return CreateSuccessResponse(request, CreateNavigationPayload(response, TryGetCurrentEntry(), url));
     }
@@ -1059,7 +1063,7 @@ internal sealed class PageNavigationState : IPageTransport
             if (property.Value.ValueKind != JsonValueKind.String)
                 continue;
 
-            headers ??= [];
+            headers ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             headers[property.Name] = property.Value.GetString()!;
         }
 
@@ -1183,7 +1187,9 @@ internal sealed class PageNavigationState : IPageTransport
         events.Enqueue(CreateEventMessage(BridgeEvent.DomContentLoaded, payload));
         events.Enqueue(CreateEventMessage(BridgeEvent.NavigationCompleted, payload));
         events.Enqueue(CreateEventMessage(BridgeEvent.PageLoaded, payload));
+#pragma warning disable CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
         logger?.LogPageTransportLifecycleEventsQueued(entry.Url.ToString(), windowId, tabId);
+#pragma warning restore CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
     }
 
     private void EnqueueRequestResponseEvents(HttpsResponseMessage response, NavigationSettings settings, PageNavigationEntry? entry, Uri fallbackUrl)

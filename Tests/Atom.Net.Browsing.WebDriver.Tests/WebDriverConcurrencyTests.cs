@@ -49,7 +49,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(3)]
     public async Task BridgeQueuesConcurrentDrainPreservesAllNavigationEnvelopeMessagesAcrossScopes()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)browser.CurrentWindow;
         var page = (WebPage)window.CurrentPage;
         const int navigationCount = 256;
@@ -176,7 +176,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task BrowserMixedConcurrentOpenWindowAndReadCurrentWindowKeepsPublishedWindowInSnapshot()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         const int producerCount = 8;
         const int windowsPerProducer = 32;
         const int observerCount = 32;
@@ -248,7 +248,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task WindowMixedConcurrentOpenPageAndReadCurrentPageKeepsPublishedPageInSnapshot()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)browser.CurrentWindow;
         const int producerCount = 8;
         const int pagesPerProducer = 32;
@@ -328,7 +328,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task BrowserConcurrentDisposeAndOpenWindowAllowsOnlySuccessOrObjectDisposed()
     {
-        var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         const int producerCount = 8;
         const int attemptsPerProducer = 256;
         const int disposerCount = 8;
@@ -405,7 +405,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task WindowConcurrentDisposeAndOpenPageAllowsOnlySuccessOrObjectDisposed()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)browser.CurrentWindow;
         const int producerCount = 8;
         const int attemptsPerProducer = 256;
@@ -476,7 +476,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task BrowserConcurrentDisposeAndNavigateAllowsOnlySuccessOrObjectDisposed()
     {
-        var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         const int producerCount = 8;
         const int attemptsPerProducer = 256;
         const int disposerCount = 8;
@@ -557,7 +557,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task WindowConcurrentDisposeAndNavigateAllowsOnlySuccessOrObjectDisposed()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)browser.CurrentWindow;
         const int producerCount = 8;
         const int attemptsPerProducer = 256;
@@ -632,7 +632,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task BridgeAndLifecycleFanOutRemainsConsistentUnderConcurrentNavigationStress()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)browser.CurrentWindow;
         var page = (WebPage)window.CurrentPage;
         var frame = (Frame)page.MainFrame;
@@ -709,7 +709,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task SubscriberChurnAcrossBridgeAndLifecycleDoesNotBreakConcurrentDelivery()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         const int producerCount = 8;
         const int navigationsPerProducer = 32;
@@ -800,7 +800,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task ConcurrentNavigationAndReadPathsRemainConsistentAcrossPageFrameAndElement()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         var frame = page.MainFrame;
         var element = new Element(page);
@@ -918,7 +918,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task ConcurrentLookupByTitleAndUrlRemainsConsistentAcrossBrowserPageAndFrame()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         const int producerCount = 4;
         const int windowsPerProducer = 12;
         const int readerCount = 12;
@@ -1011,7 +1011,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task ConcurrentWindowLookupSeparatesCurrentTitleFromAnyPageUrl()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         const int producerCount = 4;
         const int windowsPerProducer = 8;
         const int pagesPerWindow = 4;
@@ -1151,7 +1151,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task BrowserLookupAfterDisposeFailsFast()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var target = new Uri("https://127.0.0.1/post-dispose-browser");
         var element = new Element((WebPage)browser.CurrentPage);
         await browser.DisposeAsync().ConfigureAwait(false);
@@ -1169,7 +1169,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task BrowserClearAllCookiesSkipsDisposedCurrentWindowAndFansOutAcrossLiveWindows()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var initialWindow = (WebWindow)browser.CurrentWindow;
         var transientCurrentWindow = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
         await transientCurrentWindow.DisposeAsync().ConfigureAwait(false);
@@ -1185,7 +1185,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task WindowClearAllCookiesSkipsDisposedCurrentPageAndFansOutAcrossLivePages()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
         var initialPage = (WebPage)window.CurrentPage;
         var transientCurrentPage = (WebPage)await window.OpenPageAsync().ConfigureAwait(false);
@@ -1202,7 +1202,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task WindowLookupAndInspectionAfterDisposeFailFast()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
         var target = new Uri("https://127.0.0.1/post-dispose-window");
         var element = new Element((WebPage)window.CurrentPage);
@@ -1221,7 +1221,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task PropertySurfaceAfterDisposeRemainsReadableAsFinalSnapshot()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
         var page = (WebPage)window.CurrentPage;
         var frame = (Frame)page.MainFrame;
@@ -1255,7 +1255,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task LivePropertySurfacePromotesNextWindowAndPageAfterCurrentChildDispose()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var stableWindow = (WebWindow)browser.CurrentWindow;
         var transientWindow = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
         var stablePage = (WebPage)stableWindow.CurrentPage;
@@ -1278,7 +1278,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task WindowPromotionAfterCurrentWindowDisposeAllowsSubsequentWindowOpenInSameBrowser()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var promotedWindow = (WebWindow)browser.CurrentWindow;
         var disposedCurrentWindow = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
 
@@ -1309,7 +1309,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task PagePromotionAfterCurrentPageDisposeAllowsSubsequentPageOpenInSameWindow()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)browser.CurrentWindow;
         var promotedPage = (WebPage)window.CurrentPage;
         var disposedCurrentPage = (WebPage)await window.OpenPageAsync().ConfigureAwait(false);
@@ -1342,7 +1342,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task WindowNavigateAsyncUsesPromotedPageAfterCurrentPageDispose()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)browser.CurrentWindow;
         var promotedPage = (WebPage)window.CurrentPage;
         var disposedCurrentPage = (WebPage)await window.OpenPageAsync().ConfigureAwait(false);
@@ -1368,7 +1368,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task DirectDisposeOfNonCurrentPageRemovesItFromLiveCollectionsAndLookup()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
         var disposedNonCurrentPage = (WebPage)window.CurrentPage;
         var target = new Uri("https://127.0.0.1/disposed-noncurrent-page");
@@ -1398,7 +1398,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task DirectDisposeOfLastPageKeepsLastSnapshotUntilReplacementPageOpens()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)browser.CurrentWindow;
         var lastPage = (WebPage)window.CurrentPage;
         var target = new Uri("https://127.0.0.1/last-page-dispose");
@@ -1437,7 +1437,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task DirectCloseOfLastWindowKeepsLastSnapshotUntilReplacementWindowOpens()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var lastWindow = (WebWindow)browser.CurrentWindow;
         var lastPage = (WebPage)lastWindow.CurrentPage;
         var target = new Uri("https://127.0.0.1/last-window-close");
@@ -1490,7 +1490,7 @@ public sealed class WebDriverConcurrencyTests
             Height = 1,
         }).ConfigureAwait(false);
         await using var microphone = await VirtualMicrophone.CreateAsync(new VirtualMicrophoneSettings()).ConfigureAwait(false);
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var liveWindow = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
         var livePage = (WebPage)liveWindow.CurrentPage;
         await livePage.NavigateAsync(new Uri("https://127.0.0.1/live-window"), new NavigationSettings
@@ -1530,7 +1530,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task CurrentKeywordLookupTakesPrecedenceOverLiteralCurrentTitleMatches()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var literalCurrentWindow = (WebWindow)browser.CurrentWindow;
         var literalCurrentWindowPage = (WebPage)literalCurrentWindow.CurrentPage;
         await literalCurrentWindowPage.NavigateAsync(new Uri("https://127.0.0.1/window-title-current"), new NavigationSettings
@@ -1569,7 +1569,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task DuplicateUrlLookupRemainsStableForUnchangedLiveSnapshot()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var sharedUrl = new Uri("https://127.0.0.1/shared-lookup-target");
 
         var firstWindow = (WebWindow)browser.CurrentWindow;
@@ -1613,7 +1613,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task MainFrameLookupRemainsStableAcrossNameUrlAndElementPaths()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         var frame = (Frame)page.MainFrame;
         var url = new Uri("https://127.0.0.1/main-frame-lookup");
@@ -1642,7 +1642,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task ChildFrameHostSurfacePreservesParentNameAndHandle()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         var mainFrame = (Frame)page.MainFrame;
         var hostState = HtmlFallbackElementState.CreateResolved(
@@ -1688,7 +1688,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task ElementLookupResolvesOwningWindowAndPageAcrossNonCurrentWindowTab()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
 
         var firstWindow = (WebWindow)browser.CurrentWindow;
         var firstWindowInitialPage = (WebPage)firstWindow.CurrentPage;
@@ -1732,7 +1732,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task OpenPageAsyncInNonCurrentWindowPreservesBrowserCurrentBoundaryAndCollections()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
 
         var firstWindow = (WebWindow)browser.CurrentWindow;
         var firstWindowInitialPage = (WebPage)firstWindow.CurrentPage;
@@ -1777,7 +1777,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task BrowserWindowTitleLookupUsesOnlyCurrentPageWhilePageLookupSeesNonCurrentTab()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
 
         var firstWindow = (WebWindow)browser.CurrentWindow;
         var firstWindowNonCurrentPage = (WebPage)firstWindow.CurrentPage;
@@ -1820,7 +1820,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task UrlLookupFindsNonCurrentTabAcrossWindowsWhileWindowScopeStaysLocal()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
 
         var firstWindow = (WebWindow)browser.CurrentWindow;
         var firstWindowTargetPage = (WebPage)firstWindow.CurrentPage;
@@ -1863,7 +1863,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task PageDomSurfaceRemainsAlignedWithMainFrameAfterNavigation()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         var frame = (Frame)page.MainFrame;
         var url = new Uri("https://127.0.0.1/page-frame-alignment");
@@ -1920,7 +1920,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task CookieSurfacePersistsAndClearsAcrossPageWindowAndBrowser()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)browser.CurrentWindow;
         var page = (WebPage)window.CurrentPage;
         var cookies = new[]
@@ -1957,7 +1957,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task ConcurrentCookieMutationsAndReadsRemainConsistentOnSinglePage()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         const int setterCount = 4;
         const int clearerCount = 4;
@@ -2068,7 +2068,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task ScreenshotSurfaceRemainsEmptyAcrossPageFrameAndElement()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         var frame = (Frame)page.MainFrame;
         var element = new Element(page, frame);
@@ -2093,7 +2093,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task LifecycleEventSurfaceAfterDisposeRemainsInertAndNonThrowing()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
         var page = (WebPage)window.CurrentPage;
         var frame = (Frame)page.MainFrame;
@@ -2120,7 +2120,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task CallbackAndInterceptionEventSurfaceAfterDisposeRemainsInertAndNonThrowing()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
         var page = (WebPage)window.CurrentPage;
         await window.DisposeAsync().ConfigureAwait(false);
@@ -2146,7 +2146,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task PageAndMainFrameAfterWindowDisposeFailFast()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
         var page = (WebPage)window.CurrentPage;
         var frame = (Frame)page.MainFrame;
@@ -2269,7 +2269,7 @@ public sealed class WebDriverConcurrencyTests
             Height = 1,
         }).ConfigureAwait(false);
         await using var microphone = await VirtualMicrophone.CreateAsync(new VirtualMicrophoneSettings()).ConfigureAwait(false);
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         await browser.DisposeAsync().ConfigureAwait(false);
 
         Assert.That(async () => await browser.AttachVirtualCameraAsync(camera).ConfigureAwait(false), Throws.InstanceOf<ObjectDisposedException>());
@@ -2287,7 +2287,7 @@ public sealed class WebDriverConcurrencyTests
             Height = 1,
         }).ConfigureAwait(false);
         await using var microphone = await VirtualMicrophone.CreateAsync(new VirtualMicrophoneSettings()).ConfigureAwait(false);
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
         var page = (WebPage)window.CurrentPage;
         await window.DisposeAsync().ConfigureAwait(false);
@@ -2301,7 +2301,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task ElementAndShadowRootAfterWindowDisposeFailFast()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
         var page = (WebPage)window.CurrentPage;
         var element = new Element(page);
@@ -2341,7 +2341,7 @@ public sealed class WebDriverConcurrencyTests
     [Test]
     public async Task IsDisposedReflectsOwnerLifecycleAcrossBrowserDomAndElementContracts()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)browser.CurrentWindow;
         var page = (WebPage)window.CurrentPage;
         var frame = (Frame)page.MainFrame;
@@ -2379,7 +2379,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task ConcurrentIsDisposedReadsStayNonThrowingAndObserveDisposedState()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)browser.CurrentWindow;
         var page = (WebPage)window.CurrentPage;
         var frame = (Frame)page.MainFrame;
@@ -2462,7 +2462,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task ConcurrentBrowserDisposeAndLookupEitherResolveConsistentlyOrFailClosed()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         const int windowCount = 8;
         const int pagesPerWindow = 3;
         const int readerCount = 8;
@@ -2562,7 +2562,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task ConcurrentWindowDisposeAndLookupEitherResolveConsistentlyOrFailClosed()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)await browser.OpenWindowAsync().ConfigureAwait(false);
         const int pageCount = 8;
         const int readerCount = 8;
@@ -2649,7 +2649,7 @@ public sealed class WebDriverConcurrencyTests
     [Repeat(2)]
     public async Task CombinedRuntimeChaosStressKeepsBrowserGraphConsistent()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var initialWindow = (WebWindow)browser.CurrentWindow;
         var initialPage = (WebPage)browser.CurrentPage;
         var windows = new ConcurrentBag<WebWindow>([initialWindow]);

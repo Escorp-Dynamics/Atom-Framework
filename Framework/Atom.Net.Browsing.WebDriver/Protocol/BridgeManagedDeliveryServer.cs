@@ -73,7 +73,7 @@ internal sealed class BridgeManagedDeliveryServer(string host, int port, BridgeM
         {
             try
             {
-                await acceptLoop.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                await acceptLoop.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

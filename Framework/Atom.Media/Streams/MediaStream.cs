@@ -3,9 +3,9 @@
 namespace Atom.Media;
 
 /// <summary>
-/// Базовый runtime-поток мультимедийных данных поверх <see cref="Atom.IO.Stream"/>.
+/// Базовый runtime-поток мультимедийных данных поверх <see cref="IO.Stream"/>.
 /// </summary>
-public abstract class MediaStream(MediaStreamType streamType) : Atom.IO.Stream
+public abstract class MediaStream(MediaStreamType streamType) : IO.Stream
 {
     private bool isDisposed;
 

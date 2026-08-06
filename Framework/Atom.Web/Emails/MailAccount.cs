@@ -71,8 +71,11 @@ public abstract class MailAccount : IMailAccount
     /// <inheritdoc/>
     public abstract ValueTask<IEnumerable<Mail>> RefreshInboxAsync(CancellationToken cancellationToken);
 
+
+#pragma warning disable MA0196 // Do not use inheritdoc on non-inheriting members
     /// <inheritdoc/>
     public ValueTask SendAsync(Mail mail) => SendAsync(mail, CancellationToken.None);
+#pragma warning restore MA0196 // Do not use inheritdoc on non-inheriting members
 
     /// <inheritdoc/>
     public abstract ValueTask SendAsync(IMail mail, CancellationToken cancellationToken);

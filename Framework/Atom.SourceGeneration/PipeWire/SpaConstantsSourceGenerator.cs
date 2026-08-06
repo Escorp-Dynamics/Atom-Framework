@@ -79,7 +79,7 @@ public sealed class SpaConstantsSourceGenerator : IIncrementalGenerator
                 continue;
             }
 
-            var (enumName, entries) = SpaHeaderParser.Parse(text!);
+            var (enumName, entries) = SpaHeaderParser.Parse(text);
             if (entries.Count == 0)
             {
                 continue;

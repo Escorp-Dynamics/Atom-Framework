@@ -10,7 +10,7 @@ namespace Atom.SourceGeneration;
 /// </summary>
 public abstract class Entity : IEntity
 {
-    private readonly SparseArray<string> attributes = new(128);
+    private readonly SparseArray<string> attributes = [with(128)];
 
     /// <inheritdoc/>
     public string? Comment { get; protected set; }

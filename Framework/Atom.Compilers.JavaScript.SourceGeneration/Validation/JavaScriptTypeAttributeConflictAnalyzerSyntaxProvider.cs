@@ -33,7 +33,7 @@ public sealed class JavaScriptTypeAttributeConflictAnalyzerSyntaxProvider : Anal
     public override void Execute(SyntaxNodeAnalysisContext context)
     {
         if (context.Node is not TypeDeclarationSyntax node) return;
-        if (context.SemanticModel.GetDeclaredSymbol(node) is not INamedTypeSymbol symbol) return;
+        if (context.SemanticModel.GetDeclaredSymbol(node, context.CancellationToken) is not INamedTypeSymbol symbol) return;
         if (!IsPrimaryDeclaration(symbol, node)) return;
         if (JavaScriptAnalyzerSyntaxHelpers.IsIgnored(symbol)) return;
 

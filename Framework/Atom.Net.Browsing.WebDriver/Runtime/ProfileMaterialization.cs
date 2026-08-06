@@ -67,7 +67,7 @@ internal static class ProfileMaterialization
     {
         var rootDirectory = ResolveSandboxedProfileRoot(profile);
         if (string.IsNullOrWhiteSpace(rootDirectory))
-            rootDirectory = IOPath.GetTempPath();
+            rootDirectory = IOPath.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".atom-webdriver");
 
         return IOPath.Combine(rootDirectory, Guid.NewGuid().ToString("N"));
     }

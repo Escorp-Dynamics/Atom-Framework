@@ -128,11 +128,11 @@ public sealed class WebDriverElementTrustedInputTests
         Assert.That(async () => await element.TypeAsync("price=10€").ConfigureAwait(false), Throws.TypeOf<NotSupportedException>());
     }
 
-    private static VirtualMouse? GetCurrentMouse(Atom.Net.Browsing.WebDriver.WebBrowser browser)
-        => typeof(Atom.Net.Browsing.WebDriver.WebBrowser).GetProperty("CurrentMouse", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(browser) as VirtualMouse;
+    private static VirtualMouse? GetCurrentMouse(WebBrowser browser)
+        => typeof(WebBrowser).GetProperty("CurrentMouse", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(browser) as VirtualMouse;
 
-    private static VirtualKeyboard? GetCurrentKeyboard(Atom.Net.Browsing.WebDriver.WebBrowser browser)
-        => typeof(Atom.Net.Browsing.WebDriver.WebBrowser).GetProperty("CurrentKeyboard", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(browser) as VirtualKeyboard;
+    private static VirtualKeyboard? GetCurrentKeyboard(WebBrowser browser)
+        => typeof(WebBrowser).GetProperty("CurrentKeyboard", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(browser) as VirtualKeyboard;
 
     [SupportedOSPlatform("linux")]
     private static async ValueTask<VirtualDisplay> CreateDisplayOrIgnoreAsync()

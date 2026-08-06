@@ -341,6 +341,7 @@ internal static class BridgeManagedDeliveryCertificateTrustInstaller
 
     private static Process? StartSudoProcess(string scriptPath)
     {
+#pragma warning disable S4036 // OS commands should not rely on PATH resolution
         var startInfo = new ProcessStartInfo("sudo")
         {
             UseShellExecute = false,
@@ -348,6 +349,7 @@ internal static class BridgeManagedDeliveryCertificateTrustInstaller
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
+#pragma warning restore S4036 // OS commands should not rely on PATH resolution
         startInfo.ArgumentList.Add("-S");
         startInfo.ArgumentList.Add("/bin/sh");
         startInfo.ArgumentList.Add(scriptPath);

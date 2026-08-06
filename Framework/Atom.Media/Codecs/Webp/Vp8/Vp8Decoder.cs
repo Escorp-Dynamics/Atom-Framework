@@ -309,7 +309,7 @@ internal sealed class Vp8Decoder
                 if (captureCurrentMacroblock)
                 {
                     diagnostics!.TargetMacroblockSegment = mb.Segment;
-                    diagnostics!.FirstMacroblockYMode = mb.YMode;
+                    diagnostics.FirstMacroblockYMode = mb.YMode;
                     diagnostics.FirstMacroblockUvMode = mb.UvMode;
                     diagnostics.FirstMacroblockIsSkip = mb.IsSkip;
                 }
@@ -370,7 +370,7 @@ internal sealed class Vp8Decoder
                         Array.Clear(y2Coeffs);
                         Array.Clear(coeffs);
                         var y2InitialContext = aboveY2NonZero[mbX] + leftY2NonZero;
-                        System.Collections.Generic.List<string>? y2TokenTrace = null;
+                        List<string>? y2TokenTrace = null;
                         if (captureCurrentMacroblock)
                         {
                             y2TokenTrace = diagnostics!.FirstMacroblockY2TokenTrace;
@@ -413,7 +413,7 @@ internal sealed class Vp8Decoder
                                 var leftContext = bx > 0
                                     ? currentMbYNonZero[(by * 4) + bx - 1]
                                     : leftYNonZero[by];
-                                System.Collections.Generic.List<string>? yBlockTokenTrace = null;
+                                List<string>? yBlockTokenTrace = null;
                                 var captureCurrentSubblock = captureCurrentMacroblock
                                     && by == diagnostics!.TargetSubblockY
                                     && bx == diagnostics.TargetSubblockX;
@@ -876,7 +876,7 @@ internal sealed class Vp8Decoder
     // ── Coefficient decoding (§13) ──
 
     private bool DecodeBlock(ref Vp8BoolDecoder bd, short[] coeffs, int blockType,
-        int blockIndex, int firstCoeff, int initialContext, System.Collections.Generic.List<string>? tokenTrace = null)
+        int blockIndex, int firstCoeff, int initialContext, List<string>? tokenTrace = null)
     {
         var ctx2 = initialContext;
         var hasNonZeroCoefficients = false;
@@ -1091,7 +1091,7 @@ internal sealed class Vp8Decoder
     }
 
     private bool DecodeBlockReferenceStyle(ref Vp8BoolDecoder bd, short[] coeffs, int blockType,
-        int firstCoeff, int initialContext, System.Collections.Generic.List<string>? tokenTrace = null)
+        int firstCoeff, int initialContext, List<string>? tokenTrace = null)
     {
         var context = initialContext;
         var prevCoeffWasZero = false;
@@ -1279,7 +1279,7 @@ internal sealed class Vp8Decoder
                     var leftContext = bx > 0
                         ? currentMbYNonZero[(by * 4) + bx - 1]
                         : leftYNonZero[by];
-                    System.Collections.Generic.List<string>? yBlockTokenTrace = null;
+                    List<string>? yBlockTokenTrace = null;
                     if (captureCurrentMacroblock && by == 0 && bx == 0)
                     {
                         yBlockTokenTrace = diagnostics!.FirstYBlockTokenTrace;
@@ -1908,9 +1908,9 @@ internal sealed class Vp8DecodeDiagnostics
 
     public short[] FirstMacroblockY2WhtCoeffs { get; } = new short[16];
 
-    public System.Collections.Generic.List<string> FirstMacroblockY2TokenTrace { get; } = [];
+    public List<string> FirstMacroblockY2TokenTrace { get; } = [];
 
-    public System.Collections.Generic.List<string> FirstYBlockTokenTrace { get; } = [];
+    public List<string> FirstYBlockTokenTrace { get; } = [];
 
     public bool FirstYBlockNonZero { get; set; }
 
@@ -1964,7 +1964,7 @@ internal sealed class Vp8DecodeDiagnostics
 
     public short[] TargetYSubblockForcedContext0RawCoeffs { get; } = new short[16];
 
-    public System.Collections.Generic.List<string> TargetYSubblockForcedContext0TokenTrace { get; } = [];
+    public List<string> TargetYSubblockForcedContext0TokenTrace { get; } = [];
 
     public bool TargetYSubblockForcedContext1NonZero { get; set; }
 
@@ -1972,7 +1972,7 @@ internal sealed class Vp8DecodeDiagnostics
 
     public short[] TargetYSubblockForcedContext1RawCoeffs { get; } = new short[16];
 
-    public System.Collections.Generic.List<string> TargetYSubblockForcedContext1TokenTrace { get; } = [];
+    public List<string> TargetYSubblockForcedContext1TokenTrace { get; } = [];
 
     public bool TargetYSubblockForcedContext2NonZero { get; set; }
 
@@ -1980,7 +1980,7 @@ internal sealed class Vp8DecodeDiagnostics
 
     public short[] TargetYSubblockForcedContext2RawCoeffs { get; } = new short[16];
 
-    public System.Collections.Generic.List<string> TargetYSubblockForcedContext2TokenTrace { get; } = [];
+    public List<string> TargetYSubblockForcedContext2TokenTrace { get; } = [];
 
     public bool TargetYSubblockReferenceStyleNonZero { get; set; }
 
@@ -1988,7 +1988,7 @@ internal sealed class Vp8DecodeDiagnostics
 
     public short[] TargetYSubblockReferenceStyleRawCoeffs { get; } = new short[16];
 
-    public System.Collections.Generic.List<string> TargetYSubblockReferenceStyleTokenTrace { get; } = [];
+    public List<string> TargetYSubblockReferenceStyleTokenTrace { get; } = [];
 
     public short[] TargetYSubblockRawCoeffs { get; } = new short[16];
 
@@ -2050,7 +2050,7 @@ internal sealed class Vp8DecodeDiagnostics
 
     public byte[] TargetFinalV2x2 { get; } = new byte[4];
 
-    public System.Collections.Generic.List<string> TargetYSubblockTokenTrace { get; } = [];
+    public List<string> TargetYSubblockTokenTrace { get; } = [];
 
     public byte FirstMacroblockPredictedUTopLeft { get; set; }
 

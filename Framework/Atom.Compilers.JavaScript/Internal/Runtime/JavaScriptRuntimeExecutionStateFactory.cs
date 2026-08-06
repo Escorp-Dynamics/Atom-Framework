@@ -97,7 +97,7 @@ internal static class JavaScriptRuntimeExecutionStateFactory
         if (totalExportableMemberCount == 0)
             return null;
 
-        return new Dictionary<(string RegistrationName, string EntityName, string ExportName), int>(totalExportableMemberCount);
+        return [with(totalExportableMemberCount)];
     }
 
     private static FrozenDictionary<(string RegistrationName, string EntityName, string ExportName), int> CreateFrozenMemberIndexes(

@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using Atom.Text;
@@ -117,4 +117,4 @@ public class FileLogger : ConsoleLogger
 /// Инициализирует новый экземпляр <see cref="FileLogger{TCategoryName}"/>.
 /// </remarks>
 [method: MethodImpl(MethodImplOptions.AggressiveInlining)]
-public class FileLogger<TCategoryName>() : FileLogger(typeof(TCategoryName).FullName ?? string.Empty), ILogger<TCategoryName> { }
+public class FileLogger<TCategoryName>() : FileLogger(typeof(TCategoryName).FullName ?? string.Empty), ILogger<TCategoryName>;

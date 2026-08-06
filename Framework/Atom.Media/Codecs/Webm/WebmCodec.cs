@@ -63,8 +63,11 @@ public sealed partial class WebmCodec : IVideoCodec
     /// <inheritdoc/>
     public string Name => "WebM VP9 (Atom Store Mode)";
 
+
+#pragma warning disable MA0196 // Do not use inheritdoc on non-inheriting members
     /// <inheritdoc/>
     public string MimeType => "video/webm";
+#pragma warning restore MA0196 // Do not use inheritdoc on non-inheriting members
 
     /// <inheritdoc/>
     public CodecCapabilities Capabilities =>

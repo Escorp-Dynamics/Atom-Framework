@@ -11,7 +11,7 @@ namespace Atom.Net.Tls;
 internal sealed class HandshakeTranscript
 {
     private const int ChunkSize = 16 * 1024;
-    private readonly List<byte[]> chunks = new(capacity: 8);
+    private readonly List<byte[]> chunks = [with(capacity: 8)];
     private int lastLen;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Runtime.CompilerServices;
 
 namespace Atom.Net.Udp;
@@ -49,11 +49,17 @@ public readonly struct UdpPacketInfo(IPAddress? localAddress, int ifIndex) : IEq
         _ => default,
     };
 
+
+#pragma warning disable MA0196 // Do not use inheritdoc on non-inheriting members
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+#pragma warning restore MA0196 // Do not use inheritdoc on non-inheriting members
     public static bool operator ==(UdpPacketInfo left, UdpPacketInfo right) => left.Equals(right);
 
+
+#pragma warning disable MA0196 // Do not use inheritdoc on non-inheriting members
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+#pragma warning restore MA0196 // Do not use inheritdoc on non-inheriting members
     public static bool operator !=(UdpPacketInfo left, UdpPacketInfo right) => !(left == right);
 }

@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using Atom.Buffers;
 using Atom.Text;
 
@@ -210,6 +210,8 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
         return this;
     }
 
+
+#pragma warning disable MA0196 // Do not use inheritdoc on non-inheriting members
     /// <inheritdoc/>
     public EventMember WithRemover(string body, string comment, params IEnumerable<string> attributes) => WithRemover(EventRemoveMember.Create()
         .WithAttribute(attributes)
@@ -217,6 +219,7 @@ public class EventMember : Member<EventMember>, IEventMember<EventMember>
         .WithComment(comment)
         .WithAccessModifier(AccessModifier)
     );
+#pragma warning restore MA0196 // Do not use inheritdoc on non-inheriting members
 
     /// <inheritdoc/>
     public EventMember WithRemover(string body) => WithRemover(body, string.Empty);

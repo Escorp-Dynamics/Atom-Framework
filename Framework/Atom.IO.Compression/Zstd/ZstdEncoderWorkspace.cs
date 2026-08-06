@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 #pragma warning disable CA2213
@@ -9,7 +9,7 @@ namespace Atom.IO.Compression.Zstd;
 /// Рабочее пространство энкодера Zstd. Представляет единый неуправляемый буфер с разбиением на сегменты
 /// для всех служебных структур, чтобы избежать повторных аллокаций и копирований.
 /// </summary>
-internal sealed unsafe class ZstdEncoderWorkspace : IDisposable
+internal sealed class ZstdEncoderWorkspace : IDisposable
 {
     internal const int SequenceCapacity = (ZstdStream.MaxRawBlockSize / 4) + 64;
     private static readonly int sequenceBytes = SequenceCapacity * Unsafe.SizeOf<ZstdSeq>();

@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 
 namespace Atom.Debug.Logging;
@@ -14,7 +14,7 @@ public abstract class LoggerProvider<TLogger> : ILoggerProvider where TLogger : 
     /// <summary>
     /// Активные журналы событий.
     /// </summary>
-    protected ConcurrentDictionary<string, TLogger> Loggers { get; } = [];
+    protected ConcurrentDictionary<string, TLogger> Loggers { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Высвобождает ресурсы.

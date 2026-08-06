@@ -311,7 +311,7 @@ internal sealed unsafe class LinuxMicrophoneBackend : IVirtualMicrophoneBackend
 
     private static string BuildMetadataSlug(string? value, string fallback)
     {
-        var source = string.IsNullOrWhiteSpace(value) ? fallback : value!;
+        var source = string.IsNullOrWhiteSpace(value) ? fallback : value;
         Span<char> buffer = stackalloc char[source.Length];
         var length = 0;
         var previousWasSeparator = false;

@@ -99,7 +99,7 @@ public sealed class VideoStream : MediaStream
             }
 
             EnsurePackedFrame();
-            return packedFrameBuffer!.AsMemory(0, PackedFrameSize);
+            return packedFrameBuffer.AsMemory(0, PackedFrameSize);
         }
     }
 
@@ -218,7 +218,9 @@ public sealed class VideoStream : MediaStream
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            var readResult = await demuxer!.ReadPacketAsync(packetBuffer!, cancellationToken).ConfigureAwait(false);
+#pragma warning disable CS8602 // Разыменование вероятной пустой ссылки.
+            var readResult = await demuxer.ReadPacketAsync(packetBuffer!, cancellationToken).ConfigureAwait(false);
+#pragma warning restore CS8602 // Разыменование вероятной пустой ссылки.
             if (readResult == ContainerResult.EndOfFile)
             {
                 if (loop)
@@ -235,8 +237,10 @@ public sealed class VideoStream : MediaStream
                 continue;
             }
 
-            var decodeResult = await codec!.DecodeAsync(
+#pragma warning disable CS8602 // Разыменование вероятной пустой ссылки.
+            var decodeResult = await codec.DecodeAsync(
                 packetBuffer.GetMemory(), frameBuffer, cancellationToken).ConfigureAwait(false);
+#pragma warning restore CS8602 // Разыменование вероятной пустой ссылки.
             if (decodeResult != CodecResult.Success)
             {
                 continue;
@@ -449,6 +453,7 @@ public sealed class VideoStream : MediaStream
         videoStreamIndex = sourceStreamIndex;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ThrowIfStreamingSourceIsMissing()
     {
         if (demuxer is null || codec is null || packetBuffer is null || videoStreamIndex < 0)

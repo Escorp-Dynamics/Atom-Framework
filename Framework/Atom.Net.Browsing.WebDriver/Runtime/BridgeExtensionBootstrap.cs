@@ -1631,6 +1631,7 @@ internal static class BridgeExtensionBootstrap
 
     private static Process? StartSudoProcess(string scriptPath)
     {
+#pragma warning disable S4036 // OS commands should not rely on PATH resolution
         var startInfo = new ProcessStartInfo("sudo")
         {
             UseShellExecute = false,
@@ -1638,6 +1639,7 @@ internal static class BridgeExtensionBootstrap
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
+#pragma warning restore S4036 // OS commands should not rely on PATH resolution
         startInfo.ArgumentList.Add("-S");
         startInfo.ArgumentList.Add("/bin/sh");
         startInfo.ArgumentList.Add(scriptPath);
@@ -1843,6 +1845,7 @@ internal static class BridgeExtensionBootstrap
         Directory.CreateDirectory(packageDirectoryPath);
 
         var crxPath = Path.Combine(packageDirectoryPath, "atom-webdriver-extension.crx");
+#pragma warning disable S4036 // OS commands should not rely on PATH resolution
         var startInfo = new ProcessStartInfo("node")
         {
             UseShellExecute = false,
@@ -1850,6 +1853,7 @@ internal static class BridgeExtensionBootstrap
             RedirectStandardError = true,
             WorkingDirectory = Path.GetDirectoryName(scriptPath) ?? AppContext.BaseDirectory,
         };
+#pragma warning restore S4036 // OS commands should not rely on PATH resolution
         startInfo.ArgumentList.Add(scriptPath);
         startInfo.ArgumentList.Add(extensionPath);
         startInfo.ArgumentList.Add(privateKeyPath);

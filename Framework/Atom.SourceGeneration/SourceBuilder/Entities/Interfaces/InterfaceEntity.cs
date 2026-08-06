@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using Atom.Buffers;
 using Atom.Collections;
 using Atom.Text;
@@ -10,12 +10,12 @@ namespace Atom.SourceGeneration;
 /// </summary>
 public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<InterfaceEntity>
 {
-    private readonly SparseArray<string> parents = new(128);
-    private readonly SparseArray<GenericEntity> generics = new(128);
-    private readonly SparseArray<PropertyMember> properties = new(128);
-    private readonly SparseArray<EventMember> events = new(128);
-    private readonly SparseArray<MethodMember> methods = new(128);
-    private readonly SparseArray<IEntity> others = new(128);
+    private readonly SparseArray<string> parents = [with(128)];
+    private readonly SparseArray<GenericEntity> generics = [with(128)];
+    private readonly SparseArray<PropertyMember> properties = [with(128)];
+    private readonly SparseArray<EventMember> events = [with(128)];
+    private readonly SparseArray<MethodMember> methods = [with(128)];
+    private readonly SparseArray<IEntity> others = [with(128)];
     private bool HasMembers() => !(properties.IsEmpty && events.IsEmpty && methods.IsEmpty && others.IsEmpty);
 
     private static void AppendMembers<TMember>(ref ValueStringBuilder sb, int tabs, IEnumerable<TMember> members, params IEnumerable<string> usings)
@@ -148,8 +148,11 @@ public class InterfaceEntity : Entity<InterfaceEntity>, IInterfaceEntity<Interfa
         return this;
     }
 
+
+#pragma warning disable MA0196 // Do not use inheritdoc on non-inheriting members
     /// <inheritdoc/>
     public InterfaceEntity WithEvent<TType>(string name, AccessModifier access) => WithEvent(EventMember.Create<TType>(name, access));
+#pragma warning restore MA0196 // Do not use inheritdoc on non-inheriting members
 
     /// <inheritdoc/>
     public InterfaceEntity WithEvent<TType>(string name) => WithEvent<TType>(name, default);

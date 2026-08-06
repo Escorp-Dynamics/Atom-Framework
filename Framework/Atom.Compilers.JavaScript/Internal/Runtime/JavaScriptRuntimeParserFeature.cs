@@ -1,6 +1,6 @@
 ﻿namespace Atom.Compilers.JavaScript;
 
-[System.Flags]
+[Flags]
 internal enum JavaScriptRuntimeParserFeature
 {
     None = 0,

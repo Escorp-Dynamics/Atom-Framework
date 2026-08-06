@@ -53,10 +53,9 @@ public sealed partial class WebPage
     public ValueTask<IFrame?> GetFrameAsync(Uri url)
         => GetFrameAsync(url, CancellationToken.None);
 
-    public async ValueTask<IFrame?> GetFrameAsync(IElement element, CancellationToken cancellationToken)
+    public IFrame? GetFrame(IElement element)
     {
         ArgumentNullException.ThrowIfNull(element);
-        cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
 
         if (!ReferenceEquals(element.Page, this))
@@ -66,5 +65,5 @@ public sealed partial class WebPage
     }
 
     public ValueTask<IFrame?> GetFrameAsync(IElement element)
-        => GetFrameAsync(element, CancellationToken.None);
+        => ValueTask.FromResult(GetFrame(element));
 }

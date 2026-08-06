@@ -513,7 +513,9 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         try
         {
             var response = await completionSource.Task.WaitAsync(settings.RequestTimeout, cancellationToken).ConfigureAwait(false);
+#pragma warning disable CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
             settings.Logger?.LogBridgeServerRequestCompleted(request.Id, sessionId, tabId, commandName, DescribeStatus(response.Status), response.Error ?? string.Empty);
+#pragma warning restore CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
             return response;
         }
         catch (TimeoutException)
@@ -869,7 +871,9 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         try
         {
+#pragma warning disable VSTHRD003 // Avoid awaiting foreign Tasks
             await connectionTask.ConfigureAwait(false);
+#pragma warning restore VSTHRD003 // Avoid awaiting foreign Tasks
         }
         catch (Exception exception)
         {
@@ -1097,7 +1101,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         return request.Path switch
         {
-            "/debug-event" => await ProcessDebugEventAsync(request.BodyText).ConfigureAwait(false),
+            "/debug-event" => ProcessDebugEvent(request.BodyText),
             "/callback" => await ProcessCallbackRequestAsync(request.BodyText).ConfigureAwait(false),
             "/intercept" => await ProcessInterceptRequestAsync(request.BodyText).ConfigureAwait(false),
             "/intercept-response" => await ProcessInterceptResponseAsync(request.BodyText).ConfigureAwait(false),
@@ -1111,7 +1115,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         if (!TryAuthorizeUtilityPost(context))
             return;
 
-        var response = await ProcessDebugEventAsync(await ReadRequestBodyAsync(context.Request).ConfigureAwait(false)).ConfigureAwait(false);
+        var response = ProcessDebugEvent(await ReadRequestBodyAsync(context.Request).ConfigureAwait(false));
         await WriteUtilityResponseAsync(context.Response, response).ConfigureAwait(false);
     }
 
@@ -1151,7 +1155,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         await WriteUtilityResponseAsync(context.Response, response).ConfigureAwait(false);
     }
 
-    private async Task<BridgeNavigationProxyDirectResponse> ProcessDebugEventAsync(string payload)
+    private BridgeNavigationProxyDirectResponse ProcessDebugEvent(string payload)
     {
         try
         {
@@ -1277,7 +1281,9 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         return CreateUtilityResponse(HttpStatusCode.NoContent);
     }
 
+#pragma warning disable S3776 // Cognitive Complexity of methods should not be too high
     private async Task HandleFulfillRequestAsync(HttpListenerContext context, string path)
+#pragma warning restore S3776 // Cognitive Complexity of methods should not be too high
     {
         var response = context.Response;
         response.AddHeader("Access-Control-Allow-Origin", "*");
@@ -1346,7 +1352,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             pendingFulfillments.TryRemove(requestId, out _);
 
             if (bodyBytes is { Length: > 0 })
-                await response.OutputStream.WriteAsync(bodyBytes).ConfigureAwait(false);
+                await response.OutputStream.WriteAsync(bodyBytes, CancellationToken.None).ConfigureAwait(false);
         }
 
         response.Close();
@@ -1369,7 +1375,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         response.ContentType = "application/json; charset=utf-8";
         response.ContentEncoding = Encoding.UTF8;
         response.ContentLength64 = bytes.Length;
-        await response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);
+        await response.OutputStream.WriteAsync(bytes, CancellationToken.None).ConfigureAwait(false);
         response.Close();
     }
 
@@ -2012,7 +2018,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             """);
 
         response.ContentLength64 = payload.Length;
-        await response.OutputStream.WriteAsync(payload).ConfigureAwait(false);
+        await response.OutputStream.WriteAsync(payload, CancellationToken.None).ConfigureAwait(false);
         response.Close();
     }
 
@@ -3007,7 +3013,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         {
             try
             {
-                await acceptLoop.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                await acceptLoop.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -3042,7 +3048,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         {
             try
             {
-                await Task.WhenAll([.. inFlightConnections.Values]).WaitAsync(ConnectionDrainTimeout).ConfigureAwait(false);
+                await Task.WhenAll([.. inFlightConnections.Values]).WaitAsync(ConnectionDrainTimeout, CancellationToken.None).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
@@ -3129,7 +3135,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     /// параллельных операций записи, а внешний токен отмены в <see cref="WebSocket.SendAsync(ReadOnlyMemory{byte}, WebSocketMessageType, bool, CancellationToken)"/>
     /// способен аварийно завершить сокет целиком, поэтому отправка всегда выполняется без токена отмены.
     /// </summary>
-    private sealed class BridgeSessionTransport(WebSocket socket)
+    private sealed class BridgeSessionTransport(WebSocket socket) : IDisposable
     {
         private readonly SemaphoreSlim sendGate = new(1, 1);
 
@@ -3165,7 +3171,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             }
         }
 
-        public void Dispose() => Socket.Dispose();
+        public void Dispose() => sendGate.Dispose();
     }
 
     private void LogManagedDeliveryTrustState()

@@ -737,7 +737,7 @@ public sealed partial class HostBridge
             .Matches(generatedSource)
             .ToDictionary(match => match.Groups["name"].Value, match => match.Groups["value"].Value, StringComparer.Ordinal);
 
-        var memberCount = int.Parse(constants["AnnotatedMemberCount"], global::System.Globalization.CultureInfo.InvariantCulture);
+        var memberCount = int.Parse(constants["AnnotatedMemberCount"], System.Globalization.CultureInfo.InvariantCulture);
         var members = ImmutableArray.CreateBuilder<ReaderMemberContract>(memberCount);
 
         for (var i = 0; i < memberCount; i++)
@@ -755,7 +755,7 @@ public sealed partial class HostBridge
         return new ReaderTypeContract(
             EntityName: Unquote(constants["EntityName"]),
             Generator: Unquote(constants["Generator"]),
-            MetadataVersion: int.Parse(constants["MetadataVersion"], global::System.Globalization.CultureInfo.InvariantCulture),
+            MetadataVersion: int.Parse(constants["MetadataVersion"], System.Globalization.CultureInfo.InvariantCulture),
             Members: members.MoveToImmutable(),
             IsGlobalExportEnabled: TryGetBoolean(constants, "IsGlobalExportEnabled"),
             IsStringKeysOnly: TryGetBoolean(constants, "IsStringKeysOnly", defaultValue: true),

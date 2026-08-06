@@ -11,7 +11,7 @@ namespace Atom.SourceGeneration;
 /// </summary>
 public class EnumEntity : Entity<EnumEntity>, IEnumEntity<EnumEntity>
 {
-    private readonly SparseArray<EnumMember> values = new(1024);
+    private readonly SparseArray<EnumMember> values = [with(1024)];
 
     /// <inheritdoc/>
     public AccessModifier AccessModifier { get; set; }

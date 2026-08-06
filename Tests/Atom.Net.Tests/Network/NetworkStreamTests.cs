@@ -66,7 +66,7 @@ public sealed class NetworkStreamTests
         Assert.That(read, Is.Zero);
     }
 
-    private sealed class TestNetworkStream(Socket socket, bool ownsSocket) : Atom.Net.NetworkStream(socket, ownsSocket);
+    private sealed class TestNetworkStream(Socket socket, bool ownsSocket) : NetworkStream(socket, ownsSocket);
 
     private static Task Within(Task task) => task.WaitAsync(TimeSpan.FromMilliseconds(TestTimeoutMs));
 

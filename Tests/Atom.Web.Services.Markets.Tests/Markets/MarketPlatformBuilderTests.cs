@@ -1,7 +1,5 @@
-﻿using Atom.Web.Services.Binance;
-using Atom.Web.Services.Coinbase;
+﻿using Atom.Web.Services.Coinbase;
 using Atom.Web.Services.Kraken;
-using Atom.Web.Services.Markets;
 
 namespace Atom.Web.Services.Markets.Tests;
 
@@ -370,7 +368,9 @@ public class MarketPlatformBuilderTests(ILogger logger) : BenchmarkTests<MarketP
         using var scope = Assert.EnterMultipleScope();
         Assert.That(registry.TryGetRegistration("Kraken", out var reg), Is.True);
         Assert.That(reg!.Name, Is.EqualTo("Kraken"));
+#pragma warning disable CS8604 // Возможно, аргумент-ссылка, допускающий значение NULL.
         Assert.That(reg.ClientFactory, Is.Not.Null);
+#pragma warning restore CS8604 // Возможно, аргумент-ссылка, допускающий значение NULL.
 
         Assert.That(registry.TryGetRegistration("Unknown", out _), Is.False);
     }

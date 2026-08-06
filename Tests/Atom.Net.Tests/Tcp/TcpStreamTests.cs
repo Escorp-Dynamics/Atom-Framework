@@ -18,7 +18,7 @@ public sealed class TcpStreamTests
 
         try
         {
-            using var stream = new Atom.Net.Tcp.TcpStream(new Atom.Net.Tcp.TcpSettings
+            using var stream = new Net.Tcp.TcpStream(new Net.Tcp.TcpSettings
             {
                 AttemptTimeout = TimeSpan.FromSeconds(2),
             });
@@ -58,7 +58,7 @@ public sealed class TcpStreamTests
         var (client, server) = await Within(LoopbackSocketFactory.CreateTcpPairAsync()).ConfigureAwait(false);
 
         using var serverSocket = server;
-        using var stream = new Atom.Net.Tcp.TcpStream(client, new Atom.Net.Tcp.TcpSettings
+        using var stream = new Net.Tcp.TcpStream(client, new Net.Tcp.TcpSettings
         {
             Dscp = 10,
         }, ownsSocket: true);
@@ -99,7 +99,7 @@ public sealed class TcpStreamTests
     [Test]
     public void ConnectAsyncHonorsPreCanceledToken()
     {
-        using var stream = new Atom.Net.Tcp.TcpStream(new Atom.Net.Tcp.TcpSettings
+        using var stream = new Net.Tcp.TcpStream(new Net.Tcp.TcpSettings
         {
             AttemptTimeout = TimeSpan.FromSeconds(2),
         });
@@ -113,7 +113,7 @@ public sealed class TcpStreamTests
     [Test]
     public void ConnectAsyncWithUnresolvableHostThrowsSocketException()
     {
-        using var stream = new Atom.Net.Tcp.TcpStream(new Atom.Net.Tcp.TcpSettings
+        using var stream = new Net.Tcp.TcpStream(new Net.Tcp.TcpSettings
         {
             AttemptTimeout = TimeSpan.FromSeconds(2),
         });
@@ -127,7 +127,7 @@ public sealed class TcpStreamTests
     [Test]
     public async Task ConnectAsyncWithShortAttemptTimeoutStaysWithinBudget()
     {
-        using var stream = new Atom.Net.Tcp.TcpStream(new Atom.Net.Tcp.TcpSettings
+        using var stream = new Net.Tcp.TcpStream(new Net.Tcp.TcpSettings
         {
             AttemptTimeout = TimeSpan.FromMilliseconds(150),
             UseHappyEyeballsAlternating = false,
@@ -157,7 +157,7 @@ public sealed class TcpStreamTests
     [Test]
     public async Task ConnectAsyncWithoutTokenHonorsConfiguredConnectTimeout()
     {
-        using var stream = new Atom.Net.Tcp.TcpStream(new Atom.Net.Tcp.TcpSettings
+        using var stream = new Net.Tcp.TcpStream(new Net.Tcp.TcpSettings
         {
             AttemptTimeout = Timeout.InfiniteTimeSpan,
             ConnectTimeout = TimeSpan.FromMilliseconds(150),
@@ -197,7 +197,7 @@ public sealed class TcpStreamTests
         if (!localhostAddresses.Any(static address => address.AddressFamily is AddressFamily.InterNetworkV6))
             Assert.Ignore("localhost не резолвится в IPv6 на этой среде");
 
-        using var stream = new Atom.Net.Tcp.TcpStream(new Atom.Net.Tcp.TcpSettings
+        using var stream = new Net.Tcp.TcpStream(new Net.Tcp.TcpSettings
         {
             AttemptTimeout = TimeSpan.FromSeconds(2),
         });
@@ -243,7 +243,7 @@ public sealed class TcpStreamTests
 
     private static async Task RunTcpClientAsync(int port, int index)
     {
-        using var stream = new Atom.Net.Tcp.TcpStream(new Atom.Net.Tcp.TcpSettings
+        using var stream = new Net.Tcp.TcpStream(new Net.Tcp.TcpSettings
         {
             AttemptTimeout = TimeSpan.FromSeconds(2),
         });

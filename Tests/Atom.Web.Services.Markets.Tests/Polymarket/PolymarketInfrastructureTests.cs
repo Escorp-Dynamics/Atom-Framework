@@ -237,7 +237,7 @@ public class PolymarketInfrastructureTests(ILogger logger) : BenchmarkTests<Poly
         var policy = new PolymarketRetryPolicy();
         var callCount = 0;
 
-        var result = await policy.ExecuteAsync<string>(ct =>
+        var result = await policy.ExecuteAsync(ct =>
         {
             callCount++;
             return new ValueTask<string>("success");
@@ -256,7 +256,7 @@ public class PolymarketInfrastructureTests(ILogger logger) : BenchmarkTests<Poly
         var policy = new PolymarketRetryPolicy(2, TimeSpan.FromMilliseconds(10), TimeSpan.FromSeconds(1));
         var callCount = 0;
 
-        var result = await policy.ExecuteAsync<string>(ct =>
+        var result = await policy.ExecuteAsync(ct =>
         {
             callCount++;
             if (callCount < 2)
@@ -307,7 +307,7 @@ public class PolymarketInfrastructureTests(ILogger logger) : BenchmarkTests<Poly
         var policy = new PolymarketRetryPolicy(2, TimeSpan.FromMilliseconds(10), TimeSpan.FromSeconds(1));
         var callCount = 0;
 
-        var result = await policy.ExecuteAsync<string>(ct =>
+        var result = await policy.ExecuteAsync(ct =>
         {
             callCount++;
             if (callCount < 2)

@@ -18,12 +18,12 @@ public class UdpStreamBenchmarkSuite
     {
         var (leftSocket, rightSocket) = await LoopbackSocketFactory.CreateUdpPairAsync().ConfigureAwait(false);
 
-        using var left = new Atom.Net.Udp.UdpStream(leftSocket, new Atom.Net.Udp.UdpSettings
+        using var left = new Net.Udp.UdpStream(leftSocket, new Net.Udp.UdpSettings
         {
             UsePacketInfo = false,
             AttemptTimeout = TimeSpan.FromSeconds(2),
         }, ownsSocket: true);
-        using var right = new Atom.Net.Udp.UdpStream(rightSocket, new Atom.Net.Udp.UdpSettings
+        using var right = new Net.Udp.UdpStream(rightSocket, new Net.Udp.UdpSettings
         {
             UsePacketInfo = false,
             AttemptTimeout = TimeSpan.FromSeconds(2),

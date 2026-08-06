@@ -1,4 +1,4 @@
-#pragma warning disable CA1000, MA0018
+﻿#pragma warning disable CA1000, MA0018
 
 using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
@@ -12,7 +12,7 @@ namespace Atom.Buffers;
 /// Представляет средство буферизации объектов.
 /// </summary>
 /// <typeparam name="T">Тип объекта.</typeparam>
-public unsafe class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T> : IDisposable
+public class ObjectPool<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T> : IDisposable
 {
     [StructLayout(LayoutKind.Auto)]
     private struct CacheLine

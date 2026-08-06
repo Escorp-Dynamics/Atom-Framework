@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace Atom;
 
@@ -34,7 +34,7 @@ public partial class NativeException : Exception
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     private static partial nint ErrorUnix(int errorNo);
 
-    private static unsafe string? GetError() => OperatingSystem.IsWindows()
+    private static string? GetError() => OperatingSystem.IsWindows()
         ? Marshal.GetLastPInvokeErrorMessage()
         : Marshal.PtrToStringAnsi(ErrorUnix(Marshal.GetLastWin32Error()));
 }

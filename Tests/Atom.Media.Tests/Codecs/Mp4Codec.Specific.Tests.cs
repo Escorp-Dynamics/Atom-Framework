@@ -1054,11 +1054,10 @@ public class Mp4CodecTests(ILogger logger) : BenchmarkTests<Mp4CodecTests>(logge
             spsRbsp[2], // AVCLevelIndication (level_idc)
             0xFF,      // lengthSizeMinusOne = 3 → nalLengthSize = 4 (0b11111111)
             (byte)(0xE0 | 1), // numOfSPS = 1 (0b111 00001)
+                              // SPS length (big-endian)
+            (byte)(spsNal.Length >> 8),
+            (byte)(spsNal.Length & 0xFF)
         };
-
-        // SPS length (big-endian)
-        result.Add((byte)(spsNal.Length >> 8));
-        result.Add((byte)(spsNal.Length & 0xFF));
         result.AddRange(spsNal);
 
         // numOfPPS = 1

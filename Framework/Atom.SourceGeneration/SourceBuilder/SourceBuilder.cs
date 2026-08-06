@@ -10,9 +10,9 @@ namespace Atom.SourceGeneration;
 /// </summary>
 public class SourceBuilder : ISourceBuilder
 {
-    private readonly SparseArray<string> directives = new(128);
-    private readonly SparseArray<string> usings = new(128);
-    private readonly SparseArray<IEntity> entities = new(1024);
+    private readonly SparseArray<string> directives = [with(128)];
+    private readonly SparseArray<string> usings = [with(128)];
+    private readonly SparseArray<IEntity> entities = [with(1024)];
 
     /// <inheritdoc/>
     public IEnumerable<string> Directives => directives;

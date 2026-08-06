@@ -432,20 +432,20 @@ public sealed class VirtualMicrophone : IAsyncDisposable
             bufferSamples > 0 ? bufferSamples : 1024,
             Settings.Channels,
             Settings.SampleRate,
-            (Atom.Media.AudioSampleFormat)(byte)Settings.SampleFormat);
+            (Media.AudioSampleFormat)(byte)Settings.SampleFormat);
 
         await DecodeAndWriteSamplesAsync(
             demuxer, codec, packet, audioBuffer, audioStreamIndex, loop, cancellationToken)
             .ConfigureAwait(false);
     }
 
-    private Atom.Media.AudioCodecParameters CreateFallbackAudioParams()
+    private AudioCodecParameters CreateFallbackAudioParams()
     {
-        return new Atom.Media.AudioCodecParameters
+        return new AudioCodecParameters
         {
             SampleRate = Settings.SampleRate,
             ChannelCount = Settings.Channels,
-            SampleFormat = (Atom.Media.AudioSampleFormat)(byte)Settings.SampleFormat,
+            SampleFormat = (Media.AudioSampleFormat)(byte)Settings.SampleFormat,
         };
     }
 

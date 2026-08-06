@@ -39,7 +39,7 @@ internal sealed class BridgeNavigationProxyServer(
     private static readonly TimeSpan ConnectionIoTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan ForwardTimeout = TimeSpan.FromSeconds(60);
 
-    private static readonly IReadOnlySet<string> HopByHopHeaderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> HopByHopHeaderNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "Connection",
         "Proxy-Connection",
@@ -95,7 +95,7 @@ internal sealed class BridgeNavigationProxyServer(
         {
             try
             {
-                await acceptLoop.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                await acceptLoop.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -146,7 +146,9 @@ internal sealed class BridgeNavigationProxyServer(
         }
     }
 
+#pragma warning disable MA0051 // Method is too long
     private async Task HandleClientAsync(TcpClient client, CancellationToken cancellationToken)
+#pragma warning restore MA0051 // Method is too long
     {
         // Общий бюджет на ввод-вывод: зависший клиент не должен удерживать обработчик вечно.
         using var ioTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -312,7 +314,9 @@ internal sealed class BridgeNavigationProxyServer(
             return;
         }
 
+#pragma warning disable CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
         logger?.LogBridgeServerNavigationProxyMatched(decision.Action.ToString(), clientRequest.Method, absoluteTargetUrl);
+#pragma warning restore CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
 
         if (decision.Action is ProxyNavigationDecisionAction.Continue)
         {
@@ -420,7 +424,7 @@ internal sealed class BridgeNavigationProxyServer(
         else
         {
             var contentLength = TryReadContentLength(headers);
-            bodyBytes = contentLength > 0 && contentLength <= MaxRequestBodyBytes
+            bodyBytes = contentLength is > 0 and <= MaxRequestBodyBytes
                 ? await ReadRequestBodyBytesAsync(stream, bufferedBodyBytes, contentLength, cancellationToken).ConfigureAwait(false)
                 : [];
         }
@@ -428,12 +432,14 @@ internal sealed class BridgeNavigationProxyServer(
         return CreateProxyRequest(method, target, headers, bodyBytes);
     }
 
-    private static bool IsChunkedTransferEncoding(IReadOnlyDictionary<string, string> headers)
+    private static bool IsChunkedTransferEncoding(Dictionary<string, string> headers)
         => headers.TryGetValue("Transfer-Encoding", out var transferEncoding)
             && transferEncoding.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Any(static token => string.Equals(token, "chunked", StringComparison.OrdinalIgnoreCase));
 
+#pragma warning disable S3776 // Cognitive Complexity of methods should not be too high
     private static async Task<byte[]> ReadChunkedBodyBytesAsync(Stream stream, byte[] bufferedBodyBytes, CancellationToken cancellationToken)
+#pragma warning restore S3776 // Cognitive Complexity of methods should not be too high
     {
         var cursor = new ChunkCursor(stream, bufferedBodyBytes);
         var body = new MemoryStream();
@@ -769,7 +775,7 @@ internal sealed class BridgeNavigationProxyServer(
         }
 
         if (request.Content is not null && !request.Content.Headers.Contains("Content-Length"))
-            request.Content.Headers.ContentLength = body!.Length;
+            request.Content.Headers.ContentLength = body.Length;
 
         return request;
     }
@@ -839,7 +845,7 @@ internal sealed class BridgeNavigationProxyServer(
 
         return new HttpClient(handler)
         {
-            Timeout = System.Threading.Timeout.InfiniteTimeSpan,
+            Timeout = Timeout.InfiniteTimeSpan,
         };
     }
 
@@ -1135,7 +1141,10 @@ internal sealed class BridgeNavigationProxyServer(
 
     private static HashSet<string> EnumerateDecisionLookupUrls(string absoluteTargetUrl)
     {
-        HashSet<string> candidates = [absoluteTargetUrl];
+        var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            absoluteTargetUrl,
+        };
 
         if (Uri.TryCreate(absoluteTargetUrl, UriKind.Absolute, out var uri))
         {

@@ -74,8 +74,11 @@ public sealed partial class Mp4Codec : IVideoCodec
     /// <inheritdoc/>
     public string Name => "MP4 H.264/AVC";
 
+
+#pragma warning disable MA0196 // Do not use inheritdoc on non-inheriting members
     /// <inheritdoc/>
     public string MimeType => "video/mp4";
+#pragma warning restore MA0196 // Do not use inheritdoc on non-inheriting members
 
     /// <inheritdoc/>
     public CodecCapabilities Capabilities =>

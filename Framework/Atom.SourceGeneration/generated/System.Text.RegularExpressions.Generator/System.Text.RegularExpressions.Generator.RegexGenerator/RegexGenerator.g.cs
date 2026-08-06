@@ -24,7 +24,7 @@ namespace Atom.SourceGeneration.PipeWire
         /// ○ Match '}'.<br/>
         /// </code>
         /// </remarks>
-        [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.13.2411")]
+        [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.14.27113")]
         private static partial global::System.Text.RegularExpressions.Regex EnumPattern => global::System.Text.RegularExpressions.Generated.EnumPattern_0.Instance;
     }
 }
@@ -45,7 +45,7 @@ namespace Atom.SourceGeneration.PipeWire
         /// ○ Match the string "*/".<br/>
         /// </code>
         /// </remarks>
-        [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.13.2411")]
+        [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.14.27113")]
         private static partial global::System.Text.RegularExpressions.Regex CCommentPattern => global::System.Text.RegularExpressions.Generated.CCommentPattern_1.Instance;
     }
 }
@@ -67,7 +67,7 @@ namespace Atom.SourceGeneration.PipeWire
         /// ○ Match if at the end of the string or if before an ending newline.<br/>
         /// </code>
         /// </remarks>
-        [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.13.2411")]
+        [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.14.27113")]
         private static partial global::System.Text.RegularExpressions.Regex IdentifierPattern => global::System.Text.RegularExpressions.Generated.IdentifierPattern_2.Instance;
     }
 }
@@ -86,7 +86,7 @@ namespace System.Text.RegularExpressions.Generated
 
     /// <summary>Caches a <see cref="Regex"/> instance for the EnumPattern method.</summary>
     /// <remarks>A custom Regex-derived type could not be generated because RegexOptions.NonBacktracking isn't supported.</remarks>
-    [GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.13.2411")]
+    [GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.14.27113")]
     file sealed class EnumPattern_0 : Regex
     {
         /// <summary>Cached, thread-safe singleton instance.</summary>
@@ -95,7 +95,7 @@ namespace System.Text.RegularExpressions.Generated
     
     /// <summary>Caches a <see cref="Regex"/> instance for the CCommentPattern method.</summary>
     /// <remarks>A custom Regex-derived type could not be generated because RegexOptions.NonBacktracking isn't supported.</remarks>
-    [GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.13.2411")]
+    [GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.14.27113")]
     file sealed class CCommentPattern_1 : Regex
     {
         /// <summary>Cached, thread-safe singleton instance.</summary>
@@ -104,7 +104,7 @@ namespace System.Text.RegularExpressions.Generated
     
     /// <summary>Caches a <see cref="Regex"/> instance for the IdentifierPattern method.</summary>
     /// <remarks>A custom Regex-derived type could not be generated because RegexOptions.NonBacktracking isn't supported.</remarks>
-    [GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.13.2411")]
+    [GeneratedCodeAttribute("System.Text.RegularExpressions.Generator", "10.0.14.27113")]
     file sealed class IdentifierPattern_2 : Regex
     {
         /// <summary>Cached, thread-safe singleton instance.</summary>

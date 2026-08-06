@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -23,12 +23,12 @@ public readonly struct TlsRecordHeader(TlsContentType type, ushort ver, ushort l
     public readonly TlsContentType ContentType { get; } = type;
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public readonly ushort LegacyVersion { get; } = ver;
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public readonly ushort Length { get; } = len;
 
@@ -72,11 +72,17 @@ public readonly struct TlsRecordHeader(TlsContentType type, ushort ver, ushort l
         _ => default,
     };
 
+
+#pragma warning disable MA0196 // Do not use inheritdoc on non-inheriting members
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+#pragma warning restore MA0196 // Do not use inheritdoc on non-inheriting members
     public static bool operator ==(TlsRecordHeader left, TlsRecordHeader right) => left.Equals(right);
 
+
+#pragma warning disable MA0196 // Do not use inheritdoc on non-inheriting members
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+#pragma warning restore MA0196 // Do not use inheritdoc on non-inheriting members
     public static bool operator !=(TlsRecordHeader left, TlsRecordHeader right) => !(left == right);
 }

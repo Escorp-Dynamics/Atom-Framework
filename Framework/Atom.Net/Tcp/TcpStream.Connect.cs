@@ -246,7 +246,9 @@ public sealed partial class TcpStream
                 winner: winnerTcs);
 
             var firstOtherTask = LaunchInitialHappyEyeballsTasks(plan, preferredFamily, initialDelay);
+#pragma warning disable CA2025 // Не передавайте экземпляры IDisposable в неожидаемые задачи
             var schedulerTask = RunHappyEyeballsSchedulerAsync(plan, firstOtherTask);
+#pragma warning restore CA2025 // Не передавайте экземпляры IDisposable в неожидаемые задачи
             var all = Task.WhenAll(firstOtherTask, schedulerTask);
 
             await EnsureHappyEyeballsWinnerAsync(winnerTcs.Task, all).ConfigureAwait(false);

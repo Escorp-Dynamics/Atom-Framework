@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Atom.Buffers;
@@ -127,7 +127,7 @@ public abstract class Logger : ILogger, IDisposable
     {
         while (true)
         {
-            await trigger.WaitAsync().ConfigureAwait(false);
+            await trigger.WaitAsync(CancellationToken.None).ConfigureAwait(false);
 
             if (cts.IsCancellationRequested) return;
 
@@ -404,7 +404,7 @@ public abstract class Logger : ILogger, IDisposable
 
         queue.Enqueue(async () =>
         {
-            await locker.WaitAsync().ConfigureAwait(false);
+            await locker.WaitAsync(CancellationToken.None).ConfigureAwait(false);
 
             try
             {
@@ -439,4 +439,4 @@ public abstract class Logger : ILogger, IDisposable
 /// Инициализирует новый экземпляр <see cref="Logger{TCategoryName}"/>.
 /// </remarks>
 [method: MethodImpl(MethodImplOptions.AggressiveInlining)]
-public abstract class Logger<TCategoryName>() : Logger(typeof(TCategoryName).FullName ?? string.Empty), ILogger<TCategoryName> { }
+public abstract class Logger<TCategoryName>() : Logger(typeof(TCategoryName).FullName ?? string.Empty), ILogger<TCategoryName>;

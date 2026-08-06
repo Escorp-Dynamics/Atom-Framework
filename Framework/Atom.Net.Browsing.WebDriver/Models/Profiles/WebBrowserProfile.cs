@@ -179,7 +179,11 @@ public abstract class WebBrowserProfile
     /// Добавляет к нативным Linux-кандидатам пути sandboxed-установок (Flatpak exports и Snap launcher-скрипты).
     /// Нативные кандидаты сохраняют приоритет разрешения над sandboxed.
     /// </summary>
+#pragma warning disable MA0050 // Validate arguments correctly in iterator methods
+#pragma warning disable S4456 // Parameter validation in yielding methods should be wrapped
     protected static IEnumerable<string> AppendSandboxedInstallCandidates(
+#pragma warning restore S4456 // Parameter validation in yielding methods should be wrapped
+#pragma warning restore MA0050 // Validate arguments correctly in iterator methods
         IEnumerable<string> nativeCandidates,
         string? flatpakApplicationId = null,
         string? snapPackageName = null)
@@ -206,7 +210,11 @@ public abstract class WebBrowserProfile
     /// Формирует кандидатов Flatpak для экспортированных launcher-скриптов приложения
     /// из системного и пользовательского exports-каталогов.
     /// </summary>
+#pragma warning disable MA0050 // Validate arguments correctly in iterator methods
+#pragma warning disable S4456 // Parameter validation in yielding methods should be wrapped
     protected static IEnumerable<string> GetFlatpakCandidates(params string[] applicationIds)
+#pragma warning restore S4456 // Parameter validation in yielding methods should be wrapped
+#pragma warning restore MA0050 // Validate arguments correctly in iterator methods
     {
         ArgumentNullException.ThrowIfNull(applicationIds);
 
@@ -223,7 +231,11 @@ public abstract class WebBrowserProfile
     /// <summary>
     /// Формирует кандидатов Snap для launcher-скриптов пакета из каталога бинарных файлов snap.
     /// </summary>
+#pragma warning disable MA0050 // Validate arguments correctly in iterator methods
+#pragma warning disable S4456 // Parameter validation in yielding methods should be wrapped
     protected static IEnumerable<string> GetSnapCandidates(params string[] packageNames)
+#pragma warning restore S4456 // Parameter validation in yielding methods should be wrapped
+#pragma warning restore MA0050 // Validate arguments correctly in iterator methods
     {
         ArgumentNullException.ThrowIfNull(packageNames);
 

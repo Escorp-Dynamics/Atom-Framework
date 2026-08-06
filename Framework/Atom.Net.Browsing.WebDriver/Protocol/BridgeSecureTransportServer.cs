@@ -67,7 +67,7 @@ internal sealed class BridgeSecureTransportServer(
         {
             try
             {
-                await acceptLoop.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                await acceptLoop.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

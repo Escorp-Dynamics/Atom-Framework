@@ -35,7 +35,7 @@ public sealed class TlsStreamTests
 
     private static Task Within(ValueTask task) => task.AsTask().WaitAsync(TimeSpan.FromMilliseconds(TestTimeoutMs));
 
-    private sealed class StubNetworkStream() : Atom.Net.NetworkStream(new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
+    private sealed class StubNetworkStream() : NetworkStream(new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
     {
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
             => ValueTask.FromResult(0);
@@ -44,7 +44,7 @@ public sealed class TlsStreamTests
             => ValueTask.CompletedTask;
     }
 
-    private sealed class NeverCompletingTlsStream(Atom.Net.NetworkStream stream, in TlsSettings settings) : TlsStream(stream, settings)
+    private sealed class NeverCompletingTlsStream(NetworkStream stream, in TlsSettings settings) : TlsStream(stream, settings)
     {
         protected override ValueTask<bool> OnHandshakeRecordAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
             => ValueTask.FromResult(false);

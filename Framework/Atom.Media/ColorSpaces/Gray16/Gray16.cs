@@ -1,4 +1,4 @@
-#pragma warning disable CA1000, CA2208, IDE0290, S4136
+﻿#pragma warning disable CA1000, CA2208, IDE0290, S4136
 
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
@@ -33,11 +33,17 @@ public readonly partial struct Gray16 : IColorSpace<Gray16>, IEquatable<Gray16>
 
     #region IColorSpace Implementation
 
+
+#pragma warning disable MA0196 // Do not use inheritdoc on non-inheriting members
     /// <inheritdoc />
     public static int ComponentCount => 1;
+#pragma warning restore MA0196 // Do not use inheritdoc on non-inheriting members
 
+
+#pragma warning disable MA0196 // Do not use inheritdoc on non-inheriting members
     /// <inheritdoc />
     public static Gray16 Default => default;
+#pragma warning restore MA0196 // Do not use inheritdoc on non-inheriting members
 
     /// <inheritdoc/>
     public T To<T>() where T : unmanaged, IColorSpace<T> => T.From(this);

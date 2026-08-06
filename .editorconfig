@@ -104,3 +104,6 @@ dotnet_diagnostic.MA0048.severity = suggestion
 
 # Default severity for analyzer diagnostics with category 'IDisposableAnalyzers.Correctness'
 dotnet_analyzer_diagnostic.category-IDisposableAnalyzers.Correctness.severity = suggestion
+
+# S6640: Unsafe code blocks should not be used
+dotnet_diagnostic.S6640.severity = suggestion

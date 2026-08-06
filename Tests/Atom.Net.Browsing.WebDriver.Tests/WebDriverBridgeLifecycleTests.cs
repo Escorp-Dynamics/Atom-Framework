@@ -28,7 +28,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task OpenPageAsyncPropagatesLifecycleWithDistinctTabContext()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)browser.CurrentWindow;
         var firstPage = (WebPage)window.CurrentPage;
         var secondPage = (WebPage)await window.OpenPageAsync();
@@ -70,7 +70,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task OpenWindowAsyncPropagatesLifecycleWithDistinctWindowContext()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var firstWindow = (WebWindow)browser.CurrentWindow;
         var secondWindow = (WebWindow)await browser.OpenWindowAsync();
         var secondPage = (WebPage)secondWindow.CurrentPage;
@@ -214,7 +214,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task NavigateAsyncUpdatesPageAndFrameRuntimeState()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         var window = (WebWindow)browser.CurrentWindow;
         var targetUrl = new Uri("https://127.0.0.1/login");
@@ -328,7 +328,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task NavigateAsyncSupportsReloadBackAndForwardHistoryState()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = browser.CurrentPage;
         var firstUrl = new Uri("https://127.0.0.1/first");
         var secondUrl = new Uri("https://127.0.0.1/second");
@@ -372,7 +372,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task ElementReadFallbacksUseTransportBackedRootMarkupSnapshot()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = browser.CurrentPage;
         const string html = "<input id=\"login\" class=\"primary secondary\" value=\"alice\" data-test=\"42\" role=\"textbox\" tabindex=\"5\" contenteditable=\"true\" draggable=\"true\" checked />";
 
@@ -409,7 +409,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task PageBoundBridgeCommandsOverrideFrameMetadataQueries()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
@@ -437,7 +437,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task PageBoundBridgeCommandsCanDispatchReload()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
@@ -450,7 +450,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task PageReloadAsyncUsesBridgeCommandWhenCurrentSnapshotCameFromLiveLifecycle()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
@@ -495,7 +495,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task PageReloadAsyncFallsBackToLocalTransportWhenSnapshotDivergedFromLiveLifecycle()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
@@ -554,7 +554,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task PageNavigateAsyncRemainsSyntheticOnBoundLivePage()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
@@ -610,7 +610,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task LateBridgeDiscoveryLifecycleDoesNotOverwriteNavigatedBoundPageUrl()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         var targetUrl = new Uri("https://bridge.test/storage-isolation-page");
@@ -647,7 +647,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task PageBoundBridgeCommandsExposeRichDescribeElementAndWindowBounds()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings());
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings());
         var window = (WebWindow)browser.CurrentWindow;
         var page = (WebPage)window.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
@@ -692,7 +692,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task PageAndShadowRootBridgeQueriesUseScopedShadowContext()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
@@ -752,7 +752,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task ShadowRootMetadataQueriesReuseFrameBridgeContext()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
@@ -787,7 +787,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task ShadowRootScopedCollectionAndWaitQueriesReuseResolvedHostContext()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
@@ -828,7 +828,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task FrameChildDiscoveryRequestsShadowRootTraversalOnBridgeLookup()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
@@ -857,7 +857,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task PageGetShadowRootReturnsNullWhenBridgeReportsNonOpenMode()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
@@ -879,7 +879,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task BridgeBackedElementStateQueriesUseBridgeProperties()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
@@ -928,7 +928,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task BridgeBackedChildFrameUsesHostElementVisibilityAndBounds()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         var mainFrame = (Frame)page.MainFrame;
         var hostElement = new Element(page, mainFrame, bridgeElementId: "iframe-host-element");
@@ -960,7 +960,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task BridgeBackedChildFrameReadsNameFromHostBridgeProperty()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         var mainFrame = (Frame)page.MainFrame;
         var hostElement = new Element(page, mainFrame, bridgeElementId: "iframe-host-element");
@@ -983,7 +983,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task BridgeBackedChildFrameUsesHiddenHostVisibilityState()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         var mainFrame = (Frame)page.MainFrame;
         var hostElement = new Element(page, mainFrame, bridgeElementId: "iframe-host-element");
@@ -1012,7 +1012,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task FrameDetachedEventMarksMatchingChildFrameDetached()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         var mainFrame = (Frame)page.MainFrame;
         var hostElement = new Element(page, mainFrame, bridgeElementId: "iframe-host-element");
@@ -1052,7 +1052,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task BridgeBackedChildFrameTreatsDisconnectedHostDescriptionAsDetached()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         var mainFrame = (Frame)page.MainFrame;
         var hostElement = new Element(page, mainFrame, bridgeElementId: "iframe-host-element");
@@ -1074,7 +1074,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task BridgeBackedChildFrameTreatsMissingHostDescriptionAsDetached()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         var mainFrame = (Frame)page.MainFrame;
         var hostElement = new Element(page, mainFrame, bridgeElementId: "iframe-host-element");
@@ -1096,7 +1096,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task PageFrameLookupByNameSkipsDetachedBridgeChildFrameAndResolvesFreshSuccessor()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         var mainFrame = (Frame)page.MainFrame;
         var detachedHostElement = new Element(page, mainFrame, bridgeElementId: "iframe-host-element-detached");
@@ -1132,7 +1132,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task PageFrameLookupByUrlSkipsDetachedBridgeChildFrameAndResolvesFreshSuccessor()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         var mainFrame = (Frame)page.MainFrame;
         var detachedHostElement = new Element(page, mainFrame, bridgeElementId: "iframe-host-element-detached");
@@ -1185,7 +1185,7 @@ public sealed class WebDriverBridgeLifecycleTests
             Name = "Bridge Microphone",
             DeviceId = "bridge-bundle",
         }).ConfigureAwait(false);
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings
         {
             Device = Device.Pixel7,
         });
@@ -1232,7 +1232,7 @@ public sealed class WebDriverBridgeLifecycleTests
         const string targetTitle = "Bridge Lookup Title";
         const string targetUrl = "https://bridge.lookup/runtime";
 
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var window = (WebWindow)browser.CurrentWindow;
         var page = (WebPage)window.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
@@ -1287,7 +1287,7 @@ public sealed class WebDriverBridgeLifecycleTests
         var hiddenUrl = new Uri("https://snapshot.lookup/hidden");
         var currentUrl = new Uri("https://snapshot.lookup/current");
 
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var window = (WebWindow)browser.CurrentWindow;
         var hiddenPage = (WebPage)window.CurrentPage;
         var currentPage = (WebPage)await window.OpenPageAsync().ConfigureAwait(false);
@@ -1382,7 +1382,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task PageBoundBridgeSetCookiesAsyncSendsCookieAttributes()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
@@ -1414,7 +1414,7 @@ public sealed class WebDriverBridgeLifecycleTests
     [Test]
     public async Task PageBoundBridgeGetAllCookiesAsyncReadsCookieAttributes()
     {
-        await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
         await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);

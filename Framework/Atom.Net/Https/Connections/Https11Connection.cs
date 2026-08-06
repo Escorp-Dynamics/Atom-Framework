@@ -69,8 +69,11 @@ internal sealed partial class Https11Connection : HttpsConnection
     /// <inheritdoc/>
     public override IPEndPoint? RemoteEndPoint => socketTransport?.Socket.RemoteEndPoint as IPEndPoint;
 
+
+#pragma warning disable MA0196 // Do not use inheritdoc on non-inheriting members
     /// <inheritdoc/>
     internal long CreatedTimestamp => Volatile.Read(ref createdTimestamp);
+#pragma warning restore MA0196 // Do not use inheritdoc on non-inheriting members
 
     /// <inheritdoc/>
     public override long LastActivityTimestamp => Volatile.Read(ref lastActivityTimestamp);
@@ -557,7 +560,7 @@ internal sealed partial class Https11Connection : HttpsConnection
             }
 
             if (hasBody)
-                builder.Append("Content-Length: ").Append(bodyLength.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
+                builder.Append("Content-Length: ").Append(bodyLength.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
 
             builder.Append("\r\n");
             return Encoding.ASCII.GetBytes(builder.ToString());
@@ -752,7 +755,7 @@ internal sealed partial class Https11Connection : HttpsConnection
         var defaultPort = isHttps ? 443 : 80;
         return uri.IsDefaultPort || uri.Port == defaultPort
             ? uri.IdnHost
-            : string.Concat(uri.IdnHost, ":", uri.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            : $"{uri.IdnHost}:{uri.Port.ToString(CultureInfo.InvariantCulture)}";
     }
 
     [SuppressMessage("Reliability", "CA1849:Call async methods when in an async method", Justification = "IDisposable requires a synchronous release path.")]

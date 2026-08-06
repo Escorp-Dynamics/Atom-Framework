@@ -300,7 +300,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         }
         else
         {
-            serverCerts = new List<X509Certificate2>(4);
+            serverCerts = [with(4)];
         }
 
         // Разбор последовательности cert_len(3)+cert
@@ -458,7 +458,9 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
                 hashAlg == HashAlgorithmName.SHA512 ? 64 : 32];
 
             if (hashAlg == HashAlgorithmName.SHA1)
+#pragma warning disable S4790 // Weak hashing algorithms should not be used
                 SHA1.HashData(toSign.AsSpan(0, 64 + skeParams.Length), digest);
+#pragma warning restore S4790 // Weak hashing algorithms should not be used
             else if (hashAlg == HashAlgorithmName.SHA256)
                 SHA256.HashData(toSign.AsSpan(0, 64 + skeParams.Length), digest);
             else if (hashAlg == HashAlgorithmName.SHA384)
@@ -498,7 +500,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         var prfHash = PrfHash;
         var snap = transcript.ComputeHash(prfHash); // снимок без модификации
         var label = forServer ? "server finished"u8 : "client finished"u8;
-        Tls12Prf(masterSecret!, label, snap, dst, prfHash);
+        Tls12Prf(masterSecret, label, snap, dst, prfHash);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

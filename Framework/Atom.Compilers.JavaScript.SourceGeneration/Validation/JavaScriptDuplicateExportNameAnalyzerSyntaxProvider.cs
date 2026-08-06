@@ -33,7 +33,7 @@ public sealed class JavaScriptDuplicateExportNameAnalyzerSyntaxProvider : Analyz
     public override void Execute(SyntaxNodeAnalysisContext context)
     {
         if (context.Node is not TypeDeclarationSyntax typeNode) return;
-        if (context.SemanticModel.GetDeclaredSymbol(typeNode) is not INamedTypeSymbol typeSymbol) return;
+        if (context.SemanticModel.GetDeclaredSymbol(typeNode, context.CancellationToken) is not INamedTypeSymbol typeSymbol) return;
         if (!IsPrimaryDeclaration(typeSymbol, typeNode)) return;
         if (JavaScriptAnalyzerSyntaxHelpers.IsIgnored(typeSymbol)) return;
 
