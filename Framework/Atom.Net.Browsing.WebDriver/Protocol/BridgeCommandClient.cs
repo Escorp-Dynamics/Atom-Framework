@@ -1,4 +1,4 @@
-﻿using System.Drawing;
+using System.Drawing;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -101,6 +101,9 @@ internal sealed class BridgeCommandClient(BridgeServer server)
 
     public ValueTask CloseWindowAsync(string sessionId, string tabId, string windowId, CancellationToken cancellationToken = default)
         => server.CloseWindowAsync(sessionId, tabId, windowId, cancellationToken);
+
+    public ValueTask CloseTabAsync(string sessionId, string tabId, CancellationToken cancellationToken = default)
+        => server.CloseTabAsync(sessionId, tabId, cancellationToken);
 
     public ValueTask ActivateWindowAsync(string sessionId, string tabId, string windowId, CancellationToken cancellationToken = default)
         => server.ActivateWindowAsync(sessionId, tabId, windowId, cancellationToken);

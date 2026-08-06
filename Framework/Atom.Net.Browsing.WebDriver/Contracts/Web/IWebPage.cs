@@ -1,4 +1,4 @@
-﻿using System.Drawing;
+using System.Drawing;
 using System.Net;
 using System.Runtime.CompilerServices;
 using Atom.Media.Audio;
@@ -289,4 +289,25 @@ public interface IWebPage : IDomContext, IAsyncDisposable
     /// <inheritdoc cref="GetFrame(IElement, CancellationToken)"/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     ValueTask<IFrame?> GetFrameAsync(IElement element) => ValueTask.FromResult(GetFrame(element));
+
+    /// <summary>
+    /// Закрывает вкладку страницы.
+    /// После успешного закрытия страница переходит в освобождённое состояние.
+    /// После <see cref="IAsyncDisposable.DisposeAsync"/> выбрасывает <see cref="ObjectDisposedException"/>.
+    /// </summary>
+    ValueTask CloseAsync(CancellationToken cancellationToken);
+
+    /// <inheritdoc cref="CloseAsync(CancellationToken)"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    ValueTask CloseAsync() => CloseAsync(CancellationToken.None);
+
+    /// <summary>
+    /// Полностью обновляет окружение и параметры вкладки из новых настроек без переоткрытия вкладки.
+    /// После <see cref="IAsyncDisposable.DisposeAsync"/> выбрасывает <see cref="ObjectDisposedException"/>.
+    /// </summary>
+    ValueTask ReconfigureAsync(WebPageSettings settings, CancellationToken cancellationToken);
+
+    /// <inheritdoc cref="ReconfigureAsync(WebPageSettings, CancellationToken)"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    ValueTask ReconfigureAsync(WebPageSettings settings) => ReconfigureAsync(settings, CancellationToken.None);
 }

@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace Atom.Net.Browsing.WebDriver;
 
@@ -36,4 +36,13 @@ internal static partial class WebPageLogs
 
     [LoggerMessage(EventId = 1890, Level = LogLevel.Warning, Message = "Вкладка {TabId} получила bridge ScriptError: {Details}")]
     public static partial void LogWebPageScriptErrorReceived(this ILogger logger, string tabId, string details);
+
+    [LoggerMessage(EventId = 1891, Level = LogLevel.Information, Message = "Закрытие вкладки {TabId} начато")]
+    public static partial void LogWebPageClosing(this ILogger logger, string tabId);
+
+    [LoggerMessage(EventId = 1892, Level = LogLevel.Debug, Message = "Вкладка {TabId} выполняет полную перенастройку окружения из новых настроек")]
+    public static partial void LogWebPageReconfiguring(this ILogger logger, string tabId);
+
+    [LoggerMessage(EventId = 1893, Level = LogLevel.Debug, Message = "Вкладка {TabId} завершила полную перенастройку окружения")]
+    public static partial void LogWebPageReconfigured(this ILogger logger, string tabId);
 }
