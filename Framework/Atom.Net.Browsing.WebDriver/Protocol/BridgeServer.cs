@@ -1,4 +1,4 @@
-﻿using System.Buffers;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
@@ -355,6 +355,17 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             new JsonObject
             {
                 ["windowId"] = windowId,
+            },
+            cancellationToken);
+
+    internal ValueTask CloseTabAsync(string sessionId, string tabId, CancellationToken cancellationToken = default)
+        => SendStatusOnlyCommandAsync(
+            sessionId,
+            tabId,
+            BridgeCommand.CloseTab,
+            new JsonObject
+            {
+                ["tabId"] = tabId,
             },
             cancellationToken);
 

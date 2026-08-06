@@ -1,4 +1,4 @@
-﻿using System.Drawing;
+using System.Drawing;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -100,6 +100,9 @@ internal sealed class PageBridgeCommandClient(
 
     public ValueTask CloseWindowAsync(string windowId, CancellationToken cancellationToken = default)
         => commands.CloseWindowAsync(sessionId, tabId, windowId, cancellationToken);
+
+    public ValueTask CloseTabAsync(CancellationToken cancellationToken = default)
+        => commands.CloseTabAsync(sessionId, tabId, cancellationToken);
 
     public ValueTask ActivateWindowAsync(string windowId, CancellationToken cancellationToken = default)
         => commands.ActivateWindowAsync(sessionId, tabId, windowId, cancellationToken);

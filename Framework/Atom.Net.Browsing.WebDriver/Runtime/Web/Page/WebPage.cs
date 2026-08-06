@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Net;
@@ -47,9 +47,9 @@ public sealed partial class WebPage : IWebPage
 
     internal string WindowId => OwnerWindow.WindowId;
 
-    internal WebPageSettings? Settings { get; }
+    internal WebPageSettings? Settings { get; private set; }
 
-    internal Device? ResolvedDevice { get; }
+    internal Device? ResolvedDevice { get; private set; }
 
     internal string GetOrCreateBridgeContextId()
         => BridgeContextId ??= Guid.NewGuid().ToString("N");
@@ -357,4 +357,73 @@ public sealed partial class WebPage : IWebPage
         OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebPageDisposed(TabId);
         return ValueTask.CompletedTask;
     }
+
+    public async ValueTask CloseAsync(CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebPageClosing(TabId);
+
+        if (BridgeCommands is { } bridge)
+        {
+            try
+            {
+                await bridge.CloseTabAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException exception) when (IsExpectedBridgeCloseDisconnect(exception))
+            {
+                // Закрытие собственной вкладки моста может отключить отправителя до прихода ответа.
+            }
+        }
+
+        await DisposeAsync().ConfigureAwait(false);
+    }
+
+    public ValueTask CloseAsync()
+        => CloseAsync(CancellationToken.None);
+
+    public async ValueTask ReconfigureAsync(WebPageSettings settings, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebPageReconfiguring(TabId);
+
+        var previousContextId = BridgeContextId;
+
+        // Полная перенастройка окружения вкладки из новых настроек без переоткрытия вкладки.
+        // Прокси и фингерпринт переприменяются через повторную отправку мостового контекста:
+        // payload строится из Settings (ResolveBridgeProxy) и ResolvedDevice (AppendDeviceContext),
+        // а background/content runtime применяют их при новом contextId.
+        Settings = settings.Clone();
+        ResolvedDevice = OwnerWindow.ResolvedDevice.ResolveDevice(Settings?.Device);
+        ApplyAttachedMediaDevicesState();
+
+        BridgeContextId = null;
+        appliedRequestInterceptionState = null;
+
+        // Новый contextId порождает новый navigation-proxy маршрут; освобождаем маршрут
+        // прежнего контекста, чтобы старый upstream прокси не оставался зарегистрированным.
+        if (previousContextId is not null)
+        {
+            OwnerWindow.OwnerBrowser.ProxyNavigationDecisions.RemoveRouteByContextId(previousContextId);
+        }
+
+        if (BridgeCommands is not null)
+        {
+            await WebBrowser.ApplyBridgeTabContextAsync(this, cancellationToken).ConfigureAwait(false);
+            await ApplyEffectiveRequestInterceptionAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebPageReconfigured(TabId);
+    }
+
+    public ValueTask ReconfigureAsync(WebPageSettings settings)
+        => ReconfigureAsync(settings, CancellationToken.None);
+
+    private bool IsExpectedBridgeCloseDisconnect(InvalidOperationException exception)
+        => exception.Message.Contains("отключено", StringComparison.Ordinal)
+            || exception.Message.Contains(BridgeProtocolErrorCodes.TabDisconnected, StringComparison.Ordinal);
 }

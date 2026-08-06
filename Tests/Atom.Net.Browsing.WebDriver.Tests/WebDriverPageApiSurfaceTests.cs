@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using Atom.Media.Audio;
 using Atom.Media.Video;
 using Atom.Net.Browsing.WebDriver;
@@ -135,6 +135,23 @@ public sealed class WebDriverPageApiSurfaceTests
             PublicApiAssert.RequireEvent(page, nameof(WebPage.NavigationCompleted));
             PublicApiAssert.RequireEvent(page, nameof(WebPage.PageLoaded));
             PublicApiAssert.RequireEvent(page, nameof(WebPage.CallbackFinalized));
+        });
+    }
+
+    [Test]
+    public void PageLifecycleAndReconfigurationSurfaceSpecTest()
+    {
+        var page = typeof(WebPage);
+
+        Assert.Multiple(() =>
+        {
+            var close = PublicApiAssert.RequireMethod(page, nameof(WebPage.CloseAsync), nameof(CancellationToken));
+            PublicApiAssert.AssertReturnTypeContains(close, nameof(ValueTask));
+            PublicApiAssert.RequireMethod(page, nameof(WebPage.CloseAsync));
+
+            var reconfigure = PublicApiAssert.RequireMethod(page, nameof(WebPage.ReconfigureAsync), nameof(WebPageSettings), nameof(CancellationToken));
+            PublicApiAssert.AssertReturnTypeContains(reconfigure, nameof(ValueTask));
+            PublicApiAssert.RequireMethod(page, nameof(WebPage.ReconfigureAsync), nameof(WebPageSettings));
         });
     }
 
