@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http;
 using System.Net.Security;
 using System.Net.Sockets;
@@ -1597,6 +1597,48 @@ public sealed class WebDriverBridgeServerSkeletonTests
         var response = await BridgeTestHelpers.ReceiveBridgeMessageAsync(socket).ConfigureAwait(false);
 
         await BridgeTestHelpers.WaitForConnectionCountAsync(server, expected: 1).ConfigureAwait(false);
+        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None).ConfigureAwait(false);
+        await BridgeTestHelpers.WaitForConnectionCountAsync(server, expected: 0).ConfigureAwait(false);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(response, Is.Not.Null);
+            Assert.That(response!.Type, Is.EqualTo(BridgeMessageType.Handshake));
+            Assert.That(response.Status, Is.EqualTo(BridgeStatus.Ok));
+            Assert.That(response.Error, Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task BridgeServerAcceptsWebSocketOnRootPathUsedByBrowserExtension()
+    {
+        // Расширение подключает мостовой канал на ws://<host>:<port>/?secret=... (AbsolutePath = "/").
+        // Этот путь не должен перехватываться discovery-маршрутом "/": иначе сервер отвечает HTML
+        // вместо 101 Switching Protocols и браузер закрывает канал кодом 1006 (регрессия #webdriver-bridge-root-ws).
+        await using var server = new BridgeServer(new BridgeSettings
+        {
+            Secret = "test-secret",
+        });
+
+        await server.StartAsync().ConfigureAwait(false);
+
+        using var socket = new ClientWebSocket();
+        await socket.ConnectAsync(
+            new Uri($"ws://127.0.0.1:{server.Port}/?secret={Uri.EscapeDataString("test-secret")}"),
+            CancellationToken.None).ConfigureAwait(false);
+
+        Assert.That(socket.State, Is.EqualTo(WebSocketState.Open));
+
+        await BridgeTestHelpers.SendHandshakeAsync(socket, new BridgeHandshakeClientPayload(
+            SessionId: "session-root-ws",
+            Secret: "test-secret",
+            ProtocolVersion: BridgeHandshakeValidator.CurrentProtocolVersion,
+            BrowserFamily: "firefox",
+            ExtensionVersion: "1.0.0")).ConfigureAwait(false);
+
+        var response = await BridgeTestHelpers.ReceiveBridgeMessageAsync(socket).ConfigureAwait(false);
+        await BridgeTestHelpers.WaitForConnectionCountAsync(server, expected: 1).ConfigureAwait(false);
+
         await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None).ConfigureAwait(false);
         await BridgeTestHelpers.WaitForConnectionCountAsync(server, expected: 0).ConfigureAwait(false);
 

@@ -58,7 +58,7 @@ internal sealed record BridgeBootstrapManagedPolicyArtifacts(
 internal sealed record BridgeBootstrapDeliveryArtifacts(
     string ExtensionId,
     BridgeBootstrapManagedPolicyArtifacts ManagedPolicy,
-    BridgePackagedExtensionArtifacts Package);
+    BridgePackagedExtensionArtifacts? Package);
 
 internal sealed record BridgeBootstrapMaterializedArtifacts(
     int ManagedDeliveryPort,
@@ -1388,7 +1388,7 @@ internal static class BridgeExtensionBootstrap
             ManagedPolicyDiagnostics: materializedArtifacts.Delivery.ManagedPolicy.Diagnostics,
             ManagedUpdateUrl: materializedArtifacts.Delivery.ManagedPolicy.UpdateUrl,
             ManagedPackageUrl: materializedArtifacts.Delivery.ManagedPolicy.PackageUrl,
-            ManagedPackageArtifactPath: materializedArtifacts.Delivery.Package.PackagePath,
+            ManagedPackageArtifactPath: materializedArtifacts.Delivery.Package?.PackagePath ?? string.Empty,
             DiscoveryUrl: BuildDiscoveryUrl(preparation.Settings.Host, port),
             ConnectionTimeout: preparation.Settings.BootstrapTimeout);
 

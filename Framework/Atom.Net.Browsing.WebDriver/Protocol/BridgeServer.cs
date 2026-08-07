@@ -912,17 +912,21 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
             settings.Logger?.LogBridgeServerConnectionHandlingStarted(context.Request.HttpMethod, path);
 
-            if (await TryHandleUtilityHttpRouteAsync(context, path).ConfigureAwait(false))
-                return;
-
-            if (await TryHandleManagedExtensionRouteAsync(context, path).ConfigureAwait(false))
-                return;
-
+            // WebSocket-запросы обрабатываем до HTTP-утилитных маршрутов: расширение подключает
+            // мостовой канал на ws://<host>:<port>/?secret=... (AbsolutePath = "/"), который иначе
+            // перехватывается discovery-маршрутом "/" и отвечает HTML вместо 101 Switching Protocols,
+            // из-за чего браузер закрывает канал кодом 1006 и мост никогда не устанавливается.
             if (context.Request.IsWebSocketRequest)
             {
                 await HandleWebSocketConnectionAsync(context).ConfigureAwait(false);
                 return;
             }
+
+            if (await TryHandleUtilityHttpRouteAsync(context, path).ConfigureAwait(false))
+                return;
+
+            if (await TryHandleManagedExtensionRouteAsync(context, path).ConfigureAwait(false))
+                return;
 
             settings.Logger?.LogBridgeServerHttpRequestUnsupported(context.Request.HttpMethod, path);
             context.Response.StatusCode = (int)HttpStatusCode.NotFound;
