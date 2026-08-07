@@ -46,7 +46,7 @@ isEnabledByDefault: true
     /// <summary>
     /// Используемые атрибуты.
     /// </summary>
-    public SparseArray<string> Attributes { get; } = [with(128)];
+    public SparseArray<string> Attributes { get; } = new(128);
 
     /// <inheritdoc/>
     public IncrementalGeneratorInitializationContext Context { get; protected set; } = context;

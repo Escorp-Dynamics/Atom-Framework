@@ -11,13 +11,13 @@ namespace Atom.SourceGeneration;
 /// </summary>
 public class ClassEntity : Entity<ClassEntity>, IClassEntity<ClassEntity>
 {
-    private readonly SparseArray<string> parents = [with(128)];
-    private readonly SparseArray<GenericEntity> generics = [with(128)];
-    private readonly SparseArray<FieldMember> fields = [with(128)];
-    private readonly SparseArray<PropertyMember> properties = [with(128)];
-    private readonly SparseArray<EventMember> events = [with(128)];
-    private readonly SparseArray<MethodMember> methods = [with(128)];
-    private readonly SparseArray<IEntity> others = [with(128)];
+    private readonly SparseArray<string> parents = new(128);
+    private readonly SparseArray<GenericEntity> generics = new(128);
+    private readonly SparseArray<FieldMember> fields = new(128);
+    private readonly SparseArray<PropertyMember> properties = new(128);
+    private readonly SparseArray<EventMember> events = new(128);
+    private readonly SparseArray<MethodMember> methods = new(128);
+    private readonly SparseArray<IEntity> others = new(128);
 
     private bool HasEntities
     {

@@ -45,7 +45,7 @@ public sealed class JavaScriptRuntime(JavaScriptRuntimeSpecification specificati
     private int BootstrapCount { get; set; }
     private JavaScriptRuntimeExecutionState ExecutionState { get; set; }
     private ImmutableArray<JavaScriptRuntimeRegistrationDescriptor> FrozenRegistrationDescriptors { get; set; } = [];
-    private HashSet<string>? RegistrationNames { get; set; } = [with(StringComparer.Ordinal)];
+    private HashSet<string>? RegistrationNames { get; set; } = new(StringComparer.Ordinal);
     private ImmutableArray<JavaScriptRuntimeRegistrationDescriptor>.Builder? RegistrationDescriptorBuilder { get; set; }
         = ImmutableArray.CreateBuilder<JavaScriptRuntimeRegistrationDescriptor>();
     private int StateResetCount { get; set; }

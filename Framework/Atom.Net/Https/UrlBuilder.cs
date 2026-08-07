@@ -14,7 +14,7 @@ public partial class UrlBuilder : IBuilder<Uri, UrlBuilder>
     private const string DefaultScheme = "http";
     private const string DefaultHost = "localhost";
 
-    private readonly Dictionary<string, List<string>> parameters = [with(StringComparer.Ordinal)];
+    private readonly Dictionary<string, List<string>> parameters = new(StringComparer.Ordinal);
     private readonly List<string> paths = [];
     private string scheme = DefaultScheme;
     private string host = DefaultHost;

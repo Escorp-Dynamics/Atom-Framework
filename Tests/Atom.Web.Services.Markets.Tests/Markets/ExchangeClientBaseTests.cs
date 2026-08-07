@@ -418,7 +418,7 @@ public class ExchangeClientBaseTests(ILogger logger) : BenchmarkTests<ExchangeCl
 
     private sealed class TestWritablePriceStream : IWritableMarketPriceStream
     {
-        private readonly Dictionary<string, IMarketPriceSnapshot> cache = [with(StringComparer.OrdinalIgnoreCase)];
+        private readonly Dictionary<string, IMarketPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
 
         public int TokenCount => cache.Count;
 

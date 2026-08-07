@@ -282,7 +282,7 @@ public sealed class WebDriverVirtualDisplayLaunchTests
 
         Assert.That(method, Is.Not.Null, "Не удалось найти private static CaptureDisplayProcessIds.");
 
-        return [with((HashSet<int>)method!.Invoke(obj: null, [displayNumber])!)];
+        return new((HashSet<int>)method!.Invoke(obj: null, [displayNumber])!);
     }
 
     private static string CreateTemporaryDirectory()

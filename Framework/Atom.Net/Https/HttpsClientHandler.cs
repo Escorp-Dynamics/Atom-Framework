@@ -21,9 +21,8 @@ namespace Atom.Net.Https;
 /// </summary>
 public sealed partial class HttpsClientHandler : HttpMessageHandler
 {
-    private static readonly HashSet<string> commonMultiLabelPublicSuffixes =
-    [
-        with(StringComparer.OrdinalIgnoreCase),
+    private static readonly HashSet<string> commonMultiLabelPublicSuffixes = new(StringComparer.OrdinalIgnoreCase)
+    {
         "co.uk",
         "org.uk",
         "gov.uk",
@@ -35,7 +34,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         "com.br",
         "com.mx",
         "co.jp",
-    ];
+    };
 
     private int activeRequests;
     private int isDisposed;

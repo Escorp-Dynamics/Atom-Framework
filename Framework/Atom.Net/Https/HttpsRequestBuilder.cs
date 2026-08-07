@@ -12,7 +12,7 @@ namespace Atom.Net.Https;
 /// </summary>
 public partial class HttpsRequestBuilder : IBuilder<HttpRequestMessage, HttpsRequestBuilder>
 {
-    private readonly Dictionary<string, string> headers = [with(StringComparer.OrdinalIgnoreCase)];
+    private readonly Dictionary<string, string> headers = new(StringComparer.OrdinalIgnoreCase);
 
     private HttpMethod method = HttpMethod.Get;
     private Uri? url;
