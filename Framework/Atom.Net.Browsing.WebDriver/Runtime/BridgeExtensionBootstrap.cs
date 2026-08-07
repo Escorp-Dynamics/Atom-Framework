@@ -58,7 +58,7 @@ internal sealed record BridgeBootstrapManagedPolicyArtifacts(
 internal sealed record BridgeBootstrapDeliveryArtifacts(
     string ExtensionId,
     BridgeBootstrapManagedPolicyArtifacts ManagedPolicy,
-    BridgePackagedExtensionArtifacts Package);
+    BridgePackagedExtensionArtifacts? Package);
 
 internal sealed record BridgeBootstrapMaterializedArtifacts(
     int ManagedDeliveryPort,
