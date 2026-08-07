@@ -409,7 +409,7 @@ await pipeline.StopAsync();
 
 ## Совместимость
 
-- **.NET 10.0+** с `LangVersion preview`
+- **.NET 10.0+** с `LangVersion 14`
 - **NativeAOT** — все интерфейсы совместимы
 - Все enum'ы — `: byte` для минимального размера
 - Нет рефлексии, нет dynamic

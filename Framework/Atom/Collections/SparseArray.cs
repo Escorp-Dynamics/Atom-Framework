@@ -262,5 +262,5 @@ public class SparseArray<T> : IEnumerable<T>
     /// </summary>
     /// <param name="array">Исходный массив.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static implicit operator SparseArray<T>(T[] array) => [with(array)];
+    public static implicit operator SparseArray<T>(T[] array) => new(array);
 }

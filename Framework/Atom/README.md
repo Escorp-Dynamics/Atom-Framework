@@ -105,7 +105,7 @@ sparse.Release(clearArray: true); // Возврат памяти в пул
 ## Требования
 
 - .NET 8.0+ / .NET 10.0 (рекомендуется)
-- C# 12+ (preview features)
+- C# 14
 
 ## Сборка
 

@@ -8081,7 +8081,7 @@ public sealed class WebDriverRealBrowserIntegrationTests
     {
         private const string BasePath = "/real-browser-service-worker";
         private readonly object observedRequestHeadsSync = new();
-        private readonly Dictionary<string, List<string>> observedRequestHeads = [with(StringComparer.Ordinal)];
+        private readonly Dictionary<string, List<string>> observedRequestHeads = new(StringComparer.Ordinal);
         private readonly CancellationTokenSource cancellationTokenSource = new();
         private readonly TcpListener listener = new(IPAddress.Loopback, 0);
         private Task? serverTask;
@@ -8337,7 +8337,7 @@ public sealed class WebDriverRealBrowserIntegrationTests
     private sealed class RealBrowserInterceptionLoopbackServer : IDisposable
     {
         private readonly object observedRequestsSync = new();
-        private readonly Dictionary<string, ObservedLoopbackRequest> observedRequests = [with(StringComparer.Ordinal)];
+        private readonly Dictionary<string, ObservedLoopbackRequest> observedRequests = new(StringComparer.Ordinal);
         private readonly CancellationTokenSource cancellationTokenSource = new();
         private readonly TcpListener listener = new(IPAddress.Loopback, 0);
         private Task? serverTask;
@@ -8510,7 +8510,7 @@ public sealed class WebDriverRealBrowserIntegrationTests
         private static Dictionary<string, string> ReadRequestHeaders(string requestHead)
         {
             var lines = requestHead.Split(["\r\n"], StringSplitOptions.None);
-            Dictionary<string, string> headers = [with(StringComparer.OrdinalIgnoreCase)];
+            Dictionary<string, string> headers = new(StringComparer.OrdinalIgnoreCase);
 
             for (var index = 1; index < lines.Length; index++)
             {

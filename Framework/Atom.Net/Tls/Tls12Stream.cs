@@ -300,7 +300,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         }
         else
         {
-            serverCerts = [with(4)];
+            serverCerts = new(4);
         }
 
         // Разбор последовательности cert_len(3)+cert

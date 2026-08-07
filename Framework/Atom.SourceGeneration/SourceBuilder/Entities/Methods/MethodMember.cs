@@ -10,8 +10,8 @@ namespace Atom.SourceGeneration;
 /// </summary>
 public class MethodMember : Member<MethodMember>, IMethodMember<MethodMember>
 {
-    private readonly SparseArray<GenericEntity> generics = [with(128)];
-    private readonly SparseArray<MethodArgumentMember> arguments = [with(128)];
+    private readonly SparseArray<GenericEntity> generics = new(128);
+    private readonly SparseArray<MethodArgumentMember> arguments = new(128);
 
     internal bool IsInterface { get; set; }
 

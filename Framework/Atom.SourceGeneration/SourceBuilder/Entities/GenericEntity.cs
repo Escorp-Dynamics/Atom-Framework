@@ -11,7 +11,7 @@ namespace Atom.SourceGeneration;
 /// </summary>
 public class GenericEntity : Entity<GenericEntity>
 {
-    private readonly SparseArray<string> limitations = [with(128)];
+    private readonly SparseArray<string> limitations = new(128);
 
     /// <summary>
     /// Является ли инвариантным.

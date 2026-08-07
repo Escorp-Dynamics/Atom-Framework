@@ -12,7 +12,7 @@ public class AhoCorasickAlgorithm : TextAlgorithm
 {
     private sealed class TrieNode
     {
-        public SparseArray<TrieNode> Children = [with(ushort.MaxValue + 1)];
+        public SparseArray<TrieNode> Children = new(ushort.MaxValue + 1);
         public TrieNode? Fail;
         public SparseArray<int>? Output;
         public int OutputCount;
@@ -110,8 +110,8 @@ public class AhoCorasickAlgorithm : TextAlgorithm
     private static TrieNode GetNode()
     {
         var node = ObjectPool<TrieNode>.Shared.Rent();
-        node.Children = [with(ushort.MaxValue + 1)];
-        node.Output = [with(1024)];
+        node.Children = new(ushort.MaxValue + 1);
+        node.Output = new(1024);
         return node;
     }
 
