@@ -37,88 +37,101 @@ export async function evaluateMainWorldScript(
             });
         }
 
-        const results = await invokeBrowserCall<any[]>(
-            runtime,
-            browserHost.scripting.executeScript,
-            browserHost.scripting,
-            {
-                target: { tabId },
-                world: 'MAIN',
-                func: async (code: string) => {
-                    try {
-                        const compile = (source: string) => {
-                            try {
-                                return new Function(`return (${source});`);
-                            } catch {
-                                return new Function(source);
+        try {
+            const results = await invokeBrowserCall<any[]>(
+                runtime,
+                browserHost.scripting.executeScript,
+                browserHost.scripting,
+                {
+                    target: { tabId },
+                    world: 'MAIN',
+                    func: async (code: string) => {
+                        try {
+                            const compile = (source: string) => {
+                                try {
+                                    return new Function(`return (${source});`);
+                                } catch {
+                                    return new Function(source);
+                                }
+                            };
+
+                            let result = compile(code)();
+                            if (result !== null && typeof result === 'object' && 'then' in result && typeof result.then === 'function') {
+                                result = await result;
                             }
-                        };
 
-                        let result = compile(code)();
-                        if (result !== null && typeof result === 'object' && 'then' in result && typeof result.then === 'function') {
-                            result = await result;
+                            return {
+                                ok: true,
+                                value: result !== null && result !== undefined ? String(result) : 'null',
+                            };
+                        } catch (error) {
+                            return {
+                                ok: false,
+                                error: error instanceof Error ? error.message : String(error),
+                            };
                         }
-
-                        return {
-                            ok: true,
-                            value: result !== null && result !== undefined ? String(result) : 'null',
-                        };
-                    } catch (error) {
-                        return {
-                            ok: false,
-                            error: error instanceof Error ? error.message : String(error),
-                        };
-                    }
+                    },
+                    args: [script],
                 },
-                args: [script],
-            },
-        );
+            );
 
-        const payload = results[0]?.result;
-        if (isRecord(payload) && payload.ok === true && typeof payload.value === 'string') {
-            debug?.('execute-script-main-result', {
-                stage: 'main',
-                status: 'ok',
-                valuePreview: summarizeValue(payload.value),
-            });
-
-            if (preferPageContextOnNull && payload.value === 'null') {
-                debug?.('execute-script-null-fallback-start', {
-                    scriptPreview: summarizeScript(script),
+            const payload = results[0]?.result;
+            if (isRecord(payload) && payload.ok === true && typeof payload.value === 'string') {
+                debug?.('execute-script-main-result', {
+                    stage: 'main',
+                    status: 'ok',
+                    valuePreview: summarizeValue(payload.value),
                 });
 
-                const fallbackValue = await tryEvaluateViaScriptingPageInjection(browserHost, runtime, tabId, script);
-                if (fallbackValue !== null) {
-                    debug?.('execute-script-null-fallback-result', {
-                        status: 'ok',
-                        valuePreview: summarizeValue(fallbackValue),
+                if (preferPageContextOnNull && payload.value === 'null') {
+                    debug?.('execute-script-null-fallback-start', {
+                        scriptPreview: summarizeScript(script),
                     });
-                    return fallbackValue;
+
+                    const fallbackValue = await tryEvaluateViaScriptingPageInjection(browserHost, runtime, tabId, script);
+                    if (fallbackValue !== null) {
+                        debug?.('execute-script-null-fallback-result', {
+                            status: 'ok',
+                            valuePreview: summarizeValue(fallbackValue),
+                        });
+                        return fallbackValue;
+                    }
+
+                    debug?.('execute-script-null-fallback-result', {
+                        status: 'fallback-missed',
+                    });
                 }
 
-                debug?.('execute-script-null-fallback-result', {
-                    status: 'fallback-missed',
-                });
+                return payload.value;
             }
 
-            return payload.value;
-        }
+            if (isRecord(payload) && payload.ok === false && typeof payload.error === 'string') {
+                debug?.('execute-script-main-result', {
+                    stage: 'main',
+                    status: 'error',
+                    error: payload.error,
+                });
+                return await evaluateViaLegacyTabInjection(browserHost, runtime, tabId, script, new Error(payload.error));
+            }
 
-        if (isRecord(payload) && payload.ok === false && typeof payload.error === 'string') {
             debug?.('execute-script-main-result', {
                 stage: 'main',
-                status: 'error',
-                error: payload.error,
+                status: 'invalid-payload',
             });
-            return await evaluateViaLegacyTabInjection(browserHost, runtime, tabId, script, new Error(payload.error));
+
+            return await evaluateViaLegacyTabInjection(browserHost, runtime, tabId, script);
+        } catch (error) {
+            // Сам вызов scripting.executeScript может упасть (например, world 'MAIN' не
+            // поддержан версией браузера или временный сбой API): деградируем к legacy
+            // tabs.executeScript инъекции вместо того, чтобы ронять команду.
+            debug?.('execute-script-main-result', {
+                stage: 'main',
+                status: 'scripting-failed',
+                error: error instanceof Error ? error.message : String(error),
+            });
+
+            return await evaluateViaLegacyTabInjection(browserHost, runtime, tabId, script, toError(error));
         }
-
-        debug?.('execute-script-main-result', {
-            stage: 'main',
-            status: 'invalid-payload',
-        });
-
-        return await evaluateViaLegacyTabInjection(browserHost, runtime, tabId, script);
     }
 
     debug?.('execute-script-main-result', {
@@ -413,6 +426,14 @@ function parseLegacyResultPayload(value: unknown): unknown {
 
 function isRecord(value: unknown): value is JsonRecord {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toError(value: unknown): Error | undefined {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+
+    return value instanceof Error ? value : new Error(String(value));
 }
 
 function summarizeScript(script: string): string {

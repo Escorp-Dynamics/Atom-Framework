@@ -737,7 +737,12 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
 
         if (response.Status is not BridgeStatus.Ok)
-            throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'");
+        {
+            var errorSuffix = string.IsNullOrWhiteSpace(response.Error)
+                ? string.Empty
+                : $": {response.Error}";
+            throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'{errorSuffix}");
+        }
 
         if (response.Payload is not JsonElement openedPayload || !TryParseOpenedSurfacePayload(openedPayload, out var openedTabId, out var openedWindowId))
             throw new InvalidOperationException("Мостовая команда открытия вернула неверные данные вкладки");

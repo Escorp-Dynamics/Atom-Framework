@@ -170,6 +170,8 @@ const bridgeEventNameSet = new Set(bridgeEventNames);
 const maxLateNavigateRetryCount = 4;
 const transportReconnectBaseDelayMs = 500;
 const transportReconnectMaxDelayMs = 30_000;
+const maxOpenTabCreateAttempts = 3;
+const openTabCreateRetryDelayMs = 150;
 
 export class BackgroundRuntimeHost {
     private readonly browserHost = getBrowserHost();
@@ -1011,7 +1013,20 @@ export class BackgroundRuntimeHost {
                     const url = readOptionalPayloadString(message.payload, 'url')
                         ?? (this.config !== null ? createDiscoveryUrl(this.config) : 'about:blank');
 
-                    const tab = await createTab(this.runtime, this.browserHost.tabs, { url, active: true });
+                    // Браузерный tabs.create может кратковременно падать с общим статусом
+                    // «An unexpected error occurred» (например, когда вкладка-источник команды
+                    // ещё добивается на удалении из tab strip): повторяем создание ограниченное
+                    // число раз с короткой паузой, чтобы транзиентный сбой не ронял открытие
+                    // страницы у драйвера.
+                    const tab = await createTabWithRetry(
+                        this.runtime,
+                        this.browserHost.tabs,
+                        { url, active: true },
+                        (attempt, error) => emitBackgroundDebugEvent(this.config, 'open-tab-create-failed', {
+                            attempt,
+                            error: toErrorMessage(error),
+                        }),
+                    );
                     const payload: JsonRecord = { url: tab.url ?? url };
 
                     if (typeof tab.id === 'number') {
@@ -2636,6 +2651,34 @@ export async function bootstrapBackgroundRuntime(): Promise<BackgroundRuntimeHos
 
 function isRecord(value: unknown): value is JsonRecord {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function createTabWithRetry(
+    runtime: any,
+    tabsApi: any,
+    createProperties: unknown,
+    onTransientFailure?: (attempt: number, error: unknown) => void,
+): Promise<BrowserTab> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= maxOpenTabCreateAttempts; attempt += 1) {
+        try {
+            return await createTab(runtime, tabsApi, createProperties);
+        } catch (error) {
+            lastError = error;
+
+            if (attempt >= maxOpenTabCreateAttempts) {
+                break;
+            }
+
+            onTransientFailure?.(attempt, error);
+            await new Promise((resolve) => setTimeout(resolve, openTabCreateRetryDelayMs));
+        }
+    }
+
+    throw lastError instanceof Error
+        ? lastError
+        : new Error(lastError === undefined ? 'Не удалось создать вкладку' : String(lastError));
 }
 
 function createDiscoveryUrl(config: RuntimeConfig): string {
