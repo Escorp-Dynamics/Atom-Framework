@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -105,7 +106,15 @@ internal sealed record ChromiumBootstrapStrategy(
 
     internal static readonly ChromiumBootstrapStrategy SystemManagedPolicy = new(ChromiumBootstrapInstallMode.SystemManagedPolicy, ChromiumBootstrapTransportMode.SecureWebSocket, UseCommandLineExtensionLoad: false);
 
-    internal static readonly ChromiumBootstrapStrategy FirefoxProfileSeeded = new(ChromiumBootstrapInstallMode.ProfileSeeded, ChromiumBootstrapTransportMode.SecureWebSocket, UseCommandLineExtensionLoad: false);
+    // Для Firefox profile-seeded bootstrap используется обычный ws://, а не wss://.
+    // В отличие от Chromium на Linux, где wss нужен для совместимости с политикой
+    // https-first / HSTS на loopback, WebExtensions в Firefox подключаются к
+    // ws://127.0.0.1 без проблем даже на девовом канале, и это избавляет от
+    // необходимости импортировать самоподписанный CA в пустую NSS-базу нового
+    // временного профиля (которую Firefox пересоздаёт при первом запуске и тем
+    // самым выкидывает сертификат, что приводит к sessionSnapshot=null в
+    // EnsureReadyAfterLaunchAsync).
+    internal static readonly ChromiumBootstrapStrategy FirefoxProfileSeeded = new(ChromiumBootstrapInstallMode.ProfileSeeded, ChromiumBootstrapTransportMode.WebSocket, UseCommandLineExtensionLoad: false);
 
     internal static readonly ChromiumBootstrapStrategy FirefoxManagedPolicy = new(ChromiumBootstrapInstallMode.BrowserInstallationManagedPolicy, ChromiumBootstrapTransportMode.SecureWebSocket, UseCommandLineExtensionLoad: false);
 
@@ -190,7 +199,7 @@ internal static class BridgeExtensionBootstrap
         var sessionId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
         var port = GetMaterializedBridgePort(preparation);
         var strategy = ResolveChromiumBootstrapStrategy(profile, preparation.Settings.UseRootlessChromiumBootstrap);
-        var materializedArtifacts = await MaterializeRuntimeArtifactsAsync(
+        var (materializedStrategy, materializedArtifacts) = await MaterializeRuntimeArtifactsAsync(
             profilePath,
             profile,
             localExtensionPath,
@@ -206,7 +215,7 @@ internal static class BridgeExtensionBootstrap
             profile,
             localExtensionPath,
             manifest,
-            strategy,
+            materializedStrategy,
             materializedArtifacts,
             cancellationToken).ConfigureAwait(false);
 
@@ -528,7 +537,7 @@ internal static class BridgeExtensionBootstrap
             : throw new InvalidOperationException("BridgeServer должен выбрать порт до materialization расширения");
     }
 
-    private static async ValueTask<BridgeBootstrapMaterializedArtifacts> MaterializeRuntimeArtifactsAsync(
+    private static async ValueTask<(ChromiumBootstrapStrategy Strategy, BridgeBootstrapMaterializedArtifacts MaterializedArtifacts)> MaterializeRuntimeArtifactsAsync(
         string profilePath,
         WebBrowserProfile profile,
         string localExtensionPath,
@@ -541,7 +550,30 @@ internal static class BridgeExtensionBootstrap
         CancellationToken cancellationToken)
     {
         var managedDeliveryPort = preparation.Settings.ManagedDeliveryPort > 0 ? preparation.Settings.ManagedDeliveryPort : port;
-        var transportUrl = ResolveTransportUrl(strategy, preparation.Settings);
+
+        // На первом проходе определяем, доступна ли упаковка CRX, и подбираем
+        // эффективную стратегию (system-managed-policy vs profile-seeded).
+        // Передаём пустой runtimeConfig — policy.json всё равно будет перезаписан
+        // ниже после финализации конфигурации.
+        var emptyRuntimeConfig = BuildRuntimeConfig(
+            preparation.Settings,
+            sessionId,
+            preparation.BrowserFamily,
+            preparation.ExtensionVersion,
+            transportUrl: null);
+        var (effectiveStrategy, deliveryArtifacts) = await MaterializeManagedDeliveryArtifactsAsync(
+            profilePath,
+            profile,
+            localExtensionPath,
+            manifestPath,
+            manifest,
+            preparation.Settings.Host,
+            managedDeliveryPort,
+            emptyRuntimeConfig,
+            strategy,
+            cancellationToken).ConfigureAwait(false);
+
+        var transportUrl = ResolveTransportUrl(effectiveStrategy, preparation.Settings);
         var runtimeConfig = BuildRuntimeConfig(
             preparation.Settings,
             sessionId,
@@ -552,19 +584,28 @@ internal static class BridgeExtensionBootstrap
             localExtensionPath,
             runtimeConfig,
             cancellationToken).ConfigureAwait(false);
-        var deliveryArtifacts = await MaterializeManagedDeliveryArtifactsAsync(
+
+        // Пересобираем policy-артефакты уже с финальным runtimeConfig (который
+        // содержит верный transportUrl / host / port после возможного fallback).
+        var managedPolicyArtifacts = await WriteChromiumManagedPolicyArtifactsAsync(
             profilePath,
             profile,
-            localExtensionPath,
-            manifestPath,
-            manifest,
+            effectiveStrategy,
+            deliveryArtifacts.ExtensionId,
             preparation.Settings.Host,
             managedDeliveryPort,
             runtimeConfig,
-            strategy,
             cancellationToken).ConfigureAwait(false);
 
-        return new BridgeBootstrapMaterializedArtifacts(managedDeliveryPort, configArtifacts, deliveryArtifacts);
+        var finalDelivery = new BridgeBootstrapDeliveryArtifacts(
+            deliveryArtifacts.ExtensionId,
+            managedPolicyArtifacts,
+            deliveryArtifacts.Package);
+
+        return (effectiveStrategy, new BridgeBootstrapMaterializedArtifacts(
+            managedDeliveryPort,
+            configArtifacts,
+            finalDelivery));
     }
 
     private static async ValueTask<(ChromiumBootstrapStrategy Strategy, BridgeBootstrapMaterializedArtifacts MaterializedArtifacts)> ApplyChromiumManagedPolicyFallbackIfNeededAsync(
@@ -1199,7 +1240,7 @@ internal static class BridgeExtensionBootstrap
     private static string BuildManagedPackageUrl(string host, int port, string extensionId)
         => new UriBuilder(Uri.UriSchemeHttps, host, port, $"chromium/{extensionId}/extension.crx").Uri.ToString();
 
-    private static async ValueTask<BridgeBootstrapDeliveryArtifacts> MaterializeManagedDeliveryArtifactsAsync(
+    private static async ValueTask<(ChromiumBootstrapStrategy Strategy, BridgeBootstrapDeliveryArtifacts Artifacts)> MaterializeManagedDeliveryArtifactsAsync(
         string profilePath,
         WebBrowserProfile profile,
         string localExtensionPath,
@@ -1208,37 +1249,49 @@ internal static class BridgeExtensionBootstrap
         string host,
         int managedDeliveryPort,
         JsonObject runtimeConfig,
-        ChromiumBootstrapStrategy strategy,
+        ChromiumBootstrapStrategy requestedStrategy,
         CancellationToken cancellationToken)
     {
         var extensionKey = GetOrCreateExtensionKey(profilePath);
         var extensionId = AddChromiumExtensionKey(manifestPath, manifest, extensionKey);
-        await ConfigureChromiumProfileExtensionSettingsAsync(
-            profilePath,
-            strategy,
-            localExtensionPath,
-            extensionId,
-            manifest,
-            cancellationToken).ConfigureAwait(false);
 
-        var packagedExtension = await PackageChromiumExtensionAsync(
+        // Попытка упаковки CRX. Если среда выполнения не позволяет упаковать
+        // (отсутствует node / скрипт / зависимости npm), молча переключаемся на
+        // profile-seeded режим с --load-extension и не публикуем policy на диск.
+        var packagedExtension = await TryPackageChromiumExtensionAsync(
             profilePath,
             localExtensionPath,
             extensionKey.PrivateKeyPath,
             extensionId,
             cancellationToken).ConfigureAwait(false);
 
+        var effectiveStrategy = requestedStrategy;
+        if (packagedExtension is null && effectiveStrategy.InstallMode is not ChromiumBootstrapInstallMode.ProfileSeeded)
+        {
+            effectiveStrategy = IsLinuxChromiumProfile(profile)
+                ? ChromiumBootstrapStrategy.ProfileSeededSecure
+                : ChromiumBootstrapStrategy.ProfileSeeded;
+        }
+
+        await ConfigureChromiumProfileExtensionSettingsAsync(
+            profilePath,
+            effectiveStrategy,
+            localExtensionPath,
+            extensionId,
+            manifest,
+            cancellationToken).ConfigureAwait(false);
+
         var managedPolicyArtifacts = await WriteChromiumManagedPolicyArtifactsAsync(
             profilePath,
             profile,
-            strategy,
+            effectiveStrategy,
             extensionId,
             host,
             managedDeliveryPort,
             runtimeConfig,
             cancellationToken).ConfigureAwait(false);
 
-        return new BridgeBootstrapDeliveryArtifacts(extensionId, managedPolicyArtifacts, packagedExtension);
+        return (effectiveStrategy, new BridgeBootstrapDeliveryArtifacts(extensionId, managedPolicyArtifacts, packagedExtension));
     }
 
     private static ValueTask ConfigureChromiumProfileExtensionSettingsAsync(
@@ -1541,7 +1594,7 @@ internal static class BridgeExtensionBootstrap
 
     private static bool IsLinuxChromiumProfile(WebBrowserProfile profile)
         => OperatingSystem.IsLinux()
-            && profile is ChromeProfile;
+            && profile is ChromeProfile or BraveProfile or EdgeProfile or OperaProfile or VivaldiProfile;
 
     private static void WriteLinuxSystemManagedPolicyScript(string scriptPath, string localPolicyPath, string systemPolicyPath)
     {
@@ -1833,19 +1886,23 @@ internal static class BridgeExtensionBootstrap
             PrivateKeyPath: privateKeyPath);
     }
 
-    private static async ValueTask<BridgePackagedExtensionArtifacts> PackageChromiumExtensionAsync(
+    private static async ValueTask<BridgePackagedExtensionArtifacts?> TryPackageChromiumExtensionAsync(
         string profilePath,
         string extensionPath,
         string privateKeyPath,
         string expectedExtensionId,
         CancellationToken cancellationToken)
     {
-        var scriptPath = ResolveChromiumCrxPackagerScriptPath();
+        if (!TryResolveChromiumCrxPackager(out var scriptPath, out var missingReason))
+        {
+            Observe(new InvalidOperationException($"Упаковка Chromium CRX недоступна, используется profile-seeded bootstrap: {missingReason}"));
+            return null;
+        }
+
         var packageDirectoryPath = Path.Combine(profilePath, "managed-delivery");
         Directory.CreateDirectory(packageDirectoryPath);
 
         var crxPath = Path.Combine(packageDirectoryPath, "atom-webdriver-extension.crx");
-#pragma warning disable S4036 // OS commands should not rely on PATH resolution
         var startInfo = new ProcessStartInfo("node")
         {
             UseShellExecute = false,
@@ -1853,29 +1910,57 @@ internal static class BridgeExtensionBootstrap
             RedirectStandardError = true,
             WorkingDirectory = Path.GetDirectoryName(scriptPath) ?? AppContext.BaseDirectory,
         };
-#pragma warning restore S4036 // OS commands should not rely on PATH resolution
         startInfo.ArgumentList.Add(scriptPath);
         startInfo.ArgumentList.Add(extensionPath);
         startInfo.ArgumentList.Add(privateKeyPath);
         startInfo.ArgumentList.Add(crxPath);
 
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Не удалось запустить упаковщик Chromium CRX");
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            Observe(new InvalidOperationException("Не удалось запустить упаковщик Chromium CRX"));
+            return null;
+        }
+
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            try { process.Kill(entireProcessTree: true); } catch (Exception ex) { Observe(ex); }
+            Observe(new InvalidOperationException("Превышен таймаут упаковки Chromium CRX"));
+            return null;
+        }
 
         var standardOutput = await stdoutTask.ConfigureAwait(false);
         var standardError = await stderrTask.ConfigureAwait(false);
         if (process.ExitCode != 0)
-            throw new InvalidOperationException($"Упаковщик Chromium CRX завершился с кодом {process.ExitCode.ToString(CultureInfo.InvariantCulture)}: {standardError}");
+        {
+            Observe(new InvalidOperationException($"Упаковщик Chromium CRX завершился с кодом {process.ExitCode.ToString(CultureInfo.InvariantCulture)}: {standardError}"));
+            return null;
+        }
 
         if (!File.Exists(crxPath))
-            throw new FileNotFoundException("Упаковщик Chromium CRX не создал выходной файл", crxPath);
+        {
+            Observe(new FileNotFoundException("Упаковщик Chromium CRX не создал выходной файл", crxPath));
+            return null;
+        }
 
-        using var metadata = JsonDocument.Parse(standardOutput);
-        var packagedExtensionId = metadata.RootElement.GetProperty("extensionId").GetString();
-        if (!string.Equals(packagedExtensionId, expectedExtensionId, StringComparison.Ordinal))
-            throw new InvalidOperationException($"Упакованный CRX вернул другой extension id: {packagedExtensionId}");
+        try
+        {
+            using var metadata = JsonDocument.Parse(standardOutput);
+            var packagedExtensionId = metadata.RootElement.GetProperty("extensionId").GetString();
+            if (!string.Equals(packagedExtensionId, expectedExtensionId, StringComparison.Ordinal))
+                throw new InvalidOperationException($"Упакованный CRX вернул другой extension id: {packagedExtensionId}");
+        }
+        catch (Exception ex)
+        {
+            Observe(ex);
+            return null;
+        }
 
         return new BridgePackagedExtensionArtifacts(
             PackagePath: crxPath,
@@ -1884,18 +1969,50 @@ internal static class BridgeExtensionBootstrap
 
     private static string ResolveChromiumCrxPackagerScriptPath()
     {
+        // 1) Скрипт, скопированный в output при сборке (работает и для потребительских
+        //    сборок за пределами репозитория Atom, и для NuGet-пакетов).
+        var outputCandidate = Path.Combine(AppContext.BaseDirectory, "ExtensionRuntime", "scripts", "package-bridge-extension.mjs");
+        if (File.Exists(outputCandidate))
+            return outputCandidate;
+
+        // 2) Workspace-layout во время разработки внутри репозитория:
+        //    поднимаемся от AppContext.BaseDirectory вверх и ищем файл в исходниках.
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {
-            var directCandidate = Path.Combine(directory.FullName, "ExtensionRuntime", "scripts", "package-bridge-extension.mjs");
-            if (File.Exists(directCandidate))
-                return directCandidate;
-
             var workspaceCandidate = Path.Combine(directory.FullName, "Framework", "Atom.Net.Browsing.WebDriver", "ExtensionRuntime", "scripts", "package-bridge-extension.mjs");
             if (File.Exists(workspaceCandidate))
                 return workspaceCandidate;
+
+            var directCandidate = Path.Combine(directory.FullName, "ExtensionRuntime", "scripts", "package-bridge-extension.mjs");
+            if (File.Exists(directCandidate))
+                return directCandidate;
         }
 
         throw new FileNotFoundException("Не найден скрипт упаковки Chromium CRX для bridge extension");
+    }
+
+    private static bool TryResolveChromiumCrxPackager([NotNullWhen(true)] out string? scriptPath, [NotNullWhen(false)] out string? missingReason)
+    {
+        scriptPath = null;
+        missingReason = null;
+
+        try
+        {
+            scriptPath = ResolveChromiumCrxPackagerScriptPath();
+        }
+        catch (FileNotFoundException ex)
+        {
+            missingReason = ex.Message;
+            return false;
+        }
+
+        if (!IsCommandAvailable("node"))
+        {
+            missingReason = "Утилита node недоступна в PATH для упаковки CRX";
+            return false;
+        }
+
+        return true;
     }
 
     private static string ComputeExtensionId(byte[] derPublicKey)

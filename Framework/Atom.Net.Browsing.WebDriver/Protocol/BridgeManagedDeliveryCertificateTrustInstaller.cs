@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -40,9 +40,15 @@ internal static class BridgeManagedDeliveryCertificateTrustInstaller
 
         try
         {
+            // Профильный bootstrap для Firefox переведён на обычный ws:// транспорт
+            // (см. FirefoxProfileSeeded), поэтому импорт самоподписанного CA в NSS-базу
+            // профиля больше не требуется для подключения расширения к bridge-серверу.
+            // managed-delivery для Firefox signed-XPI пути по-прежнему ходит по https://,
+            // но там используется отдельный подписанный канал через install overlay policy.
             if (!OperatingSystem.IsLinux())
                 return BridgeManagedDeliveryTrustDiagnostics.Trusted("firefox-profile-trust-not-required");
 
+            Directory.CreateDirectory(profilePath);
             var certificateBytes = certificate.Export(X509ContentType.Cert);
             return TryInstallLinuxNssTrust(certificateBytes, profilePath, "linux-firefox-profile-nssdb", "C,,");
         }
