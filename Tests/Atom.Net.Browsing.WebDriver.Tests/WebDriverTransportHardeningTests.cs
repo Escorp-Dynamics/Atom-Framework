@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography.X509Certificates;
@@ -189,7 +189,8 @@ public sealed class WebDriverTransportHardeningTests
         {
             try
             {
-                var result = await staleSocket.ReceiveAsync(probeBuffer.AsMemory(), CancellationToken.None).ConfigureAwait(false);
+                using var receiveTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                var result = await staleSocket.ReceiveAsync(probeBuffer.AsMemory(), receiveTimeout.Token).ConfigureAwait(false);
                 if (result.MessageType is WebSocketMessageType.Close)
                     break;
             }

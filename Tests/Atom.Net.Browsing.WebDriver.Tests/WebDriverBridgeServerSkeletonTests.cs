@@ -4411,7 +4411,8 @@ public sealed class WebDriverBridgeServerSkeletonTests
         await socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None).ConfigureAwait(false);
 
         var buffer = new byte[1024];
-        var result = await socket.ReceiveAsync(buffer.AsMemory(), CancellationToken.None).ConfigureAwait(false);
+        using var receiveTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var result = await socket.ReceiveAsync(buffer.AsMemory(), receiveTimeout.Token).ConfigureAwait(false);
         if (result.MessageType is WebSocketMessageType.Close)
             await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None).ConfigureAwait(false);
 

@@ -2090,6 +2090,11 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
     private async Task HandleWebSocketConnectionAsync(HttpListenerContext context)
     {
+        // Регрессия #webdriver-bridge-compression: некоторые версии .NET / ОС могут пытаться
+        // согласовать per-message deflate, что приводит к ошибкам "compressed frame" на клиенте,
+        // если тот не ожидает сжатия. Принудительно отключаем расширения для стабильности тестов.
+        context.Request.Headers.Remove("Sec-WebSocket-Extensions");
+
         var socket = await AcceptWebSocketAsync(context).ConfigureAwait(false);
         if (socket is null)
             return;
@@ -2100,7 +2105,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     private async Task HandleAcceptedWebSocketConnectionAsync(WebSocket socket, CancellationToken cancellationToken)
     {
         var connectionEpoch = Interlocked.Increment(ref nextConnectionEpoch);
-        var transport = new BridgeSessionTransport(socket) { ConnectionEpoch = connectionEpoch };
+        var transport = new BridgeSessionTransport(socket, cancellationToken) { ConnectionEpoch = connectionEpoch };
         string? sessionId = null;
 
         try
@@ -3150,7 +3155,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     /// параллельных операций записи, а внешний токен отмены в <see cref="WebSocket.SendAsync(ReadOnlyMemory{byte}, WebSocketMessageType, bool, CancellationToken)"/>
     /// способен аварийно завершить сокет целиком, поэтому отправка всегда выполняется без токена отмены.
     /// </summary>
-    private sealed class BridgeSessionTransport(WebSocket socket) : IDisposable
+    private sealed class BridgeSessionTransport(WebSocket socket, CancellationToken serverCancellationToken) : IDisposable
     {
         private readonly SemaphoreSlim sendGate = new(1, 1);
 
@@ -3161,10 +3166,14 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         public async ValueTask SendAsync(BridgeMessage message)
         {
             var bytes = JsonSerializer.SerializeToUtf8Bytes(message, BridgeJsonContext.Default.BridgeMessage);
-            await sendGate.WaitAsync().ConfigureAwait(false);
+            await sendGate.WaitAsync(serverCancellationToken).ConfigureAwait(false);
             try
             {
-                await Socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None).ConfigureAwait(false);
+                // Для надежности при принудительном завершении сервера используем короткий таймаут на саму отправку.
+                using var sendTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(serverCancellationToken, sendTimeout.Token);
+                
+                await Socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, endOfMessage: true, linkedCts.Token).ConfigureAwait(false);
             }
             finally
             {
@@ -3174,11 +3183,18 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         public async ValueTask CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription)
         {
-            await sendGate.WaitAsync().ConfigureAwait(false);
+            // CloseOutputAsync не должен висеть вечно, если сокет уже сломан.
+            using var closeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            
+            await sendGate.WaitAsync(closeTimeout.Token).ConfigureAwait(false);
             try
             {
                 if (Socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
-                    await Socket.CloseOutputAsync(closeStatus, statusDescription, CancellationToken.None).ConfigureAwait(false);
+                    await Socket.CloseOutputAsync(closeStatus, statusDescription, closeTimeout.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Timeout or server shutdown during close is acceptable.
             }
             finally
             {

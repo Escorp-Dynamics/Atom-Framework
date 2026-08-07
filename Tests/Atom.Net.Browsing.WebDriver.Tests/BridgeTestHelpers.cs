@@ -1,4 +1,4 @@
-﻿using System.Net.Http;
+using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text.Json;
 using Atom.Net.Browsing.WebDriver.Protocol;
@@ -62,26 +62,50 @@ internal static class BridgeTestHelpers
     public static async Task SendMessageAsync(ClientWebSocket socket, BridgeMessage message)
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(message, BridgeJsonContext.Default.BridgeMessage);
-        await socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None).ConfigureAwait(false);
+        using var sendTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, endOfMessage: true, sendTimeout.Token).ConfigureAwait(false);
     }
 
-    public static async Task<BridgeMessage?> ReceiveBridgeMessageAsync(ClientWebSocket socket)
+    public static async Task<BridgeMessage?> ReceiveBridgeMessageAsync(ClientWebSocket socket, CancellationToken cancellationToken = default)
     {
+        using var ms = new MemoryStream();
         var buffer = new byte[4096];
-        var result = await socket.ReceiveAsync(buffer.AsMemory(), CancellationToken.None).ConfigureAwait(false);
-        return result.MessageType is not WebSocketMessageType.Text
-            ? null
-            : JsonSerializer.Deserialize(buffer.AsSpan(0, result.Count), BridgeJsonContext.Default.BridgeMessage);
+        
+        // Предотвращаем вечное ожидание в тестах, если сервер не прислал сообщение.
+        using var timeoutCts = cancellationToken == default 
+            ? new CancellationTokenSource(TimeSpan.FromSeconds(10)) 
+            : null;
+        var effectiveToken = timeoutCts?.Token ?? cancellationToken;
+
+        while (true)
+        {
+            var result = await socket.ReceiveAsync(buffer.AsMemory(), effectiveToken).ConfigureAwait(false);
+            if (result.MessageType == WebSocketMessageType.Close)
+                return null;
+            ms.Write(buffer, 0, result.Count);
+            if (result.EndOfMessage)
+                break;
+        }
+        
+        ms.Position = 0;
+        return JsonSerializer.Deserialize<BridgeMessage>(ms, BridgeJsonContext.Default.BridgeMessage);
     }
 
-    public static async Task<ValueWebSocketReceiveResult> ReceiveCloseAsync(ClientWebSocket socket)
+    public static async Task<ValueWebSocketReceiveResult> ReceiveCloseAsync(ClientWebSocket socket, CancellationToken cancellationToken = default)
     {
         var buffer = new byte[1024];
-        var result = await socket.ReceiveAsync(buffer.AsMemory(), CancellationToken.None).ConfigureAwait(false);
+        
+        // Предотвращаем вечное ожидание в тестах, если сервер не прислал Close.
+        using var timeoutCts = cancellationToken == default 
+            ? new CancellationTokenSource(TimeSpan.FromSeconds(10)) 
+            : null;
+        var effectiveToken = timeoutCts?.Token ?? cancellationToken;
+
+        var result = await socket.ReceiveAsync(buffer.AsMemory(), effectiveToken).ConfigureAwait(false);
         if (result.MessageType is WebSocketMessageType.Close)
             return result;
 
-        Assert.Fail("Expected close frame.");
+        Assert.Fail($"Expected close frame, but received {result.MessageType}.");
         return result;
     }
 

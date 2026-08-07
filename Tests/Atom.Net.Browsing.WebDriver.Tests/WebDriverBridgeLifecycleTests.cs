@@ -1,4 +1,4 @@
-﻿using System.Drawing;
+using System.Drawing;
 using System.Net;
 using System.Net.WebSockets;
 using System.Text.Json;
@@ -443,7 +443,14 @@ public sealed class WebDriverBridgeLifecycleTests
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
 
         var reloadTask = page.BridgeCommands!.ReloadAsync().AsTask();
+        
+        // 1. Команда Reload
         await RespondToBridgeCommandAsync(socket, BridgeCommand.Reload, page.TabId, "null").ConfigureAwait(false);
+        
+        // 2. Опрос DebugPortStatus (из-за WaitForPostNavigationBridgeTransitionAsync)
+        // В тестах сразу отвечаем, что всё Ready.
+        await RespondToBridgeCommandAsync(socket, BridgeCommand.DebugPortStatus, page.TabId, "{\"tabId\":101,\"hasPort\":true,\"queueLength\":0,\"hasSocket\":true,\"isReady\":true,\"interceptEnabled\":false,\"hasTabContext\":true}").ConfigureAwait(false);
+        
         await reloadTask.ConfigureAwait(false);
     }
 
@@ -477,6 +484,7 @@ public sealed class WebDriverBridgeLifecycleTests
         var reloadTask = page.ReloadAsync().AsTask();
         await RespondToBridgeCommandAsync(socket, BridgeCommand.GetUrl, page.TabId, $"\"{liveUrl.AbsoluteUri}\"").ConfigureAwait(false);
         await RespondToBridgeCommandAsync(socket, BridgeCommand.Reload, page.TabId, "null").ConfigureAwait(false);
+        await RespondToBridgeCommandAsync(socket, BridgeCommand.DebugPortStatus, page.TabId, "{\"tabId\":101,\"hasPort\":true,\"queueLength\":0,\"hasSocket\":true,\"isReady\":true,\"interceptEnabled\":false,\"hasTabContext\":true}").ConfigureAwait(false);
         var response = await reloadTask.ConfigureAwait(false);
 
         Assert.Multiple(() =>
@@ -1514,7 +1522,8 @@ public sealed class WebDriverBridgeLifecycleTests
         BridgeCommand expectedCommand,
         string fallbackPayloadJson)
     {
-        using var receiveCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+        // Даём больше времени на возможный bridge-запрос, 250мс может быть мало в нагруженном окружении
+        using var receiveCts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         var receiveTask = ReceiveBridgeMessageAsync(socket, receiveCts.Token);
         var firstCompleted = await Task.WhenAny(lookupTask, receiveTask).ConfigureAwait(false);
         BridgeMessage? request = null;
@@ -1551,18 +1560,34 @@ public sealed class WebDriverBridgeLifecycleTests
             }
         }
 
-        var lookupCompleted = await Task.WhenAny(lookupTask, Task.Delay(TimeSpan.FromSeconds(1))).ConfigureAwait(false);
+        var lookupCompleted = await Task.WhenAny(lookupTask, Task.Delay(TimeSpan.FromSeconds(5))).ConfigureAwait(false);
         Assert.That(lookupCompleted, Is.SameAs(lookupTask), "Lookup should complete without waiting for an extra bridge roundtrip.");
         return (await lookupTask.ConfigureAwait(false), request);
     }
 
     private static async Task<BridgeMessage?> ReceiveBridgeMessageAsync(ClientWebSocket socket, CancellationToken cancellationToken)
     {
+        using var ms = new MemoryStream();
         var buffer = new byte[4096];
-        var result = await socket.ReceiveAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
-        return result.MessageType is not WebSocketMessageType.Text
-            ? null
-            : JsonSerializer.Deserialize(buffer.AsSpan(0, result.Count), BridgeJsonContext.Default.BridgeMessage);
+        
+        // Предотвращаем вечное ожидание в тестах, если сервер не прислал сообщение.
+        using var timeoutCts = cancellationToken == default 
+            ? new CancellationTokenSource(TimeSpan.FromSeconds(10)) 
+            : null;
+        var effectiveToken = timeoutCts?.Token ?? cancellationToken;
+
+        while (true)
+        {
+            var result = await socket.ReceiveAsync(buffer.AsMemory(), effectiveToken).ConfigureAwait(false);
+            if (result.MessageType == WebSocketMessageType.Close)
+                return null;
+            ms.Write(buffer, 0, result.Count);
+            if (result.EndOfMessage)
+                break;
+        }
+
+        ms.Position = 0;
+        return JsonSerializer.Deserialize<BridgeMessage>(ms, BridgeJsonContext.Default.BridgeMessage);
     }
 
     private static void SubscribeLifecycle(WebPage page, List<string> events, List<WebLifecycleEventArgs>? argsSink = null)

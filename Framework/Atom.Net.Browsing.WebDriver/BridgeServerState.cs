@@ -1,4 +1,4 @@
-﻿using System.Threading.Channels;
+using System.Threading.Channels;
 using Atom.Net.Browsing.WebDriver.Protocol;
 using Microsoft.Extensions.Logging;
 
@@ -93,7 +93,20 @@ internal sealed class BridgeServerState : IAsyncDisposable
 
         isDisposed = true;
         operations.Writer.TryComplete();
-        await AwaitProcessingLoopAsync().ConfigureAwait(false);
+
+        try
+        {
+            // Не позволяем зависшему циклу обработки блокировать dispose сервера.
+            await processingTask.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            logger?.LogWarning("BridgeServerState loop did not terminate within timeout during disposal.");
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal termination.
+        }
     }
 
     private async Task ProcessLoopAsync()
