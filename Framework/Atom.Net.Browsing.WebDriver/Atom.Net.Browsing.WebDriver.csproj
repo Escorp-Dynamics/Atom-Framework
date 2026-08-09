@@ -154,6 +154,11 @@
 		<Exec Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/build-content-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;"
 		      WorkingDirectory="$(ExtensionRuntimeDirectory)" />
 
+		<!-- CRX packager: собираем самодостаточный бандл, чтобы node запускал упаковку без
+		     node_modules в output/NuGet (иначе import crx3 падает с ERR_MODULE_NOT_FOUND). -->
+		<Exec Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/build-crx-packager.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;"
+		      WorkingDirectory="$(ExtensionRuntimeDirectory)" />
+
 		<!-- sync working layout -->
 		<Exec Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/sync-working-layout.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot; --chrome-working-dir &quot;$(ExtensionWorkingDirectory)&quot; --firefox-working-dir &quot;$(ExtensionFirefoxWorkingDirectory)&quot;"
 		      WorkingDirectory="$(ExtensionRuntimeDirectory)" />
@@ -174,11 +179,11 @@
 			<ContentWithTargetPath Include="@(GeneratedFirefoxExtensionFiles)"
 				CopyToOutputDirectory="Always"
 				TargetPath="ExtensionWorkingLayout\Extension.Firefox\%(RecursiveDir)%(Filename)%(Extension)" />
-			<!-- Скрипты упаковки CRX нужны в runtime для Chromium policy bootstrap:
-			     при потребительской сборке (не внутри репозитория Atom) рабочая директория
-			     пакета может быть недоступна, поэтому копируем package-bridge-extension.mjs
-			     в output и публикуем в NuGet рядом с ExtensionWorkingLayout. -->
-			<ContentWithTargetPath Include="$(ExtensionRuntimeDirectory)/scripts/package-bridge-extension.mjs"
+			<!-- Упаковщик CRX нужен в runtime для Chromium policy bootstrap. Копируем именно
+			     самодостаточный БАНДЛ (build-crx-packager.mjs инлайнит crx3), а не исходный
+			     скрипт: в output/NuGet рядом нет node_modules, и исходный import crx3 упал бы
+			     с ERR_MODULE_NOT_FOUND, тихо срывая упаковку. -->
+			<ContentWithTargetPath Include="$(ExtensionGeneratedDirectory)/package-bridge-extension.mjs"
 				CopyToOutputDirectory="Always"
 				CopyToPublishDirectory="Always"
 				TargetPath="ExtensionRuntime\scripts\package-bridge-extension.mjs" />

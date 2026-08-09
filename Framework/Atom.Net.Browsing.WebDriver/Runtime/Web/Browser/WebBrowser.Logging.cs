@@ -40,6 +40,9 @@ internal static partial class WebBrowserLogs
     [LoggerMessage(EventId = 1821, Level = LogLevel.Debug, Message = "Материализованный профиль браузера очищен, путь: {ProfilePath}")]
     public static partial void LogWebBrowserProfileCleaned(this ILogger logger, string profilePath);
 
+    [LoggerMessage(EventId = 1823, Level = LogLevel.Warning, Message = "Не удалось удалить материализованный профиль браузера, путь: {ProfilePath}")]
+    public static partial void LogWebBrowserProfileCleanupFailed(this ILogger logger, string profilePath, Exception exception);
+
     [LoggerMessage(EventId = 1822, Level = LogLevel.Information, Message = "Освобождение браузера завершено")]
     public static partial void LogWebBrowserDisposeCompleted(this ILogger logger);
 

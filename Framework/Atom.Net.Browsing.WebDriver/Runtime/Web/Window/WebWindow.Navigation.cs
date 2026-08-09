@@ -31,21 +31,30 @@ public sealed partial class WebWindow
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (OwnerBrowser.GetBridgeCommandPage(this) is { } bridgePage
-            && bridgePage.BridgeCommands is { } bridge)
+        try
         {
-            try
+            if (OwnerBrowser.GetBridgeCommandPage(this) is { } bridgePage
+                && bridgePage.BridgeCommands is { } bridge)
             {
-                await bridge.CloseWindowAsync(EffectiveWindowId, cancellationToken).ConfigureAwait(false);
-            }
-            catch (InvalidOperationException exception) when (ReferenceEquals(bridgePage.OwnerWindow, this)
-                && exception.Message.Contains("отключено", StringComparison.Ordinal))
-            {
-                // Closing the only bridge-bound window can disconnect the sender before a response arrives.
+                try
+                {
+                    await bridge.CloseWindowAsync(EffectiveWindowId, cancellationToken).ConfigureAwait(false);
+                }
+                catch (InvalidOperationException exception) when (ReferenceEquals(bridgePage.OwnerWindow, this)
+                    && Protocol.BridgeCommandException.IsSurfaceDisconnect(exception))
+                {
+                    // Закрытие единственного мост-связанного окна может отключить отправителя до
+                    // прихода ответа. Классификация — по типизированному исключению, а не по
+                    // подстроке локализованного сообщения.
+                }
             }
         }
-
-        await DisposeAsync().ConfigureAwait(false);
+        finally
+        {
+            // DisposeAsync выполняется всегда: незакрытое окно с его страницами иначе утекло бы,
+            // если CloseWindow бросит непредвиденное (нетипизированное) исключение.
+            await DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     public ValueTask CloseAsync()

@@ -16,6 +16,13 @@ namespace Atom.Net.Browsing.WebDriver;
 /// </summary>
 public sealed partial class WebPage : IWebPage
 {
+    /// <summary>
+    /// Верхняя граница буфера мостовых событий. Очередь дренируется только внешним потребителем
+    /// через <see cref="TryDequeueBridgeEvent"/>; без ограничения долгоживущая страница
+    /// накапливала бы все события навигации и перехвата вместе с их payload.
+    /// </summary>
+    private const int MaxBufferedBridgeEvents = 4096;
+
     private readonly ConcurrentQueue<BridgeMessage> bridgeEvents = [];
     private readonly ConcurrentDictionary<string, byte> callbackSubscriptions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Frame> childFramesByHostElementId = new(StringComparer.Ordinal);
@@ -86,6 +93,11 @@ public sealed partial class WebPage : IWebPage
         ArgumentNullException.ThrowIfNull(message);
 
         bridgeEvents.Enqueue(message);
+        while (bridgeEvents.Count > MaxBufferedBridgeEvents && bridgeEvents.TryDequeue(out _))
+        {
+            // Вытесняем самые старые события: свежие важнее для потребителя.
+        }
+
         if (dispatchHandlers)
         {
             await OnBridgeEventReceivedAsync(message).ConfigureAwait(false);
@@ -353,9 +365,33 @@ public sealed partial class WebPage : IWebPage
             return ValueTask.CompletedTask;
         }
 
+        ReleasePageScopedState();
         OwnerWindow.OnPageDisposed(this);
         OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebPageDisposed(TabId);
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Освобождает состояние, живущее дольше самой страницы. Маршрут навигационного прокси
+    /// снимался только при <see cref="ReconfigureAsync(WebPageSettings)"/>, поэтому закрытая
+    /// вкладка навсегда оставляла в реестре рабочий route token, а неразобранные события —
+    /// в очереди страницы.
+    /// </summary>
+    private void ReleasePageScopedState()
+    {
+        if (BridgeContextId is { } contextId)
+        {
+            OwnerWindow.OwnerBrowser.ProxyNavigationDecisions.RemoveRouteByContextId(contextId);
+        }
+
+        bridgeEvents.Clear();
+        callbackSubscriptions.Clear();
+        detachedFrameElementIds.Clear();
+
+        lock (childFramesSync)
+        {
+            childFramesByHostElementId.Clear();
+        }
     }
 
     public async ValueTask CloseAsync(CancellationToken cancellationToken)
@@ -423,7 +459,10 @@ public sealed partial class WebPage : IWebPage
     public ValueTask ReconfigureAsync(WebPageSettings settings)
         => ReconfigureAsync(settings, CancellationToken.None);
 
-    private bool IsExpectedBridgeCloseDisconnect(InvalidOperationException exception)
-        => exception.Message.Contains("отключено", StringComparison.Ordinal)
-            || exception.Message.Contains(BridgeProtocolErrorCodes.TabDisconnected, StringComparison.Ordinal);
+    /// <summary>
+    /// Закрытие собственной вкладки моста может отключить отправителя до прихода ответа.
+    /// Признак берётся из типизированного исключения, а не из текста сообщения.
+    /// </summary>
+    private static bool IsExpectedBridgeCloseDisconnect(InvalidOperationException exception)
+        => BridgeCommandException.IsSurfaceDisconnect(exception);
 }

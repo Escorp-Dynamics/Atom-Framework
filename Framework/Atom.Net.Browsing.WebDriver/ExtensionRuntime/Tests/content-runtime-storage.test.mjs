@@ -11,9 +11,47 @@ import {
     buildMainWorldContextScript,
     buildStorageIsolationScript,
     resolveBridgeUtilityPort,
+    resolveMainWorldBridgeEndpoint,
     resolvePreferredBridgeRuntimeConfig,
-    tryLoadDiscoveryDocumentRuntimeConfig,
+    tryReadDiscoveryDocumentEndpointOverride,
 } from '../content.runtime.ts';
+
+function createDiscoveryDocument({ port, proxyPort, secret } = {}) {
+    const values = new Map([
+        ['meta[name="atom-bridge-port"]', port],
+        ['meta[name="atom-bridge-proxy-port"]', proxyPort],
+        ['meta[name="atom-bridge-secret"]', secret],
+    ]);
+
+    return {
+        querySelector(selector) {
+            const value = values.get(selector);
+            return value === undefined
+                ? null
+                : { getAttribute: (name) => (name === 'content' ? value : null) };
+        },
+    };
+}
+
+function createBundledConfig(overrides = {}) {
+    return {
+        host: '127.0.0.1',
+        port: 39999,
+        secret: 'bundled-secret',
+        sessionId: 'content_bundled',
+        protocolVersion: 1,
+        browserFamily: 'firefox',
+        extensionVersion: 'bundled-version',
+        featureFlags: {
+            enableNavigationEvents: true,
+            enableCallbackHooks: true,
+            enableInterception: true,
+            enableDiagnostics: true,
+            enableKeepAlive: true,
+        },
+        ...overrides,
+    };
+}
 
 class FakeStorage {
     #items = new Map();
@@ -50,141 +88,64 @@ class FakeStorage {
     }
 }
 
-test('content runtime prefers live discovery meta config when present', () => {
+test('content runtime reads only bridge ports from the discovery document', () => {
     const originalDocument = globalThis.document;
-    const originalChrome = globalThis.chrome;
-    const originalBrowser = globalThis.browser;
-    const manifestVersion = '0.8.2-test-live';
 
     try {
-        globalThis.document = {
-            querySelector(selector) {
-                if (selector === 'meta[name="atom-bridge-port"]') {
-                    return {
-                        getAttribute(name) {
-                            return name === 'content' ? '43123' : null;
-                        },
-                    };
-                }
+        globalThis.document = createDiscoveryDocument({ port: '43123', proxyPort: '9443', secret: 'must-be-ignored' });
 
-                if (selector === 'meta[name="atom-bridge-proxy-port"]') {
-                    return {
-                        getAttribute(name) {
-                            return name === 'content' ? '9443' : null;
-                        },
-                    };
-                }
-
-                if (selector === 'meta[name="atom-bridge-secret"]') {
-                    return {
-                        getAttribute(name) {
-                            return name === 'content' ? 'stable-live-secret' : null;
-                        },
-                    };
-                }
-
-                return null;
-            },
-        };
-
-        globalThis.browser = undefined;
-        globalThis.chrome = {
-            runtime: {
-                getManifest() {
-                    return { version: manifestVersion };
-                },
-            },
-        };
-
-        const config = tryLoadDiscoveryDocumentRuntimeConfig();
-        assert.ok(config);
-        assert.equal(config.host, '127.0.0.1');
-        assert.equal(config.port, 43123);
-        assert.equal(config.proxyPort, 9443);
-        assert.equal(config.secret, 'stable-live-secret');
-        assert.equal(config.extensionVersion, manifestVersion);
-        assert.equal(config.featureFlags.enableCallbackHooks, true);
+        const override = tryReadDiscoveryDocumentEndpointOverride();
+        assert.deepEqual(override, { port: 43123, proxyPort: 9443 });
+        assert.equal(Object.hasOwn(override, 'secret'), false);
     } finally {
         globalThis.document = originalDocument;
-        globalThis.chrome = originalChrome;
-        globalThis.browser = originalBrowser;
     }
 });
 
-test('content runtime replaces cached bundled config with live discovery meta config when it becomes available', () => {
+test('content runtime refreshes stale bundled ports from the discovery document but keeps the packaged secret', () => {
     const originalDocument = globalThis.document;
-    const originalChrome = globalThis.chrome;
-    const originalBrowser = globalThis.browser;
-    const manifestVersion = '0.8.2-test-refresh';
 
     try {
-        globalThis.document = {
-            querySelector(selector) {
-                if (selector === 'meta[name="atom-bridge-port"]') {
-                    return {
-                        getAttribute(name) {
-                            return name === 'content' ? '43123' : null;
-                        },
-                    };
-                }
+        globalThis.document = createDiscoveryDocument({ port: '43123', proxyPort: '9443', secret: 'must-be-ignored' });
 
-                if (selector === 'meta[name="atom-bridge-proxy-port"]') {
-                    return {
-                        getAttribute(name) {
-                            return name === 'content' ? '9443' : null;
-                        },
-                    };
-                }
-
-                if (selector === 'meta[name="atom-bridge-secret"]') {
-                    return {
-                        getAttribute(name) {
-                            return name === 'content' ? 'stable-live-secret' : null;
-                        },
-                    };
-                }
-
-                return null;
-            },
-        };
-
-        globalThis.browser = undefined;
-        globalThis.chrome = {
-            runtime: {
-                getManifest() {
-                    return { version: manifestVersion };
-                },
-            },
-        };
-
-        const config = resolvePreferredBridgeRuntimeConfig({
-            host: '127.0.0.1',
-            port: 39999,
-            secret: 'stale-bundled-secret',
-            sessionId: 'content_stale',
-            protocolVersion: 1,
-            browserFamily: 'firefox',
-            extensionVersion: 'stale-bundled-version',
-            featureFlags: {
-                enableNavigationEvents: true,
-                enableCallbackHooks: true,
-                enableInterception: true,
-                enableDiagnostics: true,
-                enableKeepAlive: true,
-            },
-        });
+        const config = resolvePreferredBridgeRuntimeConfig(createBundledConfig());
 
         assert.ok(config);
         assert.equal(config.host, '127.0.0.1');
         assert.equal(config.port, 43123);
         assert.equal(config.proxyPort, 9443);
-        assert.equal(config.secret, 'stable-live-secret');
-        assert.equal(config.extensionVersion, manifestVersion);
+        assert.equal(config.secret, 'bundled-secret');
+        assert.equal(config.extensionVersion, 'bundled-version');
     } finally {
         globalThis.document = originalDocument;
-        globalThis.chrome = originalChrome;
-        globalThis.browser = originalBrowser;
     }
+});
+
+test('content runtime keeps the bundled config when the discovery document is absent', () => {
+    const originalDocument = globalThis.document;
+
+    try {
+        globalThis.document = createDiscoveryDocument();
+
+        const bundled = createBundledConfig({ proxyPort: 8080 });
+        assert.equal(resolvePreferredBridgeRuntimeConfig(bundled), bundled);
+        assert.equal(resolvePreferredBridgeRuntimeConfig(null), null);
+    } finally {
+        globalThis.document = originalDocument;
+    }
+});
+
+test('main world bridge endpoint prefers the navigation proxy port and requires a secret', () => {
+    assert.deepEqual(
+        resolveMainWorldBridgeEndpoint(createBundledConfig({ port: 43123, proxyPort: 9443 })),
+        { host: '127.0.0.1', port: 9443, secret: 'bundled-secret' });
+
+    assert.deepEqual(
+        resolveMainWorldBridgeEndpoint(createBundledConfig({ port: 43123 })),
+        { host: '127.0.0.1', port: 43123, secret: 'bundled-secret' });
+
+    assert.equal(resolveMainWorldBridgeEndpoint(createBundledConfig({ secret: '' })), null);
+    assert.equal(resolveMainWorldBridgeEndpoint(null), null);
 });
 
 test('content runtime prefers proxyPort for utility routes and falls back to main port', () => {
@@ -438,6 +399,9 @@ function createMainWorldCallbackSandbox({ port = '43123', proxyPort = '9443', se
         },
         getResponseNode(requestId) {
             return document.getElementById(`atom-callback-response-${requestId}`);
+        },
+        pendingRequestNodeCount() {
+            return requestNodes.length;
         },
     };
 }
@@ -946,10 +910,12 @@ test('content runtime публикует ready-контекст после Apply
     }
 });
 
-test('main world callback bridge prefers discovery proxyPort and forwards tabId', () => {
+test('main world callback bridge uses the injected bridge endpoint and forwards tabId', () => {
     const sandbox = createMainWorldCallbackSandbox();
 
-    vm.runInContext(buildMainWorldContextScript(createTabContext()), sandbox.context);
+    vm.runInContext(
+        buildMainWorldContextScript(createTabContext(), { host: '127.0.0.1', port: 9443, secret: 'stable-live-secret' }),
+        sandbox.context);
     sandbox.dispatchCallback({
         requestId: 'req-1',
         name: 'bridgeCallback',
@@ -966,6 +932,44 @@ test('main world callback bridge prefers discovery proxyPort and forwards tabId'
         args: ['alpha'],
     });
     assert.equal(JSON.parse(sandbox.getResponseNode('req-1').textContent).action, 'continue');
+});
+
+test('main world callback bridge never reads the bridge secret from document meta tags', () => {
+    const sandbox = createMainWorldCallbackSandbox();
+
+    // Endpoint не внедрён: meta-теги страницы присутствуют, но использоваться не должны.
+    vm.runInContext(buildMainWorldContextScript(createTabContext()), sandbox.context);
+    sandbox.dispatchCallback({
+        requestId: 'req-1',
+        name: 'bridgeCallback',
+        args: ['alpha'],
+    });
+
+    assert.equal(sandbox.requests.length, 0);
+    assert.equal(sandbox.context.globalThis.__atomCallbackBridgeLastError, 'missing-bridge-endpoint');
+});
+
+test('main world callback bridge keeps one-shot request nodes when its decision fails so the content-script fallback can service them', () => {
+    const sandbox = createMainWorldCallbackSandbox();
+
+    // Endpoint не внедрён → main-world мост (Path A) не может разрешить решение (missing-bridge-endpoint).
+    vm.runInContext(buildMainWorldContextScript(createTabContext()), sandbox.context);
+    sandbox.dispatchCallback({
+        requestId: 'req-1',
+        name: 'bridgeCallback',
+        args: ['alpha'],
+    });
+    sandbox.dispatchCallback({
+        requestId: 'req-2',
+        name: 'bridgeCallback',
+        args: ['beta'],
+    });
+
+    // Path A зарегистрирован с capture:true и срабатывает раньше привилегированного content-script
+    // fallback (Path B). Если его синхронный XHR не доходит до моста, одноразовый узел запроса НЕЛЬЗЯ
+    // удалять — иначе Path B его не увидит и callback не долетит до C# (page.Callback не фаярит).
+    // Узлы должны остаться для Path B (который сам удаляет обслуженные узлы, поэтому накопления нет).
+    assert.equal(sandbox.pendingRequestNodeCount(), 2);
 });
 
 test('content runtime relays callback finalized only from dedicated finalized payloads', async () => {

@@ -502,6 +502,25 @@ class ContentRuntimeHost {
                 return;
             }
 
+            if (isFrameOpaqueForMainWorldEval(host)) {
+                // Непрозрачный для main-world eval фрейм (кросс-доменный data:/blob:/иной origin): выполнить
+                // код внутрь него нельзя. Отвечаем СРАЗУ строковым sentinel-ом 'null' — тем же, что даёт
+                // обычный путь для скрипта, разрешившегося в null (GetTitle/GetContent/Evaluate→"null",
+                // GetUrl→null) — БЕЗ main-world round-trip. Это критично: round-trip в opaque-фрейм не только
+                // не вернёт значение, но и зависает в main-world на том же потоке, что и content-таймеры,
+                // поэтому никакой content-side timeout его не спасёт — надо отказать закрыто ДО round-trip.
+                // Проверка синхронная по origin атрибута src (Xray-независимая): из isolated world
+                // contentDocument.URL кросс-доменного фрейма вводит в заблуждение. find/wait/child-frames для
+                // такого фрейма уже fail-closed через resolveSearchRoot.
+                await this.channel.sendResponse({
+                    id: message.id,
+                    type: 'Response',
+                    status: 'Ok',
+                    payload: 'null',
+                });
+                return;
+            }
+
             const markerId = `afh${++elementIdCounter}`;
             host.setAttribute('data-atom-frame', markerId);
 
@@ -993,7 +1012,7 @@ class ContentRuntimeHost {
     }
 
     private async applyContextInMainWorld(context: TabContextEnvelope): Promise<void> {
-        const script = buildMainWorldContextScript(context);
+        const script = buildMainWorldContextScript(context, resolveMainWorldBridgeEndpoint(this.bridgeRuntimeConfig));
 
         try {
             await this.channel.executeInMain(script);
@@ -1068,44 +1087,57 @@ function parseOptionalPositivePort(value: string | null | undefined): number | u
         : undefined;
 }
 
-export function tryLoadDiscoveryDocumentRuntimeConfig(): RuntimeConfig | null {
-    const portText = document.querySelector('meta[name="atom-bridge-port"]')?.getAttribute('content')?.trim();
-    const proxyPortText = document.querySelector('meta[name="atom-bridge-proxy-port"]')?.getAttribute('content')?.trim();
-    const secret = document.querySelector('meta[name="atom-bridge-secret"]')?.getAttribute('content')?.trim();
+export interface DiscoveryDocumentEndpointOverride {
+    port: number;
+    proxyPort?: number;
+}
 
-    if (!portText || !secret) {
+/**
+ * Discovery-страница моста публикует фактические порты текущего запуска. Это нужно, когда
+ * расширение стартовало с закешированным config.json от прежнего запуска и его порт устарел.
+ *
+ * Секрет здесь намеренно не читается: он поставляется только внутри пакета расширения
+ * (config.json / managed storage). Публикация секрета в DOM сделала бы его доступным любому
+ * скрипту на странице моста и не даёт ничего сверх того, что уже есть в пакете.
+ */
+export function tryReadDiscoveryDocumentEndpointOverride(): DiscoveryDocumentEndpointOverride | null {
+    const documentObject = globalThis.document;
+    if (typeof documentObject?.querySelector !== 'function') {
         return null;
     }
 
-    const port = parseOptionalPositivePort(portText);
+    const port = parseOptionalPositivePort(
+        documentObject.querySelector('meta[name="atom-bridge-port"]')?.getAttribute('content')?.trim());
     if (port === undefined) {
         return null;
     }
 
-    const proxyPort = parseOptionalPositivePort(proxyPortText);
+    const proxyPort = parseOptionalPositivePort(
+        documentObject.querySelector('meta[name="atom-bridge-proxy-port"]')?.getAttribute('content')?.trim());
 
-    const runtime = getContentRuntimeApi();
-    return validateRuntimeConfig({
-        host: '127.0.0.1',
-        port,
-        proxyPort,
-        secret,
-        sessionId: createContentRuntimeSessionId(),
-        protocolVersion: 1,
-        browserFamily: detectContentRuntimeBrowserFamily(),
-        extensionVersion: runtime.getManifest?.().version ?? '0.0.0-stage1',
-        featureFlags: {
-            enableNavigationEvents: true,
-            enableCallbackHooks: true,
-            enableInterception: true,
-            enableDiagnostics: true,
-            enableKeepAlive: true,
-        },
-    });
+    return proxyPort === undefined ? { port } : { port, proxyPort };
 }
 
 export function resolvePreferredBridgeRuntimeConfig(currentConfig: RuntimeConfig | null): RuntimeConfig | null {
-    return tryLoadDiscoveryDocumentRuntimeConfig() ?? currentConfig;
+    if (currentConfig === null) {
+        return null;
+    }
+
+    const override = tryReadDiscoveryDocumentEndpointOverride();
+    if (override === null) {
+        return currentConfig;
+    }
+
+    if (currentConfig.port === override.port
+        && (override.proxyPort === undefined || currentConfig.proxyPort === override.proxyPort)) {
+        return currentConfig;
+    }
+
+    return validateRuntimeConfig({
+        ...currentConfig,
+        port: override.port,
+        proxyPort: override.proxyPort ?? currentConfig.proxyPort,
+    });
 }
 
 async function loadBundledContentRuntimeConfig(): Promise<RuntimeConfig> {
@@ -1171,27 +1203,6 @@ function getContentRuntimeApi(): { getURL(path: string): string; getManifest?():
     }
 
     return runtime;
-}
-
-function detectContentRuntimeBrowserFamily(): string {
-    const runtimeState = globalThis as typeof globalThis & {
-        browser?: unknown;
-        chrome?: unknown;
-    };
-
-    if ('browser' in runtimeState && !('chrome' in runtimeState)) {
-        return 'firefox';
-    }
-
-    return 'chromium';
-}
-
-function createContentRuntimeSessionId(): string {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-        return `content_${crypto.randomUUID()}`;
-    }
-
-    return `content_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function postBlockingBridgeJson<TResponse>(
@@ -1635,11 +1646,42 @@ export function buildCacheIsolationScript(): string {
 `;
 }
 
-export function buildMainWorldContextScript(context: TabContextEnvelope): string {
+/**
+ * Точка доступа к utility-эндпоинтам моста для кода, исполняемого в основном мире страницы.
+ * Значение приходит из конфигурации расширения и внедряется в скрипт напрямую: читать его
+ * из meta-тегов документа нельзя — на обычных страницах их нет, а на discovery-странице это
+ * раскрывало бы секрет моста любому скрипту страницы.
+ */
+export interface MainWorldBridgeEndpoint {
+    host: string;
+    port: number;
+    secret: string;
+}
+
+export function resolveMainWorldBridgeEndpoint(config: RuntimeConfig | null): MainWorldBridgeEndpoint | null {
+    if (config === null || typeof config.secret !== 'string' || config.secret.length === 0) {
+        return null;
+    }
+
+    const port = resolveBridgeUtilityPort(config);
+    if (!Number.isInteger(port) || port <= 0) {
+        return null;
+    }
+
+    return {
+        host: config.host,
+        port,
+        secret: config.secret,
+    };
+}
+
+export function buildMainWorldContextScript(context: TabContextEnvelope, bridgeEndpoint: MainWorldBridgeEndpoint | null = null): string {
     const serializedContext = JSON.stringify(context);
+    const serializedBridgeEndpoint = JSON.stringify(bridgeEndpoint);
 
     return `(() => {
 const context = ${serializedContext};
+const bridgeEndpoint = ${serializedBridgeEndpoint};
 const globalObject = globalThis;
 const contextKey = '__atomTabContext';
 const stateKey = '__atomTabContextOverrideState';
@@ -1669,28 +1711,25 @@ const readContext = () => globalObject[contextKey] ?? context;
 ${buildCookieIsolationScript()}
 
 if (!globalObject[callbackBridgeInstallKey]) {
-    const readDiscoveryBridgeRuntimeConfig = () => {
-        const documentObject = globalObject.document;
-        if (!documentObject || typeof documentObject.querySelector !== 'function') {
+    // Конфигурация приходит из расширения вместе со скриптом контекста. Прежняя версия читала
+    // её из meta-тегов discovery-страницы, которых нет на обычных сайтах, из-за чего решения
+    // по callback никогда не доезжали и вызов всегда продолжался как есть.
+    const bridgeEndpointStateKey = '__atomCallbackBridgeEndpoint';
+    if (bridgeEndpoint && typeof bridgeEndpoint.secret === 'string' && bridgeEndpoint.secret.length > 0) {
+        globalObject[bridgeEndpointStateKey] = bridgeEndpoint;
+    }
+
+    const readBridgeEndpoint = () => {
+        const endpoint = globalObject[bridgeEndpointStateKey];
+        if (!endpoint || typeof endpoint.secret !== 'string' || endpoint.secret.length === 0) {
             return null;
         }
 
-        const portText = documentObject.querySelector('meta[name="atom-bridge-port"]')?.getAttribute('content')?.trim();
-        const proxyPortText = documentObject.querySelector('meta[name="atom-bridge-proxy-port"]')?.getAttribute('content')?.trim();
-        const secret = documentObject.querySelector('meta[name="atom-bridge-secret"]')?.getAttribute('content')?.trim();
-        const port = Number.parseInt(portText ?? '', 10);
-        if (!Number.isInteger(port) || port <= 0 || typeof secret !== 'string' || secret.length === 0) {
+        if (!Number.isInteger(endpoint.port) || endpoint.port <= 0) {
             return null;
         }
 
-        const proxyPort = Number.parseInt(proxyPortText ?? '', 10);
-
-        return {
-            host: '127.0.0.1',
-            port,
-            proxyPort: Number.isInteger(proxyPort) && proxyPort > 0 ? proxyPort : undefined,
-            secret,
-        };
+        return endpoint;
     };
 
     const writeCallbackDecisionPayload = (requestId, payload) => {
@@ -1711,10 +1750,10 @@ if (!globalObject[callbackBridgeInstallKey]) {
     };
 
     const tryResolveCallbackDecision = (payload) => {
-        const config = readDiscoveryBridgeRuntimeConfig();
+        const config = readBridgeEndpoint();
         if (!config || typeof globalObject.XMLHttpRequest !== 'function') {
             globalObject[callbackBridgeErrorKey] = !config
-                ? 'missing-discovery-runtime-config'
+                ? 'missing-bridge-endpoint'
                 : 'xmlhttprequest-unavailable';
             return null;
         }
@@ -1726,13 +1765,9 @@ if (!globalObject[callbackBridgeInstallKey]) {
             return null;
         }
 
-        const utilityPort = Number.isInteger(config.proxyPort) && config.proxyPort > 0
-            ? config.proxyPort
-            : config.port;
-
         try {
             const request = new globalObject.XMLHttpRequest();
-            request.open('POST', 'http://' + config.host + ':' + utilityPort + '/callback?secret=' + encodeURIComponent(config.secret), false);
+            request.open('POST', 'http://' + config.host + ':' + config.port + '/callback?secret=' + encodeURIComponent(config.secret), false);
             request.setRequestHeader('Content-Type', 'text/plain;charset=UTF-8');
             request.send(JSON.stringify({
                 requestId: payload.requestId,
@@ -1769,24 +1804,33 @@ if (!globalObject[callbackBridgeInstallKey]) {
         let handled = false;
         const nodes = Array.from(documentObject.querySelectorAll(callbackRequestSelector));
         for (const node of nodes) {
-            let handledNode = false;
+            // ВАЖНО: этот main-world обработчик (Path A) зарегистрирован с capture:true и срабатывает
+            // РАНЬШЕ привилегированного content-script fallback (Path B, flushCallbackRequestPayloads).
+            // Синхронный XHR из контекста страницы (без extension-привилегий) до моста часто не доходит.
+            // Поэтому одноразовый узел запроса снимаем ТОЛЬКО когда реально записали решение — иначе
+            // Path A удалил бы узел до того, как Path B успеет его обслужить, и callback не долетел бы
+            // до C# (page.Callback не фаярит). Path B сам удаляет обработанные узлы, накопления нет.
+            let servicedNode = false;
             try {
                 const payload = JSON.parse(node.textContent || 'null');
                 if (!payload || typeof payload.requestId !== 'string' || payload.requestId.length === 0 || typeof payload.name !== 'string' || payload.name.length === 0) {
+                    // Некорректный узел не сможет обслужить ни один обработчик — снимаем, чтобы не висел.
+                    node.remove?.();
                     continue;
                 }
 
                 const decision = tryResolveCallbackDecision(payload);
                 if (!decision || typeof decision.action !== 'string') {
+                    // Path A не смог разрешить решение: оставляем узел для Path B.
                     continue;
                 }
 
                 writeCallbackDecisionPayload(payload.requestId, decision);
                 handled = true;
-                handledNode = true;
+                servicedNode = true;
             } catch {
             } finally {
-                if (handledNode) {
+                if (servicedNode) {
                     node.remove?.();
                 }
             }
@@ -2453,26 +2497,51 @@ ${buildCacheIsolationScript()}
             let devices = await enumerateNativeDevices();
             let actualDeviceId = findNativeDeviceByLabel(devices, kind, label) ?? configuredDeviceId;
 
-            if (!actualDeviceId && enabled && originalGetUserMedia) {
-                const warmupConstraints = {};
-                if (kind === 'audioinput') {
-                    warmupConstraints.audio = true;
-                } else if (kind === 'videoinput') {
-                    warmupConstraints.video = true;
-                }
-
-                if (warmupConstraints.audio || warmupConstraints.video) {
-                    let warmupStream = null;
-                    try {
-                        warmupStream = await originalGetUserMedia(warmupConstraints);
-                    } catch {
-                    } finally {
-                        stopStream(warmupStream);
+            // Видео всегда имеет синтетический canvas-fallback (createSyntheticVideoStream), поэтому
+            // НИКОГДА не блокируем на нативном camera-warmup: в headless/automation Firefox
+            // (secure-контекст 127.0.0.1, без авто-разрешения камеры и без fake-stream pref) нативный
+            // getUserMedia({video}) может висеть бесконечно, из-за чего переопределённый getUserMedia
+            // истекает по таймауту, так и не дойдя до синтетики. Для videoinput с пустым device id
+            // (синтетика) сразу оставляем actualDeviceId=null → useSyntheticVideo. Реальная OS-камера
+            // имеет непустой DeviceIdentifier → configuredDeviceId уже задан выше, и этот блок не нужен.
+            //
+            // Для аудио синтетики нет, warmup нужен (после выдачи разрешения enumerateDevices раскроет
+            // label), но time-box'им его, чтобы нативный вызов не мог застопорить нас дольше
+            // mediaOperationTimeoutMs.
+            if (!actualDeviceId && enabled && originalGetUserMedia && kind === 'audioinput') {
+                let warmupTimeout = null;
+                const warmupPromise = originalGetUserMedia({ audio: true }).then(
+                    (stream) => stream,
+                    () => null,
+                );
+                let warmupStream = null;
+                try {
+                    warmupStream = await Promise.race([
+                        warmupPromise,
+                        new Promise((resolve) => {
+                            warmupTimeout = globalObject.setTimeout(() => resolve(null), mediaOperationTimeoutMs);
+                        }),
+                    ]);
+                } finally {
+                    if (warmupTimeout !== null) {
+                        globalObject.clearTimeout(warmupTimeout);
                     }
-
-                    devices = await enumerateNativeDevices();
-                    actualDeviceId = findNativeDeviceByLabel(devices, kind, label) ?? configuredDeviceId;
                 }
+
+                if (warmupStream !== null) {
+                    stopStream(warmupStream);
+                } else {
+                    // Таймаут выиграл гонку: если нативный вызов разрешится позже — всё равно стопаем
+                    // поток, чтобы не оставить микрофон захваченным.
+                    void warmupPromise.then((late) => {
+                        if (late !== null) {
+                            stopStream(late);
+                        }
+                    });
+                }
+
+                devices = await enumerateNativeDevices();
+                actualDeviceId = findNativeDeviceByLabel(devices, kind, label) ?? configuredDeviceId;
             }
 
             resolvedMediaDeviceIds[kind] = actualDeviceId ?? null;
@@ -3442,6 +3511,14 @@ function findMultipleWithOpenShadowRootDiscovery(strategy: string, value: string
             }
 
             seen.add(match);
+            // Отсоединённые от документа элементы не должны попадать в результаты live-поиска: иначе
+            // discovery фреймов вернёт host отвалившегося iframe (например, при remove→reattach в shadow
+            // root узел ещё держится ссылкой из elementRegistry и всплывает через обход теневых корней),
+            // и C#-кэш дочерних фреймов не сможет его выпилить (см. Frame.EnsureChildFramesDiscoveredAsync).
+            if (!match.isConnected) {
+                continue;
+            }
+
             results.push(match);
         }
     };
@@ -3469,6 +3546,38 @@ function findMultipleWithOpenShadowRootDiscovery(strategy: string, value: string
 function isFrameHostElement(element: Element | undefined): element is HTMLIFrameElement | HTMLFrameElement {
     return element instanceof HTMLIFrameElement
         || (typeof HTMLFrameElement !== 'undefined' && element instanceof HTMLFrameElement);
+}
+
+// Непрозрачность, блокирующая main-world eval, наблюдаема ТОЛЬКО по origin: Xray позволяет isolated
+// content-миру прочитать contentDocument кросс-доменного фрейма (поэтому проверка contentDocument здесь
+// бесполезна). data:/blob:/чужой origin дают отдельный или opaque ('null') origin — для них fail-closed
+// БЕЗ main-world round-trip. Синхронно, чтобы не зависеть от потока, на котором стоит page main world.
+function isFrameOpaqueForMainWorldEval(host: HTMLIFrameElement | HTMLFrameElement): boolean {
+    // Определяем по атрибуту src ЭЛЕМЕНТА-хоста (он в родительском документе и доступен content-скрипту
+    // напрямую), а НЕ по host.contentDocument.URL: для кросс-доменного фрейма Xray-обёртка отдаёт из
+    // isolated world вводящий в заблуждение 'about:blank', из-за чего data:-фрейм ошибочно считался
+    // same-origin.
+    let frameSrc = '';
+    try {
+        frameSrc = host.src ?? '';
+    } catch {
+        // ignore — оценим ниже
+    }
+
+    // Пустой src или about:* (about:blank[#...], about:srcdoc, srcdoc-фреймы) — same-origin, наследует
+    // origin родителя: исполнять внутрь можно.
+    if (frameSrc === '' || frameSrc.startsWith('about:')) {
+        return false;
+    }
+
+    try {
+        const frameOrigin = new URL(frameSrc, document.baseURI).origin;
+        // data:/blob: дают opaque ('null') origin; чужой http(s) origin — cross-origin. И то, и другое
+        // непрозрачно для main-world eval → fail closed без round-trip.
+        return frameOrigin === 'null' || frameOrigin !== document.location.origin;
+    } catch {
+        return true;
+    }
 }
 
 function findByText(text: string, root: Document | ShadowRoot | Element): Element | null {
@@ -3504,17 +3613,37 @@ function findAllByText(text: string, root: Document | ShadowRoot | Element): Ele
     return elements;
 }
 
+// Порог, после которого при регистрации выполняется амортизированная уборка отсоединённых
+// от DOM элементов. Держит elementRegistry (сильные ссылки) от бесконечного роста на
+// динамических/SPA-страницах, которые не проходят полную навигацию.
+const maxRegisteredElements = 5000;
+
 function registerElement(element: Element): string {
-    for (const [id, existingElement] of elementRegistry) {
-        if (existingElement === element) {
-            return id;
-        }
+    // O(1) обратный поиск через WeakMap вместо линейного сканирования всего реестра.
+    const existingId = elementIdRegistry.get(element);
+    if (existingId !== undefined && elementRegistry.get(existingId) === element) {
+        return existingId;
+    }
+
+    if (elementRegistry.size >= maxRegisteredElements) {
+        pruneDisconnectedElements();
     }
 
     const id = `el_${++elementIdCounter}`;
     elementRegistry.set(id, element);
     elementIdRegistry.set(element, id);
     return id;
+}
+
+// Освобождает записи для элементов, удалённых из DOM: сильная ссылка в elementRegistry иначе
+// не давала бы собрать отсоединённые поддеревья. Записи в elementIdRegistry (WeakMap) уходят
+// сами при сборке элемента. Подключённые элементы сохраняются — драйвер ещё может их адресовать.
+function pruneDisconnectedElements(): void {
+    for (const [id, element] of elementRegistry) {
+        if (!element.isConnected) {
+            elementRegistry.delete(id);
+        }
+    }
 }
 
 function isFrameElement(element: Element): boolean {

@@ -36,7 +36,14 @@ internal sealed class BridgeNavigationProxyServer(
     private const int MaxRequestHeaderBytes = 128 * 1024;
     private const int MaxRequestBodyBytes = 32 * 1024 * 1024;
     private const int MaxForwardResponseBytes = 64 * 1024 * 1024;
+    /// <summary>
+    /// Бюджет одной фазы ввода-вывода с клиентом (чтение запроса, TLS-рукопожатие туннеля,
+    /// запись ответа). Считается для каждой фазы отдельно: общий бюджет на всё соединение
+    /// поглощал бы время ожидания upstream и делал <see cref="ForwardTimeout"/> недостижимым.
+    /// </summary>
     private static readonly TimeSpan ConnectionIoTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>Бюджет ожидания ответа upstream. Не связан с фазами обмена с клиентом.</summary>
     private static readonly TimeSpan ForwardTimeout = TimeSpan.FromSeconds(60);
 
     private static readonly HashSet<string> HopByHopHeaderNames = new(StringComparer.OrdinalIgnoreCase)
@@ -146,31 +153,46 @@ internal sealed class BridgeNavigationProxyServer(
         }
     }
 
+    /// <summary>
+    /// Ограничивает одну фазу обмена с клиентом. Токен сервера остаётся связанным, поэтому
+    /// остановка сервера прерывает фазу немедленно.
+    /// </summary>
+    private static CancellationTokenSource CreatePhaseBudget(CancellationToken cancellationToken)
+    {
+        var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budget.CancelAfter(ConnectionIoTimeout);
+        return budget;
+    }
+
 #pragma warning disable MA0051 // Method is too long
     private async Task HandleClientAsync(TcpClient client, CancellationToken cancellationToken)
 #pragma warning restore MA0051 // Method is too long
     {
-        // Общий бюджет на ввод-вывод: зависший клиент не должен удерживать обработчик вечно.
-        using var ioTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        ioTimeout.CancelAfter(ConnectionIoTimeout);
-
         using (client)
         using (var stream = client.GetStream())
         {
             try
             {
-                var request = await ReadProxyRequestAsync(stream, ioTimeout.Token).ConfigureAwait(false);
-                if (request is null)
-                    return;
+                ProxyRequestReadResult readResult;
+                using (var readBudget = CreatePhaseBudget(cancellationToken))
+                {
+                    readResult = await ReadProxyRequestAsync(stream, readBudget.Token).ConfigureAwait(false);
+                }
 
-                if (await TryHandleDirectRequestAsync(stream, request, ioTimeout.Token).ConfigureAwait(false))
+                if (readResult.Request is not { } request)
+                {
+                    await WriteReadFailureAsync(stream, readResult.Outcome, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                if (await TryHandleDirectRequestAsync(stream, request, cancellationToken).ConfigureAwait(false))
                     return;
 
                 var routeToken = TryReadRouteToken(request.Headers);
                 if (string.IsNullOrWhiteSpace(routeToken))
                 {
                     logger?.LogBridgeServerNavigationProxyRejected(request.Method, request.Target, "proxy-auth-missing");
-                    await WriteProxyAuthenticationRequiredAsync(stream, ioTimeout.Token).ConfigureAwait(false);
+                    await WriteProxyAuthenticationRequiredAsync(stream, cancellationToken).ConfigureAwait(false);
                     return;
                 }
 
@@ -178,24 +200,24 @@ internal sealed class BridgeNavigationProxyServer(
                 if (registry is null || !registry.TryResolveRoute(routeToken, out var route))
                 {
                     logger?.LogBridgeServerNavigationProxyRejected(request.Method, request.Target, "proxy-route-missing");
-                    await WriteErrorResponseAsync(stream, HttpStatusCode.BadGateway, "route-missing", ioTimeout.Token).ConfigureAwait(false);
+                    await WriteErrorResponseAsync(stream, HttpStatusCode.BadGateway, "route-missing", cancellationToken).ConfigureAwait(false);
                     return;
                 }
 
                 if (request.IsConnect)
                 {
-                    await HandleConnectTunnelAsync(stream, request, routeToken, route, registry, ioTimeout.Token).ConfigureAwait(false);
+                    await HandleConnectTunnelAsync(stream, request, routeToken, route, registry, cancellationToken).ConfigureAwait(false);
                     return;
                 }
 
                 if (!TryBuildAbsoluteTargetUrl("http", request.Target, request.Headers, fallbackHost: null, fallbackPort: 0, out var absoluteTargetUrl))
                 {
                     logger?.LogBridgeServerNavigationProxyRejected(request.Method, request.Target, "absolute-url-invalid");
-                    await WriteErrorResponseAsync(stream, HttpStatusCode.BadRequest, "invalid-target", ioTimeout.Token).ConfigureAwait(false);
+                    await WriteErrorResponseAsync(stream, HttpStatusCode.BadRequest, "invalid-target", cancellationToken).ConfigureAwait(false);
                     return;
                 }
 
-                await HandleNavigationRequestAsync(stream, request, absoluteTargetUrl, routeToken, route, registry, ioTimeout.Token).ConfigureAwait(false);
+                await HandleNavigationRequestAsync(stream, request, absoluteTargetUrl, routeToken, route, registry, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -213,6 +235,32 @@ internal sealed class BridgeNavigationProxyServer(
             {
                 logger?.LogBridgeServerNavigationProxyConnectionFailed(exception);
             }
+        }
+    }
+
+    /// <summary>
+    /// Сообщает клиенту причину отказа в разборе запроса. Прежняя версия молча закрывала
+    /// соединение или, что хуже, форвардила запрос с потерянным либо обрезанным телом.
+    /// </summary>
+    private async Task WriteReadFailureAsync(Stream stream, ProxyRequestReadOutcome outcome, CancellationToken cancellationToken)
+    {
+        switch (outcome)
+        {
+            case ProxyRequestReadOutcome.HeadersTooLarge:
+                await WriteErrorResponseAsync(stream, HttpStatusCode.RequestHeaderFieldsTooLarge, "request-headers-too-large", cancellationToken).ConfigureAwait(false);
+                return;
+
+            case ProxyRequestReadOutcome.BodyTooLarge:
+                await WriteErrorResponseAsync(stream, HttpStatusCode.RequestEntityTooLarge, "request-body-too-large", cancellationToken).ConfigureAwait(false);
+                return;
+
+            case ProxyRequestReadOutcome.Malformed:
+                await WriteErrorResponseAsync(stream, HttpStatusCode.BadRequest, "malformed-request", cancellationToken).ConfigureAwait(false);
+                return;
+
+            default:
+                // Клиент закрыл соединение, не прислав запрос: отвечать некому.
+                return;
         }
     }
 
@@ -263,23 +311,37 @@ internal sealed class BridgeNavigationProxyServer(
             return;
         }
 
-        await WriteConnectEstablishedAsync(stream, cancellationToken).ConfigureAwait(false);
-
         using var sslStream = new SslStream(stream, leaveInnerStreamOpen: true);
-        var certificate = BridgeManagedDeliveryCertificateManager.Instance.GetOrCreateCertificate(request.ConnectHost);
-        await sslStream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
+
+        using (var handshakeBudget = CreatePhaseBudget(cancellationToken))
         {
-            ServerCertificate = certificate,
-            ClientCertificateRequired = false,
-            EnabledSslProtocols = SslProtocols.None,
-            CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
-        }, cancellationToken).ConfigureAwait(false);
+            await WriteConnectEstablishedAsync(stream, handshakeBudget.Token).ConfigureAwait(false);
 
-        var tunneledRequest = await ReadProxyRequestAsync(sslStream, cancellationToken).ConfigureAwait(false);
-        if (tunneledRequest is null)
+            var certificate = BridgeManagedDeliveryCertificateManager.Instance.GetOrCreateCertificate(request.ConnectHost);
+            await sslStream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
+            {
+                ServerCertificate = certificate,
+                ClientCertificateRequired = false,
+                EnabledSslProtocols = SslProtocols.None,
+                CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+            }, handshakeBudget.Token).ConfigureAwait(false);
+        }
+
+        ProxyRequestReadResult tunneledReadResult;
+        using (var readBudget = CreatePhaseBudget(cancellationToken))
+        {
+            tunneledReadResult = await ReadProxyRequestAsync(sslStream, readBudget.Token).ConfigureAwait(false);
+        }
+
+        if (tunneledReadResult.Request is not { } tunneledRequest)
+        {
+            await WriteReadFailureAsync(sslStream, tunneledReadResult.Outcome, cancellationToken).ConfigureAwait(false);
             return;
+        }
 
-        if (!TryBuildAbsoluteTargetUrl("https", tunneledRequest.Target, tunneledRequest.Headers, request.ConnectHost, request.ConnectPort, out var absoluteTargetUrl))
+        // Цель закреплена за хостом из CONNECT: заголовок Host внутри туннеля подконтролен
+        // содержимому страницы и не должен уводить запрос на другой origin.
+        if (!TryBuildTunneledTargetUrl(tunneledRequest.Target, request.ConnectHost, request.ConnectPort, out var absoluteTargetUrl))
         {
             logger?.LogBridgeServerNavigationProxyRejected(tunneledRequest.Method, tunneledRequest.Target, "tunnel-target-invalid");
             await WriteErrorResponseAsync(sslStream, HttpStatusCode.BadRequest, "invalid-tunnel-target", cancellationToken).ConfigureAwait(false);
@@ -353,13 +415,17 @@ internal sealed class BridgeNavigationProxyServer(
                 return;
 
             case ProxyNavigationDecisionAction.Abort:
+                // Навигационный abort должен ОТМЕНИТЬ переход и оставить вкладку на текущей странице,
+                // а не коммитить переход. Любой обычный HTTP-ответ (403 + тело) браузер рендерит как
+                // страницу по целевому URL. 204 No Content Firefox трактует как NS_ERROR_NO_CONTENT:
+                // навигация не коммитится, error page не показывается, вкладка остаётся на исходном URL.
                 await WriteDecisionResponseAsync(
                     stream,
                     method,
-                    ResolveStatusCode(decision.StatusCode, (int)HttpStatusCode.Forbidden),
-                    decision.ReasonPhrase,
-                    decision.ResponseHeaders,
-                    decision.ResponseBody,
+                    (int)HttpStatusCode.NoContent,
+                    reasonPhrase: null,
+                    responseHeaders: null,
+                    responseBody: null,
                     location: null,
                     cancellationToken).ConfigureAwait(false);
                 return;
@@ -396,40 +462,68 @@ internal sealed class BridgeNavigationProxyServer(
             cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<ProxyRequest?> ReadProxyRequestAsync(Stream stream, CancellationToken cancellationToken)
+    private enum ProxyRequestReadOutcome
     {
-        var requestEnvelope = await ReadRequestEnvelopeAsync(stream, cancellationToken).ConfigureAwait(false);
-        if (requestEnvelope is null)
-            return null;
+        Request,
+        Closed,
+        Malformed,
+        HeadersTooLarge,
+        BodyTooLarge,
+    }
 
-        var (headerBytes, bufferedBodyBytes) = requestEnvelope.Value;
+    private readonly record struct ProxyRequestReadResult(ProxyRequestReadOutcome Outcome, ProxyRequest? Request)
+    {
+        public static ProxyRequestReadResult Failure(ProxyRequestReadOutcome outcome) => new(outcome, Request: null);
+
+        public static ProxyRequestReadResult Success(ProxyRequest request) => new(ProxyRequestReadOutcome.Request, request);
+    }
+
+    private static async Task<ProxyRequestReadResult> ReadProxyRequestAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        var envelopeResult = await ReadRequestEnvelopeAsync(stream, cancellationToken).ConfigureAwait(false);
+        if (envelopeResult.Envelope is not { } requestEnvelope)
+            return ProxyRequestReadResult.Failure(envelopeResult.Outcome);
+
+        var (headerBytes, bufferedBodyBytes) = requestEnvelope;
         var headerText = Encoding.ASCII.GetString(headerBytes);
         var headerLines = headerText.Split("\r\n", StringSplitOptions.None);
         if (headerLines.Length == 0 || string.IsNullOrWhiteSpace(headerLines[0]))
-            return null;
+            return ProxyRequestReadResult.Failure(ProxyRequestReadOutcome.Malformed);
 
         var parts = headerLines[0].Split(' ', 3, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (parts.Length < 2)
-            return null;
+            return ProxyRequestReadResult.Failure(ProxyRequestReadOutcome.Malformed);
 
         var headers = ParseHeaders(headerLines);
 
         var method = parts[0];
         var target = parts[1];
-        byte[] bodyBytes;
+        byte[]? bodyBytes;
         if (IsChunkedTransferEncoding(headers))
         {
             bodyBytes = await ReadChunkedBodyBytesAsync(stream, bufferedBodyBytes, cancellationToken).ConfigureAwait(false);
         }
         else
         {
+            // Content-Length читается как long: значение сверх int.MaxValue раньше не разбиралось
+            // и запрос уходил upstream вообще без тела.
             var contentLength = TryReadContentLength(headers);
-            bodyBytes = contentLength is > 0 and <= MaxRequestBodyBytes
-                ? await ReadRequestBodyBytesAsync(stream, bufferedBodyBytes, contentLength, cancellationToken).ConfigureAwait(false)
+            if (contentLength is null)
+                return ProxyRequestReadResult.Failure(ProxyRequestReadOutcome.Malformed);
+
+            if (contentLength > MaxRequestBodyBytes)
+                return ProxyRequestReadResult.Failure(ProxyRequestReadOutcome.BodyTooLarge);
+
+            bodyBytes = contentLength > 0
+                ? await ReadRequestBodyBytesAsync(stream, bufferedBodyBytes, (int)contentLength.Value, cancellationToken).ConfigureAwait(false)
                 : [];
         }
 
-        return CreateProxyRequest(method, target, headers, bodyBytes);
+        // Тело не прочитано целиком: форвардить обрезанный запрос нельзя — upstream получил бы
+        // повреждённые данные и, вероятно, обработал бы их как валидные.
+        return bodyBytes is null
+            ? ProxyRequestReadResult.Failure(ProxyRequestReadOutcome.BodyTooLarge)
+            : ProxyRequestReadResult.Success(CreateProxyRequest(method, target, headers, bodyBytes));
     }
 
     private static bool IsChunkedTransferEncoding(Dictionary<string, string> headers)
@@ -437,8 +531,13 @@ internal sealed class BridgeNavigationProxyServer(
             && transferEncoding.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Any(static token => string.Equals(token, "chunked", StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// Возвращает <see langword="null"/>, если тело не удалось прочитать целиком (обрыв,
+    /// нарушенный chunked-формат или превышение лимита). Частично собранное тело наружу
+    /// не отдаётся: молчаливая обрезка приводила бы к порче данных на upstream.
+    /// </summary>
 #pragma warning disable S3776 // Cognitive Complexity of methods should not be too high
-    private static async Task<byte[]> ReadChunkedBodyBytesAsync(Stream stream, byte[] bufferedBodyBytes, CancellationToken cancellationToken)
+    private static async Task<byte[]?> ReadChunkedBodyBytesAsync(Stream stream, byte[] bufferedBodyBytes, CancellationToken cancellationToken)
 #pragma warning restore S3776 // Cognitive Complexity of methods should not be too high
     {
         var cursor = new ChunkCursor(stream, bufferedBodyBytes);
@@ -448,11 +547,11 @@ internal sealed class BridgeNavigationProxyServer(
         {
             var sizeLine = await cursor.ReadAsciiLineAsync(cancellationToken).ConfigureAwait(false);
             if (sizeLine is null)
-                return body.ToArray();
+                return null;
 
             var sizeText = sizeLine.Split(';', 2)[0].Trim();
             if (!int.TryParse(sizeText, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var chunkSize) || chunkSize < 0)
-                return body.ToArray();
+                return null;
 
             if (chunkSize == 0)
             {
@@ -467,10 +566,10 @@ internal sealed class BridgeNavigationProxyServer(
             }
 
             if (body.Length + chunkSize > MaxRequestBodyBytes)
-                return body.ToArray();
+                return null;
 
             if (!await cursor.CopyExactlyAsync(body, chunkSize, cancellationToken).ConfigureAwait(false))
-                return body.ToArray();
+                return null;
 
             // CRLF после данных чанка.
             _ = await cursor.ReadAsciiLineAsync(cancellationToken).ConfigureAwait(false);
@@ -598,66 +697,59 @@ internal sealed class BridgeNavigationProxyServer(
             Body: bodyBytes);
     }
 
-    private static async Task<(byte[] HeaderBytes, byte[] BufferedBodyBytes)?> ReadRequestEnvelopeAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        var buffer = new List<byte>();
-        var chunk = new byte[1024];
+    private readonly record struct RequestEnvelopeReadResult(
+        ProxyRequestReadOutcome Outcome,
+        (byte[] HeaderBytes, byte[] BufferedBodyBytes)? Envelope);
 
-        while (buffer.Count <= MaxRequestHeaderBytes)
+    private static async Task<RequestEnvelopeReadResult> ReadRequestEnvelopeAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        // Буфер растёт удвоением вместо поэлементного List<byte>.Add: заголовки до 128 КБ
+        // копировались по одному байту на каждый прочитанный октет.
+        var buffer = new byte[4096];
+        var count = 0;
+
+        while (true)
         {
-            var read = await stream.ReadAsync(chunk.AsMemory(0, chunk.Length), cancellationToken).ConfigureAwait(false);
+            if (count == buffer.Length)
+            {
+                if (buffer.Length >= MaxRequestHeaderBytes)
+                    return new(ProxyRequestReadOutcome.HeadersTooLarge, Envelope: null);
+
+                Array.Resize(ref buffer, Math.Min(buffer.Length * 2, MaxRequestHeaderBytes));
+            }
+
+            var read = await stream.ReadAsync(buffer.AsMemory(count), cancellationToken).ConfigureAwait(false);
             if (read <= 0)
-                return null;
-
-            var previousCount = buffer.Count;
-            for (var index = 0; index < read; index++)
             {
-                buffer.Add(chunk[index]);
+                return new(
+                    count == 0 ? ProxyRequestReadOutcome.Closed : ProxyRequestReadOutcome.Malformed,
+                    Envelope: null);
             }
 
-            if (TryExtractRequestEnvelope(buffer, previousCount, out var envelope))
-                return envelope;
-        }
+            var previousCount = count;
+            count += read;
 
-        // Заголовки сверх лимита — соединение закрывается без ответа.
-        return null;
+            if (TryExtractRequestEnvelope(buffer.AsSpan(0, count), previousCount, out var envelope))
+                return new(ProxyRequestReadOutcome.Request, envelope);
+        }
     }
 
-    private static bool TryExtractRequestEnvelope(List<byte> buffer, int previousCount, out (byte[] HeaderBytes, byte[] BufferedBodyBytes) envelope)
+    private static bool TryExtractRequestEnvelope(ReadOnlySpan<byte> buffer, int previousCount, out (byte[] HeaderBytes, byte[] BufferedBodyBytes) envelope)
     {
+        // Разделитель мог начаться в предыдущей порции, поэтому поиск отступает на три байта.
         var searchStart = Math.Max(0, previousCount - 3);
-        for (var index = searchStart; index <= buffer.Count - 4; index++)
+        var separatorIndex = buffer[searchStart..].IndexOf("\r\n\r\n"u8);
+        if (separatorIndex < 0)
         {
-            if (buffer[index] != '\r'
-                || buffer[index + 1] != '\n'
-                || buffer[index + 2] != '\r'
-                || buffer[index + 3] != '\n')
-            {
-                continue;
-            }
-
-            envelope = (
-                CopyBufferRange(buffer, 0, index),
-                CopyBufferRange(buffer, index + 4, buffer.Count - (index + 4)));
-            return true;
+            envelope = default;
+            return false;
         }
 
-        envelope = default;
-        return false;
-    }
-
-    private static byte[] CopyBufferRange(List<byte> source, int offset, int length)
-    {
-        if (length <= 0)
-            return [];
-
-        var copy = new byte[length];
-        for (var index = 0; index < length; index++)
-        {
-            copy[index] = source[offset + index];
-        }
-
-        return copy;
+        var headerEnd = searchStart + separatorIndex;
+        envelope = (
+            buffer[..headerEnd].ToArray(),
+            buffer[(headerEnd + 4)..].ToArray());
+        return true;
     }
 
     // Синтетическое решение «продолжить как есть» для запросов без зарегистрированного решения.
@@ -687,8 +779,10 @@ internal sealed class BridgeNavigationProxyServer(
             ? absoluteTargetUrl
             : decision.ForwardUrl;
 
-        using var forwardTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        forwardTimeout.CancelAfter(ForwardTimeout);
+        // Бюджет upstream отсчитывается от токена сервера, а не от фазы обмена с клиентом:
+        // иначе он поглощался бы уже потраченным на чтение запроса временем.
+        using var forwardBudget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        forwardBudget.CancelAfter(ForwardTimeout);
 
         try
         {
@@ -697,20 +791,13 @@ internal sealed class BridgeNavigationProxyServer(
             using var forwardResponse = await client.SendAsync(
                 forwardRequest,
                 HttpCompletionOption.ResponseHeadersRead,
-                forwardTimeout.Token).ConfigureAwait(false);
+                forwardBudget.Token).ConfigureAwait(false);
 
-            if (forwardResponse.Content.Headers.ContentLength > MaxForwardResponseBytes)
-            {
-                logger?.LogBridgeServerNavigationProxyRejected(clientRequest.Method, absoluteTargetUrl, "forward-response-too-large");
-                await WriteErrorResponseAsync(stream, HttpStatusCode.BadGateway, "forward-response-too-large", forwardTimeout.Token).ConfigureAwait(false);
-                return;
-            }
-
-            var body = await ReadForwardResponseBodyAsync(forwardResponse, forwardTimeout.Token).ConfigureAwait(false);
+            var body = await ReadForwardResponseBodyAsync(forwardResponse, forwardBudget.Token).ConfigureAwait(false);
             if (body is null)
             {
                 logger?.LogBridgeServerNavigationProxyRejected(clientRequest.Method, absoluteTargetUrl, "forward-response-too-large");
-                await WriteErrorResponseAsync(stream, HttpStatusCode.BadGateway, "forward-response-too-large", forwardTimeout.Token).ConfigureAwait(false);
+                await WriteErrorResponseAsync(stream, HttpStatusCode.BadGateway, "forward-response-too-large", cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -727,25 +814,49 @@ internal sealed class BridgeNavigationProxyServer(
         catch (HttpRequestException exception)
         {
             logger?.LogBridgeServerNavigationProxyForwardFailed(clientRequest.Method, absoluteTargetUrl, exception);
-            await WriteErrorResponseAsync(stream, HttpStatusCode.BadGateway, "decision-forward-failed", CancellationToken.None).ConfigureAwait(false);
+            await WriteErrorResponseAsync(stream, HttpStatusCode.BadGateway, "decision-forward-failed", cancellationToken).ConfigureAwait(false);
         }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             logger?.LogBridgeServerNavigationProxyRejected(clientRequest.Method, absoluteTargetUrl, "forward-timeout");
-            await WriteErrorResponseAsync(stream, HttpStatusCode.GatewayTimeout, "forward-timeout", CancellationToken.None).ConfigureAwait(false);
+            await WriteErrorResponseAsync(stream, HttpStatusCode.GatewayTimeout, "forward-timeout", cancellationToken).ConfigureAwait(false);
         }
     }
 
+    /// <summary>
+    /// Тело буферизуется целиком, потому что ответ клиенту всегда обрамляется Content-Length.
+    /// Лимит проверяется по мере чтения, а не после него: ответ без Content-Length (chunked)
+    /// иначе успевал бы полностью попасть в память до отбраковки.
+    /// </summary>
     private static async Task<byte[]?> ReadForwardResponseBodyAsync(HttpResponseMessage forwardResponse, CancellationToken cancellationToken)
     {
-        if (forwardResponse.Content.Headers.ContentLength == 0)
-            return [];
+        if (forwardResponse.Content.Headers.ContentLength is { } knownLength)
+        {
+            if (knownLength > MaxForwardResponseBytes)
+                return null;
 
-        if (forwardResponse.Content.Headers.ContentLength is { } knownLength && knownLength > MaxForwardResponseBytes)
-            return null;
+            if (knownLength == 0)
+                return [];
+        }
 
-        var body = await forwardResponse.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-        return body.Length > MaxForwardResponseBytes ? null : body;
+        var contentStream = await forwardResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using (contentStream.ConfigureAwait(false))
+        {
+            using var body = new MemoryStream();
+            var chunk = new byte[64 * 1024];
+
+            while (true)
+            {
+                var read = await contentStream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
+                if (read <= 0)
+                    return body.ToArray();
+
+                if (body.Length + read > MaxForwardResponseBytes)
+                    return null;
+
+                await body.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     private HttpRequestMessage CreateForwardRequest(
@@ -820,11 +931,15 @@ internal sealed class BridgeNavigationProxyServer(
 
     private static HttpClient CreateForwardClient(string upstreamProxySpec)
     {
-        var handler = new HttpClientHandler
+        var handler = new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
             AutomaticDecompression = DecompressionMethods.None,
             UseCookies = false,
+
+            // Клиенты кешируются на всё время жизни прокси, поэтому соединения нужно
+            // периодически пересоздавать: иначе они держали бы устаревшие DNS-записи.
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
         };
 
         if (!string.IsNullOrWhiteSpace(upstreamProxySpec)
@@ -849,14 +964,25 @@ internal sealed class BridgeNavigationProxyServer(
         };
     }
 
-    private static int TryReadContentLength(Dictionary<string, string> headers)
-        => headers.TryGetValue("Content-Length", out var rawContentLength)
-            && int.TryParse(rawContentLength, NumberStyles.Integer, CultureInfo.InvariantCulture, out var contentLength)
-            && contentLength > 0
-                ? contentLength
-                : 0;
+    /// <summary>
+    /// <see langword="null"/> — заголовок присутствует, но не является корректным неотрицательным
+    /// числом; <c>0</c> — тела нет.
+    /// </summary>
+    private static long? TryReadContentLength(Dictionary<string, string> headers)
+    {
+        if (!headers.TryGetValue("Content-Length", out var rawContentLength))
+            return 0;
 
-    private static async Task<byte[]> ReadRequestBodyBytesAsync(Stream stream, byte[] bufferedBodyBytes, int contentLength, CancellationToken cancellationToken)
+        return long.TryParse(rawContentLength, NumberStyles.Integer, CultureInfo.InvariantCulture, out var contentLength)
+            && contentLength >= 0
+                ? contentLength
+                : null;
+    }
+
+    /// <summary>
+    /// Возвращает <see langword="null"/>, если клиент закрыл поток до передачи всего тела.
+    /// </summary>
+    private static async Task<byte[]?> ReadRequestBodyBytesAsync(Stream stream, byte[] bufferedBodyBytes, int contentLength, CancellationToken cancellationToken)
     {
         if (bufferedBodyBytes.Length >= contentLength)
             return bufferedBodyBytes[..contentLength];
@@ -872,14 +998,12 @@ internal sealed class BridgeNavigationProxyServer(
         {
             var read = await stream.ReadAsync(result.AsMemory(offset, contentLength - offset), cancellationToken).ConfigureAwait(false);
             if (read <= 0)
-                break;
+                return null;
 
             offset += read;
         }
 
-        return offset == contentLength
-            ? result
-            : result[..offset];
+        return result;
     }
 
     private static bool TryCreateDirectRequest(ProxyRequest request, [NotNullWhen(true)] out BridgeNavigationProxyDirectRequest? directRequest)
@@ -940,6 +1064,49 @@ internal sealed class BridgeNavigationProxyServer(
         int fallbackPort,
         [NotNullWhen(true)] out string? absoluteTargetUrl)
     {
+        if (TryReadAbsoluteHttpTarget(rawTarget, out absoluteTargetUrl))
+            return true;
+
+        var authority = headers.TryGetValue("Host", out var hostHeader) && !string.IsNullOrWhiteSpace(hostHeader)
+            ? hostHeader
+            : FormatAuthority(fallbackHost, fallbackPort);
+
+        return TryResolveAgainstAuthority(scheme, authority, rawTarget, out absoluteTargetUrl);
+    }
+
+    /// <summary>
+    /// Строит цель запроса, пришедшего внутри CONNECT-туннеля. Authority берётся исключительно
+    /// из адреса, для которого туннель был установлен: заголовок Host и absolute-form цель
+    /// приходят из контента страницы и позволили бы увести запрос на посторонний узел,
+    /// сохранив при этом уже выданное TLS-соединение и маршрут прокси.
+    /// </summary>
+    private static bool TryBuildTunneledTargetUrl(
+        string rawTarget,
+        string connectHost,
+        int connectPort,
+        [NotNullWhen(true)] out string? absoluteTargetUrl)
+    {
+        if (TryReadAbsoluteHttpTarget(rawTarget, out var absoluteTarget)
+            && Uri.TryCreate(absoluteTarget, UriKind.Absolute, out var absoluteUri))
+        {
+            // Absolute-form внутри туннеля допустима только если она указывает на тот же узел.
+            // Сравнение по компонентам, а не по строке authority: Uri опускает порт по умолчанию.
+            if (!string.Equals(absoluteUri.Host, connectHost, StringComparison.OrdinalIgnoreCase)
+                || absoluteUri.Port != connectPort)
+            {
+                absoluteTargetUrl = null;
+                return false;
+            }
+
+            absoluteTargetUrl = absoluteTarget;
+            return true;
+        }
+
+        return TryResolveAgainstAuthority(Uri.UriSchemeHttps, FormatAuthority(connectHost, connectPort), rawTarget, out absoluteTargetUrl);
+    }
+
+    private static bool TryReadAbsoluteHttpTarget(string rawTarget, [NotNullWhen(true)] out string? absoluteTargetUrl)
+    {
         if (Uri.TryCreate(rawTarget, UriKind.Absolute, out var absoluteUri)
             && (string.Equals(absoluteUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(absoluteUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
@@ -948,17 +1115,19 @@ internal sealed class BridgeNavigationProxyServer(
             return true;
         }
 
-        var authority = ResolveAuthority(headers, fallbackHost, fallbackPort);
+        absoluteTargetUrl = null;
+        return false;
+    }
+
+    private static bool TryResolveAgainstAuthority(
+        string scheme,
+        string? authority,
+        string rawTarget,
+        [NotNullWhen(true)] out string? absoluteTargetUrl)
+    {
         if (string.IsNullOrWhiteSpace(authority)
-            || !Uri.TryCreate(string.Concat(scheme, "://", authority), UriKind.Absolute, out var baseUri))
-        {
-            absoluteTargetUrl = null;
-            return false;
-        }
-
-        var relativeTarget = NormalizeRelativeTarget(rawTarget);
-
-        if (!Uri.TryCreate(baseUri, relativeTarget, out var resolvedUri))
+            || !Uri.TryCreate(string.Concat(scheme, "://", authority), UriKind.Absolute, out var baseUri)
+            || !Uri.TryCreate(baseUri, NormalizeRelativeTarget(rawTarget), out var resolvedUri))
         {
             absoluteTargetUrl = null;
             return false;
@@ -968,23 +1137,14 @@ internal sealed class BridgeNavigationProxyServer(
         return true;
     }
 
-    private static string? ResolveAuthority(
-        IReadOnlyDictionary<string, string> headers,
-        string? fallbackHost,
-        int fallbackPort)
+    private static string? FormatAuthority(string? host, int port)
     {
-        if (headers.TryGetValue("Host", out var hostHeader)
-            && !string.IsNullOrWhiteSpace(hostHeader))
-        {
-            return hostHeader;
-        }
-
-        if (string.IsNullOrWhiteSpace(fallbackHost))
+        if (string.IsNullOrWhiteSpace(host))
             return null;
 
-        return fallbackPort > 0
-            ? string.Concat(fallbackHost, ":", fallbackPort.ToString(CultureInfo.InvariantCulture))
-            : fallbackHost;
+        return port > 0
+            ? string.Concat(host, ":", port.ToString(CultureInfo.InvariantCulture))
+            : host;
     }
 
     private static string NormalizeRelativeTarget(string rawTarget)
@@ -1113,12 +1273,16 @@ internal sealed class BridgeNavigationProxyServer(
             ? GetReasonPhrase(statusCode)
             : reasonPhrase;
         var headerBytes = Encoding.ASCII.GetBytes(BuildResponseHeader(statusCode, effectiveReasonPhrase, headers, effectiveBody.Length));
-        await stream.WriteAsync(headerBytes, cancellationToken).ConfigureAwait(false);
+
+        // Запись — самостоятельная фаза со своим бюджетом: клиент, переставший читать сокет,
+        // не должен удерживать обработчик после того, как ответ уже получен от upstream.
+        using var writeBudget = CreatePhaseBudget(cancellationToken);
+        await stream.WriteAsync(headerBytes, writeBudget.Token).ConfigureAwait(false);
 
         if (includeBody && effectiveBody.Length > 0)
-            await stream.WriteAsync(effectiveBody, cancellationToken).ConfigureAwait(false);
+            await stream.WriteAsync(effectiveBody, writeBudget.Token).ConfigureAwait(false);
 
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await stream.FlushAsync(writeBudget.Token).ConfigureAwait(false);
     }
 
     private static bool TryConsumeDecision(
@@ -1139,39 +1303,36 @@ internal sealed class BridgeNavigationProxyServer(
         return false;
     }
 
-    private static HashSet<string> EnumerateDecisionLookupUrls(string absoluteTargetUrl)
+    /// <summary>
+    /// Порядок кандидатов детерминирован: точное совпадение проверяется первым. Потребление
+    /// решения деструктивно, поэтому от порядка зависит, какое именно решение будет применено.
+    /// </summary>
+    private static List<string> EnumerateDecisionLookupUrls(string absoluteTargetUrl)
     {
-        var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        List<string> candidates = [absoluteTargetUrl];
+
+        if (!Uri.TryCreate(absoluteTargetUrl, UriKind.Absolute, out var uri))
+            return candidates;
+
+        var defaultPort = uri.Scheme switch
         {
-            absoluteTargetUrl,
+            "http" => 80,
+            "https" => 443,
+            _ => 0,
         };
 
-        if (Uri.TryCreate(absoluteTargetUrl, UriKind.Absolute, out var uri))
-        {
-            var defaultPort = uri.Scheme switch
-            {
-                "http" => 80,
-                "https" => 443,
-                _ => 0,
-            };
+        if (defaultPort <= 0)
+            return candidates;
 
-            if (defaultPort > 0)
-            {
-                var withoutPort = new UriBuilder(uri)
-                {
-                    Port = -1,
-                }.Uri.AbsoluteUri;
-                candidates.Add(withoutPort);
-
-                var withDefaultPort = new UriBuilder(uri)
-                {
-                    Port = defaultPort,
-                }.Uri.AbsoluteUri;
-                candidates.Add(withDefaultPort);
-            }
-        }
-
+        AddCandidate(candidates, new UriBuilder(uri) { Port = -1 }.Uri.AbsoluteUri);
+        AddCandidate(candidates, new UriBuilder(uri) { Port = defaultPort }.Uri.AbsoluteUri);
         return candidates;
+    }
+
+    private static void AddCandidate(List<string> candidates, string candidate)
+    {
+        if (!candidates.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+            candidates.Add(candidate);
     }
 
     private static string BuildResponseHeader(

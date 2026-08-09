@@ -147,7 +147,13 @@ public sealed class Frame : IFrame
     public ValueTask<string?> GetContentAsync() => GetContentAsync(CancellationToken.None);
 
     public ValueTask<JsonElement?> EvaluateAsync(string script, CancellationToken cancellationToken)
-        => EvaluateScriptCoreAsync(script, preferPageContextOnNull: true, cancellationToken);
+        // preferPageContextOnNull:false — выполняем скрипт РОВНО один раз (в world:'MAIN'). Прежний
+        // fallback-повтор через page-injection при результате 'null' исполнял скрипт с побочными
+        // эффектами дважды (например, вызов подписанной callback-функции → двойная доставка Callback).
+        // На реальном браузере world:'MAIN' — это тот же realm страницы, что и page-injection, поэтому
+        // повтор ничего не восстанавливал, только дублировал side effects. (Cookie-sync использует свой
+        // путь syncDocumentCookieSurface и сохраняет page-context fallback.)
+        => EvaluateScriptCoreAsync(script, preferPageContextOnNull: false, cancellationToken);
 
     internal async ValueTask<JsonElement?> EvaluateScriptCoreAsync(string script, bool preferPageContextOnNull, CancellationToken cancellationToken)
     {
@@ -183,7 +189,8 @@ public sealed class Frame : IFrame
 
     public async ValueTask<TResult?> EvaluateAsync<TResult>(string script, CancellationToken cancellationToken)
     {
-        var result = await EvaluateScriptCoreAsync(script, preferPageContextOnNull: true, cancellationToken).ConfigureAwait(false);
+        // preferPageContextOnNull:false — единственное исполнение (см. пояснение в EvaluateAsync выше).
+        var result = await EvaluateScriptCoreAsync(script, preferPageContextOnNull: false, cancellationToken).ConfigureAwait(false);
         if (result is not JsonElement element)
             return default;
 
@@ -456,12 +463,30 @@ public sealed class Frame : IFrame
             return;
         }
 
+        var discovered = new HashSet<string>(StringComparer.Ordinal);
         foreach (var frameHostElementId in frameHostElementIds)
         {
             if (string.IsNullOrWhiteSpace(frameHostElementId))
                 continue;
 
+            _ = discovered.Add(frameHostElementId);
             _ = page.GetOrCreateChildFrame(this, frameHostElementId);
+        }
+
+        // Discovery перечисляет только живые, подключённые host-элементы (live querySelectorAll в
+        // content-рантайме). Кэш дочерних фреймов add-only, поэтому любой закэшированный дочерний
+        // фрейм, чьего host'а больше нет в свежем наборе, имеет отвалившийся host (например,
+        // shadow-hosted iframe убрали и заменили новым) — выпиливаем его, иначе он навсегда останется
+        // в page.Frames / GetChildFramesAsync. Реконсиляция обязательна, потому что detach-сигнал в
+        // последовательности remove→reattach не всегда успевает опередить чтение снапшота.
+        foreach (var childFrame in SnapshotChildFrames())
+        {
+            if (childFrame.Host is Element host
+                && host.BridgeElementId is { Length: > 0 } hostId
+                && !discovered.Contains(hostId))
+            {
+                page.MarkFrameElementDetached(hostId);
+            }
         }
     }
 

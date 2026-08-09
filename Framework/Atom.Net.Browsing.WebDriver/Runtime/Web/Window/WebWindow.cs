@@ -11,6 +11,13 @@ namespace Atom.Net.Browsing.WebDriver;
 /// </summary>
 public sealed partial class WebWindow : IWebWindow
 {
+    /// <summary>
+    /// Верхняя граница буфера мостовых событий окна. Очередь дренируется только внешним
+    /// <see cref="TryDequeueBridgeEvent"/>; без ограничения долгоживущее окно накапливало бы
+    /// все события навигации и перехвата вместе с их payload (как и <see cref="WebPage"/>).
+    /// </summary>
+    private const int MaxBufferedBridgeEvents = 4096;
+
     private readonly ConcurrentStack<WebPage> pages = [];
     private readonly ConcurrentQueue<BridgeMessage> bridgeEvents = [];
     private readonly Lock pageGate = new();
@@ -64,6 +71,11 @@ public sealed partial class WebWindow : IWebWindow
     {
         ArgumentNullException.ThrowIfNull(message);
         bridgeEvents.Enqueue(message);
+        while (bridgeEvents.Count > MaxBufferedBridgeEvents && bridgeEvents.TryDequeue(out _))
+        {
+            // Вытесняем самые старые события: свежие важнее для потребителя.
+        }
+
         if (dispatchHandlers)
         {
             await OnBridgeEventReceivedAsync(message).ConfigureAwait(false);
@@ -117,6 +129,7 @@ public sealed partial class WebWindow : IWebWindow
             await page.DisposeAsync().ConfigureAwait(false);
         }
 
+        bridgeEvents.Clear();
         OwnerBrowser.OnWindowDisposed(this);
         OwnerBrowser.LaunchSettings.Logger?.LogWebWindowDisposed(WindowId);
     }
@@ -143,10 +156,16 @@ public sealed partial class WebWindow : IWebWindow
 
         lock (pageGate)
         {
-            if (disposeState != 0 || !ReferenceEquals(currentPage, page))
-            {
+            if (disposeState != 0)
                 return;
-            }
+
+            // ConcurrentStack не поддерживает удаление, поэтому закрытые страницы (со своей
+            // историей навигации и буферами) иначе оставались бы в стеке до закрытия окна.
+            // Все мутации pages идут под pageGate, поэтому пересборку можно делать здесь.
+            CompactDisposedPagesNoLock();
+
+            if (!ReferenceEquals(currentPage, page))
+                return;
 
             var nextPage = pages.FirstOrDefault(static candidate => !candidate.IsDisposed);
             if (nextPage is not null)
@@ -154,6 +173,21 @@ public sealed partial class WebWindow : IWebWindow
                 Volatile.Write(ref currentPage, nextPage);
                 OwnerBrowser.LaunchSettings.Logger?.LogWebWindowCurrentPageSwitched(WindowId, nextPage.TabId);
             }
+        }
+    }
+
+    private void CompactDisposedPagesNoLock()
+    {
+        if (!pages.Any(static candidate => candidate.IsDisposed))
+            return;
+
+        // pages перечисляется в LIFO-порядке (верхушка первой). Пересобираем, сохраняя порядок:
+        // живые страницы, отфильтрованные top..bottom, возвращаем в стек снизу вверх.
+        var live = pages.Where(static candidate => !candidate.IsDisposed).ToArray();
+        pages.Clear();
+        for (var index = live.Length - 1; index >= 0; index--)
+        {
+            pages.Push(live[index]);
         }
     }
 

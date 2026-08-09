@@ -15,8 +15,10 @@ public sealed class WebDriverPageLifecycleTests
         });
 
         var window = (WebWindow)browser.CurrentWindow;
-        var openedPage = (WebPage)await window.OpenPageAsync();
+        // Исходную страницу фиксируем ДО открытия новой: OpenPageAsync делает открытую страницу
+        // текущей, поэтому чтение CurrentPage после открытия вернуло бы саму openedPage.
         var initialPage = (WebPage)window.CurrentPage;
+        var openedPage = (WebPage)await window.OpenPageAsync();
 
         await openedPage.CloseAsync();
 

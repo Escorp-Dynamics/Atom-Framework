@@ -27,4 +27,7 @@ internal static partial class ProfileMaterializationLogs
 
     [LoggerMessage(EventId = 1864, Level = LogLevel.Information, Message = "Материализация профиля браузера завершена, возвращаемый путь: {ReturnedPath}")]
     public static partial void LogProfileMaterializationCompleted(this ILogger logger, string returnedPath);
+
+    [LoggerMessage(EventId = 1868, Level = LogLevel.Warning, Message = "Не удалось удалить временный профиль после сбоя материализации, путь: {ProfilePath}")]
+    public static partial void LogProfileMaterializationCleanupFailed(this ILogger logger, string profilePath, Exception exception);
 }

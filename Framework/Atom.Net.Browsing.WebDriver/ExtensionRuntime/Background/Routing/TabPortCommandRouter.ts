@@ -36,10 +36,26 @@ export class TabPortCommandRouter implements ICommandRouter {
 
             await runtime.endpoint.send(message);
         } catch (error) {
+            await this.reportFailure(message, error);
+        }
+    }
+
+    private async reportFailure(message: BridgeMessage, error: unknown): Promise<void> {
+        // Без идентификатора сообщения ответ невозможно скоррелировать: мостовой слой
+        // отбросит его как «ответ на неизвестный запрос».
+        if (typeof message.id !== 'string' || message.id.length === 0) {
+            console.error('[маршрутизатор вкладок] Команда без идентификатора не может быть завершена ошибкой', error);
+            return;
+        }
+
+        try {
             await this.dependencies.transport.send(this.dependencies.failures.toResponse({
                 request: message,
                 error,
             }));
+        } catch (sendError) {
+            // Канал уже недоступен: запрос завершится по таймауту на стороне моста.
+            console.error('[маршрутизатор вкладок] Не удалось отправить ответ об ошибке маршрутизации', sendError);
         }
     }
 }

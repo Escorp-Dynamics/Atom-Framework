@@ -181,16 +181,29 @@ public sealed partial class WebBrowser
             return (null, null);
 
         var bridgeServer = new BridgeServer(bridgeBootstrapPreparation.Settings);
-        await bridgeServer.StartAsync(cancellationToken).ConfigureAwait(false);
-        bridgeBootstrapPreparation = BindBridgeBootstrapPorts(
-            bridgeBootstrapPreparation,
-            bridgeServer.Port,
-            bridgeServer.SecureTransportPort,
-            bridgeServer.ManagedDeliveryPort,
-            bridgeServer.NavigationProxyPort,
-            bridgeServer.ManagedDeliveryRequiresCertificateBypass,
-            bridgeServer.ManagedDeliveryTrustDiagnostics);
-        return (bridgeServer, bridgeBootstrapPreparation);
+
+        // Сервер возвращается наружу только после успешного старта; до этого момента
+        // LaunchCoreAsync ещё не видит ссылку, поэтому его catch не смог бы освободить уже
+        // забинденные listener'ы/сокеты/фоновые задачи, если StartAsync упадёт (порт занят,
+        // отмена). Освобождаем частично-запущенный сервер здесь.
+        try
+        {
+            await bridgeServer.StartAsync(cancellationToken).ConfigureAwait(false);
+            bridgeBootstrapPreparation = BindBridgeBootstrapPorts(
+                bridgeBootstrapPreparation,
+                bridgeServer.Port,
+                bridgeServer.SecureTransportPort,
+                bridgeServer.ManagedDeliveryPort,
+                bridgeServer.NavigationProxyPort,
+                bridgeServer.ManagedDeliveryRequiresCertificateBypass,
+                bridgeServer.ManagedDeliveryTrustDiagnostics);
+            return (bridgeServer, bridgeBootstrapPreparation);
+        }
+        catch
+        {
+            await bridgeServer.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     private static BridgeBootstrapPreparation BindBridgeBootstrapPorts(
@@ -410,12 +423,23 @@ public sealed partial class WebBrowser
             profile.Path = string.Empty;
         }
 
-        if (Directory.Exists(materializedProfilePath))
-            Directory.Delete(materializedProfilePath, recursive: true);
-        else if (File.Exists(materializedProfilePath))
-            File.Delete(materializedProfilePath);
+        // Процесс браузера мог не завершиться за отведённые 5 секунд и всё ещё писать в
+        // user-data-dir, из-за чего рекурсивное удаление способно бросить IOException
+        // («Directory not empty») / UnauthorizedAccessException. Это не должно прерывать
+        // DisposeAsync или маскировать исходное исключение запуска в catch-ветке LaunchCoreAsync.
+        try
+        {
+            if (Directory.Exists(materializedProfilePath))
+                Directory.Delete(materializedProfilePath, recursive: true);
+            else if (File.Exists(materializedProfilePath))
+                File.Delete(materializedProfilePath);
 
-        settings.Logger?.LogWebBrowserProfileCleaned(materializedProfilePath);
+            settings.Logger?.LogWebBrowserProfileCleaned(materializedProfilePath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            settings.Logger?.LogWebBrowserProfileCleanupFailed(materializedProfilePath, exception);
+        }
     }
 
     private static bool ShouldPreserveTemporaryProfile()

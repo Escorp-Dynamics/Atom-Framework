@@ -8427,66 +8427,96 @@ public sealed class WebDriverRealBrowserIntegrationTests
             {
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    using var client = await listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
-                    await using var stream = client.GetStream();
-                    var requestHead = await ReadRequestHeadAsync(stream, cancellationToken).ConfigureAwait(false);
-                    var path = ReadRequestPath(requestHead);
-                    var requestHeaders = ReadRequestHeaders(requestHead);
-                    RecordObservedRequest(path, requestHeaders);
+                    var client = await listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
 
-                    if (path.Contains("/page-scope/", StringComparison.Ordinal)
-                        || path.Contains("/window-fanout/", StringComparison.Ordinal) && !path.Contains("/fetch/", StringComparison.Ordinal))
-                    {
-                        await WriteResponseAsync(
-                            stream,
-                            "200 OK",
-                            "text/html; charset=utf-8",
-                            Encoding.UTF8.GetBytes($"<html><body><main>{WebUtility.HtmlEncode(path)}</main></body></html>"),
-                            cancellationToken).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    if (path.Contains("/real-browser-interception/header-echo/", StringComparison.Ordinal))
-                    {
-                        var headerName = ReadQueryParameter(path, "header");
-                        var headerValue = headerName is null
-                            ? string.Empty
-                            : requestHeaders.TryGetValue(headerName, out var value)
-                                ? value
-                                : string.Empty;
-
-                        await WriteResponseAsync(
-                            stream,
-                            "200 OK",
-                            "text/plain; charset=utf-8",
-                            Encoding.UTF8.GetBytes(headerValue),
-                            cancellationToken).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    if (path.Contains("/real-browser-interception/", StringComparison.Ordinal))
-                    {
-                        await WriteResponseAsync(
-                            stream,
-                            "200 OK",
-                            "text/plain; charset=utf-8",
-                            Encoding.UTF8.GetBytes($"ok:{path}"),
-                            cancellationToken).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    await WriteResponseAsync(
-                        stream,
-                        "404 Not Found",
-                        "text/plain; charset=utf-8",
-                        Encoding.UTF8.GetBytes("not-found"),
-                        cancellationToken).ConfigureAwait(false);
+                    // Каждое соединение обслуживается независимой задачей. Последовательный цикл
+                    // блокировался бы в ReadRequestHeadAsync на «тихом» соединении (например,
+                    // спекулятивный preconnect Firefox, который не шлёт запрос) и не успевал бы
+                    // принять форвард навигационного прокси на этот же origin — навигация через
+                    // прокси зависала бы в дедлоке. Реальные серверы обслуживают соединения
+                    // конкурентно; мок обязан вести себя так же.
+                    _ = Task.Run(() => HandleConnectionAsync(client, cancellationToken), cancellationToken);
                 }
             }
             catch (OperationCanceledException)
             {
             }
             catch (ObjectDisposedException)
+            {
+            }
+        }
+
+        private async Task HandleConnectionAsync(System.Net.Sockets.TcpClient client, CancellationToken cancellationToken)
+        {
+            try
+            {
+                using (client)
+                {
+                    var stream = client.GetStream();
+                    await using (stream.ConfigureAwait(false))
+                    {
+                        var requestHead = await ReadRequestHeadAsync(stream, cancellationToken).ConfigureAwait(false);
+                        var path = ReadRequestPath(requestHead);
+                        var requestHeaders = ReadRequestHeaders(requestHead);
+                        RecordObservedRequest(path, requestHeaders);
+
+                        if (path.Contains("/page-scope/", StringComparison.Ordinal)
+                            || path.Contains("/window-fanout/", StringComparison.Ordinal) && !path.Contains("/fetch/", StringComparison.Ordinal))
+                        {
+                            await WriteResponseAsync(
+                                stream,
+                                "200 OK",
+                                "text/html; charset=utf-8",
+                                Encoding.UTF8.GetBytes($"<html><body><main>{WebUtility.HtmlEncode(path)}</main></body></html>"),
+                                cancellationToken).ConfigureAwait(false);
+                            return;
+                        }
+
+                        if (path.Contains("/real-browser-interception/header-echo/", StringComparison.Ordinal))
+                        {
+                            var headerName = ReadQueryParameter(path, "header");
+                            var headerValue = headerName is null
+                                ? string.Empty
+                                : requestHeaders.TryGetValue(headerName, out var value)
+                                    ? value
+                                    : string.Empty;
+
+                            await WriteResponseAsync(
+                                stream,
+                                "200 OK",
+                                "text/plain; charset=utf-8",
+                                Encoding.UTF8.GetBytes(headerValue),
+                                cancellationToken).ConfigureAwait(false);
+                            return;
+                        }
+
+                        if (path.Contains("/real-browser-interception/", StringComparison.Ordinal))
+                        {
+                            await WriteResponseAsync(
+                                stream,
+                                "200 OK",
+                                "text/plain; charset=utf-8",
+                                Encoding.UTF8.GetBytes($"ok:{path}"),
+                                cancellationToken).ConfigureAwait(false);
+                            return;
+                        }
+
+                        await WriteResponseAsync(
+                            stream,
+                            "404 Not Found",
+                            "text/plain; charset=utf-8",
+                            Encoding.UTF8.GetBytes("not-found"),
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            catch (IOException)
             {
             }
         }
@@ -8978,47 +9008,19 @@ public sealed class WebDriverRealBrowserIntegrationTests
         if (profile is not ChromeProfile || profile is FirefoxProfile)
             return;
 
-        var manifestPath = profile.Path is { Length: > 0 } profilePath
-            ? Path.Combine(profilePath, "profile.json")
-            : null;
-        if (string.IsNullOrWhiteSpace(manifestPath) || !File.Exists(manifestPath))
-            return;
-
-        using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
-        if (!document.RootElement.TryGetProperty("bridge", out var bridgeElement))
-            return;
-
-        string? installMode = null;
-        if (bridgeElement.TryGetProperty("strategy", out var strategyElement)
-            && strategyElement.TryGetProperty("installMode", out var installModeElement))
-        {
-            installMode = installModeElement.GetString();
-        }
-
-        string? managedPolicyStatus = null;
-        string? managedPolicyDetail = null;
-        if (bridgeElement.TryGetProperty("managedPolicyDiagnostics", out var managedPolicyElement))
-        {
-            if (managedPolicyElement.TryGetProperty("status", out var statusElement))
-                managedPolicyStatus = statusElement.GetString();
-
-            if (managedPolicyElement.TryGetProperty("detail", out var detailElement))
-                managedPolicyDetail = detailElement.GetString();
-        }
-
-        var profileSeeded = string.Equals(installMode, ChromiumBootstrapInstallMode.ProfileSeeded.ToString(), StringComparison.Ordinal);
-        var missingManagedPolicy = string.Equals(managedPolicyStatus, "profile-local", StringComparison.Ordinal)
-            || string.Equals(managedPolicyStatus, "system-publish-required", StringComparison.Ordinal);
-        if (!profileSeeded && !missingManagedPolicy)
-            return;
-
+        // Перехват с решением на стороне драйвера требует, чтобы блокирующий обработчик webRequest
+        // вернул решение СИНХРОННО. В Chromium расширение обязано быть Manifest V3, где фон — это
+        // service worker, а там нет ни XMLHttpRequest, ни Worker (проверено на Edge 150), то есть
+        // синхронного сетевого примитива не существует в принципе. Ограничение платформы, а не
+        // конфигурации: managed policy и force-install его не снимают. Firefox работает только
+        // потому, что MV2 использует persistent background page с синхронным XMLHttpRequest.
+        // Когда для Chromium появится declarativeNetRequest-бэкенд, этот пропуск нужно снять.
         var browserName = profile.GetType().Name.Replace("Profile", string.Empty, StringComparison.Ordinal);
-        var message = $"{scenario} requires a managed-policy Chromium extension install on Linux for MV3 webRequest parity; browser={browserName}, bridgeInstallMode={installMode ?? "<unknown>"}, managedPolicyStatus={managedPolicyStatus ?? "<unknown>"}";
-        if (!string.IsNullOrWhiteSpace(managedPolicyDetail))
-            message = string.Concat(message, ", managedPolicyDetail=", managedPolicyDetail);
-
-        Assert.Ignore(message);
+        Assert.Ignore(
+            $"{scenario}: перехват с решением драйвера не поддерживается в Chromium Manifest V3 "
+            + $"(фон — service worker без синхронного XMLHttpRequest, блокирующий webRequest требует синхронного ответа); browser={browserName}");
     }
+
     private sealed class RealBrowserTrustedInputSession(WebBrowser browser, VirtualDisplay? display) : IAsyncDisposable
     {
         internal WebBrowser Browser { get; } = browser;

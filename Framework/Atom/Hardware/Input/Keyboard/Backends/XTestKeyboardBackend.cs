@@ -78,7 +78,8 @@ internal sealed partial class XTestKeyboardBackend : IVirtualKeyboardBackend
         EnsurePointerFocused();
         var keycode = ConsoleKeyToKeycode(key);
         _ = XTestFakeKeyEvent(display, keycode, isPress: 1, delay: 0);
-        _ = XFlush(display);
+        // XSync, а не XFlush: гарантируем, что нажатие обработано сервером сразу после установки фокуса.
+        _ = XSync(display, discard: 0);
     }
 
     /// <inheritdoc/>
@@ -87,7 +88,7 @@ internal sealed partial class XTestKeyboardBackend : IVirtualKeyboardBackend
         ThrowIfUnavailable();
         var keycode = ConsoleKeyToKeycode(key);
         _ = XTestFakeKeyEvent(display, keycode, isPress: 0, delay: 0);
-        _ = XFlush(display);
+        _ = XSync(display, discard: 0);
     }
 
     /// <inheritdoc/>
@@ -165,8 +166,11 @@ internal sealed partial class XTestKeyboardBackend : IVirtualKeyboardBackend
         LastAssignedFocusWindow = focusWindow;
         LastFocusStrategy = focusStrategy;
 
+        // Фокус ставим на окно верхнего уровня под указателем (childWindow) — так клавиши доходят до
+        // содержимого. Важно: фокусировать глубочайшего потомка НЕЛЬЗЯ — Firefox тогда теряет клавиши.
+        // XSync (не XFlush): фокус должен примениться до отправки клавиши.
         _ = XSetInputFocus(display, focusWindow, RevertToParent, CurrentTime);
-        _ = XFlush(display);
+        _ = XSync(display, discard: 0);
     }
 
     private bool TryGetFocusedWindow(nint rootWindow, out nint focusedWindow)
@@ -294,7 +298,7 @@ internal sealed partial class XTestKeyboardBackend : IVirtualKeyboardBackend
                 _ = XTestFakeKeyEvent(display, kc, isPress, delay: 0);
         }
 
-        _ = XFlush(display);
+        _ = XSync(display, discard: 0);
     }
 
     private static nuint MapConsoleKeyToKeysym(ConsoleKey key) => key switch

@@ -13,11 +13,27 @@ namespace Atom.Net.Browsing.WebDriver;
 
 internal sealed class PageNavigationState : IPageTransport
 {
+    /// <summary>
+    /// Глубина синтетической истории навигации. Каждая запись держит контент и тело ответа,
+    /// поэтому неограниченная история для долгоживущей вкладки означала бы рост памяти,
+    /// пропорциональный числу переходов.
+    /// </summary>
+    private const int MaxHistoryEntries = 256;
+
+    /// <summary>
+    /// Верхняя граница очереди событий: её дренирует только внешний потребитель через
+    /// <see cref="TryDequeueEvent"/>, и без ограничения она росла бы бесконечно.
+    /// </summary>
+    private const int MaxQueuedEvents = 4096;
+
+    /// <summary>Контекст для команд, не указавших contextId явно.</summary>
+    private const string DefaultCookieContextId = "";
+
     private static readonly string[] CallbackRootPrefixes = ["window.", "globalThis.", "self.", "this."];
     private readonly HashSet<string> callbackSubscriptions = new(StringComparer.Ordinal);
     private readonly List<PageNavigationEntry> history = [];
     private readonly ConcurrentQueue<BridgeMessage> events = [];
-    private readonly List<Cookie> cookieStore = [];
+    private readonly List<StoredCookie> cookieStore = [];
     private readonly Lock stateGate = new();
     private readonly string tabId;
     private readonly string windowId;
@@ -82,7 +98,7 @@ internal sealed class PageNavigationState : IPageTransport
     {
         lock (stateGate)
         {
-            return cookieStore.Select(CloneCookie).ToArray();
+            return cookieStore.Select(static stored => CloneCookie(stored.Cookie)).ToArray();
         }
     }
 
@@ -97,11 +113,7 @@ internal sealed class PageNavigationState : IPageTransport
                 var normalized = CloneCookie(cookie);
                 normalized.Path = NormalizeCookiePath(normalized.Path);
                 normalized.Domain ??= string.Empty;
-                var existingIndex = cookieStore.FindIndex(existing => CookieMatches(existing, normalized));
-                if (existingIndex >= 0)
-                    cookieStore[existingIndex] = normalized;
-                else
-                    cookieStore.Add(normalized);
+                StoreCookieNoLock(DefaultCookieContextId, normalized);
             }
         }
     }
@@ -204,6 +216,28 @@ internal sealed class PageNavigationState : IPageTransport
     public bool TryDequeueEvent([NotNullWhen(true)] out BridgeMessage? message)
         => events.TryDequeue(out message);
 
+    private void EnqueueEvent(BridgeMessage message)
+    {
+        events.Enqueue(message);
+        while (events.Count > MaxQueuedEvents && events.TryDequeue(out _))
+        {
+            // Вытесняем самые старые события.
+        }
+    }
+
+    /// <summary>
+    /// Обрезает историю с головы, сохраняя позицию текущей записи.
+    /// </summary>
+    private void TrimHistoryNoLock()
+    {
+        var excess = history.Count - MaxHistoryEntries;
+        if (excess <= 0)
+            return;
+
+        history.RemoveRange(0, excess);
+        currentIndex = Math.Max(-1, currentIndex - excess);
+    }
+
     internal bool CanUseBridgeReload()
     {
         lock (stateGate)
@@ -227,6 +261,7 @@ internal sealed class PageNavigationState : IPageTransport
                 history.RemoveRange(currentIndex + 1, history.Count - currentIndex - 1);
 
             history.Add(entry);
+            TrimHistoryNoLock();
             currentIndex = history.Count - 1;
 
             var request = response.RequestMessage ?? CreateRequestMessage(url, settings, body);
@@ -256,6 +291,7 @@ internal sealed class PageNavigationState : IPageTransport
             if (currentIndex < 0)
             {
                 history.Add(entry);
+                TrimHistoryNoLock();
                 currentIndex = history.Count - 1;
             }
             else
@@ -293,6 +329,7 @@ internal sealed class PageNavigationState : IPageTransport
                     return;
 
                 history.Add(new PageNavigationEntry(url, title, Content: null, Headers: null, Body: [], SnapshotSource: PageNavigationSnapshotSource.LiveLifecycle));
+                TrimHistoryNoLock();
                 currentIndex = history.Count - 1;
                 return;
             }
@@ -364,22 +401,59 @@ internal sealed class PageNavigationState : IPageTransport
             return CreateErrorResponse(request, BridgeStatus.Error, error);
         }
 
-        var existingIndex = cookieStore.FindIndex(existing => CookieMatches(existing, cookie));
-        if (existingIndex >= 0)
-            cookieStore[existingIndex] = cookie;
-        else
-            cookieStore.Add(cookie);
-
+        StoreCookieNoLock(ReadCookieContextId(request.Payload), cookie);
         return CreateSuccessResponse(request, payload: null);
     }
 
     private BridgeMessage HandleGetCookies(BridgeMessage request)
-        => CreateSuccessResponse(request, CreateCookieArrayPayload(cookieStore));
+    {
+        var contextId = ReadCookieContextId(request.Payload);
+        return CreateSuccessResponse(request, CreateCookieArrayPayload(EnumerateCookiesNoLock(contextId)));
+    }
 
     private BridgeMessage HandleDeleteCookies(BridgeMessage request)
     {
-        cookieStore.Clear();
+        // Удаляются cookie только запрошенного контекста: прежняя версия чистила всё
+        // хранилище, обнуляя состояние остальных контекстов той же вкладки.
+        var contextId = ReadCookieContextId(request.Payload);
+        cookieStore.RemoveAll(stored => string.Equals(stored.ContextId, contextId, StringComparison.Ordinal));
         return CreateSuccessResponse(request, payload: null);
+    }
+
+    private void StoreCookieNoLock(string contextId, Cookie cookie)
+    {
+        var existingIndex = cookieStore.FindIndex(
+            stored => string.Equals(stored.ContextId, contextId, StringComparison.Ordinal)
+                && CookieMatches(stored.Cookie, cookie));
+
+        var entry = new StoredCookie(contextId, cookie);
+        if (existingIndex >= 0)
+            cookieStore[existingIndex] = entry;
+        else
+            cookieStore.Add(entry);
+    }
+
+    private IEnumerable<Cookie> EnumerateCookiesNoLock(string contextId)
+        => cookieStore
+            .Where(stored => string.Equals(stored.ContextId, contextId, StringComparison.Ordinal))
+            .Select(static stored => stored.Cookie);
+
+    /// <summary>
+    /// Контекст, к которому относится cookie-команда. Команды без явного contextId работают
+    /// с контекстом по умолчанию — так же, как контекстно-независимая часть транспорта.
+    /// </summary>
+    private static string ReadCookieContextId(JsonElement? payload)
+    {
+        if (payload is not JsonElement element
+            || element.ValueKind != JsonValueKind.Object
+            || !element.TryGetProperty("contextId", out var contextIdElement)
+            || contextIdElement.ValueKind != JsonValueKind.String)
+        {
+            return DefaultCookieContextId;
+        }
+
+        var contextId = contextIdElement.GetString();
+        return string.IsNullOrWhiteSpace(contextId) ? DefaultCookieContextId : contextId;
     }
 
     private HttpsResponseMessage Move(int offset)
@@ -418,6 +492,7 @@ internal sealed class PageNavigationState : IPageTransport
             history.RemoveRange(currentIndex + 1, history.Count - currentIndex - 1);
 
         history.Add(entry);
+        TrimHistoryNoLock();
         currentIndex = history.Count - 1;
         return BuildResponse(entry);
     }
@@ -492,7 +567,7 @@ internal sealed class PageNavigationState : IPageTransport
     private void EnqueueSyntheticResponseEvents(HttpsResponseMessage response, PageNavigationEntry entry, Uri fallbackUrl)
     {
         var responsePayload = CreateResponsePayload(response, entry, fallbackUrl);
-        events.Enqueue(CreateEventMessage(BridgeEvent.ResponseReceived, responsePayload));
+        EnqueueEvent(CreateEventMessage(BridgeEvent.ResponseReceived, responsePayload));
     }
 
     private PageNavigationEntry? TryGetCurrentEntry()
@@ -547,8 +622,8 @@ internal sealed class PageNavigationState : IPageTransport
             ["name"] = callbackName,
         };
 
-        events.Enqueue(CreateEventMessage(BridgeEvent.Callback, CreateJsonObjectElement(callbackPayload)));
-        events.Enqueue(CreateEventMessage(BridgeEvent.CallbackFinalized, CreateJsonObjectElement(finalizedPayload)));
+        EnqueueEvent(CreateEventMessage(BridgeEvent.Callback, CreateJsonObjectElement(callbackPayload)));
+        EnqueueEvent(CreateEventMessage(BridgeEvent.CallbackFinalized, CreateJsonObjectElement(finalizedPayload)));
         logger?.LogPageTransportCallbackQueued(callbackName, args.Length, windowId, tabId);
     }
 
@@ -905,7 +980,7 @@ internal sealed class PageNavigationState : IPageTransport
         {
             "document.title" => CreateJsonStringElement(ReadString(BridgeCommand.GetTitle)),
             "window.location.href" or "location.href" or "document.URL" => CreateJsonStringElement(ReadUri(BridgeCommand.GetUrl)?.ToString()),
-            "document.cookie" => CreateJsonStringElement(BuildCookieHeader(cookieStore)),
+            "document.cookie" => CreateJsonStringElement(BuildCookieHeader(cookieStore.Select(static stored => stored.Cookie))),
             "document.documentElement.outerHTML" or "document.body.outerHTML" or "document.body.innerHTML" => CreateJsonStringElement(ReadString(BridgeCommand.GetContent)),
             _ => null,
         };
@@ -1076,9 +1151,15 @@ internal sealed class PageNavigationState : IPageTransport
             return ReadOnlyMemory<byte>.Empty;
 
         var value = bodyElement.GetString();
-        return string.IsNullOrWhiteSpace(value)
-            ? ReadOnlyMemory<byte>.Empty
-            : Convert.FromBase64String(value);
+        if (string.IsNullOrWhiteSpace(value))
+            return ReadOnlyMemory<byte>.Empty;
+
+        // Повреждённый base64 не должен превращаться в необработанное исключение посреди
+        // обработки навигации: тело просто считается отсутствующим.
+        var buffer = new byte[(value.Length / 4 * 3) + 3];
+        return Convert.TryFromBase64String(value, buffer, out var decodedLength)
+            ? buffer.AsMemory(0, decodedLength)
+            : ReadOnlyMemory<byte>.Empty;
     }
 
     private static HttpsResponseMessage ReadNavigationResponse(BridgeMessage response, Uri fallbackUrl)
@@ -1184,9 +1265,9 @@ internal sealed class PageNavigationState : IPageTransport
         }
 
         var payload = CreateEventPayload(entry);
-        events.Enqueue(CreateEventMessage(BridgeEvent.DomContentLoaded, payload));
-        events.Enqueue(CreateEventMessage(BridgeEvent.NavigationCompleted, payload));
-        events.Enqueue(CreateEventMessage(BridgeEvent.PageLoaded, payload));
+        EnqueueEvent(CreateEventMessage(BridgeEvent.DomContentLoaded, payload));
+        EnqueueEvent(CreateEventMessage(BridgeEvent.NavigationCompleted, payload));
+        EnqueueEvent(CreateEventMessage(BridgeEvent.PageLoaded, payload));
 #pragma warning disable CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
         logger?.LogPageTransportLifecycleEventsQueued(entry.Url.ToString(), windowId, tabId);
 #pragma warning restore CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
@@ -1196,8 +1277,8 @@ internal sealed class PageNavigationState : IPageTransport
     {
         var requestPayload = CreateRequestPayload(response, settings, entry, fallbackUrl);
         var responsePayload = CreateResponsePayload(response, entry, fallbackUrl);
-        events.Enqueue(CreateEventMessage(BridgeEvent.RequestIntercepted, requestPayload));
-        events.Enqueue(CreateEventMessage(BridgeEvent.ResponseReceived, responsePayload));
+        EnqueueEvent(CreateEventMessage(BridgeEvent.RequestIntercepted, requestPayload));
+        EnqueueEvent(CreateEventMessage(BridgeEvent.ResponseReceived, responsePayload));
     }
 
     private BridgeMessage CreateEventMessage(BridgeEvent @event, JsonElement payload)
@@ -1341,7 +1422,7 @@ internal sealed class PageNavigationState : IPageTransport
             };
 
             if (cookie.Expires != DateTime.MinValue)
-                cookiePayload["expires"] = new DateTimeOffset(cookie.Expires).ToUnixTimeSeconds();
+                cookiePayload["expires"] = ToUnixTimeSeconds(cookie.Expires);
 
             payload.Add(cookiePayload);
         }
@@ -1389,6 +1470,16 @@ internal sealed class PageNavigationState : IPageTransport
         cookie = new Cookie(name, value, path, domain);
         return true;
     }
+
+    /// <summary>
+    /// <see cref="Cookie.Expires"/> обычно имеет <see cref="DateTimeKind.Unspecified"/>, а
+    /// <c>new DateTimeOffset(DateTime)</c> трактует такое значение как локальное время и сдвигает
+    /// срок жизни на смещение часового пояса. Неуказанный Kind считаем UTC.
+    /// </summary>
+    private static long ToUnixTimeSeconds(DateTime expires)
+        => new DateTimeOffset(expires.Kind is DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(expires, DateTimeKind.Utc)
+            : expires).ToUnixTimeSeconds();
 
     private static string NormalizeCookiePath(string? path)
         => string.IsNullOrWhiteSpace(path) ? "/" : path;
@@ -1445,6 +1536,8 @@ internal sealed class PageNavigationState : IPageTransport
         return new ByteArrayContent([]);
     }
 }
+
+internal readonly record struct StoredCookie(string ContextId, Cookie Cookie);
 
 internal enum PageNavigationSnapshotSource
 {

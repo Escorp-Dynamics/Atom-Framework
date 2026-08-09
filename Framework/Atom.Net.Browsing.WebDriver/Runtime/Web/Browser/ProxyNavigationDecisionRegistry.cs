@@ -89,7 +89,7 @@ internal sealed class ProxyNavigationDecisionRegistry
             {
                 // Тот же маршрут: обновляем данные, счётчик контекстов не меняется.
                 if (routesByToken.TryGetValue(existingToken, out var currentState))
-                    currentState.Update(route);
+                    currentState.UpdateRoute(route);
 
                 return;
             }
@@ -102,7 +102,7 @@ internal sealed class ProxyNavigationDecisionRegistry
                 static (_, nextRoute) => new ProxyNavigationRouteState(nextRoute),
                 static (_, existingState, nextRoute) =>
                 {
-                    existingState.Update(nextRoute);
+                    existingState.UpdateRoute(nextRoute);
                     return existingState;
                 },
                 route);
@@ -168,6 +168,19 @@ internal sealed class ProxyNavigationDecisionRegistry
         return false;
     }
 
+    // Не-потребляющая проверка: есть ли для контекста решение (ожидающее или уже потреблённое) с данным
+    // requestId. Используется для дедупликации повторного /intercept при 407-переспросе прокси-авторизации,
+    // когда Firefox ретраит main_frame-запрос с тем же requestId.
+    public bool HasDecisionForRequest(string contextId, string requestId, DateTimeOffset nowUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(contextId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
+
+        return tokensByContextId.TryGetValue(contextId, out var routeToken)
+            && routesByToken.TryGetValue(routeToken, out var state)
+            && state.HasDecisionForRequest(requestId, nowUtc);
+    }
+
     public bool RemoveRouteByContextId(string contextId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(contextId);
@@ -216,8 +229,16 @@ internal sealed class ProxyNavigationDecisionRegistry
 
     private sealed class ProxyNavigationRouteState(ProxyNavigationRoute route)
     {
+        /// <summary>
+        /// Локальный прокси отвечает <c>Connection: close</c>, поэтому браузер повторяет запрос
+        /// на новом соединении. Без повтора решения такой ретрай не находил бы ничего и уходил
+        /// в «неявный continue», то есть fulfill/abort обходились бы простой перепосылкой.
+        /// </summary>
+        private static readonly TimeSpan ConsumedDecisionReplayWindow = TimeSpan.FromSeconds(10);
+
         private readonly Lock gate = new();
         private readonly List<ProxyNavigationPendingDecision> pendingDecisions = [];
+        private readonly List<ConsumedDecision> consumedDecisions = [];
 
         // Изменяется только под registryGate владеющего реестра.
         public int AttachedContextCount { get; private set; }
@@ -230,12 +251,15 @@ internal sealed class ProxyNavigationDecisionRegistry
         public int DetachContext()
             => --AttachedContextCount;
 
-        public void Update(ProxyNavigationRoute route)
+        /// <summary>
+        /// Обновляет данные маршрута, не трогая очередь решений: переприменение контекста вкладки
+        /// (смена прокси, обновление ревизии) не должно отменять уже поставленные решения.
+        /// </summary>
+        public void UpdateRoute(ProxyNavigationRoute route)
         {
             lock (gate)
             {
                 Route = route;
-                pendingDecisions.Clear();
             }
         }
 
@@ -257,14 +281,21 @@ internal sealed class ProxyNavigationDecisionRegistry
                 for (var index = 0; index < pendingDecisions.Count; index++)
                 {
                     var candidate = pendingDecisions[index];
-                    if (!string.Equals(candidate.Method, method, StringComparison.OrdinalIgnoreCase)
-                        || !string.Equals(candidate.AbsoluteUrl, absoluteUrl, StringComparison.Ordinal))
-                    {
+                    if (!Matches(candidate, method, absoluteUrl))
                         continue;
-                    }
 
                     pendingDecisions.RemoveAt(index);
+                    consumedDecisions.Add(new ConsumedDecision(candidate, nowUtc + ConsumedDecisionReplayWindow));
                     decision = candidate;
+                    return true;
+                }
+
+                foreach (var consumed in consumedDecisions)
+                {
+                    if (!Matches(consumed.Decision, method, absoluteUrl))
+                        continue;
+
+                    decision = consumed.Decision;
                     return true;
                 }
             }
@@ -273,13 +304,40 @@ internal sealed class ProxyNavigationDecisionRegistry
             return false;
         }
 
+        public bool HasDecisionForRequest(string requestId, DateTimeOffset nowUtc)
+        {
+            lock (gate)
+            {
+                PurgeExpired(nowUtc);
+
+                foreach (var pending in pendingDecisions)
+                {
+                    if (string.Equals(pending.RequestId, requestId, StringComparison.Ordinal))
+                        return true;
+                }
+
+                foreach (var consumed in consumedDecisions)
+                {
+                    if (string.Equals(consumed.Decision.RequestId, requestId, StringComparison.Ordinal))
+                        return true;
+                }
+
+                return false;
+            }
+        }
+
         public void Clear()
         {
             lock (gate)
             {
                 pendingDecisions.Clear();
+                consumedDecisions.Clear();
             }
         }
+
+        private static bool Matches(ProxyNavigationPendingDecision candidate, string method, string absoluteUrl)
+            => string.Equals(candidate.Method, method, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(candidate.AbsoluteUrl, absoluteUrl, StringComparison.Ordinal);
 
         private void PurgeExpired(DateTimeOffset nowUtc)
         {
@@ -288,6 +346,14 @@ internal sealed class ProxyNavigationDecisionRegistry
                 if (pendingDecisions[index].ExpiresAtUtc <= nowUtc)
                     pendingDecisions.RemoveAt(index);
             }
+
+            for (var index = consumedDecisions.Count - 1; index >= 0; index--)
+            {
+                if (consumedDecisions[index].ReplayableUntilUtc <= nowUtc)
+                    consumedDecisions.RemoveAt(index);
+            }
         }
+
+        private readonly record struct ConsumedDecision(ProxyNavigationPendingDecision Decision, DateTimeOffset ReplayableUntilUtc);
     }
 }

@@ -126,6 +126,15 @@ public sealed partial class WebBrowser
             return BridgeInterceptHttpResponse.Continue();
         }
 
+        // Локальный навигационный прокси отвечает 407 и вынуждает Firefox повторить main_frame-запрос с
+        // тем же requestId, из-за чего onBeforeSendHeaders → /intercept срабатывает дважды. Решение уже
+        // поставлено в очередь на первом проходе и будет применено прокси; повторный проход не должен
+        // снова поднимать событие Request и дублировать решение.
+        if (ProxyNavigationDecisions.HasDecisionForRequest(page.GetOrCreateBridgeContextId(), request.RequestId, DateTimeOffset.UtcNow))
+        {
+            return BridgeInterceptHttpResponse.Continue();
+        }
+
         if (!TryCreateInterceptedRequestEventArgs(request, page.MainFrame, out var args))
         {
             return BridgeInterceptHttpResponse.Continue();
@@ -342,6 +351,12 @@ public sealed partial class WebBrowser
                 StatusCode = decision.StatusCode,
                 ReasonPhrase = decision.ReasonPhrase,
             },
+            // Сюда попадают только proxy-capable main_frame запросы (см. проверку выше), то есть
+            // навигация идёт через локальный навигационный прокси. Он отвечает браузеру сам, ДО
+            // обращения к origin, поэтому синтетический top-level документ отдать безопасно —
+            // ограничение «request-side main_frame fulfill невозможен» относится к webRequest-пути
+            // без прокси, а не к этому. Ответ целиком уносится в решение, которое исполнит прокси
+            // (см. ProxyNavigationDecisionAction.Fulfill в BridgeNavigationProxyServer).
             InterceptAction.Fulfill when decision.Fulfillment is { } fulfillment => new ProxyNavigationPendingDecision
             {
                 RequestId = request.RequestId,
@@ -353,7 +368,19 @@ public sealed partial class WebBrowser
                 StatusCode = (int)fulfillment.Response.StatusCode,
                 ReasonPhrase = fulfillment.Response.ReasonPhrase,
                 ResponseHeaders = ToHeaderDictionary(fulfillment.Response),
-                ResponseBody = fulfillment.Body,
+                ResponseBody = fulfillment.Body is { Length: > 0 } fulfillmentBody ? fulfillmentBody : null,
+            },
+
+            // Fulfill без ответа подменить нечем: fail-closed — прокси отменит навигацию (204 No Content),
+            // origin не запрашивается, вкладка остаётся на текущей странице.
+            InterceptAction.Fulfill => new ProxyNavigationPendingDecision
+            {
+                RequestId = request.RequestId,
+                Method = request.Method,
+                AbsoluteUrl = request.Url,
+                IssuedAtUtc = issuedAtUtc,
+                ExpiresAtUtc = expiresAtUtc,
+                Action = ProxyNavigationDecisionAction.Abort,
             },
             InterceptAction.Continue when decision.Continuation is { } continuation => CreateProxyContinuationPendingDecision(request, issuedAtUtc, expiresAtUtc, continuation),
 

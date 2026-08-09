@@ -30,31 +30,63 @@ internal static class ProfileMaterialization
 
         settings.Logger?.LogProfileMaterializationStarted(profile.Channel.ToString(), shouldCleanup, profilePath);
 
+        // profile.Path и созданный каталог мутируются до провал-опасной работы (запись файлов,
+        // упаковка расширения, managed-policy). WebBrowserSettings.Clone копирует Profile по ссылке,
+        // поэтому при исключении нужно и удалить временный каталог, и восстановить исходный
+        // profile.Path — иначе повторный запуск примет утёкший каталог за persistent-профиль.
+        var originalPath = profile.Path;
         Directory.CreateDirectory(profilePath);
         profile.Path = profilePath;
 
-        var automationPreset = ProfileAutomationPresets.Create(profile, settings, profilePath, bridgeBootstrapPreparation is not null);
-        await WriteAutomationFilesAsync(profilePath, automationPreset.Files, cancellationToken).ConfigureAwait(false);
-        settings.Logger?.LogProfileAutomationFilesWritten(profilePath, automationPreset.Files.Count);
+        try
+        {
+            var automationPreset = ProfileAutomationPresets.Create(profile, settings, profilePath, bridgeBootstrapPreparation is not null);
+            await WriteAutomationFilesAsync(profilePath, automationPreset.Files, cancellationToken).ConfigureAwait(false);
+            settings.Logger?.LogProfileAutomationFilesWritten(profilePath, automationPreset.Files.Count);
 
-        BridgeBootstrapPlan? bridgeBootstrap = null;
-        if (bridgeBootstrapPreparation is not null)
-            bridgeBootstrap = await BridgeExtensionBootstrap.MaterializeAsync(profilePath, profile, bridgeBootstrapPreparation, cancellationToken).ConfigureAwait(false);
+            BridgeBootstrapPlan? bridgeBootstrap = null;
+            if (bridgeBootstrapPreparation is not null)
+                bridgeBootstrap = await BridgeExtensionBootstrap.MaterializeAsync(profilePath, profile, bridgeBootstrapPreparation, cancellationToken).ConfigureAwait(false);
 
-        LogBootstrapStrategyDiagnostics(settings.Logger, bridgeBootstrap);
-        LogManagedPolicyDiagnostics(settings.Logger, bridgeBootstrap);
+            LogBootstrapStrategyDiagnostics(settings.Logger, bridgeBootstrap);
+            LogManagedPolicyDiagnostics(settings.Logger, bridgeBootstrap);
 
-        var manifestPath = IOPath.Combine(profilePath, "profile.json");
-        var manifest = BuildManifest(settings, profilePath, shouldCleanup, automationPreset, bridgeBootstrap);
-        await File.WriteAllTextAsync(manifestPath, manifest.ToJsonString(), cancellationToken).ConfigureAwait(false);
-        settings.Logger?.LogProfileManifestWritten(manifestPath);
+            var manifestPath = IOPath.Combine(profilePath, "profile.json");
+            var manifest = BuildManifest(settings, profilePath, shouldCleanup, automationPreset, bridgeBootstrap);
+            await File.WriteAllTextAsync(manifestPath, manifest.ToJsonString(), cancellationToken).ConfigureAwait(false);
+            settings.Logger?.LogProfileManifestWritten(manifestPath);
 
-        var returnedPath = shouldCleanup ? profilePath : "<persistent>";
-        settings.Logger?.LogProfileMaterializationCompleted(returnedPath);
+            var returnedPath = shouldCleanup ? profilePath : "<persistent>";
+            settings.Logger?.LogProfileMaterializationCompleted(returnedPath);
 
-        return new ProfileMaterializationResult(
-            MaterializedProfilePath: shouldCleanup ? profilePath : null,
-            BridgeBootstrap: bridgeBootstrap);
+            return new ProfileMaterializationResult(
+                MaterializedProfilePath: shouldCleanup ? profilePath : null,
+                BridgeBootstrap: bridgeBootstrap);
+        }
+        catch
+        {
+            // Только для временного профиля: persistent-каталог создан пользователем и не наш.
+            if (shouldCleanup)
+            {
+                profile.Path = originalPath;
+                TryDeleteDirectory(profilePath, settings.Logger);
+            }
+
+            throw;
+        }
+    }
+
+    private static void TryDeleteDirectory(string path, ILogger? logger)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger?.LogProfileMaterializationCleanupFailed(path, ex);
+        }
     }
 
     /// <summary>

@@ -324,6 +324,13 @@ internal static class ProfileAutomationPresets
             ["datareporting.policy.dataSubmissionEnabled"] = false,
             ["network.dns.disablePrefetch"] = true,
             ["network.prefetch-next"] = false,
+            // Firefox по умолчанию форсирует DIRECT для loopback (127.0.0.1/localhost/::1) и игнорирует
+            // любой прокси, который вернул proxy.onRequest. Навигационный MITM-прокси моста слушает на
+            // loopback, поэтому без этого расширение НЕ может маршрутизировать main_frame-навигацию через
+            // прокси — и main_frame fulfill/abort (fail-closed перехват) не работает (запрос уходит на
+            // origin напрямую). Также очищаем список bypass, чтобы loopback не оседал в нём на части сборок.
+            ["network.proxy.allow_hijacking_localhost"] = true,
+            ["network.proxy.no_proxies_on"] = string.Empty,
             ["toolkit.telemetry.enabled"] = false,
             ["toolkit.telemetry.reportingpolicy.firstRun"] = false,
             ["toolkit.telemetry.unified"] = false,

@@ -20,6 +20,13 @@ namespace Atom.Net.Browsing.WebDriver;
 /// </summary>
 public sealed partial class WebBrowser : IWebBrowser
 {
+    /// <summary>
+    /// Верхняя граница буфера мостовых событий на уровне браузера. Это самый долгоживущий
+    /// буфер (живёт весь сеанс браузера) и он не дренируется потребителем, поэтому без
+    /// ограничения он накапливал бы все события навигации и перехвата с их payload.
+    /// </summary>
+    private const int MaxBufferedBridgeEvents = 4096;
+
     private readonly ConcurrentStack<WebWindow> windows = [];
     private readonly ConcurrentQueue<BridgeMessage> bridgeEvents = [];
     private readonly Lock windowGate = new();
@@ -170,6 +177,11 @@ public sealed partial class WebBrowser : IWebBrowser
     {
         ArgumentNullException.ThrowIfNull(message);
         bridgeEvents.Enqueue(message);
+        while (bridgeEvents.Count > MaxBufferedBridgeEvents && bridgeEvents.TryDequeue(out _))
+        {
+            // Вытесняем самые старые события: свежие важнее для потребителя.
+        }
+
         if (dispatchHandlers)
         {
             await OnBridgeEventReceivedAsync(message).ConfigureAwait(false);
@@ -236,6 +248,7 @@ public sealed partial class WebBrowser : IWebBrowser
             await window.DisposeAsync().ConfigureAwait(false);
         }
 
+        bridgeEvents.Clear();
         await DisposeBridgeBootstrapAsync().ConfigureAwait(false);
         await DisposeBrowserProcessAsync(browserProcess).ConfigureAwait(false);
         await DisposeBridgeServerAsync().ConfigureAwait(false);
@@ -270,8 +283,13 @@ public sealed partial class WebBrowser : IWebBrowser
             var resolutionSource = Volatile.Read(ref mouseResolutionSource);
             if (resolutionSource is null)
             {
-                var createdSource = LazyInitializer.EnsureInitialized(ref mouseResolutionSource, () => new TaskCompletionSource<VirtualMouse>(TaskCreationOptions.RunContinuationsAsynchronously));
+                // Кандидат создаётся ЛОКАЛЬНО и публикуется атомарно через CompareExchange.
+                // Использовать LazyInitializer.EnsureInitialized здесь нельзя: он сам публикует
+                // источник в поле до CompareExchange, из-за чего сравнение с null никогда не
+                // срабатывало, ветка CompleteMouseResolutionAsync становилась недостижимой, и
+                // ожидание висло на никем не завершаемом TaskCompletionSource.
 #pragma warning disable MA0173 // Use LazyInitializer.EnsureInitialize
+                var createdSource = new TaskCompletionSource<VirtualMouse>(TaskCreationOptions.RunContinuationsAsynchronously);
                 if (Interlocked.CompareExchange(ref mouseResolutionSource, createdSource, comparand: null) is null)
                 {
                     return await CompleteMouseResolutionAsync(createdSource, cancellationToken).ConfigureAwait(false);
@@ -305,8 +323,11 @@ public sealed partial class WebBrowser : IWebBrowser
             var resolutionSource = Volatile.Read(ref keyboardResolutionSource);
             if (resolutionSource is null)
             {
-                var createdSource = LazyInitializer.EnsureInitialized(ref keyboardResolutionSource, () => new TaskCompletionSource<VirtualKeyboard>(TaskCreationOptions.RunContinuationsAsynchronously));
+                // См. комментарий в ResolveMouseAsync: кандидат создаётся локально и публикуется
+                // атомарно; LazyInitializer.EnsureInitialized сделал бы ветку завершения
+                // недостижимой и приводил к зависанию.
 #pragma warning disable MA0173 // Use LazyInitializer.EnsureInitialize
+                var createdSource = new TaskCompletionSource<VirtualKeyboard>(TaskCreationOptions.RunContinuationsAsynchronously);
                 if (Interlocked.CompareExchange(ref keyboardResolutionSource, createdSource, comparand: null) is null)
                 {
                     return await CompleteKeyboardResolutionAsync(createdSource, cancellationToken).ConfigureAwait(false);
