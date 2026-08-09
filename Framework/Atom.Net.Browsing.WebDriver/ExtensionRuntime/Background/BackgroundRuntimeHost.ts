@@ -171,6 +171,9 @@ const maxLateNavigateRetryCount = 4;
 const transportReconnectBaseDelayMs = 500;
 const transportReconnectMaxDelayMs = 30_000;
 const maxOpenTabCreateAttempts = 3;
+// Заголовок-носитель route token для Chromium. Прокси срезает его до отправки на origin
+// (BridgeNavigationProxyServer.RouteTokenHeaderName).
+const navigationProxyRouteHeaderName = 'X-Atom-Route';
 const openTabCreateRetryDelayMs = 150;
 
 export class BackgroundRuntimeHost {
@@ -2347,6 +2350,11 @@ export class BackgroundRuntimeHost {
         this.interceptPatterns.delete(tabId);
         this.pendingNavigations.delete(tabId);
         this.clearPendingNavigationGateDebugState(tabId);
+
+        // Правило declarativeNetRequest живёт в сессии браузера, а не в нашем состоянии: без
+        // явного снятия оно пережило бы вкладку и метило чужие запросы, если браузер переиспользует
+        // идентификатор.
+        void this.syncNavigationProxyRouteRule(tabId, undefined);
     }
 
     private createPendingNavigationGateDebugDetails(
@@ -2424,6 +2432,63 @@ export class BackgroundRuntimeHost {
 
         if (this.tabs.get(tabId) !== null) {
             this.tabs.markReady(tabId, context);
+        }
+
+        void this.syncNavigationProxyRouteRule(tabId, context);
+    }
+
+    /**
+     * Держит в актуальном состоянии правило declarativeNetRequest, которое помечает запросы вкладки
+     * route token'ом навигационного прокси.
+     *
+     * Нужно только Chromium: там прокси-аутентификацию расширению не отдают (onAuthRequired в режиме
+     * asyncBlocking не срабатывает), поэтому токен доставляется заголовком запроса. Firefox отвечает
+     * на 407 сам и в этом правиле не нуждается — там declarativeNetRequest попросту отсутствует.
+     * Прокси срезает заголовок до обращения к origin, так что наружу он не уходит.
+     */
+    private async syncNavigationProxyRouteRule(tabId: string, context: TabContextEnvelope | undefined): Promise<void> {
+        const declarativeNetRequest = (this.browserHost as { declarativeNetRequest?: any }).declarativeNetRequest;
+        if (typeof declarativeNetRequest?.updateSessionRules !== 'function') {
+            return;
+        }
+
+        const ruleId = toNavigationProxyRouteRuleId(tabId);
+        if (ruleId === null) {
+            return;
+        }
+
+        const routeToken = this.resolveNavigationProxyRouteToken(context);
+
+        try {
+            if (routeToken === undefined) {
+                await declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleId] });
+                return;
+            }
+
+            await declarativeNetRequest.updateSessionRules({
+                removeRuleIds: [ruleId],
+                addRules: [{
+                    id: ruleId,
+                    priority: 1,
+                    condition: { tabIds: [ruleId], urlFilter: '*' },
+                    action: {
+                        type: 'modifyHeaders',
+                        requestHeaders: [{
+                            header: navigationProxyRouteHeaderName,
+                            operation: 'set',
+                            value: routeToken,
+                        }],
+                    },
+                }],
+            });
+        } catch (error) {
+            emitBackgroundDebugEvent(this.config, 'navigation-proxy-route-rule-failed', {
+                tabId,
+                hasRouteToken: routeToken !== undefined,
+                error: toErrorMessage(error),
+            });
+
+            console.error('[фоновый вход] Не удалось обновить правило маршрутизации навигационного прокси', error);
         }
     }
 
@@ -2881,6 +2946,18 @@ export async function bootstrapBackgroundRuntime(): Promise<BackgroundRuntimeHos
     runtimeState.__atomBackgroundRuntimeHost = host;
     await host.start();
     return host;
+}
+
+/**
+ * Идентификатор правила declarativeNetRequest для вкладки.
+ * Совпадает с числовым tabId: он уникален и служит одновременно условием привязки правила.
+ * Диапазон ограничен int32 — идентификаторы правил больше не принимаются.
+ */
+function toNavigationProxyRouteRuleId(tabId: string): number | null {
+    const numericTabId = Number(tabId);
+    return Number.isInteger(numericTabId) && numericTabId > 0 && numericTabId <= 2147483647
+        ? numericTabId
+        : null;
 }
 
 function isRecord(value: unknown): value is JsonRecord {
