@@ -453,7 +453,7 @@ internal sealed class BridgeNavigationProxyServer(
             return;
         }
 
-        await WriteMatchedDecisionResponseAsync(stream, clientRequest.Method, absoluteTargetUrl, decision, cancellationToken).ConfigureAwait(false);
+        await WriteMatchedDecisionResponseAsync(stream, clientRequest.Method, absoluteTargetUrl, decision, IsNavigationRequest(clientRequest), cancellationToken).ConfigureAwait(false);
     }
 
     private async Task WriteMatchedDecisionResponseAsync(
@@ -461,6 +461,7 @@ internal sealed class BridgeNavigationProxyServer(
         string method,
         string absoluteTargetUrl,
         ProxyNavigationPendingDecision decision,
+        bool isNavigationRequest,
         CancellationToken cancellationToken)
     {
         switch (decision.Action)
@@ -479,6 +480,12 @@ internal sealed class BridgeNavigationProxyServer(
 
             case ProxyNavigationDecisionAction.Redirect:
                 await WriteRedirectDecisionResponseAsync(stream, method, absoluteTargetUrl, decision, cancellationToken).ConfigureAwait(false);
+                return;
+
+            case ProxyNavigationDecisionAction.Abort when !isNavigationRequest:
+                // Для подзапроса 204 — это УСПЕШНЫЙ ответ: fetch/XHR завершается, и вызывающий видит
+                // отменённый запрос как состоявшийся. Блокирующий webRequest в этом случае просто
+                // отменяет запрос, поэтому здесь соединение обрывается без ответа — сетевая ошибка.
                 return;
 
             case ProxyNavigationDecisionAction.Abort:
@@ -916,6 +923,9 @@ internal sealed class BridgeNavigationProxyServer(
             logger?.LogBridgeServerNavigationProxyConnectionFailed(exception);
         }
     }
+
+    private static bool IsNavigationRequest(ProxyRequest clientRequest)
+        => string.Equals(ResolveResourceType(clientRequest), "main_frame", StringComparison.OrdinalIgnoreCase);
 
     private static string CreateProxyRequestId()
         => "proxy-" + Guid.NewGuid().ToString("n", CultureInfo.InvariantCulture);

@@ -174,6 +174,23 @@ const maxOpenTabCreateAttempts = 3;
 // Заголовок-носитель route token для Chromium. Прокси срезает его до отправки на origin
 // (BridgeNavigationProxyServer.RouteTokenHeaderName).
 const navigationProxyRouteHeaderName = 'X-Atom-Route';
+// Явный перечень типов ресурсов для правила маршрутизации: при опущенном resourceTypes
+// declarativeNetRequest не покрывает main_frame, и навигации остались бы без метки вкладки.
+const navigationProxyRouteResourceTypes = [
+    'main_frame',
+    'sub_frame',
+    'stylesheet',
+    'script',
+    'image',
+    'font',
+    'object',
+    'xmlhttprequest',
+    'ping',
+    'csp_report',
+    'media',
+    'websocket',
+    'other',
+];
 const openTabCreateRetryDelayMs = 150;
 
 export class BackgroundRuntimeHost {
@@ -2492,7 +2509,10 @@ export class BackgroundRuntimeHost {
                 addRules: [{
                     id: ruleId,
                     priority: 1,
-                    condition: { tabIds: [ruleId], urlFilter: '*' },
+                    // resourceTypes перечисляются явно: без него правило не покрывает main_frame,
+                    // то есть навигации остались бы без route token и прокси не смог бы их
+                    // сопоставить с вкладкой.
+                    condition: { tabIds: [ruleId], urlFilter: '*', resourceTypes: navigationProxyRouteResourceTypes },
                     action: {
                         type: 'modifyHeaders',
                         requestHeaders: [{

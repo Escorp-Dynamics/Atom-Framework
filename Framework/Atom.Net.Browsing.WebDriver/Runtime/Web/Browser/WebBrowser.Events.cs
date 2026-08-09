@@ -126,6 +126,15 @@ public sealed partial class WebBrowser
             return BridgeInterceptHttpResponse.Continue();
         }
 
+        // Прокси видит весь трафик отслеживаемой вкладки и о шаблонах перехвата не знает: на
+        // webRequest-пути их применяет расширение, а здесь фильтровать может только драйвер.
+        // Без этого перехват срабатывал бы на запросах, которые вызывающий не выбирал.
+        if (request.DecidedByNavigationProxy
+            && page.GetEffectiveRequestInterceptionState()?.Matches(request.Url) != true)
+        {
+            return BridgeInterceptHttpResponse.Continue();
+        }
+
         // Локальный навигационный прокси отвечает 407 и вынуждает Firefox повторить main_frame-запрос с
         // тем же requestId, из-за чего onBeforeSendHeaders → /intercept срабатывает дважды. Решение уже
         // поставлено в очередь на первом проходе и будет применено прокси; повторный проход не должен

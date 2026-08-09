@@ -9007,20 +9007,10 @@ public sealed class WebDriverRealBrowserIntegrationTests
         ArgumentNullException.ThrowIfNull(browser);
         ArgumentException.ThrowIfNullOrWhiteSpace(scenario);
 
-        // Диагностический обход: позволяет прогнать перехват в Chromium, пока путь достраивается.
-        if (Environment.GetEnvironmentVariable("ATOM_FORCE_CHROMIUM_INTERCEPTION") is { Length: > 0 })
-            return;
-
-        var launchSettings = WebDriverTestEnvironment.GetLaunchSettings(browser);
-        if (launchSettings.Profile is not ChromeProfile || launchSettings.Profile is FirefoxProfile)
-            return;
-
-        // Перехват в Chromium переводится с блокирующего webRequest на локальный навигационный
-        // прокси: браузер уже направлен в него, вкладку помечает правило declarativeNetRequest,
-        // но решения драйвера до запроса ещё не доходят. Пропуск снимается, когда путь заработает
-        // целиком, — до тех пор тесты не должны выдавать ложную зелень.
-        var browserName = launchSettings.Profile.GetType().Name.Replace("Profile", string.Empty, StringComparison.Ordinal);
-        Assert.Ignore($"{scenario}: перехват в Chromium переводится на навигационный прокси и ещё не завершён; browser={browserName}");
+        // Перехват в Chromium больше не зависит от блокирующего webRequest: браузер направлен в
+        // локальный навигационный прокси, вкладку помечает правило declarativeNetRequest, а решения
+        // драйвера запрашивает и применяет сам прокси. Пропуск снят — сценарии идут на обоих
+        // семействах браузеров.
     }
 
     private sealed class RealBrowserTrustedInputSession(WebBrowser browser, VirtualDisplay? display) : IAsyncDisposable
