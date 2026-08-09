@@ -73,6 +73,19 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     public int NavigationProxyPort { get; private set; }
 
     /// <summary>
+    /// Настраивает способ получения route token навигационным прокси под конкретный браузер.
+    /// </summary>
+    /// <remarks>
+    /// Firefox приносит токен только в ответ на 407, Chromium — заголовком запроса.
+    /// Вызывается после того, как стало известно семейство запускаемого браузера.
+    /// </remarks>
+    internal void ConfigureNavigationProxyRouteTokenChallenge(bool challengeForRouteToken)
+    {
+        if (navigationProxyServer is { } proxy)
+            proxy.ChallengeForRouteToken = challengeForRouteToken;
+    }
+
+    /// <summary>
     /// Требуются ли fallback-флаги браузеру для обхода недоверенного сертификата managed-delivery.
     /// </summary>
     public bool ManagedDeliveryRequiresCertificateBypass => managedDeliveryServer.RequiresCertificateBypass;

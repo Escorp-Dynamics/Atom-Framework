@@ -42,6 +42,7 @@ public sealed partial class WebBrowser
                 cancellationToken).ConfigureAwait(false);
             materializedProfilePath = materialization.MaterializedProfilePath;
             ConfigureBridgeManagedDelivery(bridgeServer, materialization.BridgeBootstrap);
+            ConfigureBridgeNavigationProxy(bridgeServer, materialization.BridgeBootstrap);
 
             if (!string.IsNullOrWhiteSpace(materializedProfilePath))
                 launchSettings.Logger?.LogWebBrowserProfileMaterialized(materializedProfilePath);
@@ -275,6 +276,21 @@ public sealed partial class WebBrowser
                 ManagedDeliveryTrustDiagnostics = bridgeServerManagedTrustDiagnostics,
             },
         };
+    }
+
+    /// <summary>
+    /// Настраивает навигационный прокси под способ доставки route token в запускаемом браузере.
+    /// </summary>
+    private static void ConfigureBridgeNavigationProxy(BridgeServer? bridgeServer, BridgeBootstrapPlan? bridgeBootstrap)
+    {
+        if (bridgeServer is null || bridgeBootstrap is null)
+            return;
+
+        // Firefox отвечает на 407 через blocking onAuthRequired и приносит токен так.
+        // Chromium прокси-аутентификацию расширению не отдаёт: там токен ставится заголовком,
+        // а требовать вызов значило бы отклонять весь неотслеживаемый трафик браузера.
+        bridgeServer.ConfigureNavigationProxyRouteTokenChallenge(
+            !string.Equals(bridgeBootstrap.BrowserFamily, "chromium", StringComparison.Ordinal));
     }
 
     private static void ConfigureBridgeManagedDelivery(BridgeServer? bridgeServer, BridgeBootstrapPlan? bridgeBootstrap)
@@ -533,7 +549,25 @@ public sealed partial class WebBrowser
             if (startInfo.ArgumentList.Any(argument => string.Equals(argument, launchArgument, StringComparison.Ordinal)))
                 continue;
 
+            // Аргументы моста вытесняют одноимённые из пресета: например, локальный навигационный
+            // прокси должен заменить пользовательский --proxy-server, а не соседствовать с ним
+            // (upstream пользователя учитывается уже самим прокси при форварде).
+            RemoveConflictingLaunchArguments(startInfo, launchArgument);
             startInfo.ArgumentList.Add(launchArgument);
+        }
+    }
+
+    private static void RemoveConflictingLaunchArguments(ProcessStartInfo startInfo, string launchArgument)
+    {
+        var separatorIndex = launchArgument.IndexOf('=', StringComparison.Ordinal);
+        if (separatorIndex <= 0 || !launchArgument.StartsWith("--", StringComparison.Ordinal))
+            return;
+
+        var prefix = launchArgument[..(separatorIndex + 1)];
+        for (var index = startInfo.ArgumentList.Count - 1; index >= 0; index--)
+        {
+            if (startInfo.ArgumentList[index].StartsWith(prefix, StringComparison.Ordinal))
+                startInfo.ArgumentList.RemoveAt(index);
         }
     }
 

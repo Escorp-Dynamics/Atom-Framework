@@ -41,6 +41,7 @@ internal sealed record BridgeBootstrapPlan(
     string ManagedPackageUrl,
     string ManagedPackageArtifactPath,
     string DiscoveryUrl,
+    int NavigationProxyPort,
     TimeSpan ConnectionTimeout);
 
 internal sealed record BridgeBootstrapConfigArtifacts(
@@ -328,6 +329,7 @@ internal static class BridgeExtensionBootstrap
             ManagedPackageUrl: string.Empty,
             ManagedPackageArtifactPath: string.Empty,
             DiscoveryUrl: BuildDiscoveryUrl(preparation.Settings.Host, port),
+            NavigationProxyPort: preparation.Settings.NavigationProxyPort,
             ConnectionTimeout: preparation.Settings.BootstrapTimeout);
     }
 
@@ -386,6 +388,7 @@ internal static class BridgeExtensionBootstrap
             ManagedPackageUrl: managedInstallation.ManagedPolicy.PackageUrl,
             ManagedPackageArtifactPath: signedPackagePath,
             DiscoveryUrl: BuildDiscoveryUrl(preparation.Settings.Host, port),
+            NavigationProxyPort: preparation.Settings.NavigationProxyPort,
             ConnectionTimeout: preparation.Settings.BootstrapTimeout);
     }
 
@@ -805,7 +808,66 @@ internal static class BridgeExtensionBootstrap
             arguments.Add("--allow-insecure-localhost");
         }
 
+        arguments.AddRange(GetChromiumNavigationProxyArguments(profile, bridgeBootstrap));
+
         return arguments;
+    }
+
+    /// <summary>
+    /// Направляет Chromium в локальный навигационный прокси.
+    /// </summary>
+    /// <remarks>
+    /// В Firefox маршрутизацией per-request занимается <c>proxy.onRequest</c>, которого в Chromium нет,
+    /// поэтому там прокси задаётся на весь запуск. Пользовательский upstream-прокси это не отменяет:
+    /// локальный прокси форвардит через него по данным маршрута, как и на Firefox-пути.
+    /// <para>
+    /// <c>--proxy-bypass-list=&lt;-loopback&gt;</c> обязателен: по умолчанию Chromium не проксирует
+    /// loopback, а перехватывать нужно в том числе локальные адреса. Собственный трафик расширения к
+    /// мосту при этом тоже идёт через прокси и обслуживается его прямым маршрутом.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<string> GetChromiumNavigationProxyArguments(
+        WebBrowserProfile profile,
+        BridgeBootstrapPlan bridgeBootstrap)
+    {
+        if (profile is FirefoxProfile || bridgeBootstrap.NavigationProxyPort <= 0)
+            return [];
+
+        var host = string.IsNullOrWhiteSpace(bridgeBootstrap.Host) ? "127.0.0.1" : bridgeBootstrap.Host;
+        var port = bridgeBootstrap.NavigationProxyPort.ToString(CultureInfo.InvariantCulture);
+
+        // Служебные каналы самого моста обязаны идти в обход: они не несут route token, а прокси
+        // без него отвечает 407 — иначе расширение не смогло бы даже подключиться. Всё остальное,
+        // включая прочий loopback, проксируется.
+        List<string> bypassEntries = ["<-loopback>"];
+        foreach (var infrastructurePort in EnumerateBridgeInfrastructurePorts(bridgeBootstrap))
+            bypassEntries.Add($"{host}:{infrastructurePort.ToString(CultureInfo.InvariantCulture)}");
+
+        return
+        [
+            $"--proxy-server=http://{host}:{port}",
+            "--proxy-bypass-list=" + string.Join(';', bypassEntries),
+        ];
+    }
+
+    private static HashSet<int> EnumerateBridgeInfrastructurePorts(BridgeBootstrapPlan bridgeBootstrap)
+    {
+        HashSet<int> ports = [];
+
+        if (bridgeBootstrap.Port > 0)
+            _ = ports.Add(bridgeBootstrap.Port);
+
+        if (bridgeBootstrap.ManagedDeliveryPort > 0)
+            _ = ports.Add(bridgeBootstrap.ManagedDeliveryPort);
+
+        if (bridgeBootstrap.NavigationProxyPort > 0)
+            _ = ports.Add(bridgeBootstrap.NavigationProxyPort);
+
+        // Порт защищённого транспорта известен только из его URL.
+        if (Uri.TryCreate(bridgeBootstrap.TransportUrl, UriKind.Absolute, out var transportUri) && transportUri.Port > 0)
+            _ = ports.Add(transportUri.Port);
+
+        return ports;
     }
 
     private static string? ResolveSourceExtensionPath(WebBrowserProfile profile)
@@ -1350,6 +1412,7 @@ internal static class BridgeExtensionBootstrap
         string ManagedPackageUrl,
         string ManagedPackageArtifactPath,
         string DiscoveryUrl,
+        int NavigationProxyPort,
         TimeSpan ConnectionTimeout)
         => new(
             SessionId,
@@ -1376,6 +1439,7 @@ internal static class BridgeExtensionBootstrap
             ManagedPackageUrl,
             ManagedPackageArtifactPath,
             DiscoveryUrl,
+            NavigationProxyPort,
             ConnectionTimeout);
 
     private static BridgeBootstrapPlan CreateMaterializedBridgeBootstrapPlan(
@@ -1410,6 +1474,7 @@ internal static class BridgeExtensionBootstrap
             ManagedPackageUrl: materializedArtifacts.Delivery.ManagedPolicy.PackageUrl,
             ManagedPackageArtifactPath: materializedArtifacts.Delivery.Package?.PackagePath ?? string.Empty,
             DiscoveryUrl: BuildDiscoveryUrl(preparation.Settings.Host, port),
+            NavigationProxyPort: preparation.Settings.NavigationProxyPort,
             ConnectionTimeout: preparation.Settings.BootstrapTimeout);
 
     private static async ValueTask<(string PublishPath, BridgeManagedPolicyPublishDiagnostics Diagnostics)> PublishManagedPolicyAsync(

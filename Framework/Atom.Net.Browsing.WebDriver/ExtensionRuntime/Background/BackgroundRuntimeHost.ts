@@ -836,6 +836,11 @@ export class BackgroundRuntimeHost {
                         this.tabs,
                     );
 
+                    // Именно этой командой драйвер включает proxy-режим и присылает route token,
+                    // а контекст здесь пишется напрямую, минуя updateTrackedTabContext, — поэтому
+                    // правило маршрутизации синхронизируется отдельно.
+                    void this.syncNavigationProxyRouteRule(context.tabId, context);
+
                     if (context.proxy !== undefined) {
                         this.ensureProxyRoutingListeners();
                     }

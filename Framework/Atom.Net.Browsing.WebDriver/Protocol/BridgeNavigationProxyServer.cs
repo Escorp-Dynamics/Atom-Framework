@@ -83,6 +83,17 @@ internal sealed class BridgeNavigationProxyServer(
 
     public int Port { get; private set; } = port;
 
+    /// <summary>
+    /// Требовать ли route token через 407 Proxy Authentication Required.
+    /// </summary>
+    /// <remarks>
+    /// Firefox доставляет токен только так: он отвечает на вызов через blocking onAuthRequired.
+    /// Chromium прокси-аутентификацию расширению не отдаёт и токен приносит заголовком, поэтому
+    /// для него вызов выключается — иначе первый же запрос вкладки без токена был бы отклонён,
+    /// хотя через прокси идёт весь трафик браузера, включая заведомо неотслеживаемый.
+    /// </remarks>
+    internal bool ChallengeForRouteToken { get; set; } = true;
+
     internal ValueTask StartAsync()
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
@@ -212,20 +223,29 @@ internal sealed class BridgeNavigationProxyServer(
                     return;
                 }
 
-                if (string.IsNullOrWhiteSpace(routeToken))
+                if (!TryResolveRouteForRequest(routeToken, out var route))
                 {
-                    logger?.LogBridgeServerNavigationProxyRejected(request.Method, request.Target, "proxy-auth-missing");
-                    await WriteProxyAuthenticationRequiredAsync(stream, cancellationToken).ConfigureAwait(false);
+                    if (ChallengeForRouteToken && string.IsNullOrWhiteSpace(routeToken))
+                    {
+                        logger?.LogBridgeServerNavigationProxyRejected(request.Method, request.Target, "proxy-auth-missing");
+                        await WriteProxyAuthenticationRequiredAsync(stream, cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+
+                    // Через прокси идёт весь трафик браузера, а не только перехватываемые навигации:
+                    // у запросов вне отслеживаемых вкладок токена нет и быть не может. Такой запрос
+                    // прозрачно форвардится — отклонять его значило бы ломать обычную загрузку страниц.
+                    await ForwardUnroutedRequestAsync(stream, request, cancellationToken).ConfigureAwait(false);
                     return;
                 }
 
                 var registry = registryResolver();
-                if (registry is null || !registry.TryResolveRoute(routeToken, out var route))
+                if (registry is null)
                 {
-                    logger?.LogBridgeServerNavigationProxyRejected(request.Method, request.Target, "proxy-route-missing");
-                    await WriteErrorResponseAsync(stream, HttpStatusCode.BadGateway, "route-missing", cancellationToken).ConfigureAwait(false);
+                    await ForwardUnroutedRequestAsync(stream, request, cancellationToken).ConfigureAwait(false);
                     return;
                 }
+
 
                 if (!TryBuildAbsoluteTargetUrl("http", request.Target, request.Headers, fallbackHost: null, fallbackPort: 0, out var absoluteTargetUrl))
                 {
@@ -234,7 +254,7 @@ internal sealed class BridgeNavigationProxyServer(
                     return;
                 }
 
-                await HandleNavigationRequestAsync(stream, request, absoluteTargetUrl, routeToken, route, registry, cancellationToken).ConfigureAwait(false);
+                await HandleNavigationRequestAsync(stream, request, absoluteTargetUrl, route.RouteToken, route, registry, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -365,22 +385,27 @@ internal sealed class BridgeNavigationProxyServer(
 
         // Токен запроса внутри туннеля приоритетнее: именно на нём стоит заголовок вкладки.
         var routeToken = TryReadRouteToken(tunneledRequest.Headers) ?? connectRouteToken;
-        if (string.IsNullOrWhiteSpace(routeToken))
+        if (!TryResolveRouteForRequest(routeToken, out var route))
         {
-            logger?.LogBridgeServerNavigationProxyRejected(tunneledRequest.Method, tunneledRequest.Target, "proxy-auth-missing");
-            await WriteProxyAuthenticationRequiredAsync(sslStream, cancellationToken).ConfigureAwait(false);
+            if (ChallengeForRouteToken && string.IsNullOrWhiteSpace(routeToken))
+            {
+                logger?.LogBridgeServerNavigationProxyRejected(tunneledRequest.Method, tunneledRequest.Target, "proxy-auth-missing");
+                await WriteProxyAuthenticationRequiredAsync(sslStream, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            await ForwardUnroutedRequestAsync(sslStream, tunneledRequest, cancellationToken, absoluteTargetUrl).ConfigureAwait(false);
             return;
         }
 
-        var registry = registryResolver();
-        if (registry is null || !registry.TryResolveRoute(routeToken, out var route))
+        var tunnelRegistry = registryResolver();
+        if (tunnelRegistry is null)
         {
-            logger?.LogBridgeServerNavigationProxyRejected(tunneledRequest.Method, tunneledRequest.Target, "proxy-route-missing");
-            await WriteErrorResponseAsync(sslStream, HttpStatusCode.BadGateway, "route-missing", cancellationToken).ConfigureAwait(false);
+            await ForwardUnroutedRequestAsync(sslStream, tunneledRequest, cancellationToken, absoluteTargetUrl).ConfigureAwait(false);
             return;
         }
 
-        await HandleNavigationRequestAsync(sslStream, tunneledRequest, absoluteTargetUrl, routeToken, route, registry, cancellationToken).ConfigureAwait(false);
+        await HandleNavigationRequestAsync(sslStream, tunneledRequest, absoluteTargetUrl, route.RouteToken, route, tunnelRegistry, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task HandleNavigationRequestAsync(
@@ -785,6 +810,77 @@ internal sealed class BridgeNavigationProxyServer(
     }
 
     // Синтетическое решение «продолжить как есть» для запросов без зарегистрированного решения.
+    /// <summary>
+    /// Пытается сопоставить запросу зарегистрированный маршрут по route token.
+    /// </summary>
+    private bool TryResolveRouteForRequest(string? routeToken, [NotNullWhen(true)] out ProxyNavigationRoute? route)
+    {
+        route = null;
+
+        if (string.IsNullOrWhiteSpace(routeToken))
+            return false;
+
+        var registry = registryResolver();
+        return registry is not null && registry.TryResolveRoute(routeToken, out route);
+    }
+
+    /// <summary>
+    /// Прозрачно форвардит запрос, для которого нет отслеживаемого маршрута.
+    /// </summary>
+    /// <remarks>
+    /// Такие запросы — норма: через прокси идёт весь трафик браузера, включая вкладки без
+    /// перехвата и служебные обращения самого браузера. Решений для них нет, поэтому запрос
+    /// уходит на origin как есть; upstream-прокси не применяется, так как маршрут неизвестен.
+    /// </remarks>
+    private async Task ForwardUnroutedRequestAsync(
+        Stream stream,
+        ProxyRequest clientRequest,
+        CancellationToken cancellationToken,
+        string? absoluteTargetUrl = null)
+    {
+        var targetUrl = absoluteTargetUrl;
+        if (string.IsNullOrWhiteSpace(targetUrl)
+            && !TryBuildAbsoluteTargetUrl("http", clientRequest.Target, clientRequest.Headers, fallbackHost: null, fallbackPort: 0, out targetUrl))
+        {
+            logger?.LogBridgeServerNavigationProxyRejected(clientRequest.Method, clientRequest.Target, "absolute-url-invalid");
+            await WriteErrorResponseAsync(stream, HttpStatusCode.BadRequest, "invalid-target", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var unroutedRoute = new ProxyNavigationRoute
+        {
+            SessionId = string.Empty,
+            TabId = string.Empty,
+            ContextId = string.Empty,
+            RouteToken = string.Empty,
+        };
+
+        await ForwardContinueDecisionAsync(
+            stream,
+            clientRequest,
+            targetUrl,
+            unroutedRoute,
+            CreateImplicitContinueDecision(clientRequest, targetUrl),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task WriteProxyAuthenticationRequiredAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        Dictionary<string, string> headers = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Proxy-Authenticate"] = ProxyAuthenticationRealm,
+        };
+
+        await WriteResponseAsync(
+            stream,
+            statusCode: (int)HttpStatusCode.ProxyAuthenticationRequired,
+            reasonPhrase: null,
+            headers,
+            body: null,
+            includeBody: false,
+            cancellationToken).ConfigureAwait(false);
+    }
+
     private static ProxyNavigationPendingDecision CreateImplicitContinueDecision(ProxyRequest clientRequest, string absoluteTargetUrl)
     {
         var issuedAtUtc = DateTimeOffset.UtcNow;
@@ -1220,23 +1316,6 @@ internal sealed class BridgeNavigationProxyServer(
         {
             return null;
         }
-    }
-
-    private static async Task WriteProxyAuthenticationRequiredAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        Dictionary<string, string> headers = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Proxy-Authenticate"] = ProxyAuthenticationRealm,
-        };
-
-        await WriteResponseAsync(
-            stream,
-            statusCode: (int)HttpStatusCode.ProxyAuthenticationRequired,
-            reasonPhrase: null,
-            headers,
-            body: null,
-            includeBody: false,
-            cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task WriteConnectEstablishedAsync(Stream stream, CancellationToken cancellationToken)

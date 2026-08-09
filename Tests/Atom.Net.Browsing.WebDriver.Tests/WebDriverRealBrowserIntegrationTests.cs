@@ -9008,21 +9008,15 @@ public sealed class WebDriverRealBrowserIntegrationTests
         ArgumentException.ThrowIfNullOrWhiteSpace(scenario);
 
         var launchSettings = WebDriverTestEnvironment.GetLaunchSettings(browser);
-        var profile = launchSettings.Profile;
-        if (profile is not ChromeProfile || profile is FirefoxProfile)
+        if (launchSettings.Profile is not ChromeProfile || launchSettings.Profile is FirefoxProfile)
             return;
 
-        // Перехват с решением на стороне драйвера требует, чтобы блокирующий обработчик webRequest
-        // вернул решение СИНХРОННО. В Chromium расширение обязано быть Manifest V3, где фон — это
-        // service worker, а там нет ни XMLHttpRequest, ни Worker (проверено на Edge 150), то есть
-        // синхронного сетевого примитива не существует в принципе. Ограничение платформы, а не
-        // конфигурации: managed policy и force-install его не снимают. Firefox работает только
-        // потому, что MV2 использует persistent background page с синхронным XMLHttpRequest.
-        // Когда для Chromium появится declarativeNetRequest-бэкенд, этот пропуск нужно снять.
-        var browserName = profile.GetType().Name.Replace("Profile", string.Empty, StringComparison.Ordinal);
-        Assert.Ignore(
-            $"{scenario}: перехват с решением драйвера не поддерживается в Chromium Manifest V3 "
-            + $"(фон — service worker без синхронного XMLHttpRequest, блокирующий webRequest требует синхронного ответа); browser={browserName}");
+        // Перехват в Chromium переводится с блокирующего webRequest на локальный навигационный
+        // прокси: браузер уже направлен в него, вкладку помечает правило declarativeNetRequest,
+        // но решения драйвера до запроса ещё не доходят. Пропуск снимается, когда путь заработает
+        // целиком, — до тех пор тесты не должны выдавать ложную зелень.
+        var browserName = launchSettings.Profile.GetType().Name.Replace("Profile", string.Empty, StringComparison.Ordinal);
+        Assert.Ignore($"{scenario}: перехват в Chromium переводится на навигационный прокси и ещё не завершён; browser={browserName}");
     }
 
     private sealed class RealBrowserTrustedInputSession(WebBrowser browser, VirtualDisplay? display) : IAsyncDisposable

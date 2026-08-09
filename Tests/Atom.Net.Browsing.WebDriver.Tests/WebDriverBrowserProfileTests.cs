@@ -279,6 +279,7 @@ public class WebDriverBrowserProfileTests
             ManagedPackageUrl: "https://127.0.0.1:9443/chromium/abcdefghijklmnopabcdefghijklmnop/extension.crx",
             ManagedPackageArtifactPath: "/tmp/profile/managed-delivery/atom-webdriver-extension.crx",
             DiscoveryUrl: "http://127.0.0.1:9000/",
+            NavigationProxyPort: 0,
             ConnectionTimeout: TimeSpan.FromSeconds(5));
 
         var arguments = BridgeExtensionBootstrap.GetLaunchArguments(profile, bridgeBootstrap);
@@ -567,6 +568,7 @@ public class WebDriverBrowserProfileTests
             ManagedPackageUrl: "https://127.0.0.1:9443/chromium/abcdefghijklmnopabcdefghijklmnop/extension.crx",
             ManagedPackageArtifactPath: "/tmp/profile/managed-delivery/atom-webdriver-extension.crx",
             DiscoveryUrl: "http://127.0.0.1:9000/",
+            NavigationProxyPort: 0,
             ConnectionTimeout: TimeSpan.FromSeconds(5));
 
         var arguments = BridgeExtensionBootstrap.GetLaunchArguments(profile, bridgeBootstrap);
@@ -609,6 +611,7 @@ public class WebDriverBrowserProfileTests
             ManagedPackageUrl: string.Empty,
             ManagedPackageArtifactPath: string.Empty,
             DiscoveryUrl: "http://127.0.0.1:9000/",
+            NavigationProxyPort: 0,
             ConnectionTimeout: TimeSpan.FromSeconds(5));
 
         var arguments = BridgeExtensionBootstrap.GetLaunchArguments(profile, bridgeBootstrap);
