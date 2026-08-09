@@ -46,6 +46,18 @@ internal sealed class BridgeNavigationProxyServer(
     /// <summary>Бюджет ожидания ответа upstream. Не связан с фазами обмена с клиентом.</summary>
     private static readonly TimeSpan ForwardTimeout = TimeSpan.FromSeconds(60);
 
+    /// <summary>
+    /// Заголовок, которым расширение помечает вкладку-источник запроса.
+    /// </summary>
+    /// <remarks>
+    /// Chromium не отдаёт расширению прокси-аутентификацию (событие onAuthRequired в режиме
+    /// asyncBlocking не приходит), поэтому route token там доставляется не через
+    /// <c>Proxy-Authorization</c>, а этим заголовком: его ставит правило declarativeNetRequest,
+    /// привязанное к конкретной вкладке. Заголовок входит в список hop-by-hop и срезается до
+    /// отправки на origin — сайт не должен видеть никаких следов автоматизации.
+    /// </remarks>
+    internal const string RouteTokenHeaderName = "X-Atom-Route";
+
     private static readonly HashSet<string> HopByHopHeaderNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "Connection",
@@ -53,6 +65,7 @@ internal sealed class BridgeNavigationProxyServer(
         "Keep-Alive",
         "Proxy-Authenticate",
         "Proxy-Authorization",
+        RouteTokenHeaderName,
         "TE",
         "Trailer",
         "Transfer-Encoding",
@@ -189,6 +202,16 @@ internal sealed class BridgeNavigationProxyServer(
                     return;
 
                 var routeToken = TryReadRouteToken(request.Headers);
+
+                if (request.IsConnect)
+                {
+                    // На самом CONNECT токена может не быть: declarativeNetRequest правит заголовки
+                    // запроса, а не установку туннеля. Поэтому туннель принимается безусловно, а
+                    // маршрут определяется по запросу внутри TLS, где заголовок уже есть.
+                    await HandleConnectTunnelAsync(stream, request, routeToken, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
                 if (string.IsNullOrWhiteSpace(routeToken))
                 {
                     logger?.LogBridgeServerNavigationProxyRejected(request.Method, request.Target, "proxy-auth-missing");
@@ -201,12 +224,6 @@ internal sealed class BridgeNavigationProxyServer(
                 {
                     logger?.LogBridgeServerNavigationProxyRejected(request.Method, request.Target, "proxy-route-missing");
                     await WriteErrorResponseAsync(stream, HttpStatusCode.BadGateway, "route-missing", cancellationToken).ConfigureAwait(false);
-                    return;
-                }
-
-                if (request.IsConnect)
-                {
-                    await HandleConnectTunnelAsync(stream, request, routeToken, route, registry, cancellationToken).ConfigureAwait(false);
                     return;
                 }
 
@@ -299,9 +316,7 @@ internal sealed class BridgeNavigationProxyServer(
     private async Task HandleConnectTunnelAsync(
         System.Net.Sockets.NetworkStream stream,
         ProxyRequest request,
-        string routeToken,
-        ProxyNavigationRoute route,
-        ProxyNavigationDecisionRegistry registry,
+        string? connectRouteToken,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.ConnectHost) || request.ConnectPort <= 0)
@@ -345,6 +360,23 @@ internal sealed class BridgeNavigationProxyServer(
         {
             logger?.LogBridgeServerNavigationProxyRejected(tunneledRequest.Method, tunneledRequest.Target, "tunnel-target-invalid");
             await WriteErrorResponseAsync(sslStream, HttpStatusCode.BadRequest, "invalid-tunnel-target", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // Токен запроса внутри туннеля приоритетнее: именно на нём стоит заголовок вкладки.
+        var routeToken = TryReadRouteToken(tunneledRequest.Headers) ?? connectRouteToken;
+        if (string.IsNullOrWhiteSpace(routeToken))
+        {
+            logger?.LogBridgeServerNavigationProxyRejected(tunneledRequest.Method, tunneledRequest.Target, "proxy-auth-missing");
+            await WriteProxyAuthenticationRequiredAsync(sslStream, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var registry = registryResolver();
+        if (registry is null || !registry.TryResolveRoute(routeToken, out var route))
+        {
+            logger?.LogBridgeServerNavigationProxyRejected(tunneledRequest.Method, tunneledRequest.Target, "proxy-route-missing");
+            await WriteErrorResponseAsync(sslStream, HttpStatusCode.BadGateway, "route-missing", cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -1159,6 +1191,14 @@ internal sealed class BridgeNavigationProxyServer(
 
     private static string? TryReadRouteToken(IReadOnlyDictionary<string, string> headers)
     {
+        // Chromium-путь: токен проставлен правилом declarativeNetRequest прямо на запросе.
+        if (headers.TryGetValue(RouteTokenHeaderName, out var routeHeader)
+            && !string.IsNullOrWhiteSpace(routeHeader))
+        {
+            return routeHeader.Trim();
+        }
+
+        // Firefox-путь: токен приезжает как имя пользователя в ответе на 407.
         if (!headers.TryGetValue("Proxy-Authorization", out var proxyAuthorization)
             || string.IsNullOrWhiteSpace(proxyAuthorization))
         {

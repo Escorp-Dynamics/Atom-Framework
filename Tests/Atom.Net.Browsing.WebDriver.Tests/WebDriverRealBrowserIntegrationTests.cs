@@ -4875,7 +4875,7 @@ public sealed class WebDriverRealBrowserIntegrationTests
     }
 
     [Test]
-    public async Task RealBrowserPageRequestInterceptionMainFrameFulfillFailsClosedWithoutOriginRequest()
+    public async Task RealBrowserPageRequestInterceptionMainFrameFulfillServesSyntheticDocumentWithoutOriginRequest()
     {
         if (!WebDriverTestEnvironment.IsRealBrowserRunConfigured())
             Assert.Ignore("Real-browser integration test requires ATOM_TEST_WEBDRIVER_BROWSER.");
@@ -4935,18 +4935,22 @@ public sealed class WebDriverRealBrowserIntegrationTests
             await Task.Delay(250).ConfigureAwait(false);
 
             var liveUrlAfterBlockedNavigate = await targetPage.GetUrlAsync().ConfigureAwait(false);
-            var liveBodyTextAfterBlockedNavigate = await targetPage.EvaluateAsync<string>(bodyTextScript).ConfigureAwait(false);
+            var liveBodyTextAfterFulfilledNavigate = await targetPage.EvaluateAsync<string>(bodyTextScript).ConfigureAwait(false);
 
+            var liveTitleAfterFulfilledNavigate = await targetPage.GetTitleAsync().ConfigureAwait(false);
+
+            // Навигационный fulfill исполняет локальный прокси: он отвечает браузеру сам, ДО обращения
+            // к origin, поэтому переход коммитится с подставленным документом на запрошенном URL.
+            // Ключевое свойство безопасности при этом сохраняется — origin не запрашивается вовсе.
             Assert.Multiple(() =>
             {
                 Assert.That(targetPageRequests, Has.Count.EqualTo(1));
-                Assert.That(server.HasObservedRequest(blockedUrl), Is.False);
+                Assert.That(server.HasObservedRequest(blockedUrl), Is.False, "Origin must never be contacted for a fulfilled navigation.");
                 Assert.That(baselineSnapshotUrl, Is.EqualTo(baselineUrl));
                 Assert.That(baselineLiveUrl, Is.EqualTo(baselineUrl.AbsoluteUri));
-                Assert.That(targetPage.CurrentUrl, Is.EqualTo(baselineSnapshotUrl));
-                Assert.That(targetPage.CurrentTitle, Is.EqualTo(baselineSnapshotTitle));
-                Assert.That(liveUrlAfterBlockedNavigate, Is.EqualTo(baselineLiveUrl));
-                Assert.That(liveBodyTextAfterBlockedNavigate, Is.EqualTo(baselineBodyText));
+                Assert.That(liveUrlAfterBlockedNavigate, Is.EqualTo(blockedUrl.AbsoluteUri));
+                Assert.That(liveTitleAfterFulfilledNavigate, Is.EqualTo("Main Frame Fulfilled"));
+                Assert.That(liveBodyTextAfterFulfilledNavigate, Does.Contain("fulfilled"));
                 Assert.That(targetPage.IsDisposed, Is.False);
             });
         }
