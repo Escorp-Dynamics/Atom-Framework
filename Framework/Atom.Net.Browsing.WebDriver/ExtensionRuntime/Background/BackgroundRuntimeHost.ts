@@ -357,6 +357,15 @@ export class BackgroundRuntimeHost {
         // Content scripts connect immediately on startup, so the port listener must exist before async config loading.
         this.runtime.onConnect?.addListener(this.onConnect);
 
+        // Остальные браузерные слушатели регистрируются здесь же — СИНХРОННО, до первого await.
+        // Manifest V3 будит завершённый service worker только по тем событиям, слушатели которых
+        // были зарегистрированы во время первого исполнения скрипта. Если отложить регистрацию за
+        // загрузку конфигурации, они успевают привязаться лишь на первом запуске: после ближайшего
+        // простоя браузер уже не знает, что расширение ждёт webRequest, и перехват умирает молча,
+        // без единой ошибки. Сами обработчики к конфигурации обращаются лениво и переживают её
+        // отсутствие, поэтому регистрация до загрузки безопасна.
+        this.registerBrowserEventListeners();
+
         let loadedConfig: BootstrapRuntimeConfigResult;
         try {
             loadedConfig = await loadBootstrapRuntimeConfigWithSource(this.runtime, this.browserHost);
@@ -378,35 +387,6 @@ export class BackgroundRuntimeHost {
             extensionVersion: this.config.extensionVersion,
         });
 
-        try {
-            this.ensureCookieIsolationListeners();
-        } catch (error) {
-            emitBackgroundDebugEvent(this.config, 'cookie-isolation-init-failed', {
-                error: toErrorMessage(error),
-            });
-
-            console.error('[фоновый вход] Не удалось инициализировать cookie isolation listeners', error);
-        }
-
-        try {
-            this.ensureProxyRoutingListeners();
-        } catch (error) {
-            emitBackgroundDebugEvent(this.config, 'proxy-routing-init-failed', {
-                error: toErrorMessage(error),
-            });
-
-            console.error('[фоновый вход] Не удалось инициализировать proxy routing listeners', error);
-        }
-
-        try {
-            this.ensureTabLifecycleListeners();
-        } catch (error) {
-            emitBackgroundDebugEvent(this.config, 'tab-lifecycle-init-failed', {
-                error: toErrorMessage(error),
-            });
-
-            console.error('[фоновый вход] Не удалось инициализировать tab lifecycle listeners', error);
-        }
 
         this.health = new ConsoleSessionHealthReporter(this.sessionIdValue);
         this.coordinator = this.createCoordinator(this.sessionIdValue);
@@ -442,6 +422,30 @@ export class BackgroundRuntimeHost {
             });
 
             console.error('[фоновый вход] Не удалось запустить сеанс мостового слоя', error);
+        }
+    }
+
+    /**
+     * Регистрирует браузерные слушатели синхронно, до загрузки конфигурации.
+     * Сбой одного набора не должен мешать остальным, поэтому каждый изолирован.
+     */
+    private registerBrowserEventListeners(): void {
+        try {
+            this.ensureCookieIsolationListeners();
+        } catch (error) {
+            console.error('[фоновый вход] Не удалось инициализировать cookie isolation listeners', error);
+        }
+
+        try {
+            this.ensureProxyRoutingListeners();
+        } catch (error) {
+            console.error('[фоновый вход] Не удалось инициализировать proxy routing listeners', error);
+        }
+
+        try {
+            this.ensureTabLifecycleListeners();
+        } catch (error) {
+            console.error('[фоновый вход] Не удалось инициализировать tab lifecycle listeners', error);
         }
     }
 
