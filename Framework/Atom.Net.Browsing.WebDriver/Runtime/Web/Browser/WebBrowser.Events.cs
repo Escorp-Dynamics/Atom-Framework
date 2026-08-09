@@ -329,8 +329,11 @@ public sealed partial class WebBrowser
         ArgumentNullException.ThrowIfNull(effectiveRequest);
         ArgumentNullException.ThrowIfNull(decision);
 
-        if (!request.SupportsNavigationFulfillment
-            || !string.Equals(request.ResourceType, "main_frame", StringComparison.OrdinalIgnoreCase))
+        // Запрос от прокси решается прокси же — для любого типа ресурса. Путь блокирующего
+        // webRequest по-прежнему отдаёт прокси только main_frame: остальное он применяет сам.
+        if (!request.DecidedByNavigationProxy
+            && (!request.SupportsNavigationFulfillment
+                || !string.Equals(request.ResourceType, "main_frame", StringComparison.OrdinalIgnoreCase)))
         {
             return null;
         }

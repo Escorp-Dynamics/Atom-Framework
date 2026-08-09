@@ -1504,7 +1504,12 @@ export class BackgroundRuntimeHost {
         const requestHeaders = toMutableHeaders(mutation?.requestHeaders ?? details.requestHeaders);
         const decision = this.tryPostInterceptedRequest(route, details, requestHeaders);
         if (decision === null) {
-            void this.emitInterceptedRequestEvent(details);
+            // Когда перехватом владеет навигационный прокси, он сам поднимет событие запроса на
+            // стороне драйвера. Продублировать его отсюда значило бы вызвать обработчик дважды.
+            if (!this.isNavigationProxyOwnedRequest(details)) {
+                void this.emitInterceptedRequestEvent(details);
+            }
+
             this.tryPostObservedRequestHeaders(route, details, requestHeaders);
             return mutation;
         }
@@ -1600,6 +1605,18 @@ export class BackgroundRuntimeHost {
         }
 
         return { responseHeaders };
+    }
+
+    /**
+     * Владеет ли запросом навигационный прокси.
+     *
+     * В proxy-режиме решение принимает и событие поднимает прокси на стороне драйвера, поэтому
+     * расширение не должно сообщать о том же запросе повторно.
+     */
+    private isNavigationProxyOwnedRequest(details: WebRequestDetails): boolean {
+        const tabId = getWebRequestTabId(details.tabId);
+        return tabId !== null
+            && this.resolveNavigationProxyRouteToken(this.getTabContext(tabId)) !== undefined;
     }
 
     private async emitInterceptedRequestEvent(details: WebRequestDetails): Promise<void> {

@@ -169,7 +169,8 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             settings.NavigationProxyPort,
             () => navigationProxyDecisions,
             HandleNavigationProxyDirectRequestAsync,
-            settings.Logger);
+            settings.Logger,
+            DispatchNavigationProxyInterceptionAsync);
 
         StartBridgeListener();
         await managedDeliveryServer.StartAsync().ConfigureAwait(false);
@@ -1564,6 +1565,40 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
         context.Response.Close();
         return false;
+    }
+
+    /// <summary>
+    /// Поднимает событие перехвата по запросу, пришедшему на навигационный прокси.
+    /// </summary>
+    /// <remarks>
+    /// В Chromium блокирующего webRequest нет, поэтому спросить драйвер некому — это делает сам
+    /// прокси. Решение кладётся в реестр обработчиком события, после чего прокси забирает его
+    /// обычным путём. Ответ здесь не нужен: применяет решение прокси, а не расширение.
+    /// </remarks>
+    internal async ValueTask DispatchNavigationProxyInterceptionAsync(
+        ProxyNavigationRoute route,
+        string requestId,
+        string method,
+        string absoluteUrl,
+        string resourceType,
+        IReadOnlyDictionary<string, string>? headers,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(route);
+
+        var payload = new BridgeInterceptedRequestPayload
+        {
+            RequestId = requestId,
+            TabId = route.TabId,
+            Url = absoluteUrl,
+            Method = method,
+            ResourceType = resourceType,
+            Headers = headers,
+            SupportsNavigationFulfillment = true,
+            DecidedByNavigationProxy = true,
+        };
+
+        _ = await InvokeRequestInterceptionAsync(payload, cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask<BridgeInterceptHttpResponse> InvokeRequestInterceptionAsync(BridgeInterceptedRequestPayload request, CancellationToken cancellationToken)

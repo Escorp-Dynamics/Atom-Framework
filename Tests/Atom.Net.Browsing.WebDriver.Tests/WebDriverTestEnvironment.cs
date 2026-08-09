@@ -1,5 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Reflection;
+using Atom.Debug.Logging;
+using Microsoft.Extensions.Logging;
 using Atom.Hardware.Display;
 using Atom.Hardware.Input;
 using RuntimeWebBrowser = Atom.Net.Browsing.WebDriver.WebBrowser;
@@ -65,6 +67,14 @@ internal static class WebDriverTestEnvironment
         }
     }
 
+    /// <summary>
+    /// Диагностический логгер драйвера: включается переменной ATOM_DIAG_LOG.
+    /// </summary>
+    private static FileLogger? ResolveDiagnosticLogger()
+        => Environment.GetEnvironmentVariable("ATOM_DIAG_LOG") is { Length: > 0 } diagnosticLogPath
+            ? new FileLogger(nameof(WebDriverTestEnvironment), diagnosticLogPath)
+            : null;
+
     private static WebBrowserSettings ApplyOverrides(WebBrowserSettings settings)
     {
         var resolvedProfile = settings.Profile;
@@ -86,7 +96,7 @@ internal static class WebDriverTestEnvironment
         {
             Profile = resolvedProfile,
             Proxy = settings.Proxy,
-            Logger = settings.Logger,
+            Logger = settings.Logger ?? ResolveDiagnosticLogger(),
             Display = settings.Display,
             Mouse = settings.Mouse,
             Keyboard = settings.Keyboard,

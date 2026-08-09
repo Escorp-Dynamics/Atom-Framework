@@ -9007,6 +9007,10 @@ public sealed class WebDriverRealBrowserIntegrationTests
         ArgumentNullException.ThrowIfNull(browser);
         ArgumentException.ThrowIfNullOrWhiteSpace(scenario);
 
+        // Диагностический обход: позволяет прогнать перехват в Chromium, пока путь достраивается.
+        if (Environment.GetEnvironmentVariable("ATOM_FORCE_CHROMIUM_INTERCEPTION") is { Length: > 0 })
+            return;
+
         var launchSettings = WebDriverTestEnvironment.GetLaunchSettings(browser);
         if (launchSettings.Profile is not ChromeProfile || launchSettings.Profile is FirefoxProfile)
             return;

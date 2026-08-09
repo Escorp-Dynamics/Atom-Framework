@@ -68,6 +68,15 @@ internal sealed class BridgeInterceptedRequestPayload
 
     public IReadOnlyDictionary<string, string>? Headers { get; init; }
 
+    /// <summary>
+    /// Запрос пришёл от локального навигационного прокси, а не от блокирующего webRequest.
+    /// </summary>
+    /// <remarks>
+    /// В этом режиме решение применяет сам прокси, поэтому оно нужно для ЛЮБОГО типа ресурса,
+    /// а не только для main_frame: блокирующего слушателя, который отработал бы остальные, нет.
+    /// </remarks>
+    public bool DecidedByNavigationProxy { get; init; }
+
     public string? RequestBodyBase64 { get; init; }
 
     public IReadOnlyDictionary<string, string[]>? FormData { get; init; }

@@ -30,7 +30,8 @@ internal sealed class BridgeNavigationProxyServer(
     int port,
     Func<ProxyNavigationDecisionRegistry?> registryResolver,
     Func<BridgeNavigationProxyDirectRequest, CancellationToken, ValueTask<BridgeNavigationProxyDirectResponse?>>? directRequestHandler = null,
-    ILogger? diagnosticsLogger = null) : IAsyncDisposable
+    ILogger? diagnosticsLogger = null,
+    Func<ProxyNavigationRoute, string, string, string, string, IReadOnlyDictionary<string, string>?, CancellationToken, ValueTask>? interceptionDispatcher = null) : IAsyncDisposable
 {
     private const string ProxyAuthenticationRealm = "Basic realm=\"Atom Bridge Navigation Proxy\"";
     private const int MaxRequestHeaderBytes = 128 * 1024;
@@ -77,6 +78,7 @@ internal sealed class BridgeNavigationProxyServer(
     private readonly Func<ProxyNavigationDecisionRegistry?> registryResolver = registryResolver;
     private readonly Func<BridgeNavigationProxyDirectRequest, CancellationToken, ValueTask<BridgeNavigationProxyDirectResponse?>>? directRequestHandler = directRequestHandler;
     private readonly ILogger? logger = diagnosticsLogger;
+    private readonly Func<ProxyNavigationRoute, string, string, string, string, IReadOnlyDictionary<string, string>?, CancellationToken, ValueTask>? interceptionDispatcher = interceptionDispatcher;
     private readonly ConcurrentDictionary<string, HttpClient> forwardClients = new(StringComparer.Ordinal);
     private Task? acceptLoop;
     private bool isDisposed;
@@ -418,6 +420,14 @@ internal sealed class BridgeNavigationProxyServer(
         CancellationToken cancellationToken)
     {
         if (!TryConsumeDecision(registry, routeToken, clientRequest.Method, absoluteTargetUrl, DateTimeOffset.UtcNow, out var decision))
+        {
+            // Решения нет — возможно, спросить драйвер ещё некому: в Chromium блокирующего
+            // webRequest не существует, поэтому перехват поднимает сам прокси и повторяет выборку.
+            await TryDispatchInterceptionAsync(clientRequest, absoluteTargetUrl, route, cancellationToken).ConfigureAwait(false);
+            _ = TryConsumeDecision(registry, routeToken, clientRequest.Method, absoluteTargetUrl, DateTimeOffset.UtcNow, out decision);
+        }
+
+        if (decision is null)
         {
             // Решения нет: запрос не проходил через мост (неперехваченная навигация, повтор после
             // истечения TTL и т.п.). Route token валиден, поэтому вместо 502 (который ломал бы
@@ -879,6 +889,54 @@ internal sealed class BridgeNavigationProxyServer(
             body: null,
             includeBody: false,
             cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask TryDispatchInterceptionAsync(
+        ProxyRequest clientRequest,
+        string absoluteTargetUrl,
+        ProxyNavigationRoute route,
+        CancellationToken cancellationToken)
+    {
+        if (interceptionDispatcher is not { } dispatch)
+            return;
+
+        try
+        {
+            await dispatch(
+                route,
+                CreateProxyRequestId(),
+                clientRequest.Method,
+                absoluteTargetUrl,
+                ResolveResourceType(clientRequest),
+                clientRequest.Headers,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger?.LogBridgeServerNavigationProxyConnectionFailed(exception);
+        }
+    }
+
+    private static string CreateProxyRequestId()
+        => "proxy-" + Guid.NewGuid().ToString("n", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Тип ресурса по заголовкам запроса: прокси не получает его от браузера напрямую.
+    /// </summary>
+    private static string ResolveResourceType(ProxyRequest clientRequest)
+    {
+        if (clientRequest.Headers.TryGetValue("Sec-Fetch-Dest", out var fetchDestination)
+            && !string.IsNullOrWhiteSpace(fetchDestination))
+        {
+            return string.Equals(fetchDestination, "document", StringComparison.OrdinalIgnoreCase)
+                ? "main_frame"
+                : fetchDestination.Trim();
+        }
+
+        return clientRequest.Headers.TryGetValue("Accept", out var accept)
+            && accept.Contains("text/html", StringComparison.OrdinalIgnoreCase)
+                ? "main_frame"
+                : "other";
     }
 
     private static ProxyNavigationPendingDecision CreateImplicitContinueDecision(ProxyRequest clientRequest, string absoluteTargetUrl)
