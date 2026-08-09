@@ -1604,7 +1604,12 @@ export class BackgroundRuntimeHost {
 
         const decision = this.tryPostInterceptedResponse(route, details, responseHeaders);
         if (decision === null) {
-            void this.emitInterceptedResponseEvent(details);
+            // Ответом, как и запросом, в proxy-режиме владеет прокси: он поднимет событие сам,
+            // причём с телом. Дубль отсюда вызвал бы обработчик дважды.
+            if (!this.isNavigationProxyOwnedRequest(details)) {
+                void this.emitInterceptedResponseEvent(details);
+            }
+
             return modified ? { responseHeaders } : mutation;
         }
 

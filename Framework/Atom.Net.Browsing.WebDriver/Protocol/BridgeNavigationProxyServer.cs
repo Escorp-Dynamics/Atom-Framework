@@ -31,7 +31,8 @@ internal sealed class BridgeNavigationProxyServer(
     Func<ProxyNavigationDecisionRegistry?> registryResolver,
     Func<BridgeNavigationProxyDirectRequest, CancellationToken, ValueTask<BridgeNavigationProxyDirectResponse?>>? directRequestHandler = null,
     ILogger? diagnosticsLogger = null,
-    Func<ProxyNavigationRoute, string, string, string, string, IReadOnlyDictionary<string, string>?, CancellationToken, ValueTask>? interceptionDispatcher = null) : IAsyncDisposable
+    Func<ProxyNavigationRoute, string, string, string, string, IReadOnlyDictionary<string, string>?, CancellationToken, ValueTask>? interceptionDispatcher = null,
+    Func<ProxyNavigationRoute, string, string, string, string, int, string?, IReadOnlyDictionary<string, string>?, byte[]?, CancellationToken, ValueTask<BridgeInterceptHttpResponse>>? responseInterceptionDispatcher = null) : IAsyncDisposable
 {
     private const string ProxyAuthenticationRealm = "Basic realm=\"Atom Bridge Navigation Proxy\"";
     private const int MaxRequestHeaderBytes = 128 * 1024;
@@ -79,6 +80,7 @@ internal sealed class BridgeNavigationProxyServer(
     private readonly Func<BridgeNavigationProxyDirectRequest, CancellationToken, ValueTask<BridgeNavigationProxyDirectResponse?>>? directRequestHandler = directRequestHandler;
     private readonly ILogger? logger = diagnosticsLogger;
     private readonly Func<ProxyNavigationRoute, string, string, string, string, IReadOnlyDictionary<string, string>?, CancellationToken, ValueTask>? interceptionDispatcher = interceptionDispatcher;
+    private readonly Func<ProxyNavigationRoute, string, string, string, string, int, string?, IReadOnlyDictionary<string, string>?, byte[]?, CancellationToken, ValueTask<BridgeInterceptHttpResponse>>? responseInterceptionDispatcher = responseInterceptionDispatcher;
     private readonly ConcurrentDictionary<string, HttpClient> forwardClients = new(StringComparer.Ordinal);
     private Task? acceptLoop;
     private bool isDisposed;
@@ -924,6 +926,81 @@ internal sealed class BridgeNavigationProxyServer(
         }
     }
 
+    private async ValueTask<BridgeInterceptHttpResponse?> TryDispatchResponseInterceptionAsync(
+        ProxyRequest clientRequest,
+        string absoluteTargetUrl,
+        ProxyNavigationRoute route,
+        int statusCode,
+        string? reasonPhrase,
+        IReadOnlyDictionary<string, string> responseHeaders,
+        byte[] body,
+        CancellationToken cancellationToken)
+    {
+        if (responseInterceptionDispatcher is not { } dispatch)
+            return null;
+
+        try
+        {
+            return await dispatch(
+                route,
+                CreateProxyRequestId(),
+                clientRequest.Method,
+                absoluteTargetUrl,
+                ResolveResourceType(clientRequest),
+                statusCode,
+                reasonPhrase,
+                responseHeaders,
+                body,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger?.LogBridgeServerNavigationProxyConnectionFailed(exception);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Применяет решение по ответу. Возвращает <see langword="false"/>, если ответ отменён.
+    /// </summary>
+    private static bool TryApplyResponseDecision(
+        BridgeInterceptHttpResponse decision,
+        ref int statusCode,
+        ref string? reasonPhrase,
+        Dictionary<string, string> responseHeaders,
+        ref byte[] body)
+    {
+        if (string.Equals(decision.Action, "abort", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Заголовки применяются и при продолжении: вызывающий вправе дополнить ответ,
+        // не подменяя его целиком.
+        if (decision.ResponseHeaders is { Count: > 0 } headerOverrides)
+        {
+            foreach (var header in headerOverrides)
+                responseHeaders[header.Key] = header.Value;
+        }
+
+        if (!string.Equals(decision.Action, "fulfill", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (decision.StatusCode is { } decisionStatusCode)
+            statusCode = decisionStatusCode;
+
+        if (!string.IsNullOrWhiteSpace(decision.ReasonPhrase))
+            reasonPhrase = decision.ReasonPhrase;
+
+        if (decision.BodyBase64 is { Length: > 0 } bodyBase64)
+        {
+            body = Convert.FromBase64String(bodyBase64);
+
+            // Длина изменилась: устаревший Content-Length оборвал бы ответ на полуслове.
+            responseHeaders["Content-Length"] = body.Length.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return true;
+    }
+
     private static bool IsNavigationRequest(ProxyRequest clientRequest)
         => string.Equals(ResolveResourceType(clientRequest), "main_frame", StringComparison.OrdinalIgnoreCase);
 
@@ -998,10 +1075,32 @@ internal sealed class BridgeNavigationProxyServer(
             }
 
             var responseHeaders = CollectForwardResponseHeaders(forwardResponse);
+            var statusCode = (int)forwardResponse.StatusCode;
+            var reasonPhrase = forwardResponse.ReasonPhrase;
+
+            // Ответ получен целиком, поэтому здесь доступна подмена тела — то, чего блокирующий
+            // webRequest не даёт ни в одном браузере.
+            var responseDecision = await TryDispatchResponseInterceptionAsync(
+                clientRequest,
+                absoluteTargetUrl,
+                route,
+                statusCode,
+                reasonPhrase,
+                responseHeaders,
+                body,
+                cancellationToken).ConfigureAwait(false);
+
+            if (responseDecision is not null
+                && !TryApplyResponseDecision(responseDecision, ref statusCode, ref reasonPhrase, responseHeaders, ref body))
+            {
+                // Отмена ответа: соединение обрывается без ответа, как при cancel в webRequest.
+                return;
+            }
+
             await WriteResponseAsync(
                 stream,
-                (int)forwardResponse.StatusCode,
-                forwardResponse.ReasonPhrase,
+                statusCode,
+                reasonPhrase,
                 responseHeaders,
                 body,
                 includeBody: !string.Equals(clientRequest.Method, "HEAD", StringComparison.OrdinalIgnoreCase),

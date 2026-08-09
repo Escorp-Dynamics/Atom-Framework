@@ -183,6 +183,13 @@ public sealed partial class WebBrowser
             return BridgeInterceptHttpResponse.Continue();
         }
 
+        // Как и на стороне запроса: прокси видит весь трафик вкладки и о шаблонах не знает.
+        if (responsePayload.DecidedByNavigationProxy
+            && page.GetEffectiveRequestInterceptionState()?.Matches(responsePayload.Url) != true)
+        {
+            return BridgeInterceptHttpResponse.Continue();
+        }
+
         if (!TryCreateInterceptedResponseEventArgs(responsePayload, page.MainFrame, out var args))
         {
             return BridgeInterceptHttpResponse.Continue();
@@ -285,6 +292,11 @@ public sealed partial class WebBrowser
             ReasonPhrase = payload.ReasonPhrase,
             RequestMessage = new HttpRequestMessage(new HttpMethod(payload.Method), url),
         };
+
+        // Тело выставляется до заголовков-контента: ApplyResponseHeaders разложит Content-*
+        // на HttpContent, которого без тела просто не существует.
+        if (payload.Body is { } responseBody)
+            response.Content = new ByteArrayContent(responseBody);
 
         ApplyResponseHeaders(response, payload.Headers);
         args = new InterceptedResponseEventArgs

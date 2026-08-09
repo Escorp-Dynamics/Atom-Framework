@@ -170,7 +170,8 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             () => navigationProxyDecisions,
             HandleNavigationProxyDirectRequestAsync,
             settings.Logger,
-            DispatchNavigationProxyInterceptionAsync);
+            DispatchNavigationProxyInterceptionAsync,
+            DispatchNavigationProxyResponseInterceptionAsync);
 
         StartBridgeListener();
         await managedDeliveryServer.StartAsync().ConfigureAwait(false);
@@ -1599,6 +1600,45 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         };
 
         _ = await InvokeRequestInterceptionAsync(payload, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Поднимает событие перехвата ответа для обмена, которым владеет навигационный прокси.
+    /// </summary>
+    /// <remarks>
+    /// В отличие от пути блокирующего webRequest здесь доступно тело: прокси прочитал ответ
+    /// целиком, поэтому обработчик может его читать и подменять.
+    /// </remarks>
+    internal async ValueTask<BridgeInterceptHttpResponse> DispatchNavigationProxyResponseInterceptionAsync(
+        ProxyNavigationRoute route,
+        string requestId,
+        string method,
+        string absoluteUrl,
+        string resourceType,
+        int statusCode,
+        string? reasonPhrase,
+        IReadOnlyDictionary<string, string>? headers,
+        byte[]? body,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(route);
+
+        var payload = new BridgeInterceptedResponsePayload
+        {
+            RequestId = requestId,
+            TabId = route.TabId,
+            Url = absoluteUrl,
+            Method = method,
+            ResourceType = resourceType,
+            StatusCode = statusCode,
+            ReasonPhrase = reasonPhrase,
+            Headers = headers,
+            Body = body,
+            DecidedByNavigationProxy = true,
+            Timestamp = DateTimeOffset.UtcNow,
+        };
+
+        return await InvokeResponseInterceptionAsync(payload, cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask<BridgeInterceptHttpResponse> InvokeRequestInterceptionAsync(BridgeInterceptedRequestPayload request, CancellationToken cancellationToken)

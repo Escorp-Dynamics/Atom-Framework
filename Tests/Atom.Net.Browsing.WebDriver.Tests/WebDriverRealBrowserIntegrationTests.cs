@@ -5067,6 +5067,68 @@ public sealed class WebDriverRealBrowserIntegrationTests
         }
     }
 
+    [Test]
+    public async Task RealBrowserPageResponseInterceptionRewritesResponseBodyBeforeDelivery()
+    {
+        if (!WebDriverTestEnvironment.IsRealBrowserRunConfigured())
+            Assert.Ignore("Real-browser integration test requires ATOM_TEST_WEBDRIVER_BROWSER.");
+
+        using var server = new RealBrowserInterceptionLoopbackServer();
+        await server.StartAsync().ConfigureAwait(false);
+
+        await using var browser = await WebDriverTestEnvironment.LaunchAsync();
+        var firstWindow = (WebWindow)browser.CurrentWindow;
+        var targetPage = (WebPage)firstWindow.CurrentPage;
+
+        await AssertPageBootstrappedAsync(browser, targetPage, "Real-browser response body rewrite test requires a bootstrapped target page.").ConfigureAwait(false);
+
+        await firstWindow.ActivateAsync().ConfigureAwait(false);
+        await NavigateToRealBrowserPageAsync(browser, targetPage, server.PageScopeTargetPageUrl).ConfigureAwait(false);
+
+        const string rewrittenBody = "rewritten-by-driver";
+        var probeUrl = server.CreateHeaderEchoUrl("X-Atom-Body-Rewrite", "response-body");
+        List<InterceptedResponseEventArgs> observedResponses = [];
+
+        targetPage.Response += async (_, args) =>
+        {
+            if (args.Response.RequestMessage?.RequestUri == probeUrl)
+            {
+                observedResponses.Add(args);
+
+                var replacement = new HttpsResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(rewrittenBody, Encoding.UTF8, "text/plain"),
+                };
+
+                await args.FulfillAsync(replacement).ConfigureAwait(false);
+                return;
+            }
+
+            await args.ContinueAsync().ConfigureAwait(false);
+        };
+
+        await targetPage.SetRequestInterceptionAsync(true, ["*real-browser-interception/header-echo/*"]).ConfigureAwait(false);
+
+        try
+        {
+            var deliveredBody = await ExecuteFetchAsync(targetPage, probeUrl, "response-body").ConfigureAwait(false);
+
+            await WaitForLoopbackRequestAsync(server, probeUrl, "Timed out waiting for the response-body rewrite request to reach the loopback server.").ConfigureAwait(false);
+
+            // Тело подменяется уже после ответа origin: запрос до него доходит, а страница получает
+            // содержимое драйвера. Блокирующий webRequest такого не умеет ни в одном браузере.
+            Assert.Multiple(() =>
+            {
+                Assert.That(server.HasObservedRequest(probeUrl), Is.True);
+                Assert.That(deliveredBody, Is.EqualTo(rewrittenBody));
+            });
+        }
+        finally
+        {
+            await targetPage.SetRequestInterceptionAsync(false).ConfigureAwait(false);
+        }
+    }
+
     [TestCase(OuterRequestInterceptionScope.Window, TestName = "RealBrowser window.Request AbortAsync blocks matching fetch before loopback delivery")]
     [TestCase(OuterRequestInterceptionScope.Browser, TestName = "RealBrowser browser.Request AbortAsync blocks matching fetch before loopback delivery")]
     public async Task RealBrowserOuterScopeRequestInterceptionAbortBlocksMatchingFetchBeforeLoopbackDelivery(OuterRequestInterceptionScope scope)

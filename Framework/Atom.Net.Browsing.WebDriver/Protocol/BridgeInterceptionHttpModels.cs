@@ -104,6 +104,20 @@ internal sealed class BridgeInterceptedResponsePayload
 
     public IReadOnlyDictionary<string, string>? Headers { get; init; }
 
+    /// <summary>
+    /// Ответ получен навигационным прокси, а не блокирующим webRequest.
+    /// </summary>
+    public bool DecidedByNavigationProxy { get; init; }
+
+    /// <summary>
+    /// Тело ответа, если оно доступно перехватчику.
+    /// </summary>
+    /// <remarks>
+    /// Заполняется только на пути навигационного прокси: он владеет всем обменом и читает тело
+    /// целиком. Блокирующий webRequest тела не даёт, поэтому там остаётся пустым.
+    /// </remarks>
+    public byte[]? Body { get; init; }
+
     public DateTimeOffset Timestamp { get; init; }
 }
 
