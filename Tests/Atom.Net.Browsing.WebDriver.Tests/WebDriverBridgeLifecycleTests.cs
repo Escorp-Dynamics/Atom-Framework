@@ -1107,10 +1107,13 @@ public sealed class WebDriverBridgeLifecycleTests
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
 
         var lookupTask = page.GetFrameAsync("bridge-reattached-frame").AsTask();
-        var rootDiscoveryRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.FindElements, page.TabId, "[]").ConfigureAwait(false);
+        // Discovery перечисляет только живые host-элементы, поэтому корневой ответ содержит
+        // ТОЛЬКО переподключённый host. Отсоединённый фрейм снимается реконсиляцией кэша
+        // (Frame.EnsureChildFramesDiscoveredAsync) сразу после discovery, поэтому его
+        // DescribeElement больше не запрашивается — до него дело не доходит.
+        var rootDiscoveryRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.FindElements, page.TabId, "[\"iframe-host-element-attached\"]").ConfigureAwait(false);
         var detachedChildDiscoveryRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.FindElements, page.TabId, "[]").ConfigureAwait(false);
         var attachedChildDiscoveryRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.FindElements, page.TabId, "[]").ConfigureAwait(false);
-        var detachedDescribeRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.DescribeElement, page.TabId, "{\"tagName\":\"IFRAME\",\"checked\":false,\"selectedIndex\":-1,\"isActive\":false,\"isConnected\":false,\"isVisible\":true,\"boundingBox\":{\"left\":40,\"top\":50,\"width\":320,\"height\":180},\"computedStyle\":{\"display\":\"block\"},\"options\":[]}").ConfigureAwait(false);
         var attachedDescribeRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.DescribeElement, page.TabId, "{\"tagName\":\"IFRAME\",\"checked\":false,\"selectedIndex\":-1,\"isActive\":false,\"isConnected\":true,\"isVisible\":true,\"boundingBox\":{\"left\":40,\"top\":50,\"width\":320,\"height\":180},\"computedStyle\":{\"display\":\"block\"},\"options\":[]}").ConfigureAwait(false);
         var nameRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.GetElementProperty, page.TabId, "\"bridge-reattached-frame\"").ConfigureAwait(false);
         var resolvedFrame = await lookupTask.ConfigureAwait(false);
@@ -1121,7 +1124,6 @@ public sealed class WebDriverBridgeLifecycleTests
             Assert.That(rootDiscoveryRequest.Payload?.TryGetProperty("frameHostElementId", out _), Is.False, "Root frame discovery must start without a frameHostElementId payload.");
             Assert.That(detachedChildDiscoveryRequest.Payload?.TryGetProperty("frameHostElementId", out _), Is.False, "Bridge discovery currently uses the shared frame discovery payload shape for existing child frames as well.");
             Assert.That(attachedChildDiscoveryRequest.Payload?.TryGetProperty("frameHostElementId", out _), Is.False, "Bridge discovery currently uses the shared frame discovery payload shape for existing child frames as well.");
-            Assert.That(detachedDescribeRequest.Payload?.GetProperty("elementId").GetString(), Is.EqualTo("iframe-host-element-detached"));
             Assert.That(attachedDescribeRequest.Payload?.GetProperty("elementId").GetString(), Is.EqualTo("iframe-host-element-attached"));
             Assert.That(nameRequest.Payload?.GetProperty("elementId").GetString(), Is.EqualTo("iframe-host-element-attached"));
             Assert.That(nameRequest.Payload?.GetProperty("propertyName").GetString(), Is.EqualTo("name"));
@@ -1144,11 +1146,14 @@ public sealed class WebDriverBridgeLifecycleTests
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
 
         var lookupTask = page.GetFrameAsync(attachedFrameUrl).AsTask();
-        var rootDiscoveryRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.FindElements, page.TabId, "[]").ConfigureAwait(false);
+        // Discovery перечисляет только живые host-элементы, поэтому корневой ответ содержит
+        // ТОЛЬКО переподключённый host. Отсоединённый фрейм снимается реконсиляцией кэша
+        // (Frame.EnsureChildFramesDiscoveredAsync) сразу после discovery, поэтому его
+        // DescribeElement больше не запрашивается — до него дело не доходит.
+        var rootDiscoveryRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.FindElements, page.TabId, "[\"iframe-host-element-attached\"]").ConfigureAwait(false);
         var detachedChildDiscoveryRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.FindElements, page.TabId, "[]").ConfigureAwait(false);
         var attachedChildDiscoveryRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.FindElements, page.TabId, "[]").ConfigureAwait(false);
         var mainFrameUrlRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.GetUrl, page.TabId, "\"https://bridge.test/main-frame\"").ConfigureAwait(false);
-        var detachedDescribeRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.DescribeElement, page.TabId, "{\"tagName\":\"IFRAME\",\"checked\":false,\"selectedIndex\":-1,\"isActive\":false,\"isConnected\":false,\"isVisible\":true,\"boundingBox\":{\"left\":40,\"top\":50,\"width\":320,\"height\":180},\"computedStyle\":{\"display\":\"block\"},\"options\":[]}").ConfigureAwait(false);
         var attachedDescribeRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.DescribeElement, page.TabId, "{\"tagName\":\"IFRAME\",\"checked\":false,\"selectedIndex\":-1,\"isActive\":false,\"isConnected\":true,\"isVisible\":true,\"boundingBox\":{\"left\":40,\"top\":50,\"width\":320,\"height\":180},\"computedStyle\":{\"display\":\"block\"},\"options\":[]}").ConfigureAwait(false);
         var urlRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.ExecuteScript, page.TabId, "\"https://bridge.test/reattached-frame\"").ConfigureAwait(false);
         var resolvedFrame = await lookupTask.ConfigureAwait(false);
@@ -1160,7 +1165,6 @@ public sealed class WebDriverBridgeLifecycleTests
             Assert.That(detachedChildDiscoveryRequest.Payload?.TryGetProperty("frameHostElementId", out _), Is.False);
             Assert.That(attachedChildDiscoveryRequest.Payload?.TryGetProperty("frameHostElementId", out _), Is.False);
             Assert.That(mainFrameUrlRequest.Payload, Is.Null, "Main frame URL lookup should use the page-level GetUrl command without an element payload.");
-            Assert.That(detachedDescribeRequest.Payload?.GetProperty("elementId").GetString(), Is.EqualTo("iframe-host-element-detached"));
             Assert.That(attachedDescribeRequest.Payload?.GetProperty("elementId").GetString(), Is.EqualTo("iframe-host-element-attached"));
             Assert.That(urlRequest.Payload?.GetProperty("frameHostElementId").GetString(), Is.EqualTo("iframe-host-element-attached"));
             Assert.That(urlRequest.Payload?.GetProperty("script").GetString(), Does.Contain("globalThis.location?.href"));
