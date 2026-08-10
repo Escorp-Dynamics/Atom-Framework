@@ -82,7 +82,7 @@ public sealed class Frame : IFrame
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Observe(ex);
+                Observe(ex, "адрес");
                 return null;
             }
 
@@ -110,7 +110,7 @@ public sealed class Frame : IFrame
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Observe(ex);
+                Observe(ex, "заголовок");
                 return null;
             }
         }
@@ -136,7 +136,7 @@ public sealed class Frame : IFrame
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Observe(ex);
+                Observe(ex, "содержимое");
                 return null;
             }
         }
@@ -147,7 +147,13 @@ public sealed class Frame : IFrame
     public ValueTask<string?> GetContentAsync() => GetContentAsync(CancellationToken.None);
 
     public ValueTask<JsonElement?> EvaluateAsync(string script, CancellationToken cancellationToken)
-        => EvaluateScriptCoreAsync(script, preferPageContextOnNull: true, cancellationToken);
+        // preferPageContextOnNull:false — выполняем скрипт РОВНО один раз (в world:'MAIN'). Прежний
+        // fallback-повтор через page-injection при результате 'null' исполнял скрипт с побочными
+        // эффектами дважды (например, вызов подписанной callback-функции → двойная доставка Callback).
+        // На реальном браузере world:'MAIN' — это тот же realm страницы, что и page-injection, поэтому
+        // повтор ничего не восстанавливал, только дублировал side effects. (Cookie-sync использует свой
+        // путь syncDocumentCookieSurface и сохраняет page-context fallback.)
+        => EvaluateScriptCoreAsync(script, preferPageContextOnNull: false, cancellationToken);
 
     internal async ValueTask<JsonElement?> EvaluateScriptCoreAsync(string script, bool preferPageContextOnNull, CancellationToken cancellationToken)
     {
@@ -183,20 +189,21 @@ public sealed class Frame : IFrame
 
     public async ValueTask<TResult?> EvaluateAsync<TResult>(string script, CancellationToken cancellationToken)
     {
-        var result = await EvaluateScriptCoreAsync(script, preferPageContextOnNull: true, cancellationToken).ConfigureAwait(false);
+        // preferPageContextOnNull:false — единственное исполнение (см. пояснение в EvaluateAsync выше).
+        var result = await EvaluateScriptCoreAsync(script, preferPageContextOnNull: false, cancellationToken).ConfigureAwait(false);
         if (result is not JsonElement element)
             return default;
 
         if (typeof(TResult) == typeof(string))
             return (TResult?)(object?)element.GetString();
 
-        if (typeof(TResult) == typeof(bool) && (element.ValueKind is JsonValueKind.True or JsonValueKind.False))
-            return (TResult?)(object)element.GetBoolean();
+        if (typeof(TResult) == typeof(bool) && ScriptResultValue.TryReadBoolean(element, out var boolValue))
+            return (TResult?)(object)boolValue;
 
-        if (typeof(TResult) == typeof(int) && element.TryGetInt32(out var intValue))
+        if (typeof(TResult) == typeof(int) && ScriptResultValue.TryReadInt32(element, out var intValue))
             return (TResult?)(object)intValue;
 
-        if (typeof(TResult) == typeof(double) && element.TryGetDouble(out var doubleValue))
+        if (typeof(TResult) == typeof(double) && ScriptResultValue.TryReadDouble(element, out var doubleValue))
             return (TResult?)(object)doubleValue;
 
         if (typeof(TResult) == typeof(Uri) && element.ValueKind == JsonValueKind.String && Uri.TryCreate(element.GetString(), UriKind.Absolute, out var uri))
@@ -265,7 +272,7 @@ public sealed class Frame : IFrame
         if (page.BridgeCommands is not { } bridge)
             return CreateFallbackElement(HtmlFallbackDomQuery.FindFirst(page.CurrentContent, selector));
 
-        var elementId = await bridge.WaitForElementAsync(CreateWaitForElementPayload(selector, kind, timeout), cancellationToken).ConfigureAwait(false);
+        var elementId = await bridge.WaitForElementAsync(CreateWaitForElementPayload(selector, kind, timeout), timeout, cancellationToken).ConfigureAwait(false);
         return CreateBridgeElement(elementId);
     }
 
@@ -452,16 +459,34 @@ public sealed class Frame : IFrame
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Observe(ex);
+            Observe(ex, "снимок экрана");
             return;
         }
 
+        var discovered = new HashSet<string>(StringComparer.Ordinal);
         foreach (var frameHostElementId in frameHostElementIds)
         {
             if (string.IsNullOrWhiteSpace(frameHostElementId))
                 continue;
 
+            _ = discovered.Add(frameHostElementId);
             _ = page.GetOrCreateChildFrame(this, frameHostElementId);
+        }
+
+        // Discovery перечисляет только живые, подключённые host-элементы (live querySelectorAll в
+        // content-рантайме). Кэш дочерних фреймов add-only, поэтому любой закэшированный дочерний
+        // фрейм, чьего host'а больше нет в свежем наборе, имеет отвалившийся host (например,
+        // shadow-hosted iframe убрали и заменили новым) — выпиливаем его, иначе он навсегда останется
+        // в page.Frames / GetChildFramesAsync. Реконсиляция обязательна, потому что detach-сигнал в
+        // последовательности remove→reattach не всегда успевает опередить чтение снапшота.
+        foreach (var childFrame in SnapshotChildFrames())
+        {
+            if (childFrame.Host is Element host
+                && host.BridgeElementId is { Length: > 0 } hostId
+                && !discovered.Contains(hostId))
+            {
+                page.MarkFrameElementDetached(hostId);
+            }
         }
     }
 
@@ -503,8 +528,14 @@ public sealed class Frame : IFrame
 
     public ValueTask<string?> GetFrameElementHandleAsync() => GetFrameElementHandleAsync(CancellationToken.None);
 
-    private static void Observe(Exception ex)
-        => Trace.TraceWarning(ex.ToString());
+    // Сбой чтения возвращается вызывающему как пустой результат — отличить его от «значения нет»
+    // нельзя, поэтому запись обязана попасть в настроенный журнал драйвера. Прежде она уходила в
+    // System.Diagnostics.Trace, которого в рабочей настройке никто не слушает, и сбой исчезал.
+    private void Observe(Exception ex, string operation)
+    {
+        page.OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebFrameReadFailed(ex, page.TabId, operation);
+        Trace.TraceWarning(ex.ToString());
+    }
 
     public ValueTask<Memory<byte>> GetScreenshotAsync(CancellationToken cancellationToken)
         => GetScreenshotCoreAsync(cancellationToken);

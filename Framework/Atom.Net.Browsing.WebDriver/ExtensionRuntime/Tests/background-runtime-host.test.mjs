@@ -1631,6 +1631,27 @@ test('BackgroundRuntimeHost использует tabs.executeScript как legac
     }
 });
 
+test('BackgroundRuntimeHost деградирует на tabs.executeScript при сбое самого scripting.executeScript', async () => {
+    const { restore, tabsCalls } = installChromeStub({
+        executeScript: async () => ([{ state: 'ready', result: JSON.stringify({ ok: true, value: '4' }) }]),
+    });
+
+    try {
+        globalThis.chrome.scripting.executeScript = async () => {
+            throw new Error("'world' value 'MAIN' is not supported");
+        };
+
+        const host = new BackgroundRuntimeHost();
+        const result = await host.executeInMainWorld('7', 'req_fallback', '2 + 2');
+
+        assert.equal(result.status, 'ok');
+        assert.equal(result.value, '4');
+        assert.equal(tabsCalls.executeScript.length, 1);
+    } finally {
+        restore();
+    }
+});
+
 test('BackgroundRuntimeHost открывает окно напрямую через windows.create', async () => {
     const { restore, windowCalls } = installChromeStub({
         createWindow: async (createData) => ({
@@ -1668,6 +1689,83 @@ test('BackgroundRuntimeHost открывает окно напрямую чер�
             windowId: '12',
             tabId: '77',
         });
+    } finally {
+        restore();
+    }
+});
+
+test('BackgroundRuntimeHost повторяет tabs.create при транзиентном сбое OpenTab', async () => {
+    const { restore, tabsCalls } = installChromeStub({
+        createTab: async (createProperties) => {
+            if (tabsCalls.create.length === 1) {
+                throw new Error('An unexpected error occurred');
+            }
+
+            return { id: 42, windowId: 3, url: createProperties.url };
+        },
+    });
+
+    try {
+        const host = new BackgroundRuntimeHost();
+        host.config = normalizeBootstrapConfig({
+            host: '127.0.0.1',
+            port: 9222,
+            secret: 'open-tab-retry-secret',
+        }, globalThis.chrome.runtime);
+        const forwarded = [];
+        host.transport.send = async (message) => {
+            forwarded.push(message);
+        };
+
+        const handled = await host.tryHandleDirectCommand({
+            id: 'open_tab_retry_1',
+            type: 'Request',
+            tabId: '7',
+            command: 'OpenTab',
+        });
+
+        assert.equal(handled, true);
+        assert.equal(tabsCalls.create.length, 2);
+        assert.deepEqual(tabsCalls.create[0], {
+            url: 'http://127.0.0.1:9222/',
+            active: true,
+        });
+        assert.deepEqual(forwarded[0].status, 'Ok');
+        assert.deepEqual(forwarded[0].payload, {
+            url: 'http://127.0.0.1:9222/',
+            tabId: '42',
+            windowId: '3',
+        });
+    } finally {
+        restore();
+    }
+});
+
+test('BackgroundRuntimeHost исчерпывает повторы OpenTab и возвращает ошибку', async () => {
+    const { restore, tabsCalls } = installChromeStub({
+        createTab: async () => {
+            throw new Error('An unexpected error occurred');
+        },
+    });
+
+    try {
+        const host = new BackgroundRuntimeHost();
+        const forwarded = [];
+        host.transport.send = async (message) => {
+            forwarded.push(message);
+        };
+
+        const handled = await host.tryHandleDirectCommand({
+            id: 'open_tab_retry_exhausted_1',
+            type: 'Request',
+            tabId: '7',
+            command: 'OpenTab',
+        });
+
+        assert.equal(handled, true);
+        assert.equal(tabsCalls.create.length, 3);
+        assert.equal(forwarded[0].status, 'Error');
+        assert.equal(forwarded[0].error, 'An unexpected error occurred');
     } finally {
         restore();
     }
@@ -2007,7 +2105,10 @@ test('BackgroundRuntimeHost синхронизирует document.cookie пос�
         assert.equal(typeof setScript, 'string');
         assert.equal(typeof deleteScript, 'string');
         assert.match(setScript, /session=alpha/);
-        assert.match(deleteScript, /syncCookieHeader/);
+        // Синхронизация идёт через канал резидента: имени в window больше нет по построению,
+        // иначе автоматика выдавала бы себя перечислением свойств.
+        assert.match(deleteScript, /dispatchEvent\(new CustomEvent\("e[0-9a-f]{8}"/);
+        assert.equal(deleteScript.includes('__atom'), false);
         assert.doesNotMatch(deleteScript, /session=alpha/);
     } finally {
         restore();
@@ -2727,6 +2828,7 @@ function installChromeStub(tabOverrides = {}, options = {}) {
         update: [],
         reload: [],
         executeScript: [],
+        create: [],
     };
     const scriptingCalls = {
         executeScript: [],
@@ -2799,7 +2901,14 @@ function installChromeStub(tabOverrides = {}, options = {}) {
                 return { id: tabId, windowId: 3, url: 'https://example.com/', title: 'Example' };
             },
             query: async () => [],
-            create: async (createProperties) => ({ id: 41, windowId: 3, url: createProperties.url ?? 'about:blank' }),
+            create: async (createProperties) => {
+                tabsCalls.create.push(createProperties);
+                if (typeof tabOverrides.createTab === 'function') {
+                    return tabOverrides.createTab(createProperties);
+                }
+
+                return { id: 41, windowId: 3, url: createProperties.url ?? 'about:blank' };
+            },
             update: async (tabId, updateProperties) => {
                 tabsCalls.update.push({ tabId, updateProperties });
                 if (typeof tabOverrides.update === 'function') {

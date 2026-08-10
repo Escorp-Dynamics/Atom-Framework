@@ -64,6 +64,12 @@ public sealed partial class WebPage
         return element.Frame;
     }
 
+    public ValueTask<IFrame?> GetFrameAsync(IElement element, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(GetFrame(element));
+    }
+
     public ValueTask<IFrame?> GetFrameAsync(IElement element)
-        => ValueTask.FromResult(GetFrame(element));
+        => GetFrameAsync(element, CancellationToken.None);
 }

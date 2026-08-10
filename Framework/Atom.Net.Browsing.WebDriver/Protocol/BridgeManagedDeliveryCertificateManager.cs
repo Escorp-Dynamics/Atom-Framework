@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Collections.Generic;
 using System.Net;
@@ -13,10 +14,24 @@ internal sealed class BridgeManagedDeliveryCertificateManager
 {
     private const string AuthorityCertificateFileName = "managed-delivery-cert.pfx";
     private const string ServerCertificateFilePrefix = "managed-delivery-server-";
+
+    /// <summary>
+    /// Верхняя граница кеша leaf-сертификатов по хостам. Долгоживущий обход тысяч доменов
+    /// иначе накапливал бы X509Certificate2 (каждый удерживает native-хэндл закрытого ключа)
+    /// и PFX-файлы без ограничения. Вытеснение освобождает и хэндл, и файл.
+    /// </summary>
+    private const int MaxServerCertificates = 256;
+
     private static readonly Lazy<BridgeManagedDeliveryCertificateManager> shared = new(static () => new BridgeManagedDeliveryCertificateManager());
 
     private readonly SemaphoreSlim gate = new(1, 1);
-    private readonly Dictionary<string, X509Certificate2> serverCertificates = new(StringComparer.OrdinalIgnoreCase);
+
+    // ConcurrentDictionary: fast-path чтение на CONNECT hot-path выполняется без gate,
+    // а обычный Dictionary недопустимо читать конкурентно с записью (порча/зависание при resize).
+    private readonly ConcurrentDictionary<string, X509Certificate2> serverCertificates = new(StringComparer.OrdinalIgnoreCase);
+
+    // Порядок вставки для ограниченного (approx-LRU по вставке) вытеснения. Изменяется только под gate.
+    private readonly Queue<string> serverCertificateOrder = new();
     private X509Certificate2? authorityCertificate;
     private string? certificateDirectory;
 
@@ -46,6 +61,7 @@ internal sealed class BridgeManagedDeliveryCertificateManager
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(host);
 
+        // Fast-path без gate безопасен: ConcurrentDictionary допускает чтение конкурентно с записью.
         if (serverCertificates.TryGetValue(host, out var current))
             return current;
 
@@ -59,11 +75,40 @@ internal sealed class BridgeManagedDeliveryCertificateManager
             var serverCertificatePath = ResolveServerCertificatePath(host);
             current = LoadExistingCertificate(serverCertificatePath) ?? CreateAndPersistServerCertificate(serverCertificatePath, authority, host);
             serverCertificates[host] = current;
+            serverCertificateOrder.Enqueue(host);
+            EvictExcessServerCertificatesNoLock();
             return current;
         }
         finally
         {
             gate.Release();
+        }
+    }
+
+    // Держит кеш leaf-сертификатов в пределах MaxServerCertificates. Вызывается только под gate.
+    private void EvictExcessServerCertificatesNoLock()
+    {
+        while (serverCertificateOrder.Count > MaxServerCertificates)
+        {
+            var evictedHost = serverCertificateOrder.Dequeue();
+            if (serverCertificates.TryRemove(evictedHost, out var evicted))
+            {
+                evicted.Dispose();
+                TryDeleteFile(ResolveServerCertificatePath(evictedHost));
+            }
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Observe(ex);
         }
     }
 

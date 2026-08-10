@@ -675,6 +675,7 @@ public sealed class WebDriverTransportHardeningTests
             ManagedPackageUrl: "https://127.0.0.1:9443/chromium/abcdefghijklmnopabcdefghijklmnop/extension.crx",
             ManagedPackageArtifactPath: Path.Combine(root, "atom-webdriver-extension.crx"),
             DiscoveryUrl: "http://127.0.0.1:9000/",
+            NavigationProxyPort: 0,
             ConnectionTimeout: TimeSpan.FromSeconds(5));
     }
 

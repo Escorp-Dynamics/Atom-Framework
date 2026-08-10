@@ -58,7 +58,7 @@ public sealed class Element : IElement
         cancellationToken.ThrowIfCancellationRequested();
         OwnerPage.OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebElementClickStarting(handle, OwnerPage.TabId);
 
-        await OwnerPage.OwnerWindow.ActivateAsync(cancellationToken).ConfigureAwait(false);
+        await OwnerPage.OwnerWindow.PrepareForTrustedInputAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
         var mouse = await OwnerPage.ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         var interactionPoint = await ResolveInteractionPointAsync(cancellationToken).ConfigureAwait(false);
         interactionPoint = await CalibrateInteractionPointAsync(mouse, interactionPoint, cancellationToken).ConfigureAwait(false);
@@ -73,7 +73,7 @@ public sealed class Element : IElement
         cancellationToken.ThrowIfCancellationRequested();
         OwnerPage.OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebElementHoverStarting(handle, OwnerPage.TabId);
 
-        await OwnerPage.OwnerWindow.ActivateAsync(cancellationToken).ConfigureAwait(false);
+        await OwnerPage.OwnerWindow.PrepareForTrustedInputAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
         var mouse = await OwnerPage.ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         await ApproachInteractionPointAsync(mouse, await ResolveInteractionPointAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }
@@ -154,7 +154,7 @@ public sealed class Element : IElement
             return;
         }
 
-        await OwnerPage.OwnerWindow.ActivateAsync(cancellationToken).ConfigureAwait(false);
+        await OwnerPage.OwnerWindow.PrepareForTrustedInputAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
         var mouse = await OwnerPage.ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         var interactionPoint = await ResolveInteractionPointAsync(cancellationToken).ConfigureAwait(false);
         await ApproachInteractionPointAsync(mouse, interactionPoint, cancellationToken).ConfigureAwait(false);
@@ -165,7 +165,7 @@ public sealed class Element : IElement
 
     private async ValueTask PrepareForTrustedKeyboardInputAsync(bool requireDocumentFocus, CancellationToken cancellationToken)
     {
-        await OwnerPage.OwnerWindow.ActivateAsync(cancellationToken).ConfigureAwait(false);
+        await OwnerPage.OwnerWindow.PrepareForTrustedInputAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
 
         if (OwnerPage.BridgeCommands is { } bridge && BridgeElementId is { } elementId)
         {
@@ -202,21 +202,37 @@ public sealed class Element : IElement
         ArgumentNullException.ThrowIfNull(text);
         OwnerPage.OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebElementTypeStarting(handle, OwnerPage.TabId, text.Length);
 
+        // Раскладка проверяется целиком до первого нажатия: иначе неподдерживаемый символ
+        // в середине строки оставлял бы в поле наполовину введённый текст.
+        var keystrokes = MapTextToKeystrokes(text);
+
         await PrepareForTrustedKeyboardInputAsync(requireDocumentFocus: true, cancellationToken).ConfigureAwait(false);
         var keyboard = await OwnerPage.ResolveKeyboardAsync(cancellationToken).ConfigureAwait(false);
 
-        foreach (var character in text)
+        foreach (var (key, modifiers) in keystrokes)
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            if (!TryMapCharacterToKey(character, out var key, out var modifiers))
-                throw new NotSupportedException($"Символ '{character}' пока не поддерживается на пути доверенного ввода с клавиатуры");
 
             if (modifiers == default)
                 await keyboard.KeyPressAsync(key, cancellationToken).ConfigureAwait(false);
             else
                 await keyboard.KeyPressAsync(key, modifiers, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private static (ConsoleKey Key, ConsoleModifiers Modifiers)[] MapTextToKeystrokes(string text)
+    {
+        var keystrokes = new (ConsoleKey Key, ConsoleModifiers Modifiers)[text.Length];
+
+        for (var index = 0; index < text.Length; index++)
+        {
+            if (!TryMapCharacterToKey(text[index], out var key, out var modifiers))
+                throw new NotSupportedException($"Символ '{text[index]}' пока не поддерживается на пути доверенного ввода с клавиатуры");
+
+            keystrokes[index] = (key, modifiers);
+        }
+
+        return keystrokes;
     }
 
     public ValueTask TypeAsync(string text) => TypeAsync(text, CancellationToken.None);
@@ -725,12 +741,6 @@ return true;
         if (OwnerPage.BridgeCommands is not { } || BridgeElementId is not { })
             throw SurfaceGuards.Unsupported(nameof(AddEventListenerAsync));
 
-        lock (eventListenerGate)
-        {
-            if (eventListenerRegistrations.ContainsKey((eventName, handler)))
-                return;
-        }
-
         var callbackName = "atom.element.callback." + Guid.NewGuid().ToString("N");
         var listenerId = "atom-element-listener-" + Guid.NewGuid().ToString("N");
 
@@ -742,23 +752,62 @@ return true;
             await InvokeElementEventHandlerAsync(handler, args.Args).ConfigureAwait(false);
         };
 
-        await OwnerPage.SubscribeAsync(callbackName, cancellationToken).ConfigureAwait(false);
-        OwnerPage.Callback += callbackBridge;
+        // Место в реестре занимается до любых асинхронных шагов. Раздельные проверка и вставка
+        // позволяли двум параллельным подпискам на одну пару (событие, обработчик) пройти проверку
+        // одновременно: вторая перетирала запись первой, а её listenerId терялся навсегда.
+        var key = (eventName, handler);
+        var registration = new ElementEventListenerRegistration(listenerId, callbackName, callbackBridge);
+        lock (eventListenerGate)
+        {
+            if (!eventListenerRegistrations.TryAdd(key, registration))
+                return;
+        }
 
         try
         {
+            // Вся установка проводов под общим try: если SubscribeAsync/Callback/DOM бросят
+            // (например, транзиентный BridgeCommandException при обрыве канала), запись не должна
+            // остаться в реестре — иначе повторный Add с тем же делегатом молча ничего не сделает.
+            await OwnerPage.SubscribeAsync(callbackName, cancellationToken).ConfigureAwait(false);
+            OwnerPage.Callback += callbackBridge;
             await ExecuteElementScriptAsync(CreateAddEventListenerScript(eventName, listenerId, callbackName), cancellationToken).ConfigureAwait(false);
         }
         catch
         {
-            OwnerPage.Callback -= callbackBridge;
-            await OwnerPage.UnSubscribeAsync(callbackName, cancellationToken).ConfigureAwait(false);
+            // Снимаем запись только если она всё ещё наша (защита от ABA: между провалом и
+            // очисткой параллельный Add мог занять тот же ключ новой регистрацией).
+            RemoveRegistrationIfCurrent(key, registration);
+            OwnerPage.Callback -= callbackBridge; // идемпотентно: no-op, если ещё не подписывались
+            await OwnerPage.UnSubscribeAsync(callbackName, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
 
+        // Провода установлены. Если параллельный Remove застал нас во время установки, он пометил
+        // RemovalRequested и снял запись, но не мог размотать ещё не установленное состояние —
+        // разматываем здесь, чтобы снятие слушателя пользователем было честно исполнено.
+        bool superseded;
         lock (eventListenerGate)
         {
-            eventListenerRegistrations[(eventName, handler)] = new ElementEventListenerRegistration(listenerId, callbackName, callbackBridge);
+            superseded = registration.RemovalRequested
+                || !(eventListenerRegistrations.TryGetValue(key, out var current) && ReferenceEquals(current, registration));
+            if (!superseded)
+                registration.WiringComplete = true;
+        }
+
+        if (superseded)
+        {
+            OwnerPage.Callback -= callbackBridge;
+            await ExecuteElementScriptAsync(CreateRemoveEventListenerScript(eventName, listenerId), CancellationToken.None).ConfigureAwait(false);
+            await OwnerPage.UnSubscribeAsync(callbackName, CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    private void RemoveRegistrationIfCurrent((string EventName, Delegate Handler) key, ElementEventListenerRegistration registration)
+    {
+        lock (eventListenerGate)
+        {
+            if (eventListenerRegistrations.TryGetValue(key, out var current) && ReferenceEquals(current, registration))
+                eventListenerRegistrations.Remove(key);
         }
     }
     public ValueTask AddEventListenerAsync(string eventName, Delegate handler) => AddEventListenerAsync(eventName, handler, CancellationToken.None);
@@ -769,16 +818,22 @@ return true;
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        ElementEventListenerRegistration? registration;
+        var key = (eventName, handler);
+        ElementEventListenerRegistration registration;
         lock (eventListenerGate)
         {
-            eventListenerRegistrations.TryGetValue((eventName, handler), out registration);
-            if (registration is not null)
-                eventListenerRegistrations.Remove((eventName, handler));
-        }
+            if (!eventListenerRegistrations.TryGetValue(key, out var found))
+                return;
 
-        if (registration is null)
-            return;
+            registration = found;
+            eventListenerRegistrations.Remove(key);
+            if (!registration.WiringComplete)
+            {
+                // Add ещё дописывает провода — он сам размотает их, увидев этот флаг после установки.
+                registration.RemovalRequested = true;
+                return;
+            }
+        }
 
         OwnerPage.Callback -= registration.CallbackBridge;
 
@@ -801,16 +856,25 @@ return true;
         if (result is not JsonElement element)
             return default;
 
+        // GetString бросает, если значение не строка и не null: скрипт, вернувший число или
+        // объект, не должен превращать запрос строки в исключение.
         if (typeof(TResult) == typeof(string))
-            return (TResult?)(object?)element.GetString();
+        {
+            return element.ValueKind switch
+            {
+                JsonValueKind.String => (TResult?)(object?)element.GetString(),
+                JsonValueKind.Null or JsonValueKind.Undefined => default,
+                _ => (TResult?)(object)element.GetRawText(),
+            };
+        }
 
-        if (typeof(TResult) == typeof(bool) && (element.ValueKind is JsonValueKind.True or JsonValueKind.False))
-            return (TResult?)(object)element.GetBoolean();
+        if (typeof(TResult) == typeof(bool) && ScriptResultValue.TryReadBoolean(element, out var boolValue))
+            return (TResult?)(object)boolValue;
 
-        if (typeof(TResult) == typeof(int) && element.TryGetInt32(out var intValue))
+        if (typeof(TResult) == typeof(int) && ScriptResultValue.TryReadInt32(element, out var intValue))
             return (TResult?)(object)intValue;
 
-        if (typeof(TResult) == typeof(double) && element.TryGetDouble(out var doubleValue))
+        if (typeof(TResult) == typeof(double) && ScriptResultValue.TryReadDouble(element, out var doubleValue))
             return (TResult?)(object)doubleValue;
 
         if (typeof(TResult) == typeof(Uri) && element.ValueKind == JsonValueKind.String && Uri.TryCreate(element.GetString(), UriKind.Absolute, out var uri))
@@ -1427,20 +1491,39 @@ return JSON.stringify({
         throw new NotSupportedException($"Unsupported element event payload parameter type '{parameterType.Name}'.");
     }
 
+    // Полезная нагрузка приходит из страницы и может не быть корректным JSON: разбор не должен
+    // ронять доставку события пользовательскому обработчику.
     private static JsonElement? TryParseElementEventPayloadJson(object? payload)
     {
         var payloadText = payload?.ToString();
         if (string.IsNullOrWhiteSpace(payloadText))
             return null;
 
-        using var document = JsonDocument.Parse(payloadText);
-        return document.RootElement.Clone();
+        try
+        {
+            using var document = JsonDocument.Parse(payloadText);
+            return document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static JsonNode? TryParseElementEventPayloadNode(object? payload)
     {
         var payloadText = payload?.ToString();
-        return string.IsNullOrWhiteSpace(payloadText) ? null : JsonNode.Parse(payloadText);
+        if (string.IsNullOrWhiteSpace(payloadText))
+            return null;
+
+        try
+        {
+            return JsonNode.Parse(payloadText);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static Dictionary<string, JsonElement>? TryCreateElementEventJsonElementDictionary(JsonElement? payload)
@@ -1480,10 +1563,23 @@ return JSON.stringify({
             _ => value.GetRawText(),
         };
 
-    private sealed record ElementEventListenerRegistration(
-        string ListenerId,
-        string CallbackName,
-        AsyncEventHandler<IWebPage, CallbackEventArgs> CallbackBridge);
+    private sealed class ElementEventListenerRegistration(
+        string listenerId,
+        string callbackName,
+        AsyncEventHandler<IWebPage, CallbackEventArgs> callbackBridge)
+    {
+        public string ListenerId { get; } = listenerId;
+
+        public string CallbackName { get; } = callbackName;
+
+        public AsyncEventHandler<IWebPage, CallbackEventArgs> CallbackBridge { get; } = callbackBridge;
+
+        /// <summary>Провода (подписка/Callback/DOM-слушатель) полностью установлены. Меняется под eventListenerGate.</summary>
+        public bool WiringComplete { get; set; }
+
+        /// <summary>Снятие запрошено, пока Add ещё дописывал провода. Меняется под eventListenerGate.</summary>
+        public bool RemovalRequested { get; set; }
+    }
 
     private static bool TryMapCharacterToKey(char character, out ConsoleKey key, out ConsoleModifiers modifiers)
     {

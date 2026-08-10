@@ -66,7 +66,18 @@ export class BridgeSessionCoordinator implements ISessionCoordinator {
         const request = this.dependencies.handshake.createRequest(config);
         const handshakeResultPromise = this.createHandshakePromise();
 
-        await this.dependencies.transport.send(request);
+        // Промис согласования создаётся до отправки, чтобы не потерять мгновенный ответ. Если
+        // сама отправка сорвалась, его нужно снять здесь: иначе он останется висеть с живым
+        // таймером и через таймаут даст необработанное отклонение, которое уже никто не ждёт.
+        try {
+            await this.dependencies.transport.send(request);
+        } catch (error) {
+            this.rejectPendingHandshake(error);
+            await handshakeResultPromise.catch(() => undefined);
+            this.transitionTo('Degraded', describeSendFailure(error));
+            throw error;
+        }
+
         const handshakeResult = await handshakeResultPromise;
 
         if (!handshakeResult.accepted || handshakeResult.acceptPayload === undefined) {
@@ -207,6 +218,12 @@ export class BridgeSessionCoordinator implements ISessionCoordinator {
 
         this.pendingHandshake.reject(error);
     }
+}
+
+function describeSendFailure(error: unknown): string {
+    return error instanceof Error && error.message.trim().length > 0
+        ? error.message
+        : 'Не удалось отправить запрос согласования';
 }
 
 function createRuntimeMessageId(prefix: string): string {

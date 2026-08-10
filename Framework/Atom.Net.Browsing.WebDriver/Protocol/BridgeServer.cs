@@ -31,6 +31,12 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     private readonly ConcurrentDictionary<string, BridgePendingFulfillment> pendingFulfillments = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, BridgeSessionTransport> sessionSockets = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<long, Task> inFlightConnections = new();
+
+    // Сериализует критическую секцию регистрации сессии: создание/вытеснение состояния сессии
+    // и публикацию транспорта в sessionSockets. Без него между созданием состояния и публикацией
+    // сокета оставалось окно (включая сетевую отправку accept), в котором дубль-реконнект того же
+    // sessionId вытеснял состояние, не оборвав ещё не опубликованный сокет, — оставляя зомби-сокет.
+    private readonly SemaphoreSlim registrationGate = new(1, 1);
     private long nextConnectionEpoch;
     private readonly BridgeManagedDeliveryServer managedDeliveryServer = new(
         settings.Host,
@@ -42,7 +48,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     private ProxyNavigationDecisionRegistry? navigationProxyDecisions;
     private BridgeSecureTransportServer? secureTransportServer;
     private Task? acceptLoop;
-    private bool isDisposed;
+    private int isDisposed;
 
     /// <summary>
     /// Фактический порт, на котором запущен bridge endpoint.
@@ -65,6 +71,19 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     /// Фактический порт, на котором запущен navigation proxy endpoint.
     /// </summary>
     public int NavigationProxyPort { get; private set; }
+
+    /// <summary>
+    /// Настраивает способ получения route token навигационным прокси под конкретный браузер.
+    /// </summary>
+    /// <remarks>
+    /// Firefox приносит токен только в ответ на 407, Chromium — заголовком запроса.
+    /// Вызывается после того, как стало известно семейство запускаемого браузера.
+    /// </remarks>
+    internal void ConfigureNavigationProxyRouteTokenChallenge(bool challengeForRouteToken)
+    {
+        if (navigationProxyServer is { } proxy)
+            proxy.ChallengeForRouteToken = challengeForRouteToken;
+    }
 
     /// <summary>
     /// Требуются ли fallback-флаги браузеру для обхода недоверенного сертификата managed-delivery.
@@ -133,7 +152,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     /// </summary>
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(isDisposed, this);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed) != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
 
         if (listener.IsListening)
@@ -150,7 +169,9 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             settings.NavigationProxyPort,
             () => navigationProxyDecisions,
             HandleNavigationProxyDirectRequestAsync,
-            settings.Logger);
+            settings.Logger,
+            DispatchNavigationProxyInterceptionAsync,
+            DispatchNavigationProxyResponseInterceptionAsync);
 
         StartBridgeListener();
         await managedDeliveryServer.StartAsync().ConfigureAwait(false);
@@ -400,8 +421,60 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     internal ValueTask<string[]> FindElementsAsync(string sessionId, string tabId, JsonObject payload, CancellationToken cancellationToken = default)
         => SendStringArrayCommandAsync(sessionId, tabId, BridgeCommand.FindElements, payload, cancellationToken);
 
-    internal ValueTask<string?> WaitForElementAsync(string sessionId, string tabId, JsonObject payload, CancellationToken cancellationToken = default)
-        => SendOptionalStringCommandAsync(sessionId, tabId, BridgeCommand.WaitForElement, payload, cancellationToken, BridgeStatus.NotFound, BridgeStatus.Timeout);
+    // Ожидание элемента — единственная команда, живущая дольше обычного мостового запроса: ждёт
+    // столько, сколько попросил вызывающий. Транспортный бюджет поэтому считаем от его таймаута, а
+    // не от общего RequestTimeout — иначе ожидание в 30 с обрывалось бы на пятой секунде. И обрыв
+    // транспорта нельзя выдавать за «элемент не появился»: статус у них один, различаем по коду.
+    internal async ValueTask<string?> WaitForElementAsync(
+        string sessionId,
+        string tabId,
+        JsonObject payload,
+        TimeSpan waitTimeout,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await SendRequestAsync(
+            sessionId,
+            CreateCommandRequest(
+                tabId,
+                BridgeCommand.WaitForElement,
+                JsonSerializer.SerializeToElement(payload, BridgeJsonContext.Default.JsonObject)),
+            ResolveWaitForElementRequestTimeout(waitTimeout),
+            cancellationToken).ConfigureAwait(false);
+
+        if (response.Status is BridgeStatus.Ok)
+        {
+            if (response.Payload is not JsonElement stringPayload || !TryParseStringPayload(stringPayload, propertyName: null, out var value))
+                throw new BridgeCommandException("Мостовая команда вернула неверные строковые данные");
+
+            return value;
+        }
+
+        if (response.Status is BridgeStatus.NotFound)
+            return null;
+
+        // Истечение ожидания в самой вкладке — законный ответ «не появился». Истечение нашего
+        // транспортного бюджета означает, что вкладка не отвечает вовсе, и это настоящий сбой.
+        if (response.Status is BridgeStatus.Timeout
+            && !string.Equals(response.Error, BridgeProtocolErrorCodes.RequestTimeout, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        throw CreateCommandFailureException(response);
+    }
+
+    private TimeSpan ResolveWaitForElementRequestTimeout(TimeSpan waitTimeout)
+    {
+        if (settings.RequestTimeout <= TimeSpan.Zero)
+            return Timeout.InfiniteTimeSpan;
+
+        if (waitTimeout <= TimeSpan.Zero)
+            return settings.RequestTimeout;
+
+        // Запас в один обычный RequestTimeout: вкладка должна успеть ответить своим «Timeout»
+        // раньше, чем сработает наш бюджет, иначе законный отрицательный ответ выглядел бы сбоем.
+        return waitTimeout + settings.RequestTimeout;
+    }
 
     internal ValueTask<string?> GetElementPropertyAsync(string sessionId, string tabId, string elementId, string propertyName, CancellationToken cancellationToken = default)
         => SendNullableStringCommandAsync(
@@ -487,14 +560,21 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             },
             cancellationToken);
 
-    internal async ValueTask<BridgeMessage> SendRequestAsync(string sessionId, BridgeMessage request, CancellationToken cancellationToken = default)
+    internal ValueTask<BridgeMessage> SendRequestAsync(string sessionId, BridgeMessage request, CancellationToken cancellationToken = default)
+        => SendRequestAsync(sessionId, request, requestTimeoutOverride: null, cancellationToken);
+
+    internal async ValueTask<BridgeMessage> SendRequestAsync(
+        string sessionId,
+        BridgeMessage request,
+        TimeSpan? requestTimeoutOverride,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(request);
         ValidateOutboundRequest(request);
 
         if (!sessionSockets.TryGetValue(sessionId, out var transport) || transport.Socket.State is not WebSocketState.Open)
-            throw new InvalidOperationException($"Сеанс '{sessionId}' не подключён");
+            throw CreateSurfaceDisconnectedException($"Сеанс '{sessionId}' не подключён", BridgeProtocolErrorCodes.SessionDisconnected);
 
         var tabId = request.TabId!;
         var completionSource = new TaskCompletionSource<BridgeMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -517,13 +597,13 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         catch
         {
             settings.Logger?.LogBridgeServerRequestFailed(request.Id, sessionId, tabId, BridgeProtocolErrorCodes.SendFailed);
-            _ = await state.TryFailPendingRequestAsync(request.Id, BridgeStatus.Disconnected, BridgeProtocolErrorCodes.SendFailed).ConfigureAwait(false);
+            await TryAbandonPendingRequestAsync(request.Id, BridgeStatus.Disconnected, BridgeProtocolErrorCodes.SendFailed).ConfigureAwait(false);
             throw;
         }
 
         try
         {
-            var response = await completionSource.Task.WaitAsync(settings.RequestTimeout, cancellationToken).ConfigureAwait(false);
+            var response = await completionSource.Task.WaitAsync(requestTimeoutOverride ?? settings.RequestTimeout, cancellationToken).ConfigureAwait(false);
 #pragma warning disable CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
             settings.Logger?.LogBridgeServerRequestCompleted(request.Id, sessionId, tabId, commandName, DescribeStatus(response.Status), response.Error ?? string.Empty);
 #pragma warning restore CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
@@ -532,29 +612,69 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         catch (TimeoutException)
         {
             settings.Logger?.LogBridgeServerRequestFailed(request.Id, sessionId, tabId, BridgeProtocolErrorCodes.RequestTimeout);
-            _ = await state.TryFailPendingRequestAsync(request.Id, BridgeStatus.Timeout, BridgeProtocolErrorCodes.RequestTimeout).ConfigureAwait(false);
+            await TryAbandonPendingRequestAsync(request.Id, BridgeStatus.Timeout, BridgeProtocolErrorCodes.RequestTimeout).ConfigureAwait(false);
             return await completionSource.Task.ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             settings.Logger?.LogBridgeServerRequestFailed(request.Id, sessionId, tabId, BridgeProtocolErrorCodes.RequestCanceled);
-            _ = await state.TryFailPendingRequestAsync(request.Id, BridgeStatus.Error, BridgeProtocolErrorCodes.RequestCanceled).ConfigureAwait(false);
+            await TryAbandonPendingRequestAsync(request.Id, BridgeStatus.Error, BridgeProtocolErrorCodes.RequestCanceled).ConfigureAwait(false);
             throw;
         }
     }
 
-    private static InvalidOperationException CreatePendingRequestRegistrationException(
+    /// <summary>
+    /// Снимает ожидающий запрос, не подменяя исходную причину сбоя. Состояние моста могло быть
+    /// удалено параллельной остановкой сервера — тогда запрос уже завершён самим удалением,
+    /// и <see cref="ObjectDisposedException"/> здесь не является отдельной ошибкой.
+    /// </summary>
+    private async ValueTask TryAbandonPendingRequestAsync(string messageId, BridgeStatus status, string error)
+    {
+        try
+        {
+            _ = await state.TryFailPendingRequestAsync(messageId, status, error).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Состояние моста уже остановлено: оно само завершило все ожидающие запросы.
+        }
+    }
+
+    private static BridgeCommandException CreatePendingRequestRegistrationException(
         string sessionId,
         string tabId,
         string requestId,
         PendingRequestAddResultKind outcome)
         => outcome switch
         {
-            PendingRequestAddResultKind.SessionNotFound => new($"Сеанс '{sessionId}' не подключён"),
-            PendingRequestAddResultKind.TabNotFound => new($"Вкладка '{tabId}' не зарегистрирована для сеанса '{sessionId}'"),
-            PendingRequestAddResultKind.DuplicateMessageId => new($"Ожидающий запрос '{requestId}' уже зарегистрирован для сеанса '{sessionId}'"),
-            _ => new($"Не удалось зарегистрировать ожидающий запрос '{requestId}' для сеанса '{sessionId}' (outcome={outcome})"),
+            PendingRequestAddResultKind.SessionNotFound
+                => CreateSurfaceDisconnectedException($"Сеанс '{sessionId}' не подключён", BridgeProtocolErrorCodes.SessionDisconnected),
+            PendingRequestAddResultKind.TabNotFound
+                => CreateSurfaceDisconnectedException($"Вкладка '{tabId}' не зарегистрирована для сеанса '{sessionId}'", BridgeProtocolErrorCodes.TabDisconnected),
+            PendingRequestAddResultKind.DuplicateMessageId
+                => new BridgeCommandException($"Ожидающий запрос '{requestId}' уже зарегистрирован для сеанса '{sessionId}'"),
+            _ => new BridgeCommandException($"Не удалось зарегистрировать ожидающий запрос '{requestId}' для сеанса '{sessionId}' (outcome={outcome})"),
         };
+
+    private static BridgeCommandException CreateSurfaceDisconnectedException(string message, string errorCode)
+        => new(message, status: BridgeStatus.Disconnected, errorCode: errorCode, isSurfaceDisconnected: true);
+
+    /// <summary>
+    /// Переносит статус и текст ошибки мостового ответа в исключение, чтобы вызывающий код
+    /// классифицировал сбой по данным, а не по подстроке локализованного сообщения.
+    /// </summary>
+    private static BridgeCommandException CreateCommandFailureException(BridgeMessage response)
+    {
+        var errorSuffix = string.IsNullOrWhiteSpace(response.Error)
+            ? string.Empty
+            : $": {response.Error}";
+
+        return new BridgeCommandException(
+            $"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'{errorSuffix}",
+            status: response.Status,
+            errorCode: response.Error,
+            isSurfaceDisconnected: response.Status is BridgeStatus.Disconnected);
+    }
 
     private async ValueTask<string> SendStringCommandAsync(
         string sessionId,
@@ -569,10 +689,10 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
 
         if (response.Status is not BridgeStatus.Ok)
-            throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'");
+            throw CreateCommandFailureException(response);
 
         if (response.Payload is not JsonElement payload || !TryParseStringPayload(payload, propertyName, out var value))
-            throw new InvalidOperationException("Мостовая команда вернула неверные строковые данные");
+            throw new BridgeCommandException("Мостовая команда вернула неверные строковые данные");
 
         return value;
     }
@@ -589,13 +709,10 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         if (response.Status is not BridgeStatus.Ok)
         {
-            var errorSuffix = string.IsNullOrWhiteSpace(response.Error)
-                ? string.Empty
-                : $": {response.Error}";
-            throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'{errorSuffix}");
+            throw CreateCommandFailureException(response);
         }
 
-        return response.Payload ?? throw new InvalidOperationException("Мостовая команда не вернула обязательный payload");
+        return response.Payload ?? throw new BridgeCommandException("Мостовая команда не вернула обязательный payload");
     }
 
     private async ValueTask<string?> SendOptionalStringCommandAsync(
@@ -617,7 +734,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         if (response.Status is BridgeStatus.Ok)
         {
             if (response.Payload is not JsonElement stringPayload || !TryParseStringPayload(stringPayload, propertyName: null, out var value))
-                throw new InvalidOperationException("Мостовая команда вернула неверные строковые данные");
+                throw new BridgeCommandException("Мостовая команда вернула неверные строковые данные");
 
             return value;
         }
@@ -625,10 +742,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         if (IsAcceptedEmptyStatus(response.Status, emptyStatuses))
             return null;
 
-        var errorSuffix = string.IsNullOrWhiteSpace(response.Error)
-            ? string.Empty
-            : $": {response.Error}";
-        throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'{errorSuffix}");
+        throw CreateCommandFailureException(response);
     }
 
     private async ValueTask<string?> SendNullableStringCommandAsync(
@@ -653,7 +767,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
                 return null;
 
             if (response.Payload is not JsonElement stringPayload || !TryParseStringPayload(stringPayload, propertyName: null, out var value))
-                throw new InvalidOperationException("Мостовая команда вернула неверные строковые данные");
+                throw new BridgeCommandException("Мостовая команда вернула неверные строковые данные");
 
             return value;
         }
@@ -661,10 +775,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         if (IsAcceptedEmptyStatus(response.Status, emptyStatuses))
             return null;
 
-        var errorSuffix = string.IsNullOrWhiteSpace(response.Error)
-            ? string.Empty
-            : $": {response.Error}";
-        throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'{errorSuffix}");
+        throw CreateCommandFailureException(response);
     }
 
     private async ValueTask<string[]> SendStringArrayCommandAsync(
@@ -686,10 +797,10 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             return [];
 
         if (response.Status is not BridgeStatus.Ok)
-            throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'");
+            throw CreateCommandFailureException(response);
 
         if (response.Payload is not JsonElement arrayPayload || !TryParseStringArrayPayload(arrayPayload, out var values))
-            throw new InvalidOperationException("Мостовая команда вернула неверный список строк");
+            throw new BridgeCommandException("Мостовая команда вернула неверный список строк");
 
         return values;
     }
@@ -713,10 +824,10 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             return false;
 
         if (response.Status is not BridgeStatus.Ok)
-            throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'");
+            throw CreateCommandFailureException(response);
 
         if (response.Payload is not JsonElement shadowRootPayload || !TryParseStringPayload(shadowRootPayload, propertyName: null, out var shadowRootState))
-            throw new InvalidOperationException("Мостовая команда вернула неверное состояние теневого корня");
+            throw new BridgeCommandException("Мостовая команда вернула неверное состояние теневого корня");
 
         return string.Equals(shadowRootState, "open", StringComparison.OrdinalIgnoreCase);
     }
@@ -737,10 +848,12 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
 
         if (response.Status is not BridgeStatus.Ok)
-            throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'");
+        {
+            throw CreateCommandFailureException(response);
+        }
 
         if (response.Payload is not JsonElement openedPayload || !TryParseOpenedSurfacePayload(openedPayload, out var openedTabId, out var openedWindowId))
-            throw new InvalidOperationException("Мостовая команда открытия вернула неверные данные вкладки");
+            throw new BridgeCommandException("Мостовая команда открытия вернула неверные данные вкладки");
 
         return (openedTabId, openedWindowId);
     }
@@ -757,8 +870,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         if (response.Status is not BridgeStatus.Ok)
         {
-            var error = string.IsNullOrWhiteSpace(response.Error) ? null : $": {response.Error}";
-            throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'{error}");
+            throw CreateCommandFailureException(response);
         }
     }
 
@@ -770,10 +882,10 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
 
         if (response.Status is not BridgeStatus.Ok)
-            throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'");
+            throw CreateCommandFailureException(response);
 
         if (response.Payload is not JsonElement payload || !TryParseRectanglePayload(payload, out var rectangle))
-            throw new InvalidOperationException("Мостовая команда вернула неверные данные прямоугольника");
+            throw new BridgeCommandException("Мостовая команда вернула неверные данные прямоугольника");
 
         return rectangle;
     }
@@ -789,10 +901,10 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
 
         if (response.Status is not BridgeStatus.Ok)
-            throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'");
+            throw CreateCommandFailureException(response);
 
         if (response.Payload is not JsonElement pointPayload || !TryParsePointPayload(pointPayload, out var point))
-            throw new InvalidOperationException("Мостовая команда вернула неверные данные точки");
+            throw new BridgeCommandException("Мостовая команда вернула неверные данные точки");
 
         return point;
     }
@@ -806,12 +918,11 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         if (response.Status is not BridgeStatus.Ok)
         {
-            var error = string.IsNullOrWhiteSpace(response.Error) ? null : $": {response.Error}";
-            throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'{error}");
+            throw CreateCommandFailureException(response);
         }
 
         if (response.Payload is not JsonElement payload || !TryParseDebugPortStatusPayload(payload, out var debugPortStatus))
-            throw new InvalidOperationException("Мостовая команда вернула неверные данные состояния отладочного порта");
+            throw new BridgeCommandException("Мостовая команда вернула неверные данные состояния отладочного порта");
 
         return debugPortStatus;
     }
@@ -822,7 +933,9 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         if (description is not null)
             return description;
 
-        throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(BridgeStatus.NotFound)}'");
+        throw new BridgeCommandException(
+            $"Мостовая команда завершилась со статусом '{DescribeStatus(BridgeStatus.NotFound)}'",
+            BridgeStatus.NotFound);
     }
 
     private async ValueTask<BridgeElementDescriptionPayload?> SendOptionalElementDescriptionCommandAsync(string sessionId, string tabId, BridgeCommand command, JsonObject payload, CancellationToken cancellationToken)
@@ -839,10 +952,10 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             return null;
 
         if (response.Status is not BridgeStatus.Ok)
-            throw new InvalidOperationException($"Мостовая команда завершилась со статусом '{DescribeStatus(response.Status)}'");
+            throw CreateCommandFailureException(response);
 
         if (response.Payload is not JsonElement descriptionPayload || !TryParseElementDescriptionPayload(descriptionPayload, out var description))
-            throw new InvalidOperationException("Мостовая команда вернула неверные данные описания элемента");
+            throw new BridgeCommandException("Мостовая команда вернула неверные данные описания элемента");
 
         return description;
     }
@@ -1211,8 +1324,41 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             return CreateUtilityResponse(HttpStatusCode.BadRequest);
         }
 
-        var response = await InvokeRequestInterceptionAsync(request, CancellationToken.None).ConfigureAwait(false);
+        // Расширение вызывает этот маршрут синхронным XHR из блокирующего webRequest-обработчика,
+        // где нельзя задать timeout. Ограничиваем на стороне сервера: зависший пользовательский
+        // обработчик перехвата иначе заморозил бы всю сеть перехватываемой вкладки.
+        using var timeout = CreateInterceptionTimeout();
+        var response = await InvokeInterceptionWithTimeoutAsync(
+            token => InvokeRequestInterceptionAsync(request, token),
+            "request-interception",
+            timeout.Token).ConfigureAwait(false);
         return CreateJsonUtilityResponse(response);
+    }
+
+    private CancellationTokenSource CreateInterceptionTimeout()
+        => settings.RequestTimeout > TimeSpan.Zero
+            ? new CancellationTokenSource(settings.RequestTimeout)
+            : new CancellationTokenSource();
+
+    /// <summary>
+    /// Гарантирует ответ на решение перехвата не позже дедлайна. Токен даёт кооперативную отмену,
+    /// а WaitAsync страхует от обработчика, который токен игнорирует; при срабатывании возвращается
+    /// безопасное решение continue, поэтому синхронный XHR расширения всегда разблокируется.
+    /// </summary>
+    private async ValueTask<BridgeInterceptHttpResponse> InvokeInterceptionWithTimeoutAsync(
+        Func<CancellationToken, ValueTask<BridgeInterceptHttpResponse>> invoke,
+        string operationKind,
+        CancellationToken timeoutToken)
+    {
+        try
+        {
+            return await invoke(timeoutToken).AsTask().WaitAsync(timeoutToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            settings.Logger?.LogBridgeServerHandlerInvocationFailed(operationKind + "-timeout", new TimeoutException());
+            return BridgeInterceptHttpResponse.Continue();
+        }
     }
 
     private async Task<BridgeNavigationProxyDirectResponse> ProcessCallbackRequestAsync(string payloadText)
@@ -1266,7 +1412,11 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             return CreateUtilityResponse(HttpStatusCode.BadRequest);
         }
 
-        var response = await InvokeResponseInterceptionAsync(responsePayload, CancellationToken.None).ConfigureAwait(false);
+        using var timeout = CreateInterceptionTimeout();
+        var response = await InvokeInterceptionWithTimeoutAsync(
+            token => InvokeResponseInterceptionAsync(responsePayload, token),
+            "response-interception",
+            timeout.Token).ConfigureAwait(false);
         return CreateJsonUtilityResponse(response);
     }
 
@@ -1304,8 +1454,11 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         response.AddHeader("Access-Control-Allow-Origin", "*");
         response.AddHeader("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS");
 
-        var requestId = path["/fulfill/".Length..];
-        if (!pendingFulfillments.TryGetValue(requestId, out var fulfillment))
+        // Токен в пути — одноразовая capability со 128 битами энтропии (см. RegisterRequestFulfillment).
+        // Прежняя версия ключевала выдачу идентификатором запроса браузера, который предсказуем,
+        // из-за чего тело подготовленного ответа мог забрать любой локальный процесс.
+        var fulfillmentToken = path["/fulfill/".Length..];
+        if (!pendingFulfillments.TryGetValue(fulfillmentToken, out var fulfillment))
         {
             response.StatusCode = (int)HttpStatusCode.NotFound;
             response.Close();
@@ -1359,17 +1512,24 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         }
 
         var bodyBytes = fulfillment.Body;
-        if (bodyBytes is { Length: > 0 })
-            response.ContentLength64 = bodyBytes.Length;
 
-        if (!string.Equals(context.Request.HttpMethod, "HEAD", StringComparison.OrdinalIgnoreCase))
+        // На HEAD тело не пишется, поэтому ContentLength64 не выставляется: HttpListener
+        // обрывает соединение, если фактически записано меньше объявленного.
+        if (string.Equals(context.Request.HttpMethod, "HEAD", StringComparison.OrdinalIgnoreCase))
         {
-            pendingFulfillments.TryRemove(requestId, out _);
-
-            if (bodyBytes is { Length: > 0 })
-                await response.OutputStream.WriteAsync(bodyBytes, CancellationToken.None).ConfigureAwait(false);
+            response.Close();
+            return;
         }
 
+        if (bodyBytes is { Length: > 0 })
+        {
+            response.ContentLength64 = bodyBytes.Length;
+            await response.OutputStream.WriteAsync(bodyBytes, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        // Снимаем выдачу только после успешной записи: иначе оборванная передача теряла бы тело
+        // безвозвратно, и повтор навигации получал бы 404 вместо подготовленного ответа.
+        pendingFulfillments.TryRemove(fulfillmentToken, out _);
         response.Close();
     }
 
@@ -1467,6 +1627,79 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         return false;
     }
 
+    /// <summary>
+    /// Поднимает событие перехвата по запросу, пришедшему на навигационный прокси.
+    /// </summary>
+    /// <remarks>
+    /// В Chromium блокирующего webRequest нет, поэтому спросить драйвер некому — это делает сам
+    /// прокси. Решение кладётся в реестр обработчиком события, после чего прокси забирает его
+    /// обычным путём. Ответ здесь не нужен: применяет решение прокси, а не расширение.
+    /// </remarks>
+    internal async ValueTask DispatchNavigationProxyInterceptionAsync(
+        ProxyNavigationRoute route,
+        string requestId,
+        string method,
+        string absoluteUrl,
+        string resourceType,
+        IReadOnlyDictionary<string, string>? headers,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(route);
+
+        var payload = new BridgeInterceptedRequestPayload
+        {
+            RequestId = requestId,
+            TabId = route.TabId,
+            Url = absoluteUrl,
+            Method = method,
+            ResourceType = resourceType,
+            Headers = headers,
+            SupportsNavigationFulfillment = true,
+            DecidedByNavigationProxy = true,
+        };
+
+        _ = await InvokeRequestInterceptionAsync(payload, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Поднимает событие перехвата ответа для обмена, которым владеет навигационный прокси.
+    /// </summary>
+    /// <remarks>
+    /// В отличие от пути блокирующего webRequest здесь доступно тело: прокси прочитал ответ
+    /// целиком, поэтому обработчик может его читать и подменять.
+    /// </remarks>
+    internal async ValueTask<BridgeInterceptHttpResponse> DispatchNavigationProxyResponseInterceptionAsync(
+        ProxyNavigationRoute route,
+        string requestId,
+        string method,
+        string absoluteUrl,
+        string resourceType,
+        int statusCode,
+        string? reasonPhrase,
+        IReadOnlyDictionary<string, string>? headers,
+        byte[]? body,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(route);
+
+        var payload = new BridgeInterceptedResponsePayload
+        {
+            RequestId = requestId,
+            TabId = route.TabId,
+            Url = absoluteUrl,
+            Method = method,
+            ResourceType = resourceType,
+            StatusCode = statusCode,
+            ReasonPhrase = reasonPhrase,
+            Headers = headers,
+            Body = body,
+            DecidedByNavigationProxy = true,
+            Timestamp = DateTimeOffset.UtcNow,
+        };
+
+        return await InvokeResponseInterceptionAsync(payload, cancellationToken).ConfigureAwait(false);
+    }
+
     private async ValueTask<BridgeInterceptHttpResponse> InvokeRequestInterceptionAsync(BridgeInterceptedRequestPayload request, CancellationToken cancellationToken)
     {
         var response = BridgeInterceptHttpResponse.Continue();
@@ -1478,7 +1711,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             response = await InvokeSafelyAsync(() => ((BridgeRequestInterceptionHandler)entry)(request, cancellationToken), () => BridgeInterceptHttpResponse.Continue(), "request-interception").ConfigureAwait(false);
         }
 
-        return RegisterRequestFulfillment(request.RequestId, response);
+        return RegisterRequestFulfillment(response);
     }
 
     private async ValueTask<BridgeCallbackHttpResponse> InvokeCallbackAsync(BridgeCallbackRequestPayload request, CancellationToken cancellationToken)
@@ -1678,22 +1911,26 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
+    // Читатели ниже намеренно основаны на TryGetValue: JsonValue.GetValue<T> бросает
+    // InvalidOperationException при несовпадении типа узла, из-за чего запрос с полем
+    // неожиданного типа обрывал соединение вместо ответа 400.
     private static string? ReadOptionalString(JsonObject payload, string propertyName)
-        => payload[propertyName]?.GetValue<string>();
+        => payload[propertyName] is JsonValue value && value.TryGetValue<string>(out var stringValue)
+            ? stringValue
+            : null;
 
     private static int? ReadOptionalInt(JsonObject payload, string propertyName)
-        => payload[propertyName]?.GetValue<int>();
+        => payload[propertyName] is JsonValue value && value.TryGetValue<int>(out var intValue)
+            ? intValue
+            : null;
 
     private static bool ReadOptionalBoolean(JsonObject payload, string propertyName)
         => payload[propertyName] is JsonValue value && value.TryGetValue<bool>(out var booleanValue) && booleanValue;
 
     private static DateTimeOffset ReadTimestamp(JsonObject payload, string propertyName)
-    {
-        var unixTime = payload[propertyName]?.GetValue<long?>();
-        return unixTime is { } value
-            ? DateTimeOffset.FromUnixTimeMilliseconds(value)
+        => payload[propertyName] is JsonValue value && value.TryGetValue<long>(out var unixTime)
+            ? DateTimeOffset.FromUnixTimeMilliseconds(unixTime)
             : DateTimeOffset.UtcNow;
-    }
 
     private static Dictionary<string, string>? ReadStringDictionary(JsonObject payload, string propertyName)
     {
@@ -1998,7 +2235,12 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         response.StatusCode = (int)HttpStatusCode.OK;
         response.ContentType = "text/html; charset=utf-8";
         response.ContentEncoding = Encoding.UTF8;
-        response.AddHeader("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval';");
+        // frame-src разрешает создавать фреймы на discovery-странице (в т.ч. data:/blob:), которые
+        // драйвер использует как automation-поверхность (например, кросс-доменные data:-iframe в тестах
+        // фреймов). Без него default-src 'none' блокирует data:-фрейм → тот отдаёт 'error' вместо 'load',
+        // и evaluate, ждущий 'load', зависает. about:blank/srcdoc CSP не трогает, поэтому same-origin
+        // фрейм-тесты работали и без этого. Риск минимален: страница и так допускает unsafe-eval.
+        response.AddHeader("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; frame-src 'self' data: blob:;");
         response.AddHeader("Cross-Origin-Resource-Policy", "same-origin");
 
         var port = Port.ToString(CultureInfo.InvariantCulture);
@@ -2105,11 +2347,17 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         try
         {
-            sessionId = await RunHandshakeAsync(transport, connectionEpoch, cancellationToken).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(sessionId))
+            var registration = await RunHandshakeAsync(transport, connectionEpoch, cancellationToken).ConfigureAwait(false);
+            if (registration is null)
                 return;
 
-            sessionSockets[sessionId] = transport;
+            // sessionId фиксируется здесь — сразу после того, как состояние сессии создано и сокет
+            // опубликован под registrationGate. Тогда finally гарантированно уберёт и состояние, и
+            // сокет, даже если отправка accept ниже упадёт (иначе состояние сессии утекало бы).
+            sessionId = registration.SessionId;
+            await RefreshConnectionCountAsync().ConfigureAwait(false);
+            await SendHandshakeAcceptAsync(transport, registration.Validation).ConfigureAwait(false);
+            settings.Logger?.LogBridgeServerHandshakeAccepted(sessionId);
             settings.Logger?.LogBridgeServerSessionConnected(sessionId);
             await RunConnectedSessionAsync(transport.Socket, sessionId, cancellationToken).ConfigureAwait(false);
         }
@@ -2154,7 +2402,9 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         }
     }
 
-    private async Task<string?> RunHandshakeAsync(BridgeSessionTransport transport, long connectionEpoch, CancellationToken cancellationToken)
+    private sealed record HandshakeRegistration(string SessionId, BridgeHandshakeValidationResult Validation);
+
+    private async Task<HandshakeRegistration?> RunHandshakeAsync(BridgeSessionTransport transport, long connectionEpoch, CancellationToken cancellationToken)
     {
         var validation = await ReceiveAndValidateHandshakeAsync(transport.Socket, cancellationToken).ConfigureAwait(false);
         if (validation.IsRejected)
@@ -2164,7 +2414,24 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             return null;
         }
 
-        var registrationFailure = await TryRegisterSessionAsync(validation, connectionEpoch).ConfigureAwait(false);
+        var sessionId = validation.ClientPayload!.SessionId;
+
+        // Регистрация состояния (с вытеснением дубля) и публикация сокета — единая критическая
+        // секция под registrationGate, чтобы конкурентный дубль-реконнект всегда видел и обрывал
+        // уже опубликованный сокет прежнего соединения. Сетевые accept/reject — вне gate.
+        BridgeHandshakeValidationResult? registrationFailure;
+        await registrationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            registrationFailure = await TryRegisterSessionAsync(validation, connectionEpoch).ConfigureAwait(false);
+            if (registrationFailure is null)
+                sessionSockets[sessionId] = transport;
+        }
+        finally
+        {
+            registrationGate.Release();
+        }
+
         if (registrationFailure is not null)
         {
             settings.Logger?.LogBridgeServerHandshakeRejected(registrationFailure.CorrelationId ?? "без-идентификатора", registrationFailure.RejectCode ?? BridgeProtocolErrorCodes.InvalidPayload);
@@ -2172,10 +2439,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             return null;
         }
 
-        await RefreshConnectionCountAsync().ConfigureAwait(false);
-        await SendHandshakeAcceptAsync(transport, validation).ConfigureAwait(false);
-        settings.Logger?.LogBridgeServerHandshakeAccepted(validation.ClientPayload!.SessionId);
-        return validation.ClientPayload!.SessionId;
+        return new HandshakeRegistration(sessionId, validation);
     }
 
     private async Task<BridgeHandshakeValidationResult> ReceiveAndValidateHandshakeAsync(WebSocket socket, CancellationToken cancellationToken)
@@ -2204,7 +2468,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             // Быстрый реконнект с тем же sessionId: вытесняем «зомби»-сессию прежнего соединения.
             // Удаление со стороны прежнего коннекта станет no-op благодаря несовпадению эпох.
             if (sessionSockets.TryRemove(payload.SessionId, out var staleTransport))
-                staleTransport.Dispose();
+                await staleTransport.SupersedeAsync(BridgeProtocolErrorCodes.DuplicateSessionId).ConfigureAwait(false);
 
             _ = await state.RemoveSessionAsync(payload.SessionId).ConfigureAwait(false);
             createResult = await state.CreateSessionAsync(descriptor).ConfigureAwait(false);
@@ -2369,10 +2633,13 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             return true;
         }
 
+        // Контракт транспорта — fail-closed: сообщение, которое мост не может интерпретировать,
+        // означает рассогласование сторон, и канал закрывается, чтобы расширение переподключилось
+        // с чистым состоянием. Ответственность за то, чтобы не слать нерасшифровываемые кадры,
+        // лежит на маршрутизаторе расширения.
         if (message.Type is BridgeMessageType.Response)
         {
-            var responseHandled = await HandlePostHandshakeResponseAsync(message).ConfigureAwait(false);
-            if (responseHandled)
+            if (await HandlePostHandshakeResponseAsync(sessionId, message).ConfigureAwait(false))
                 return true;
 
             settings.Logger?.LogBridgeServerProtocolViolation(sessionId, BridgeProtocolErrorCodes.InvalidPayload);
@@ -2383,8 +2650,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         if (message.Type is not BridgeMessageType.Event)
             return true;
 
-        var handled = await TryHandlePostHandshakeEventAsync(sessionId, message).ConfigureAwait(false);
-        if (handled)
+        if (await TryHandlePostHandshakeEventAsync(sessionId, message).ConfigureAwait(false))
             return true;
 
         settings.Logger?.LogBridgeServerProtocolViolation(sessionId, BridgeProtocolErrorCodes.InvalidPayload);
@@ -2401,11 +2667,9 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             TabId = ping.TabId,
         };
 
-    private async Task<bool> HandlePostHandshakeResponseAsync(BridgeMessage message)
+    private async Task<bool> HandlePostHandshakeResponseAsync(string sessionId, BridgeMessage message)
     {
-        if (string.IsNullOrWhiteSpace(message.Id)
-            || message.Status is null
-            || string.IsNullOrWhiteSpace(message.TabId))
+        if (string.IsNullOrWhiteSpace(message.Id) || message.Status is null)
         {
             settings.Logger?.LogBridgeServerResponseRejected(message.Id ?? "без-идентификатора", "в ответе отсутствуют обязательные поля");
             return false;
@@ -2414,7 +2678,19 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         var pendingRequest = await state.CreatePendingRequestSnapshotAsync(message.Id).ConfigureAwait(false);
         if (pendingRequest is not null)
         {
-            if (!string.Equals(pendingRequest.TabId, message.TabId, StringComparison.Ordinal))
+            // Ответ принимается только от сеанса-владельца запроса: иначе посторонний коннект,
+            // угадавший идентификатор сообщения, мог бы завершить чужой ожидающий запрос.
+            if (!string.Equals(pendingRequest.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                settings.Logger?.LogBridgeServerResponseRejected(message.Id, "ответ пришёл от постороннего сеанса");
+                return false;
+            }
+
+            // TabId в ответе необязателен: аварийные ответы маршрутизатора расширения формируются
+            // до разбора вкладки. Корреляция идёт по идентификатору сообщения, а вкладка
+            // проверяется только если она указана.
+            if (!string.IsNullOrWhiteSpace(message.TabId)
+                && !string.Equals(pendingRequest.TabId, message.TabId, StringComparison.Ordinal))
             {
                 settings.Logger?.LogBridgeServerResponseRejected(message.Id, "вкладка ответа не совпадает с ожидаемой");
                 return false;
@@ -3009,10 +3285,9 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (isDisposed)
+        if (Interlocked.Exchange(ref isDisposed, 1) != 0)
             return;
 
-        isDisposed = true;
         await cts.CancelAsync().ConfigureAwait(false);
 
         try
@@ -3072,6 +3347,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         }
 
         cts.Dispose();
+        registrationGate.Dispose();
         pendingFulfillments.Clear();
         await state.DisposeAsync().ConfigureAwait(false);
         settings.Logger?.LogBridgeServerStopped(settings.Host, Port);
@@ -3083,21 +3359,24 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     private void PurgeExpiredFulfillments(DateTimeOffset nowUtc)
     {
         var maxAge = TimeSpan.FromMinutes(MaxSettledFulfillmentAgeMinutes);
-        foreach (var (requestId, fulfillment) in pendingFulfillments)
+        foreach (var (fulfillmentToken, fulfillment) in pendingFulfillments)
         {
             if (nowUtc - fulfillment.CreatedAtUtc > maxAge)
-                pendingFulfillments.TryRemove(requestId, out _);
+                pendingFulfillments.TryRemove(fulfillmentToken, out _);
         }
     }
 
-    private BridgeInterceptHttpResponse RegisterRequestFulfillment(string requestId, BridgeInterceptHttpResponse response)
+    private BridgeInterceptHttpResponse RegisterRequestFulfillment(BridgeInterceptHttpResponse response)
     {
         if (!string.Equals(response.Action, "fulfill", StringComparison.OrdinalIgnoreCase))
             return response;
 
         PurgeExpiredFulfillments(DateTimeOffset.UtcNow);
-        var effectiveRequestId = string.IsNullOrWhiteSpace(requestId) ? Guid.NewGuid().ToString("N") : requestId;
-        pendingFulfillments[effectiveRequestId] = new BridgePendingFulfillment
+
+        // Маршрут /fulfill отдаёт тело без секрета (его запрашивает сам браузер по redirect),
+        // поэтому ключом служит непредсказуемый одноразовый токен, а не идентификатор запроса.
+        var fulfillmentToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+        pendingFulfillments[fulfillmentToken] = new BridgePendingFulfillment
         {
             StatusCode = response.StatusCode ?? (int)HttpStatusCode.OK,
             ReasonPhrase = response.ReasonPhrase,
@@ -3111,11 +3390,11 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             responseHeaders: response.ResponseHeaders,
             statusCode: response.StatusCode,
             reasonPhrase: response.ReasonPhrase,
-            url: CreateFulfillmentUrl(effectiveRequestId));
+            url: CreateFulfillmentUrl(fulfillmentToken));
     }
 
-    private string CreateFulfillmentUrl(string requestId)
-        => string.Concat("http://127.0.0.1:", Port.ToString(CultureInfo.InvariantCulture), "/fulfill/", requestId);
+    private string CreateFulfillmentUrl(string fulfillmentToken)
+        => string.Concat("http://127.0.0.1:", Port.ToString(CultureInfo.InvariantCulture), "/fulfill/", fulfillmentToken);
 
     private static byte[]? TryDecodeBase64(string? value)
     {
@@ -3186,7 +3465,47 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             }
         }
 
-        public void Dispose() => sendGate.Dispose();
+        /// <summary>
+        /// Вытесняет соединение: отправляет close-кадр и обрывает сокет. Обрыв обязателен —
+        /// цикл чтения вытесненного коннекта висит в <see cref="WebSocket.ReceiveAsync(Memory{byte}, CancellationToken)"/>
+        /// и без него не разблокируется, оставляя сокет, задачу и TCP-соединение жить
+        /// до тех пор, пока что-нибудь не пришлёт клиент.
+        /// </summary>
+        public async ValueTask SupersedeAsync(string reason)
+        {
+            try
+            {
+                // Ограниченное ожидание: вытеснение выполняется под registrationGate, поэтому
+                // close-кадр не должен удерживать общий gate из-за подвисшего peer'а.
+                await CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, reason)
+                    .AsTask()
+                    .WaitAsync(TimeSpan.FromSeconds(2))
+                    .ConfigureAwait(false);
+            }
+            catch (WebSocketException)
+            {
+                // Сокет уже нерабочий — остаётся только оборвать его.
+            }
+            catch (OperationCanceledException)
+            {
+                // Отправка close-кадра прервана: обрыв ниже всё равно освободит ресурсы.
+            }
+            catch (TimeoutException)
+            {
+                // Peer не принял close вовремя: обрываем принудительно.
+            }
+
+            Socket.Abort();
+            Dispose();
+        }
+
+        public void Dispose()
+        {
+            sendGate.Dispose();
+
+            // Сокет, принятый через HttpListener, больше никто не освобождает.
+            Socket.Dispose();
+        }
     }
 
     private void LogManagedDeliveryTrustState()
@@ -3212,10 +3531,19 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             diagnostics.Detail);
     }
 
-    private static int FindFreePort()
+    /// <summary>
+    /// Подбирает свободный порт на том же адресе, к которому затем привяжется listener:
+    /// проба на loopback ничего не говорила бы о занятости порта на другом интерфейсе.
+    /// Гонка «порт освободили — порт заняли» неизбежна, поэтому вызывающий код повторяет попытку.
+    /// </summary>
+    private int FindFreePort()
     {
-        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        var bindAddress = IPAddress.TryParse(settings.Host, out var parsedAddress)
+            ? parsedAddress
+            : IPAddress.Loopback;
+
+        using var socket = new Socket(bindAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+        socket.Bind(new IPEndPoint(bindAddress, 0));
         return ((IPEndPoint)socket.LocalEndPoint!).Port;
     }
 

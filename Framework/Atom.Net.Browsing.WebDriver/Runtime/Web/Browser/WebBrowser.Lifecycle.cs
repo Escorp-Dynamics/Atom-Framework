@@ -42,6 +42,7 @@ public sealed partial class WebBrowser
                 cancellationToken).ConfigureAwait(false);
             materializedProfilePath = materialization.MaterializedProfilePath;
             ConfigureBridgeManagedDelivery(bridgeServer, materialization.BridgeBootstrap);
+            ConfigureBridgeNavigationProxy(bridgeServer, materialization.BridgeBootstrap);
 
             if (!string.IsNullOrWhiteSpace(materializedProfilePath))
                 launchSettings.Logger?.LogWebBrowserProfileMaterialized(materializedProfilePath);
@@ -181,16 +182,29 @@ public sealed partial class WebBrowser
             return (null, null);
 
         var bridgeServer = new BridgeServer(bridgeBootstrapPreparation.Settings);
-        await bridgeServer.StartAsync(cancellationToken).ConfigureAwait(false);
-        bridgeBootstrapPreparation = BindBridgeBootstrapPorts(
-            bridgeBootstrapPreparation,
-            bridgeServer.Port,
-            bridgeServer.SecureTransportPort,
-            bridgeServer.ManagedDeliveryPort,
-            bridgeServer.NavigationProxyPort,
-            bridgeServer.ManagedDeliveryRequiresCertificateBypass,
-            bridgeServer.ManagedDeliveryTrustDiagnostics);
-        return (bridgeServer, bridgeBootstrapPreparation);
+
+        // Сервер возвращается наружу только после успешного старта; до этого момента
+        // LaunchCoreAsync ещё не видит ссылку, поэтому его catch не смог бы освободить уже
+        // забинденные listener'ы/сокеты/фоновые задачи, если StartAsync упадёт (порт занят,
+        // отмена). Освобождаем частично-запущенный сервер здесь.
+        try
+        {
+            await bridgeServer.StartAsync(cancellationToken).ConfigureAwait(false);
+            bridgeBootstrapPreparation = BindBridgeBootstrapPorts(
+                bridgeBootstrapPreparation,
+                bridgeServer.Port,
+                bridgeServer.SecureTransportPort,
+                bridgeServer.ManagedDeliveryPort,
+                bridgeServer.NavigationProxyPort,
+                bridgeServer.ManagedDeliveryRequiresCertificateBypass,
+                bridgeServer.ManagedDeliveryTrustDiagnostics);
+            return (bridgeServer, bridgeBootstrapPreparation);
+        }
+        catch
+        {
+            await bridgeServer.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     private static BridgeBootstrapPreparation BindBridgeBootstrapPorts(
@@ -262,6 +276,21 @@ public sealed partial class WebBrowser
                 ManagedDeliveryTrustDiagnostics = bridgeServerManagedTrustDiagnostics,
             },
         };
+    }
+
+    /// <summary>
+    /// Настраивает навигационный прокси под способ доставки route token в запускаемом браузере.
+    /// </summary>
+    private static void ConfigureBridgeNavigationProxy(BridgeServer? bridgeServer, BridgeBootstrapPlan? bridgeBootstrap)
+    {
+        if (bridgeServer is null || bridgeBootstrap is null)
+            return;
+
+        // Firefox отвечает на 407 через blocking onAuthRequired и приносит токен так.
+        // Chromium прокси-аутентификацию расширению не отдаёт: там токен ставится заголовком,
+        // а требовать вызов значило бы отклонять весь неотслеживаемый трафик браузера.
+        bridgeServer.ConfigureNavigationProxyRouteTokenChallenge(
+            !string.Equals(bridgeBootstrap.BrowserFamily, "chromium", StringComparison.Ordinal));
     }
 
     private static void ConfigureBridgeManagedDelivery(BridgeServer? bridgeServer, BridgeBootstrapPlan? bridgeBootstrap)
@@ -410,12 +439,23 @@ public sealed partial class WebBrowser
             profile.Path = string.Empty;
         }
 
-        if (Directory.Exists(materializedProfilePath))
-            Directory.Delete(materializedProfilePath, recursive: true);
-        else if (File.Exists(materializedProfilePath))
-            File.Delete(materializedProfilePath);
+        // Процесс браузера мог не завершиться за отведённые 5 секунд и всё ещё писать в
+        // user-data-dir, из-за чего рекурсивное удаление способно бросить IOException
+        // («Directory not empty») / UnauthorizedAccessException. Это не должно прерывать
+        // DisposeAsync или маскировать исходное исключение запуска в catch-ветке LaunchCoreAsync.
+        try
+        {
+            if (Directory.Exists(materializedProfilePath))
+                Directory.Delete(materializedProfilePath, recursive: true);
+            else if (File.Exists(materializedProfilePath))
+                File.Delete(materializedProfilePath);
 
-        settings.Logger?.LogWebBrowserProfileCleaned(materializedProfilePath);
+            settings.Logger?.LogWebBrowserProfileCleaned(materializedProfilePath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            settings.Logger?.LogWebBrowserProfileCleanupFailed(materializedProfilePath, exception);
+        }
     }
 
     private static bool ShouldPreserveTemporaryProfile()
@@ -509,7 +549,25 @@ public sealed partial class WebBrowser
             if (startInfo.ArgumentList.Any(argument => string.Equals(argument, launchArgument, StringComparison.Ordinal)))
                 continue;
 
+            // Аргументы моста вытесняют одноимённые из пресета: например, локальный навигационный
+            // прокси должен заменить пользовательский --proxy-server, а не соседствовать с ним
+            // (upstream пользователя учитывается уже самим прокси при форварде).
+            RemoveConflictingLaunchArguments(startInfo, launchArgument);
             startInfo.ArgumentList.Add(launchArgument);
+        }
+    }
+
+    private static void RemoveConflictingLaunchArguments(ProcessStartInfo startInfo, string launchArgument)
+    {
+        var separatorIndex = launchArgument.IndexOf('=', StringComparison.Ordinal);
+        if (separatorIndex <= 0 || !launchArgument.StartsWith("--", StringComparison.Ordinal))
+            return;
+
+        var prefix = launchArgument[..(separatorIndex + 1)];
+        for (var index = startInfo.ArgumentList.Count - 1; index >= 0; index--)
+        {
+            if (startInfo.ArgumentList[index].StartsWith(prefix, StringComparison.Ordinal))
+                startInfo.ArgumentList.RemoveAt(index);
         }
     }
 

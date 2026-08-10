@@ -279,6 +279,7 @@ public class WebDriverBrowserProfileTests
             ManagedPackageUrl: "https://127.0.0.1:9443/chromium/abcdefghijklmnopabcdefghijklmnop/extension.crx",
             ManagedPackageArtifactPath: "/tmp/profile/managed-delivery/atom-webdriver-extension.crx",
             DiscoveryUrl: "http://127.0.0.1:9000/",
+            NavigationProxyPort: 0,
             ConnectionTimeout: TimeSpan.FromSeconds(5));
 
         var arguments = BridgeExtensionBootstrap.GetLaunchArguments(profile, bridgeBootstrap);
@@ -474,7 +475,9 @@ public class WebDriverBrowserProfileTests
             Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableChrome), Is.EqualTo("/etc/opt/chrome/policies/managed/atom-webdriver-extension.json"));
             Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(betaChrome), Is.Null);
             Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableEdge), Is.EqualTo("/etc/opt/edge/policies/managed/atom-webdriver-extension.json"));
-            Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableBrave), Is.EqualTo("/etc/opt/BraveSoftware/Brave-Browser/policies/managed/atom-webdriver-extension.json"));
+            // Brave на Linux читает policy из /etc/brave/policies/managed, а не из /etc/opt/<vendor>/...
+            // по аналогии с Chrome/Edge: путь подтверждён самим браузером (config_dir_policy_loader).
+            Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableBrave), Is.EqualTo("/etc/brave/policies/managed/atom-webdriver-extension.json"));
             Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableOpera), Is.EqualTo("/etc/opt/opera/policies/managed/atom-webdriver-extension.json"));
             Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableOperaGx), Is.Null);
             Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableVivaldi), Is.EqualTo("/etc/opt/vivaldi/policies/managed/atom-webdriver-extension.json"));
@@ -565,6 +568,7 @@ public class WebDriverBrowserProfileTests
             ManagedPackageUrl: "https://127.0.0.1:9443/chromium/abcdefghijklmnopabcdefghijklmnop/extension.crx",
             ManagedPackageArtifactPath: "/tmp/profile/managed-delivery/atom-webdriver-extension.crx",
             DiscoveryUrl: "http://127.0.0.1:9000/",
+            NavigationProxyPort: 0,
             ConnectionTimeout: TimeSpan.FromSeconds(5));
 
         var arguments = BridgeExtensionBootstrap.GetLaunchArguments(profile, bridgeBootstrap);
@@ -607,6 +611,7 @@ public class WebDriverBrowserProfileTests
             ManagedPackageUrl: string.Empty,
             ManagedPackageArtifactPath: string.Empty,
             DiscoveryUrl: "http://127.0.0.1:9000/",
+            NavigationProxyPort: 0,
             ConnectionTimeout: TimeSpan.FromSeconds(5));
 
         var arguments = BridgeExtensionBootstrap.GetLaunchArguments(profile, bridgeBootstrap);
@@ -846,9 +851,12 @@ public class WebDriverBrowserProfileTests
                 Assert.That(addonManifestDocument.RootElement.GetProperty("browser_specific_settings").GetProperty("gecko").GetProperty("id").GetString(), Is.EqualTo("escorp-automation@escorp.local"));
                 Assert.That(addonManifestDocument.RootElement.GetProperty("background").TryGetProperty("persistent", out _), Is.False);
                 Assert.That(addonManifestDocument.RootElement.GetProperty("permissions").EnumerateArray().Select(static item => item.GetString()).ToArray(), Does.Contain("storage"));
-                Assert.That(bootstrap.Strategy.TransportMode, Is.EqualTo(ChromiumBootstrapTransportMode.SecureWebSocket));
-                Assert.That(Uri.TryCreate(bootstrap.TransportUrl, UriKind.Absolute, out var transportUri), Is.True);
-                Assert.That(transportUri!.Scheme, Is.EqualTo("wss"));
+                // Без сконфигурированного подписанного XPI (env очищен выше) Firefox stable идёт по
+                // профиль-seeded пути, который намеренно использует обычный ws:// транспорт через
+                // discovery-документ (см. коммит dcb7bbc и BridgeManagedDeliveryCertificateTrustInstaller):
+                // явный wss transportUrl не выдаётся, поэтому он null.
+                Assert.That(bootstrap.Strategy.TransportMode, Is.EqualTo(ChromiumBootstrapTransportMode.WebSocket));
+                Assert.That(bootstrap.TransportUrl, Is.Null);
             });
 
             if (OperatingSystem.IsLinux())

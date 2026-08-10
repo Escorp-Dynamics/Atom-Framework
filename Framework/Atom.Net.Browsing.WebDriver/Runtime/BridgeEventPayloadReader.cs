@@ -149,7 +149,7 @@ internal static class BridgeEventPayloadReader
         }
 
         var body = ReadBody(payload);
-        var request = new HttpsRequestMessage(new HttpMethod(ReadString(payload, "method") ?? HttpMethod.Get.Method), url);
+        var request = new HttpsRequestMessage(ReadHttpMethod(payload), url);
         if (body.Length > 0)
         {
             request.Content = new ByteArrayContent(body);
@@ -238,9 +238,13 @@ internal static class BridgeEventPayloadReader
         {
             var stringContent = new StringContent(content, Encoding.UTF8);
             var contentType = ReadContentType(payload);
+            // Заголовок типа содержимого приходит от origin-сервера дословно и может быть
+            // некорректным; строгий разбор бросил бы исключение и уронил бы диспетчеризацию
+            // события, поэтому разбор безопасный, с откатом на значение по умолчанию.
             stringContent.Headers.ContentType = !string.IsNullOrWhiteSpace(contentType)
-                ? MediaTypeHeaderValue.Parse(contentType)
-                : new MediaTypeHeaderValue("text/html");
+                && MediaTypeHeaderValue.TryParse(contentType, out var parsedMediaType)
+                    ? parsedMediaType
+                    : new MediaTypeHeaderValue("text/html");
 
             response.Content = stringContent;
         }
@@ -254,7 +258,7 @@ internal static class BridgeEventPayloadReader
         var url = ReadUri(payload, "url");
         if (url is not null)
         {
-            response.RequestMessage = new HttpRequestMessage(new HttpMethod(ReadString(payload, "method") ?? HttpMethod.Get.Method), url);
+            response.RequestMessage = new HttpRequestMessage(ReadHttpMethod(payload), url);
         }
 
         args = new InterceptedResponseEventArgs
@@ -376,9 +380,40 @@ internal static class BridgeEventPayloadReader
     private static byte[] ReadBody(JsonElement payload)
     {
         var value = ReadString(payload, "bodyBase64");
-        return string.IsNullOrWhiteSpace(value)
-            ? []
-            : Convert.FromBase64String(value);
+        if (string.IsNullOrWhiteSpace(value))
+            return [];
+
+        // Повреждённый base64 не должен ронять диспетчеризацию события необработанным
+        // FormatException: тело просто считается отсутствующим.
+        var buffer = new byte[(value.Length / 4 * 3) + 3];
+        return Convert.TryFromBase64String(value, buffer, out var written)
+            ? buffer[..written]
+            : [];
+    }
+
+    /// <summary>
+    /// Читает HTTP-метод из полезной нагрузки события. Метод приходит из браузера/сети и может
+    /// содержать не-token символы; конструктор <see cref="HttpMethod"/> на таком бросает, поэтому
+    /// невалидный метод откатывается к GET, а не роняет обработку события.
+    /// </summary>
+    private static HttpMethod ReadHttpMethod(JsonElement payload)
+    {
+        var method = ReadString(payload, "method");
+        if (string.IsNullOrWhiteSpace(method))
+            return HttpMethod.Get;
+
+        try
+        {
+            return new HttpMethod(method);
+        }
+        catch (FormatException)
+        {
+            return HttpMethod.Get;
+        }
+        catch (ArgumentException)
+        {
+            return HttpMethod.Get;
+        }
     }
 
     private static HttpStatusCode ReadStatusCode(JsonElement payload)

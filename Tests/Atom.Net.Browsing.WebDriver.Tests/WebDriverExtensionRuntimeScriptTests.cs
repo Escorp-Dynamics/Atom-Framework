@@ -19,7 +19,12 @@ public sealed class WebDriverExtensionRuntimeScriptTests
             Assert.That(script, Does.Contain("requestedDeviceId === 'default'"));
             Assert.That(script, Does.Contain("normalizeLabel(device.label) === expectedLabel"));
             Assert.That(script, Does.Contain("let warmupStream = null;"));
-            Assert.That(script, Does.Contain("warmupStream = await originalGetUserMedia(warmupConstraints);"));
+            // Аудио-warmup сохранён, но обёрнут в тайм-бокс (Promise.race с mediaOperationTimeoutMs),
+            // чтобы нативный getUserMedia не мог зависнуть. Видео-warmup удалён намеренно: у видео всегда
+            // есть синтетический canvas-fallback, а нативный getUserMedia({video}) в automation-Firefox
+            // виснет и срывал getUserMedia в TimeoutError (см. RealBrowser*MediaAttachment*).
+            Assert.That(script, Does.Contain("warmupStream = await Promise.race(["));
+            Assert.That(script, Does.Not.Contain("warmupStream = await originalGetUserMedia(warmupConstraints);"));
             Assert.That(script, Does.Contain("const createSyntheticVideoStream = (request) => {"));
             Assert.That(script, Does.Contain("return createSyntheticVideoStream(request.video);"));
             Assert.That(script, Does.Contain("return mergeStreams(nativeStream, createSyntheticVideoStream(request.video));"));

@@ -12,4 +12,7 @@ internal static partial class FrameLogs
 
     [LoggerMessage(EventId = 1892, Level = LogLevel.Trace, Message = "Фрейм вкладки {TabId} начал операцию {Operation}, селектор: {Selector}")]
     public static partial void LogWebFrameDomOperationStarting(this ILogger logger, string tabId, string operation, string selector);
+
+    [LoggerMessage(EventId = 1893, Level = LogLevel.Warning, Message = "Фрейм вкладки {TabId} не смог выполнить чтение «{Operation}» и вернул пустой результат")]
+    public static partial void LogWebFrameReadFailed(this ILogger logger, Exception exception, string tabId, string operation);
 }

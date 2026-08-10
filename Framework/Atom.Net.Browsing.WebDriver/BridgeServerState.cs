@@ -28,7 +28,7 @@ internal sealed class BridgeServerState : IAsyncDisposable
     private readonly Task processingTask;
     private long completedRequestCount;
     private long failedRequestCount;
-    private bool isDisposed;
+    private int isDisposed;
 
     public BridgeServerState(ILogger? logger = null)
     {
@@ -88,10 +88,20 @@ internal sealed class BridgeServerState : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (isDisposed)
+        if (Interlocked.Exchange(ref isDisposed, 1) != 0)
             return;
 
-        isDisposed = true;
+        // Завершение очереди операций само по себе не разбудило бы тех, кто ждёт ответа моста:
+        // их TaskCompletionSource остались бы незавершёнными навсегда, а повторная попытка
+        // отменить запрос по таймауту упиралась бы в ObjectDisposedException вместо ответа.
+        operations.Writer.TryWrite(new BridgeServerStateOperation<bool, bool>(
+            state: false,
+            action: static (owner, _) =>
+            {
+                owner.FailRequestsNoLock(static _ => true, BridgeStatus.Disconnected, BridgeProtocolErrorCodes.SessionDisconnected);
+                return true;
+            }));
+
         operations.Writer.TryComplete();
         await AwaitProcessingLoopAsync().ConfigureAwait(false);
     }
@@ -104,9 +114,10 @@ internal sealed class BridgeServerState : IAsyncDisposable
 
     private ValueTask<TResult> EnqueueAsync<TState, TResult>(TState operationState, Func<BridgeServerState, TState, TResult> action)
     {
-        ObjectDisposedException.ThrowIf(isDisposed, this);
-
         var operation = new BridgeServerStateOperation<TState, TResult>(operationState, action);
+
+        // Проверка «уже удалён» намеренно основана на результате записи в канал, а не на
+        // предварительном чтении флага: между чтением и записью канал мог быть завершён.
         ObjectDisposedException.ThrowIf(condition: !operations.Writer.TryWrite(operation), instance: this);
 
         return new(task: operation.Task);
@@ -344,6 +355,7 @@ internal sealed class BridgeServerState : IAsyncDisposable
                 matchedIds.Add(pendingRequest.MessageId);
         }
 
+        var failedCount = 0;
         foreach (var messageId in matchedIds)
         {
             if (!pendingRequests.Remove(messageId, out var pendingRequest))
@@ -352,10 +364,11 @@ internal sealed class BridgeServerState : IAsyncDisposable
             MarkSettledNoLock(messageId);
             pendingRequest.IsCompleted = true;
             failedRequestCount++;
+            failedCount++;
             pendingRequest.CompletionSource.TrySetResult(CreateFailureResponse(messageId, status, error));
         }
 
-        return matchedIds.Count;
+        return failedCount;
     }
 
     private void MarkSettledNoLock(string messageId)

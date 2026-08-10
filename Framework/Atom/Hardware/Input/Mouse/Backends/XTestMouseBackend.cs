@@ -91,7 +91,10 @@ internal sealed partial class XTestMouseBackend : IVirtualMouseBackend
         ThrowIfUnavailable();
         lastAbsoluteMovePosition = position;
         _ = XTestFakeMotionEvent(display, screenNumber, position.X, position.Y, delay: 0);
-        _ = XFlush(display);
+        // XSync, а не XFlush: дожидаемся, пока X-сервер реально обработает перемещение указателя,
+        // прежде чем возвращать управление. На виртуальных дисплеях без WM (Xvfb) браузер отбрасывает
+        // последующее нажатие кнопки, если оно приходит до применения motion.
+        _ = XSync(display, discard: 0);
     }
 
     /// <inheritdoc/>
@@ -106,11 +109,22 @@ internal sealed partial class XTestMouseBackend : IVirtualMouseBackend
     public void ButtonDown(VirtualMouseButton button)
     {
         ThrowIfUnavailable();
+
+        // Переподтверждаем позицию указателя непосредственно перед нажатием и синхронно ждём её
+        // применения. Без «досыла» первое нажатие после перемещения часто теряется на Xvfb
+        // (наблюдаемая надёжность клика на чистом Firefox: ~75% → 100%).
+        if (lastAbsoluteMovePosition is { } reassert)
+        {
+            _ = XTestFakeMotionEvent(display, screenNumber, reassert.X, reassert.Y, delay: 0);
+            _ = XSync(display, discard: 0);
+        }
+
         _ = TryQueryPointerState(out lastPointerPositionBeforeButtonDown, out var childWindow, out var childPosition);
         LastPointerChildWindowBeforeButtonDown = childWindow;
         LastPointerPositionInChildWindowBeforeButtonDown = childPosition;
+
         _ = XTestFakeButtonEvent(display, MapButton(button), isPress: 1, delay: 0);
-        _ = XFlush(display);
+        _ = XSync(display, discard: 0);
     }
 
     /// <inheritdoc/>
@@ -118,7 +132,7 @@ internal sealed partial class XTestMouseBackend : IVirtualMouseBackend
     {
         ThrowIfUnavailable();
         _ = XTestFakeButtonEvent(display, MapButton(button), isPress: 0, delay: 0);
-        _ = XFlush(display);
+        _ = XSync(display, discard: 0);
         lastPointerPositionAfterButtonUp = QueryPointerPosition();
     }
 
@@ -259,6 +273,10 @@ internal sealed partial class XTestMouseBackend : IVirtualMouseBackend
     [LibraryImport("libX11.so.6", EntryPoint = "XFlush")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     private static partial int XFlush(nint display);
+
+    [LibraryImport("libX11.so.6", EntryPoint = "XSync")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static partial int XSync(nint display, int discard);
 
     [LibraryImport("libXtst.so.6", EntryPoint = "XTestQueryExtension")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]

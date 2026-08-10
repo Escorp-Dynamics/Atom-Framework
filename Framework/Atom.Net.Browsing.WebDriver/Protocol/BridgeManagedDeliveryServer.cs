@@ -12,6 +12,12 @@ namespace Atom.Net.Browsing.WebDriver;
 [SuppressMessage("Reliability", "CA2213:Disposable fields should be disposed", Justification = "Certificate lifetime is owned by the shared certificate manager.")]
 internal sealed class BridgeManagedDeliveryServer(string host, int port, BridgeManagedExtensionDelivery? delivery, ILogger? diagnosticsLogger = null) : IAsyncDisposable
 {
+    // Бюджет на TLS-рукопожатие и чтение заголовков одного клиента: как у BridgeSecureTransportServer.
+    // Без него медленный/зависший клиент (slowloris) удерживал бы обработчик, сокет и SslStream вечно.
+    private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(30);
+    private const int MaxRequestLines = 128;
+    private const int MaxRequestLineLength = 8192;
+
     private readonly TcpListener listener = new(ResolveBindableAddress(host), port);
     private readonly CancellationTokenSource cts = new();
     private readonly X509Certificate2 certificate = BridgeManagedDeliveryCertificateManager.Instance.GetOrCreateCertificate(host);
@@ -122,6 +128,10 @@ internal sealed class BridgeManagedDeliveryServer(string host, int port, BridgeM
 
     private async Task HandleClientAsync(TcpClient client, CancellationToken cancellationToken)
     {
+        // Отдельный бюджет на приём клиента (TLS + заголовки), связанный с токеном сервера.
+        using var handshakeTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        handshakeTimeout.CancelAfter(HandshakeTimeout);
+
         using (client)
         using (var stream = new SslStream(client.GetStream(), leaveInnerStreamOpen: false))
         {
@@ -133,9 +143,9 @@ internal sealed class BridgeManagedDeliveryServer(string host, int port, BridgeM
                     ClientCertificateRequired = false,
                     EnabledSslProtocols = SslProtocols.None,
                     CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
-                }, cancellationToken).ConfigureAwait(false);
+                }, handshakeTimeout.Token).ConfigureAwait(false);
 
-                var request = await ReadRequestAsync(stream, cancellationToken).ConfigureAwait(false);
+                var request = await ReadRequestAsync(stream, handshakeTimeout.Token).ConfigureAwait(false);
                 if (request is null)
                     return;
 
@@ -143,7 +153,7 @@ internal sealed class BridgeManagedDeliveryServer(string host, int port, BridgeM
             }
             catch (OperationCanceledException)
             {
-                // Server shutdown.
+                // Server shutdown or handshake/read budget elapsed.
             }
             catch (IOException ex)
             {
@@ -155,6 +165,12 @@ internal sealed class BridgeManagedDeliveryServer(string host, int port, BridgeM
             {
                 logger?.LogManagedDeliveryTlsHandshakeFailed(Port, ex);
                 // TLS negotiation failed.
+            }
+            catch (Exception ex)
+            {
+                // Никакое непредвиденное исключение не должно уходить в fire-and-forget Task.Run
+                // как unobserved: сокет уже закрывается using-блоком, остаётся только залогировать.
+                logger?.LogManagedDeliveryClientDisconnected(Port, ex);
             }
         }
     }
@@ -251,14 +267,19 @@ internal sealed class BridgeManagedDeliveryServer(string host, int port, BridgeM
     {
         using var reader = new StreamReader(stream, Encoding.ASCII, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true);
         var requestLine = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(requestLine))
+        if (string.IsNullOrWhiteSpace(requestLine) || requestLine.Length > MaxRequestLineLength)
             return null;
 
-        while (true)
+        // Ограничиваем число заголовочных строк: клиент, бесконечно шлющий заголовки без
+        // терминального пустого CRLF, иначе крутил бы цикл до истечения бюджета рукопожатия.
+        for (var lineCount = 0; lineCount < MaxRequestLines; lineCount++)
         {
             var headerLine = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrEmpty(headerLine))
                 break;
+
+            if (headerLine.Length > MaxRequestLineLength)
+                return null;
         }
 
         var parts = requestLine.Split(' ', 3, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

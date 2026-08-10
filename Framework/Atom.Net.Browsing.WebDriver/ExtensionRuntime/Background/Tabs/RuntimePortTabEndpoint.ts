@@ -164,7 +164,10 @@ export class RuntimePortTabEndpoint implements ITabRuntimeEndpoint {
                 message.preferPageContextOnNull === true,
                 message.forcePageContextExecution === true,
             );
+            return;
         }
+
+        console.error('[порт вкладки] Получено сообщение неизвестной формы', message);
     }
 
     private forwardToBridge(message: BridgeMessage): void {
@@ -205,14 +208,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+const bridgeStatusNames: ReadonlySet<string> = new Set(['Ok', 'Error', 'Timeout', 'NotFound', 'Disconnected']);
+
 function isContentResponseEnvelope(value: unknown): value is ContentResponseEnvelope {
     if (!isRecord(value)) {
         return false;
     }
 
+    // Статус проверяется по списку допустимых значений: произвольная строка не разбирается
+    // мостовым слоем и приводила бы к отбраковке всего кадра вместо ответа на команду.
     return value.action === 'response'
         && typeof value.id === 'string'
-        && typeof value.status === 'string';
+        && value.id.length > 0
+        && typeof value.status === 'string'
+        && bridgeStatusNames.has(value.status);
 }
 
 function isContentEventEnvelope(value: unknown): value is ContentEventEnvelope {

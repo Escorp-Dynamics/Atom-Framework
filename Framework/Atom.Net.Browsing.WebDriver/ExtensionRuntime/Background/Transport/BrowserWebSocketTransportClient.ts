@@ -31,6 +31,10 @@ export class BrowserWebSocketTransportClient implements IBridgeTransportClient {
             return this.connectionPromise;
         }
 
+        // Предыдущий сокет мог остаться в CONNECTING/CLOSING после сброшенного промиса.
+        // Без явного закрытия он оставался бы висеть навсегда, продолжая доставлять события.
+        this.closeLingeringSocket();
+
         const socket = new WebSocket(connection.url);
         this.socket = socket;
         console.info('[мостовой канал] Открываем соединение', {
@@ -146,6 +150,23 @@ export class BrowserWebSocketTransportClient implements IBridgeTransportClient {
                 this.closeHandlers.delete(handler);
             },
         };
+    }
+
+    private closeLingeringSocket(): void {
+        const socket = this.socket;
+        if (socket === null) {
+            return;
+        }
+
+        this.socket = null;
+
+        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+            try {
+                socket.close(1000, 'Вытеснено новым подключением');
+            } catch (error) {
+                console.error('[мостовой канал] Не удалось закрыть вытесненный сокет', error);
+            }
+        }
     }
 
     private notifyClosed(info: BridgeTransportCloseInfo): void {

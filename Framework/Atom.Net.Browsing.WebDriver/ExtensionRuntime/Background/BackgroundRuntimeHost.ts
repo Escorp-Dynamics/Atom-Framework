@@ -1,6 +1,7 @@
 import { type RuntimeConfig } from '../Shared/Config';
 import {
     bridgeEventNames,
+    deriveResidentChannelName,
     validateTabContextEnvelope,
     type BridgeMessage,
     type JsonValue,
@@ -88,7 +89,6 @@ import {
     updateWindow,
     addWebRequestListener,
     pruneExpiredVirtualCookies,
-    releaseTabContext,
     type BridgeTransportCloseInfo,
     type BrowserCookie,
     type BrowserHost,
@@ -100,6 +100,7 @@ import {
     type BootstrapRuntimeConfigSource,
     type MutableHeaderLike,
     type WebRequestDetails,
+    type WebRequestListenerDegradation,
     type RuntimePortLike,
 } from './index';
 
@@ -170,6 +171,28 @@ const bridgeEventNameSet = new Set(bridgeEventNames);
 const maxLateNavigateRetryCount = 4;
 const transportReconnectBaseDelayMs = 500;
 const transportReconnectMaxDelayMs = 30_000;
+const maxOpenTabCreateAttempts = 3;
+// Заголовок-носитель route token для Chromium. Прокси срезает его до отправки на origin
+// (BridgeNavigationProxyServer.RouteTokenHeaderName).
+const navigationProxyRouteHeaderName = 'X-Atom-Route';
+// Явный перечень типов ресурсов для правила маршрутизации: при опущенном resourceTypes
+// declarativeNetRequest не покрывает main_frame, и навигации остались бы без метки вкладки.
+const navigationProxyRouteResourceTypes = [
+    'main_frame',
+    'sub_frame',
+    'stylesheet',
+    'script',
+    'image',
+    'font',
+    'object',
+    'xmlhttprequest',
+    'ping',
+    'csp_report',
+    'media',
+    'websocket',
+    'other',
+];
+const openTabCreateRetryDelayMs = 150;
 
 export class BackgroundRuntimeHost {
     private readonly browserHost = getBrowserHost();
@@ -193,6 +216,7 @@ export class BackgroundRuntimeHost {
     private transportReconnectAttempts = 0;
     private transportReconnectTimerId: ReturnType<typeof globalThis.setTimeout> | null = null;
     private transportReconnectInFlight = false;
+    private blockingInterceptionUnavailableReported = false;
 
     private readonly onConnect = (port: RuntimePortLike) => {
         void this.handlePortConnected(port);
@@ -354,6 +378,15 @@ export class BackgroundRuntimeHost {
         // Content scripts connect immediately on startup, so the port listener must exist before async config loading.
         this.runtime.onConnect?.addListener(this.onConnect);
 
+        // Остальные браузерные слушатели регистрируются здесь же — СИНХРОННО, до первого await.
+        // Manifest V3 будит завершённый service worker только по тем событиям, слушатели которых
+        // были зарегистрированы во время первого исполнения скрипта. Если отложить регистрацию за
+        // загрузку конфигурации, они успевают привязаться лишь на первом запуске: после ближайшего
+        // простоя браузер уже не знает, что расширение ждёт webRequest, и перехват умирает молча,
+        // без единой ошибки. Сами обработчики к конфигурации обращаются лениво и переживают её
+        // отсутствие, поэтому регистрация до загрузки безопасна.
+        this.registerBrowserEventListeners();
+
         let loadedConfig: BootstrapRuntimeConfigResult;
         try {
             loadedConfig = await loadBootstrapRuntimeConfigWithSource(this.runtime, this.browserHost);
@@ -375,25 +408,6 @@ export class BackgroundRuntimeHost {
             extensionVersion: this.config.extensionVersion,
         });
 
-        try {
-            this.ensureCookieIsolationListeners();
-        } catch (error) {
-            emitBackgroundDebugEvent(this.config, 'cookie-isolation-init-failed', {
-                error: toErrorMessage(error),
-            });
-
-            console.error('[фоновый вход] Не удалось инициализировать cookie isolation listeners', error);
-        }
-
-        try {
-            this.ensureProxyRoutingListeners();
-        } catch (error) {
-            emitBackgroundDebugEvent(this.config, 'proxy-routing-init-failed', {
-                error: toErrorMessage(error),
-            });
-
-            console.error('[фоновый вход] Не удалось инициализировать proxy routing listeners', error);
-        }
 
         this.health = new ConsoleSessionHealthReporter(this.sessionIdValue);
         this.coordinator = this.createCoordinator(this.sessionIdValue);
@@ -432,6 +446,30 @@ export class BackgroundRuntimeHost {
         }
     }
 
+    /**
+     * Регистрирует браузерные слушатели синхронно, до загрузки конфигурации.
+     * Сбой одного набора не должен мешать остальным, поэтому каждый изолирован.
+     */
+    private registerBrowserEventListeners(): void {
+        try {
+            this.ensureCookieIsolationListeners();
+        } catch (error) {
+            console.error('[фоновый вход] Не удалось инициализировать cookie isolation listeners', error);
+        }
+
+        try {
+            this.ensureProxyRoutingListeners();
+        } catch (error) {
+            console.error('[фоновый вход] Не удалось инициализировать proxy routing listeners', error);
+        }
+
+        try {
+            this.ensureTabLifecycleListeners();
+        } catch (error) {
+            console.error('[фоновый вход] Не удалось инициализировать tab lifecycle listeners', error);
+        }
+    }
+
     public async stop(reason: string): Promise<void> {
         // Снимаем флаг до закрытия сокета: иначе событие close во время stop() привело бы
         // к планированию реконнекта для заведомо остановленного сеанса.
@@ -446,6 +484,11 @@ export class BackgroundRuntimeHost {
         await this.coordinator.stop(reason);
         this.tabContexts.clear();
         this.virtualCookies.clear();
+        this.interceptEnabledTabs.clear();
+        this.interceptPatterns.clear();
+        this.pendingNavigations.clear();
+        this.pendingNavigationGateDiagnostics.clear();
+        this.pendingResponseHeaderOverrides.clear();
     }
 
     public snapshot() {
@@ -596,6 +639,14 @@ export class BackgroundRuntimeHost {
                     }
 
                     this.tabs.unregister(tabId);
+
+                    // ВАЖНО: порт content-скрипта отключается на КАЖДОЙ навигации/перезагрузке
+                    // (старый документ сносится), а не только при закрытии вкладки. Поэтому здесь
+                    // НЕЛЬЗЯ чистить per-tab состояние (interceptEnabledTabs/Patterns, tabContexts,
+                    // virtualCookies) — иначе перехват и контекст молча слетают после навигации
+                    // (fail-open перехвата). Настоящая очистка при закрытии вкладки без driver-команды
+                    // CloseTab выполняется в browser.tabs.onRemoved (ensureTabLifecycleListeners),
+                    // который срабатывает только на реальном закрытии, но не на навигации/перезагрузке.
                     this.health.reportTabCount(this.tabs.count());
 
                     emitBackgroundDebugEvent(this.config, 'runtime-port-disconnected', {
@@ -802,6 +853,11 @@ export class BackgroundRuntimeHost {
                         this.virtualCookies,
                         this.tabs,
                     );
+
+                    // Именно этой командой драйвер включает proxy-режим и присылает route token,
+                    // а контекст здесь пишется напрямую, минуя updateTrackedTabContext, — поэтому
+                    // правило маршрутизации синхронизируется отдельно.
+                    void this.syncNavigationProxyRouteRule(context.tabId, context);
 
                     if (context.proxy !== undefined) {
                         this.ensureProxyRoutingListeners();
@@ -1011,7 +1067,20 @@ export class BackgroundRuntimeHost {
                     const url = readOptionalPayloadString(message.payload, 'url')
                         ?? (this.config !== null ? createDiscoveryUrl(this.config) : 'about:blank');
 
-                    const tab = await createTab(this.runtime, this.browserHost.tabs, { url, active: true });
+                    // Браузерный tabs.create может кратковременно падать с общим статусом
+                    // «An unexpected error occurred» (например, когда вкладка-источник команды
+                    // ещё добивается на удалении из tab strip): повторяем создание ограниченное
+                    // число раз с короткой паузой, чтобы транзиентный сбой не ронял открытие
+                    // страницы у драйвера.
+                    const tab = await createTabWithRetry(
+                        this.runtime,
+                        this.browserHost.tabs,
+                        { url, active: true },
+                        (attempt, error) => emitBackgroundDebugEvent(this.config, 'open-tab-create-failed', {
+                            attempt,
+                            error: toErrorMessage(error),
+                        }),
+                    );
                     const payload: JsonRecord = { url: tab.url ?? url };
 
                     if (typeof tab.id === 'number') {
@@ -1036,6 +1105,7 @@ export class BackgroundRuntimeHost {
                         this.virtualCookies,
                         (count) => this.health.reportTabCount(count),
                     );
+                    this.purgeTabInterceptionState(tabId.toString());
                     await this.sendDirectResponse(message);
                     return true;
                 }
@@ -1059,6 +1129,11 @@ export class BackgroundRuntimeHost {
                     const windowTabs = await queryTabs(this.runtime, this.browserHost.tabs, { windowId });
 
                     await closeTrackedWindowTabs(windowTabs, this.tabs, this.tabContexts, this.virtualCookies);
+                    for (const windowTab of windowTabs) {
+                        if (typeof windowTab.id === 'number') {
+                            this.purgeTabInterceptionState(windowTab.id.toString());
+                        }
+                    }
 
                     await removeWindow(this.runtime, this.browserHost.windows, windowId);
                     this.health.reportTabCount(this.tabs.count());
@@ -1294,10 +1369,90 @@ export class BackgroundRuntimeHost {
             return;
         }
 
-        addWebRequestListener(webRequest.onBeforeSendHeaders, this.onBeforeSendHeaders, ['blocking', 'requestHeaders', 'extraHeaders']);
-        addWebRequestListener(webRequest.onHeadersReceived, this.onHeadersReceived, ['blocking', 'responseHeaders', 'extraHeaders']);
+        addWebRequestListener(
+            webRequest.onBeforeSendHeaders,
+            this.onBeforeSendHeaders,
+            ['blocking', 'requestHeaders', 'extraHeaders'],
+            (degradation) => this.reportWebRequestListenerDegradation('onBeforeSendHeaders', degradation));
+        addWebRequestListener(
+            webRequest.onHeadersReceived,
+            this.onHeadersReceived,
+            ['blocking', 'responseHeaders', 'extraHeaders'],
+            (degradation) => this.reportWebRequestListenerDegradation('onHeadersReceived', degradation));
+
+        // Терминальные события чистят pendingResponseHeaderOverrides для запросов, которые не
+        // дошли до onHeadersReceived (отменены, редиректнуты, сетевая ошибка): иначе их
+        // requestId-записи копились бы без ограничения при включённом перехвате.
+        if (webRequest.onCompleted?.addListener !== undefined) {
+            addWebRequestListener(webRequest.onCompleted, this.onWebRequestSettled, []);
+        }
+
+        if (webRequest.onErrorOccurred?.addListener !== undefined) {
+            addWebRequestListener(webRequest.onErrorOccurred, this.onWebRequestSettled, []);
+        }
+
         this.cookieIsolationListenersInitialized = true;
     }
+
+    /**
+     * Браузер может отказать в запрошенных возможностях слушателя webRequest. Потеря `blocking`
+     * означает, что перехват фактически выключен (заголовки не правятся, отмена и редирект
+     * невозможны), поэтому такое понижение выводится как ошибка, а не проглатывается: раньше
+     * это выглядело как «перехват включён, но не срабатывает».
+     */
+    private reportWebRequestListenerDegradation(
+        event: string,
+        degradation: WebRequestListenerDegradation,
+    ): void {
+        emitBackgroundDebugEvent(this.config, 'webrequest-listener-degraded', {
+            event,
+            requestedExtraInfoSpec: [...degradation.requestedExtraInfoSpec],
+            appliedExtraInfoSpec: [...degradation.appliedExtraInfoSpec],
+            lostBlocking: degradation.lostBlocking,
+            error: degradation.error,
+        });
+
+        if (degradation.lostBlocking) {
+            console.error(
+                `[фоновый вход] Браузер отказал в блокирующем слушателе webRequest (${event}): перехват запросов работать не будет. Причина: ${degradation.error}`);
+            return;
+        }
+
+        console.warn(
+            `[фоновый вход] Слушатель webRequest (${event}) зарегистрирован с урезанным набором возможностей: ${degradation.appliedExtraInfoSpec.join(', ')}. Причина: ${degradation.error}`);
+    }
+
+    /**
+     * Сообщает один раз за сеанс, что решение по блокирующему перехвату получить нельзя.
+     * Без этого перехват выглядел «включённым», но не менял ни одного запроса.
+     */
+    private reportBlockingInterceptionUnavailableOnce(reason: string): void {
+        if (this.blockingInterceptionUnavailableReported) {
+            return;
+        }
+
+        this.blockingInterceptionUnavailableReported = true;
+        emitBackgroundDebugEvent(this.config, 'blocking-interception-unavailable', { reason });
+        console.error(`[фоновый вход] Перехват запросов не может принимать решения драйвера: ${reason}`);
+    }
+
+    private readonly onWebRequestSettled = (details: WebRequestDetails): undefined => {
+        if (typeof details.requestId === 'string' && details.requestId.length > 0) {
+            this.pendingResponseHeaderOverrides.delete(details.requestId);
+        }
+
+        // main_frame, завершившийся 204/205 No Content, — это stay-put abort навигации (перехода нет).
+        // Дублирует сигнал webNavigation.onErrorOccurred на случай, если он не поднимается для 204.
+        if (details.type === 'main_frame'
+            && (details.statusCode === 204 || details.statusCode === 205)) {
+            const settledTabId = getWebRequestTabId(details.tabId);
+            if (settledTabId !== null) {
+                this.settleAbortedNavigation(settledTabId);
+            }
+        }
+
+        return undefined;
+    };
 
     private ensureProxyRoutingListeners(): void {
         if (this.proxyRoutingListenersInitialized) {
@@ -1367,17 +1522,33 @@ export class BackgroundRuntimeHost {
         const requestHeaders = toMutableHeaders(mutation?.requestHeaders ?? details.requestHeaders);
         const decision = this.tryPostInterceptedRequest(route, details, requestHeaders);
         if (decision === null) {
-            void this.emitInterceptedRequestEvent(details);
+            // Когда перехватом владеет навигационный прокси, он сам поднимет событие запроса на
+            // стороне драйвера. Продублировать его отсюда значило бы вызвать обработчик дважды.
+            if (!this.isNavigationProxyOwnedRequest(details)) {
+                void this.emitInterceptedRequestEvent(details);
+            }
+
             this.tryPostObservedRequestHeaders(route, details, requestHeaders);
             return mutation;
         }
 
-        if (isNonEmptyRecord(decision.responseHeaders) && typeof details.requestId === 'string' && details.requestId.length > 0) {
-            this.pendingResponseHeaderOverrides.set(details.requestId, cloneHeaderMap(decision.responseHeaders));
-        }
+        // Оверрайд заголовков ответа имеет смысл только если запрос будет пропущен и получит
+        // ответ. На cancel-путях (abort / неподдерживаемый main_frame fulfill) ответа не будет,
+        // поэтому запись не создаётся/снимается, чтобы не утечь по requestId.
+        const requestId = typeof details.requestId === 'string' && details.requestId.length > 0
+            ? details.requestId
+            : null;
 
         if (decision.action === 'abort') {
+            if (requestId !== null) {
+                this.pendingResponseHeaderOverrides.delete(requestId);
+            }
+
             return { cancel: true };
+        }
+
+        if (isNonEmptyRecord(decision.responseHeaders) && requestId !== null) {
+            this.pendingResponseHeaderOverrides.set(requestId, cloneHeaderMap(decision.responseHeaders));
         }
 
         let modified = applyHeaderOverrides(requestHeaders, decision.headers);
@@ -1385,6 +1556,10 @@ export class BackgroundRuntimeHost {
         if (decision.action === 'fulfill' && isNavigateRequestType(details.type)) {
             console.error('[фоновый вход] Request-side main_frame fulfill без сетевого fallback не поддерживается текущим browser webRequest API; запрос отменён.');
             this.tryPostObservedRequestHeaders(route, details, requestHeaders);
+            if (requestId !== null) {
+                this.pendingResponseHeaderOverrides.delete(requestId);
+            }
+
             return { cancel: true };
         }
 
@@ -1430,7 +1605,12 @@ export class BackgroundRuntimeHost {
 
         const decision = this.tryPostInterceptedResponse(route, details, responseHeaders);
         if (decision === null) {
-            void this.emitInterceptedResponseEvent(details);
+            // Ответом, как и запросом, в proxy-режиме владеет прокси: он поднимет событие сам,
+            // причём с телом. Дубль отсюда вызвал бы обработчик дважды.
+            if (!this.isNavigationProxyOwnedRequest(details)) {
+                void this.emitInterceptedResponseEvent(details);
+            }
+
             return modified ? { responseHeaders } : mutation;
         }
 
@@ -1448,6 +1628,18 @@ export class BackgroundRuntimeHost {
         }
 
         return { responseHeaders };
+    }
+
+    /**
+     * Владеет ли запросом навигационный прокси.
+     *
+     * В proxy-режиме решение принимает и событие поднимает прокси на стороне драйвера, поэтому
+     * расширение не должно сообщать о том же запросе повторно.
+     */
+    private isNavigationProxyOwnedRequest(details: WebRequestDetails): boolean {
+        const tabId = getWebRequestTabId(details.tabId);
+        return tabId !== null
+            && this.resolveNavigationProxyRouteToken(this.getTabContext(tabId)) !== undefined;
     }
 
     private async emitInterceptedRequestEvent(details: WebRequestDetails): Promise<void> {
@@ -2120,6 +2312,96 @@ export class BackgroundRuntimeHost {
         this.pendingNavigationGateDiagnostics.delete(`pending-navigation-context-apply-deferred:${tabId}`);
     }
 
+    // Регистрирует слушатель реального закрытия вкладки. В отличие от обрыва порта content-скрипта
+    // (который происходит на каждой навигации/перезагрузке), tabs.onRemoved срабатывает ТОЛЬКО когда
+    // вкладка действительно закрыта — в том числе пользователем, без driver-команды CloseTab. Именно
+    // здесь безопасно освобождать per-tab состояние, чтобы карты не утекали, а перехват/контекст
+    // при этом переживали навигацию.
+    private ensureTabLifecycleListeners(): void {
+        const tabsApi = this.browserHost.tabs;
+        if (typeof tabsApi?.onRemoved?.addListener === 'function') {
+            tabsApi.onRemoved.addListener(this.onBrowserTabRemoved);
+        }
+
+        // Прерванная main_frame-навигация (fail-closed abort прокси: 204 → NS_ERROR_NO_CONTENT,
+        // NS_BINDING_ABORTED, сетевые ошибки) НЕ порождает перехода к новому документу — вкладка
+        // остаётся на прежней странице. Без этого сигнала driver-Navigate ждёт несуществующего
+        // перехода и падает по таймауту, а resolvePendingNavigationStateAsync переиздаёт навигацию.
+        // onErrorOccurred НЕ срабатывает для успешных переходов — обычные навигации не затрагиваются.
+        const webNavigation = this.browserHost.webNavigation;
+        if (typeof webNavigation?.onErrorOccurred?.addListener === 'function') {
+            webNavigation.onErrorOccurred.addListener(this.onMainFrameNavigationErrorOccurred);
+        }
+    }
+
+    private readonly onBrowserTabRemoved = (tabId: number): void => {
+        if (typeof tabId !== 'number') {
+            return;
+        }
+
+        const key = tabId.toString();
+        closeTrackedTab(
+            key,
+            this.tabs,
+            this.tabContexts,
+            this.virtualCookies,
+            (count) => this.health?.reportTabCount(count),
+        );
+        this.purgeTabInterceptionState(key);
+    };
+
+    private readonly onMainFrameNavigationErrorOccurred = (details: { readonly tabId?: number; readonly frameId?: number }): void => {
+        if (details.frameId !== 0 || typeof details.tabId !== 'number' || !Number.isInteger(details.tabId)) {
+            return;
+        }
+
+        this.settleAbortedNavigation(details.tabId.toString());
+    };
+
+    // Навигация прервана и перехода к новому документу не будет: синхронно снимаем pending-navigation
+    // и возвращаем контекст в ready на прежнем (baseline) URL, чтобы DebugPortStatus снова считался
+    // готовым, driver-Navigate завершился, а поздний повтор навигации не запускался. Идемпотентно.
+    private settleAbortedNavigation(tabId: string): void {
+        const pendingNavigation = this.pendingNavigations.get(tabId);
+        if (pendingNavigation === undefined) {
+            return;
+        }
+
+        this.pendingNavigations.delete(tabId);
+        this.clearPendingNavigationGateDebugState(tabId);
+
+        const context = this.getTabContext(tabId);
+        if (context !== undefined) {
+            this.updateTrackedTabContext(tabId, {
+                ...context,
+                url: pendingNavigation.previousUrl ?? context.url,
+                isReady: true,
+                readyAt: context.readyAt ?? Date.now(),
+            });
+        }
+
+        emitBackgroundDebugEvent(this.config, 'navigation-aborted-settled', {
+            tabId,
+            command: pendingNavigation.command,
+            expectedUrl: pendingNavigation.expectedUrl,
+            restoredUrl: pendingNavigation.previousUrl ?? context?.url,
+        });
+    }
+
+    // Снимает per-tab состояние перехвата и навигации при закрытии/обрыве вкладки.
+    // tabContexts/virtualCookies очищаются отдельно через releaseTabContext.
+    private purgeTabInterceptionState(tabId: string): void {
+        this.interceptEnabledTabs.delete(tabId);
+        this.interceptPatterns.delete(tabId);
+        this.pendingNavigations.delete(tabId);
+        this.clearPendingNavigationGateDebugState(tabId);
+
+        // Правило declarativeNetRequest живёт в сессии браузера, а не в нашем состоянии: без
+        // явного снятия оно пережило бы вкладку и метило чужие запросы, если браузер переиспользует
+        // идентификатор.
+        void this.syncNavigationProxyRouteRule(tabId, undefined);
+    }
+
     private createPendingNavigationGateDebugDetails(
         phase: string,
         tabId: string,
@@ -2196,6 +2478,66 @@ export class BackgroundRuntimeHost {
         if (this.tabs.get(tabId) !== null) {
             this.tabs.markReady(tabId, context);
         }
+
+        void this.syncNavigationProxyRouteRule(tabId, context);
+    }
+
+    /**
+     * Держит в актуальном состоянии правило declarativeNetRequest, которое помечает запросы вкладки
+     * route token'ом навигационного прокси.
+     *
+     * Нужно только Chromium: там прокси-аутентификацию расширению не отдают (onAuthRequired в режиме
+     * asyncBlocking не срабатывает), поэтому токен доставляется заголовком запроса. Firefox отвечает
+     * на 407 сам и в этом правиле не нуждается — там declarativeNetRequest попросту отсутствует.
+     * Прокси срезает заголовок до обращения к origin, так что наружу он не уходит.
+     */
+    private async syncNavigationProxyRouteRule(tabId: string, context: TabContextEnvelope | undefined): Promise<void> {
+        const declarativeNetRequest = (this.browserHost as { declarativeNetRequest?: any }).declarativeNetRequest;
+        if (typeof declarativeNetRequest?.updateSessionRules !== 'function') {
+            return;
+        }
+
+        const ruleId = toNavigationProxyRouteRuleId(tabId);
+        if (ruleId === null) {
+            return;
+        }
+
+        const routeToken = this.resolveNavigationProxyRouteToken(context);
+
+        try {
+            if (routeToken === undefined) {
+                await declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleId] });
+                return;
+            }
+
+            await declarativeNetRequest.updateSessionRules({
+                removeRuleIds: [ruleId],
+                addRules: [{
+                    id: ruleId,
+                    priority: 1,
+                    // resourceTypes перечисляются явно: без него правило не покрывает main_frame,
+                    // то есть навигации остались бы без route token и прокси не смог бы их
+                    // сопоставить с вкладкой.
+                    condition: { tabIds: [ruleId], urlFilter: '*', resourceTypes: navigationProxyRouteResourceTypes },
+                    action: {
+                        type: 'modifyHeaders',
+                        requestHeaders: [{
+                            header: navigationProxyRouteHeaderName,
+                            operation: 'set',
+                            value: routeToken,
+                        }],
+                    },
+                }],
+            });
+        } catch (error) {
+            emitBackgroundDebugEvent(this.config, 'navigation-proxy-route-rule-failed', {
+                tabId,
+                hasRouteToken: routeToken !== undefined,
+                error: toErrorMessage(error),
+            });
+
+            console.error('[фоновый вход] Не удалось обновить правило маршрутизации навигационного прокси', error);
+        }
     }
 
     private async refreshContextFromBrowserTabAsync(
@@ -2255,6 +2597,8 @@ export class BackgroundRuntimeHost {
                 headers: headersToObject(requestHeaders),
                 timestamp: normalizeEventTimestamp(details.timeStamp),
             },
+            true,
+            (reason) => this.reportBlockingInterceptionUnavailableOnce(reason),
         );
     }
 
@@ -2273,6 +2617,8 @@ export class BackgroundRuntimeHost {
                 headers: headersToObject(responseHeaders),
                 timestamp: normalizeEventTimestamp(details.timeStamp),
             },
+            true,
+            (reason) => this.reportBlockingInterceptionUnavailableOnce(reason),
         );
     }
 
@@ -2407,7 +2753,7 @@ export class BackgroundRuntimeHost {
             const result = await this.executeInMainWorld(
                 tabId,
                 createInternalMessageId('sync_document_cookie'),
-                buildDocumentCookieSyncScript(cookieHeader),
+                buildDocumentCookieSyncScript(cookieHeader, context.sessionId),
                 true,
             );
 
@@ -2434,14 +2780,17 @@ export class BackgroundRuntimeHost {
     }
 }
 
-function buildDocumentCookieSyncScript(cookieHeader: string): string {
+// Синхронизация идёт через канал резидента главного мира, а не через имя в window: имён там
+// больше нет по построению — они выдавали автоматику простым перечислением свойств. Резидент
+// слушает событие с посессионным именем и возвращает результат в detail.
+function buildDocumentCookieSyncScript(cookieHeader: string, sessionId: string): string {
     return `(() => {
-const syncCookieHeader = globalThis.__atomSyncDocumentCookieHeader;
-if (typeof syncCookieHeader === 'function') {
-    return syncCookieHeader(${JSON.stringify(cookieHeader)});
-}
+const handoff = { cookieHeader: ${JSON.stringify(cookieHeader)}, handled: false, result: null };
+try {
+    document.dispatchEvent(new CustomEvent(${JSON.stringify(deriveResidentChannelName(sessionId))}, { detail: handoff }));
+} catch {}
 
-return '';
+return typeof handoff.result === 'string' ? handoff.result : '';
 })();`;
 }
 
@@ -2523,8 +2872,21 @@ function postBlockingBridgeJson<TResponse = void>(
     path: string,
     payload: Record<string, unknown>,
     expectJsonResponse = true,
+    onUnavailable?: (reason: string) => void,
 ): TResponse | null {
-    if (config === null || typeof XMLHttpRequest !== 'function') {
+    // Блокирующий обработчик webRequest обязан вернуть решение СИНХРОННО, поэтому решение
+    // забирается синхронным XMLHttpRequest. В service worker (Manifest V3) XMLHttpRequest
+    // отсутствует как класс, и синхронной сетевой примитив недоступен в принципе — значит
+    // перехват с решением на стороне драйвера там не работает. Молча возвращать null нельзя:
+    // снаружи это выглядит как «перехват включён, но не срабатывает».
+    if (config === null) {
+        onUnavailable?.('конфигурация моста ещё не загружена');
+        return null;
+    }
+
+    if (typeof XMLHttpRequest !== 'function') {
+        onUnavailable?.('в этой среде выполнения расширения нет XMLHttpRequest (service worker Manifest V3), '
+            + 'а блокирующий webRequest требует синхронного решения');
         return null;
     }
 
@@ -2600,7 +2962,10 @@ function readStringArrayPayload(payload: unknown, propertyName: string): string[
 }
 
 function compileInterceptionPattern(pattern: string): RegExp {
-    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    // Единственный подстановочный символ — '*' (паритет с .NET UrlPatternMatcher). Все прочие
+    // regex-метасимволы, включая '?' (иначе делает предыдущий символ опциональным) и часто
+    // встречающийся в URL перед query-строкой, экранируются как литералы.
+    const escaped = pattern.replace(/[.+^${}()|[\]\\?]/g, '\\$&');
     return new RegExp(`^${escaped.replace(/\*/g, '.*')}$`, 'i');
 }
 
@@ -2634,8 +2999,48 @@ export async function bootstrapBackgroundRuntime(): Promise<BackgroundRuntimeHos
     return host;
 }
 
+/**
+ * Идентификатор правила declarativeNetRequest для вкладки.
+ * Совпадает с числовым tabId: он уникален и служит одновременно условием привязки правила.
+ * Диапазон ограничен int32 — идентификаторы правил больше не принимаются.
+ */
+function toNavigationProxyRouteRuleId(tabId: string): number | null {
+    const numericTabId = Number(tabId);
+    return Number.isInteger(numericTabId) && numericTabId > 0 && numericTabId <= 2147483647
+        ? numericTabId
+        : null;
+}
+
 function isRecord(value: unknown): value is JsonRecord {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function createTabWithRetry(
+    runtime: any,
+    tabsApi: any,
+    createProperties: unknown,
+    onTransientFailure?: (attempt: number, error: unknown) => void,
+): Promise<BrowserTab> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= maxOpenTabCreateAttempts; attempt += 1) {
+        try {
+            return await createTab(runtime, tabsApi, createProperties);
+        } catch (error) {
+            lastError = error;
+
+            if (attempt >= maxOpenTabCreateAttempts) {
+                break;
+            }
+
+            onTransientFailure?.(attempt, error);
+            await new Promise((resolve) => setTimeout(resolve, openTabCreateRetryDelayMs));
+        }
+    }
+
+    throw lastError instanceof Error
+        ? lastError
+        : new Error(lastError === undefined ? 'Не удалось создать вкладку' : String(lastError));
 }
 
 function createDiscoveryUrl(config: RuntimeConfig): string {

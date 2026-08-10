@@ -84,18 +84,22 @@ public sealed class WebDriverPublicApiContractTests
     public void WebWindowSettingsKeepProxyOverrideState()
     {
         var proxy = new WebProxy("http://127.0.0.1:8080");
+        // Пресеты Device — фабричные свойства (=> new()): каждое обращение к Device.Pixel7 даёт
+        // новый экземпляр (так и задумано — Device мутабелен и меняется при резолве). Поэтому
+        // ссылку фиксируем в локальной переменной, как и proxy, а не читаем пресет повторно.
+        var device = Device.Pixel7;
         var settings = new WebWindowSettings
         {
             Proxy = proxy,
             UseProxy = false,
-            Device = Device.Pixel7,
+            Device = device,
         };
 
         Assert.Multiple(() =>
         {
             Assert.That(settings.Proxy, Is.SameAs(proxy));
             Assert.That(settings.UseProxy, Is.False);
-            Assert.That(settings.Device, Is.SameAs(Device.Pixel7));
+            Assert.That(settings.Device, Is.SameAs(device));
         });
     }
 

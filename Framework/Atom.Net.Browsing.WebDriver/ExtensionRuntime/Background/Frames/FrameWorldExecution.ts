@@ -231,12 +231,11 @@ async function evalInWorld(
                 },
             ).then((value) => {
                 const result = normalizeExecutionResult((value ?? [])[0]);
+                // «Ещё не готово» сигнализируется отсутствием узла data-r: тогда poll-код
+                // возвращает null и normalizeExecutionResult даёт эту ошибку. Только этот случай
+                // ретраится. Результат {s:'ok', v:'null'} — это честно разрешённый null (узел уже
+                // удалён), и раньше он ошибочно ретраился до таймаута 30s.
                 if (result.s === 'err' && result.v === 'Script execution failed.') {
-                    setTimeout(poll, 50);
-                    return;
-                }
-
-                if (result.v === 'null' && result.s === 'ok') {
                     setTimeout(poll, 50);
                     return;
                 }

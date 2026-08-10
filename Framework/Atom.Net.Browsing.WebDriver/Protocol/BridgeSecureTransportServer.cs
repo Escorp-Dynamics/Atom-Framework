@@ -21,7 +21,7 @@ internal sealed class BridgeSecureTransportServer(
 {
     private const string WebSocketAcceptGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     private const int MaxUpgradeRequestLines = 128;
-    private const int MaxUpgradeHeaderChars = 128 * 1024;
+    private const int MaxUpgradeHeaderBytes = 128 * 1024;
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(30);
 
     private readonly TcpListener listener = new(ResolveBindableAddress(host), port);
@@ -179,10 +179,20 @@ internal sealed class BridgeSecureTransportServer(
         }
     }
 
+    /// <summary>
+    /// Читает upgrade-запрос ровно до завершающего CRLFCRLF, не забирая из потока ни одного
+    /// лишнего байта. Буферизующий <see cref="StreamReader"/> здесь недопустим: он вычитывает
+    /// вперёд, и первый WebSocket-кадр клиента, отправленный вплотную за заголовками, оседал бы
+    /// в его буфере и терялся при переходе к <see cref="WebSocket.CreateFromStream(Stream, bool, string?, TimeSpan)"/>.
+    /// </summary>
     private static async Task<UpgradeRequest?> ReadUpgradeRequestAsync(SslStream stream, CancellationToken cancellationToken)
     {
-        using var reader = new StreamReader(stream, Encoding.ASCII, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true);
-        var requestLine = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+        var headerBytes = await ReadUpgradeHeaderBytesAsync(stream, cancellationToken).ConfigureAwait(false);
+        if (headerBytes is null)
+            return null;
+
+        var headerLines = Encoding.ASCII.GetString(headerBytes).Split("\r\n", StringSplitOptions.None);
+        var requestLine = headerLines[0];
         if (string.IsNullOrWhiteSpace(requestLine) || requestLine.Length > 8192)
             return null;
 
@@ -193,17 +203,15 @@ internal sealed class BridgeSecureTransportServer(
         if (!Uri.TryCreate(string.Concat("https://bridge.local", requestLineParts[1]), UriKind.Absolute, out var requestUri))
             return null;
 
-        var totalChars = requestLine.Length;
-        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        for (var lineCount = 0; lineCount < MaxUpgradeRequestLines; lineCount++)
-        {
-            var headerLine = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-            if (string.IsNullOrEmpty(headerLine))
-                break;
+        if (headerLines.Length - 1 > MaxUpgradeRequestLines)
+            return null;
 
-            totalChars += headerLine.Length;
-            if (totalChars > MaxUpgradeHeaderChars)
-                return null;
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        for (var lineIndex = 1; lineIndex < headerLines.Length; lineIndex++)
+        {
+            var headerLine = headerLines[lineIndex];
+            if (headerLine.Length == 0)
+                break;
 
             var separatorIndex = headerLine.IndexOf(':', StringComparison.Ordinal);
             if (separatorIndex <= 0)
@@ -216,6 +224,33 @@ internal sealed class BridgeSecureTransportServer(
         }
 
         return new UpgradeRequest(requestLineParts[0], requestUri.AbsolutePath, requestUri.Query, headers);
+    }
+
+    private static async Task<byte[]?> ReadUpgradeHeaderBytesAsync(SslStream stream, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[4096];
+        var count = 0;
+
+        while (true)
+        {
+            if (count == buffer.Length)
+            {
+                if (buffer.Length >= MaxUpgradeHeaderBytes)
+                    return null;
+
+                Array.Resize(ref buffer, Math.Min(buffer.Length * 2, MaxUpgradeHeaderBytes));
+            }
+
+            // Читаем по одному байту: превышение границы заголовков забрало бы начало
+            // первого WebSocket-кадра, который принадлежит уже не нам, а WebSocket-слою.
+            var read = await stream.ReadAsync(buffer.AsMemory(count, 1), cancellationToken).ConfigureAwait(false);
+            if (read <= 0)
+                return null;
+
+            count += read;
+            if (count >= 4 && buffer.AsSpan(count - 4, 4).SequenceEqual("\r\n\r\n"u8))
+                return buffer[..(count - 4)];
+        }
     }
 
     private bool TryValidateUpgradeRequest(

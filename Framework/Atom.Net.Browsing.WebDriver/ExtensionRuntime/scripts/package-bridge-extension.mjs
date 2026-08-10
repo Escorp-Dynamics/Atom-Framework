@@ -17,6 +17,17 @@ try {
     await removeIfExists(path.join(stagingDir, ".extension_key.der"));
     await removeIfExists(path.join(stagingDir, ".extension_key.pem"));
 
+    // storage.managed.json / storage.local.json — это заготовки для драйвера (он раскладывает их
+    // в policy и в профиль), расширение их из своего пакета никогда не читает. Внутри CRX они были
+    // бы лишними копиями секрета моста, поэтому в пакет не попадают.
+    await removeIfExists(path.join(stagingDir, "storage.managed.json"));
+    await removeIfExists(path.join(stagingDir, "storage.local.json"));
+
+    // config.json обязан лежать в пакете: без него service worker force-installed расширения
+    // падает на загрузке конфигурации, мост не поднимается, а драйвер видит лишь таймаут discovery.
+    // Раньше файл отсутствовал из-за порядка записи артефактов — падаем громко, а не молча.
+    await assertExists(path.join(stagingDir, "config.json"));
+
     const info = await crx3([stagingDir], {
         keyPath,
         crxPath,
@@ -52,4 +63,12 @@ async function copyDirectory(sourceDir, destinationDir) {
 
 async function removeIfExists(filePath) {
     await fs.rm(filePath, { force: true });
+}
+
+async function assertExists(filePath) {
+    try {
+        await fs.access(filePath);
+    } catch {
+        throw new Error(`Упаковка CRX прервана: в каталоге расширения нет обязательного файла ${path.basename(filePath)}`);
+    }
 }

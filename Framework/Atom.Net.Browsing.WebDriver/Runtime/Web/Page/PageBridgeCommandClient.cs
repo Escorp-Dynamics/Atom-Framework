@@ -13,6 +13,11 @@ internal sealed class PageBridgeCommandClient(
     Func<CancellationToken, ValueTask>? reapplyTabContextAsync = null,
     Action<Uri?>? trackPendingNavigateUrl = null)
 {
+    /// <summary>Сколько раз опрашивается готовность вкладки после навигации.</summary>
+    private const int BridgeReadinessProbeAttempts = 200;
+
+    private static readonly TimeSpan BridgeReadinessProbeDelay = TimeSpan.FromMilliseconds(50);
+
     internal Uri GetDiscoveryUrl() => commands.GetDiscoveryUrl();
 
     public ValueTask<string> GetTitleAsync(CancellationToken cancellationToken = default)
@@ -119,8 +124,8 @@ internal sealed class PageBridgeCommandClient(
     public ValueTask<string[]> FindElementsAsync(JsonObject payload, CancellationToken cancellationToken = default)
         => commands.FindElementsAsync(sessionId, tabId, payload, cancellationToken);
 
-    public ValueTask<string?> WaitForElementAsync(JsonObject payload, CancellationToken cancellationToken = default)
-        => commands.WaitForElementAsync(sessionId, tabId, payload, cancellationToken);
+    public ValueTask<string?> WaitForElementAsync(JsonObject payload, TimeSpan waitTimeout, CancellationToken cancellationToken = default)
+        => commands.WaitForElementAsync(sessionId, tabId, payload, waitTimeout, cancellationToken);
 
     public ValueTask<string?> GetElementPropertyAsync(string elementId, string propertyName, CancellationToken cancellationToken = default)
         => commands.GetElementPropertyAsync(sessionId, tabId, elementId, propertyName, cancellationToken);
@@ -191,94 +196,125 @@ internal sealed class PageBridgeCommandClient(
         await WaitForPostNavigationBridgeTransitionAsync("Reload", cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Исход одной пробы состояния мостовой вкладки.</summary>
+    private enum BridgeReadinessProbeOutcome
+    {
+        /// <summary>Вкладка стабилизировалась — ожидание завершено.</summary>
+        Settled,
+
+        /// <summary>Нужна ещё одна проба.</summary>
+        Retry,
+
+        /// <summary>Вкладка отключилась: требуется переход в режим ожидания восстановления.</summary>
+        Disconnected,
+    }
+
+    private sealed class BridgeReadinessProbeState
+    {
+        public bool BridgeTransitionObserved { get; set; }
+
+        public bool TabContextReapplied { get; set; }
+
+        public BridgeDebugPortStatusPayload? LastStatus { get; set; }
+
+        /// <summary>Отключение, обнаруженное последней пробой.</summary>
+        public InvalidOperationException? PendingDisconnect { get; set; }
+    }
+
     private async ValueTask WaitForPostNavigationBridgeTransitionAsync(string commandName, CancellationToken cancellationToken)
     {
-        var bridgeTransitionObserved = false;
-        var tabContextReapplied = reapplyTabContextAsync is null;
-        BridgeDebugPortStatusPayload? lastStatus = null;
+        var state = new BridgeReadinessProbeState
+        {
+            TabContextReapplied = reapplyTabContextAsync is null,
+        };
 
-        for (var attempt = 0; attempt < 200; attempt++)
+        for (var attempt = 0; attempt < BridgeReadinessProbeAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            try
+            var outcome = await ProbeBridgeReadinessAsync(commandName, state, requireReapplyAfterTransition: false, cancellationToken).ConfigureAwait(false);
+            if (outcome is BridgeReadinessProbeOutcome.Settled)
+                return;
+
+            if (outcome is BridgeReadinessProbeOutcome.Disconnected)
             {
-                var status = await commands.GetDebugPortStatusAsync(sessionId, tabId, cancellationToken).ConfigureAwait(false);
-                lastStatus = status;
-                if (!status.HasPort || !status.HasSocket || !status.IsReady)
-                {
-                    bridgeTransitionObserved = true;
-                }
-
-                if (ShouldYieldPendingNavigateToCaller(commandName, status, bridgeTransitionObserved))
-                {
-                    return;
-                }
-
-                if (bridgeTransitionObserved && !tabContextReapplied)
-                    tabContextReapplied = await TryReapplyTabContextIfNeededAsync(cancellationToken).ConfigureAwait(false);
-
-                if (status.HasPort && status.HasSocket && status.IsReady && (!bridgeTransitionObserved || tabContextReapplied))
-                    return;
-
-            }
-            catch (InvalidOperationException exception) when (IsExpectedBridgeDisconnect(exception))
-            {
-                await WaitForBridgeRecoveryAsync(commandName, exception, cancellationToken).ConfigureAwait(false);
+                await WaitForBridgeRecoveryAsync(commandName, state.PendingDisconnect!, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
-            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(BridgeReadinessProbeDelay, cancellationToken).ConfigureAwait(false);
         }
 
         throw new InvalidOperationException(
-            $"Мостовая вкладка '{tabId}' не вернулась в состояние ready после команды '{commandName}'. Последний DebugPortStatus: {FormatDebugPortStatus(lastStatus)}; bridgeTransitionObserved={FormatBoolean(bridgeTransitionObserved)}; tabContextReapplied={FormatBoolean(tabContextReapplied)}.");
+            $"Мостовая вкладка '{tabId}' не вернулась в состояние ready после команды '{commandName}'. Последний DebugPortStatus: {FormatDebugPortStatus(state.LastStatus)}; bridgeTransitionObserved={FormatBoolean(state.BridgeTransitionObserved)}; tabContextReapplied={FormatBoolean(state.TabContextReapplied)}.");
     }
 
     private async ValueTask WaitForBridgeRecoveryAsync(string commandName, InvalidOperationException originalException, CancellationToken cancellationToken)
     {
-        var bridgeTransitionObserved = true;
-        var tabContextReapplied = reapplyTabContextAsync is null;
-        BridgeDebugPortStatusPayload? lastStatus = null;
+        var state = new BridgeReadinessProbeState
+        {
+            BridgeTransitionObserved = true,
+            TabContextReapplied = reapplyTabContextAsync is null,
+        };
 
-        for (var attempt = 0; attempt < 200; attempt++)
+        for (var attempt = 0; attempt < BridgeReadinessProbeAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            try
-            {
-                var status = await commands.GetDebugPortStatusAsync(sessionId, tabId, cancellationToken).ConfigureAwait(false);
-                lastStatus = status;
-                if (!status.HasPort || !status.HasSocket || !status.IsReady)
-                {
-                    bridgeTransitionObserved = true;
-                }
+            // В режиме восстановления повторное отключение — ожидаемый шаг, а не выход из цикла.
+            var outcome = await ProbeBridgeReadinessAsync(commandName, state, requireReapplyAfterTransition: true, cancellationToken).ConfigureAwait(false);
+            if (outcome is BridgeReadinessProbeOutcome.Settled)
+                return;
 
-                if (ShouldYieldPendingNavigateToCaller(commandName, status, bridgeTransitionObserved))
-                {
-                    return;
-                }
-
-                if (bridgeTransitionObserved && !tabContextReapplied)
-                    tabContextReapplied = await TryReapplyTabContextIfNeededAsync(cancellationToken).ConfigureAwait(false);
-
-                if (status.HasPort && status.HasSocket && status.IsReady && tabContextReapplied)
-                    return;
-
-            }
-            catch (InvalidOperationException exception) when (IsExpectedBridgeDisconnect(exception))
-            {
-                bridgeTransitionObserved = true;
-                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
-                continue;
-            }
-
-            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(BridgeReadinessProbeDelay, cancellationToken).ConfigureAwait(false);
         }
 
         throw new InvalidOperationException(
-            $"Мостовая вкладка '{tabId}' не переподключилась после ожидаемого отключения во время команды '{commandName}'. Последний DebugPortStatus: {FormatDebugPortStatus(lastStatus)}; bridgeTransitionObserved={FormatBoolean(bridgeTransitionObserved)}; tabContextReapplied={FormatBoolean(tabContextReapplied)}.",
+            $"Мостовая вкладка '{tabId}' не переподключилась после ожидаемого отключения во время команды '{commandName}'. Последний DebugPortStatus: {FormatDebugPortStatus(state.LastStatus)}; bridgeTransitionObserved={FormatBoolean(state.BridgeTransitionObserved)}; tabContextReapplied={FormatBoolean(state.TabContextReapplied)}.",
             originalException);
+    }
+
+    private async ValueTask<BridgeReadinessProbeOutcome> ProbeBridgeReadinessAsync(
+        string commandName,
+        BridgeReadinessProbeState state,
+        bool requireReapplyAfterTransition,
+        CancellationToken cancellationToken)
+    {
+        // Отключение может прийти и из повторного применения контекста вкладки, а не только
+        // из самой пробы, поэтому обе операции обрабатываются одним catch-контуром.
+        try
+        {
+            var status = await commands.GetDebugPortStatusAsync(sessionId, tabId, cancellationToken).ConfigureAwait(false);
+            state.LastStatus = status;
+
+            var isReady = status.HasPort && status.HasSocket && status.IsReady;
+            if (!isReady)
+                state.BridgeTransitionObserved = true;
+
+            if (ShouldYieldPendingNavigateToCaller(commandName, status, state.BridgeTransitionObserved))
+                return BridgeReadinessProbeOutcome.Settled;
+
+            if (state.BridgeTransitionObserved && !state.TabContextReapplied)
+                state.TabContextReapplied = await TryReapplyTabContextIfNeededAsync(cancellationToken).ConfigureAwait(false);
+
+            var reapplySatisfied = state.TabContextReapplied
+                || (!requireReapplyAfterTransition && !state.BridgeTransitionObserved);
+
+            return isReady && reapplySatisfied
+                ? BridgeReadinessProbeOutcome.Settled
+                : BridgeReadinessProbeOutcome.Retry;
+        }
+        catch (InvalidOperationException exception) when (IsExpectedBridgeDisconnect(exception))
+        {
+            state.BridgeTransitionObserved = true;
+            state.PendingDisconnect = exception;
+            return BridgeReadinessProbeOutcome.Disconnected;
+        }
+        catch (InvalidOperationException exception) when (IsUnansweredBridgeProbe(exception))
+        {
+            _ = exception;
+            return BridgeReadinessProbeOutcome.Settled;
+        }
     }
 
     private static string FormatDebugPortStatus(BridgeDebugPortStatusPayload? status)
@@ -340,8 +376,24 @@ internal sealed class PageBridgeCommandClient(
         }
     }
 
+    /// <summary>
+    /// Ожидаемое отключение вкладки или сеанса. Классификация идёт по типизированным данным
+    /// исключения: подстрочный поиск по локализованному сообщению ломался бы от любой
+    /// переформулировки текста.
+    /// </summary>
     private static bool IsExpectedBridgeDisconnect(InvalidOperationException exception)
-        => exception.Message.Contains("отключено", StringComparison.OrdinalIgnoreCase)
-            || exception.Message.Contains(BridgeProtocolErrorCodes.TabDisconnected, StringComparison.OrdinalIgnoreCase)
-            || exception.Message.Contains("не зарегистрирована для сеанса", StringComparison.OrdinalIgnoreCase);
+        => BridgeCommandException.IsSurfaceDisconnect(exception);
+
+    /// <summary>
+    /// Проба готовности вкладки не получила ответа за отведённое время.
+    /// </summary>
+    /// <remarks>
+    /// Ожидание готовности — это стабилизация после уже выполненной команды, а не сама команда.
+    /// Во время перезагрузки контентный слой вкладки уничтожается и пересоздаётся, поэтому
+    /// DebugPortStatus законно может не ответить. Раньше такой таймаут поднимался наружу и
+    /// ронял весь Navigate/Reload, хотя сама навигация к тому моменту уже была подтверждена
+    /// мостом. Теперь стабилизация просто завершается по факту.
+    /// </remarks>
+    private static bool IsUnansweredBridgeProbe(InvalidOperationException exception)
+        => exception is BridgeCommandException { Status: BridgeStatus.Timeout };
 }

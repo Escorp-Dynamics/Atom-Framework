@@ -9,6 +9,7 @@
         "proxy",
         "webNavigation",
         "webRequest",
+        "webRequestBlocking",
         "storage",
         "scripting",
         "declarativeNetRequest"
@@ -32,11 +33,6 @@
             "all_frames": false
         }
     ],
-    "icons": {
-        "16": "icons/icon16.png",
-        "48": "icons/icon48.png",
-        "128": "icons/icon128.png"
-    },
     "web_accessible_resources": [
         {
             "resources": [
@@ -44,7 +40,8 @@
             ],
             "matches": [
                 "<all_urls>"
-            ]
+            ],
+            "use_dynamic_url": true
         }
     ],
     "minimum_chrome_version": "120"

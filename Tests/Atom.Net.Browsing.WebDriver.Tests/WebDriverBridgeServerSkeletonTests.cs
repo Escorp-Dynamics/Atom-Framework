@@ -97,6 +97,7 @@ public sealed class WebDriverBridgeServerSkeletonTests
             ManagedPackageUrl: "https://127.0.0.1:9443/chromium/abcdefghijklmnopabcdefghijklmnop/extension.crx",
             ManagedPackageArtifactPath: Path.Combine(root, "atom-webdriver-extension.crx"),
             DiscoveryUrl: "http://127.0.0.1:9000/",
+            NavigationProxyPort: 0,
             ConnectionTimeout: TimeSpan.FromSeconds(5));
     }
 
@@ -578,7 +579,15 @@ public sealed class WebDriverBridgeServerSkeletonTests
             {
                 reapplyAttemptCount++;
                 if (reapplyAttemptCount == 1)
-                    throw new InvalidOperationException("Вкладка 'tab-1' не зарегистрирована для сеанса 'session-a'");
+                {
+                    // Реальный reapply идёт через SetTabContext → SendRequest и при незарегистрированной
+                    // вкладке поднимает именно такой типизированный сбой.
+                    throw new BridgeCommandException(
+                        "Вкладка 'tab-1' не зарегистрирована для сеанса 'session-a'",
+                        status: BridgeStatus.Disconnected,
+                        errorCode: BridgeProtocolErrorCodes.TabDisconnected,
+                        isSurfaceDisconnected: true);
+                }
 
                 return ValueTask.CompletedTask;
             });
@@ -2243,7 +2252,7 @@ public sealed class WebDriverBridgeServerSkeletonTests
     }
 
     [Test]
-    public async Task WebPageEvaluateAsyncSendsPreferPageContextOnNullForNonGenericScripts()
+    public async Task WebPageEvaluateAsyncDoesNotRequestPageContextFallbackForNonGenericScripts()
     {
         await using var server = new BridgeServer(new BridgeSettings
         {
@@ -2295,6 +2304,13 @@ public sealed class WebDriverBridgeServerSkeletonTests
         var hasForcePageContextExecution = receivedRequest.Payload is JsonElement payload
             && payload.TryGetProperty("forcePageContextExecution", out _);
 
+        // Скрипт исполняется РОВНО один раз (world:'MAIN'), поэтому page-context fallback не
+        // запрашивается: прежний повтор при результате 'null' дублировал side effects
+        // (см. Frame.EvaluateAsync).
+        var hasPreferPageContextOnNull = receivedRequest.Payload is JsonElement preferPayload
+            && preferPayload.TryGetProperty("preferPageContextOnNull", out var preferElement)
+            && preferElement.GetBoolean();
+
         await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None).ConfigureAwait(false);
         await BridgeTestHelpers.ReceiveCloseAsync(socket).ConfigureAwait(false);
         await BridgeTestHelpers.WaitForConnectionCountAsync(server, expected: 0).ConfigureAwait(false);
@@ -2304,7 +2320,7 @@ public sealed class WebDriverBridgeServerSkeletonTests
             Assert.That(receivedRequest, Is.Not.Null);
             Assert.That(receivedRequest!.Command, Is.EqualTo(BridgeCommand.ExecuteScript));
             Assert.That(receivedRequest.Payload?.GetProperty("script").GetString(), Is.EqualTo("document.cookie"));
-            Assert.That(receivedRequest.Payload?.GetProperty("preferPageContextOnNull").GetBoolean(), Is.True);
+            Assert.That(hasPreferPageContextOnNull, Is.False);
             Assert.That(hasForcePageContextExecution, Is.False);
             Assert.That(result?.GetString(), Is.EqualTo("session=alpha"));
         });
@@ -2613,7 +2629,7 @@ public sealed class WebDriverBridgeServerSkeletonTests
 
         Assert.That(
             async () => await responseTask.ConfigureAwait(false),
-            Throws.InvalidOperationException.With.Message.Contains("ошибка"));
+            Throws.InstanceOf<InvalidOperationException>().With.Message.Contains("ошибка"));
 
         await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None).ConfigureAwait(false);
         await BridgeTestHelpers.ReceiveCloseAsync(socket).ConfigureAwait(false);
@@ -2657,7 +2673,7 @@ public sealed class WebDriverBridgeServerSkeletonTests
 
         Assert.That(
             async () => await responseTask.ConfigureAwait(false),
-            Throws.InvalidOperationException.With.Message.Contains("ошибка"));
+            Throws.InstanceOf<InvalidOperationException>().With.Message.Contains("ошибка"));
 
         await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None).ConfigureAwait(false);
         await BridgeTestHelpers.ReceiveCloseAsync(socket).ConfigureAwait(false);
@@ -2694,7 +2710,7 @@ public sealed class WebDriverBridgeServerSkeletonTests
 
         Assert.That(
             async () => await responseTask.ConfigureAwait(false),
-            Throws.InvalidOperationException.With.Message.Contains("истекло время ожидания"));
+            Throws.InstanceOf<InvalidOperationException>().With.Message.Contains("истекло время ожидания"));
 
         await BridgeTestHelpers.SendMessageAsync(socket, new BridgeMessage
         {
@@ -2894,7 +2910,7 @@ public sealed class WebDriverBridgeServerSkeletonTests
 
         Assert.That(
             async () => await server.SendRequestAsync("missing-session", outboundRequest).ConfigureAwait(false),
-            Throws.InvalidOperationException.With.Message.Contains("не подключён"));
+            Throws.InstanceOf<InvalidOperationException>().With.Message.Contains("не подключён"));
     }
 
     [Test]
@@ -4165,8 +4181,14 @@ public sealed class WebDriverBridgeServerSkeletonTests
         });
     }
 
+    /// <remarks>
+    /// Мост вытесняет прежнее соединение при повторном согласовании с тем же sessionId
+    /// (см. BridgeServerReconnectWithSameSessionIdSupersedesStaleSocket): расширение после
+    /// падения service worker переподключается с тем же идентификатором, и отказ оставлял бы
+    /// его без канала до перезапуска браузера.
+    /// </remarks>
     [Test]
-    public async Task BridgeServerWebSocketHandshakeRejectsDuplicateSessionId()
+    public async Task BridgeServerWebSocketHandshakeSupersedesDuplicateSessionId()
     {
         await using var server = new BridgeServer(new BridgeSettings
         {
@@ -4197,15 +4219,41 @@ public sealed class WebDriverBridgeServerSkeletonTests
 
         var secondResponse = await BridgeTestHelpers.ReceiveBridgeMessageAsync(secondSocket).ConfigureAwait(false);
 
-        await firstSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None).ConfigureAwait(false);
-        await BridgeTestHelpers.WaitForConnectionCountAsync(server, expected: 0).ConfigureAwait(false);
-
         Assert.Multiple(() =>
         {
             Assert.That(secondResponse, Is.Not.Null);
-            Assert.That(secondResponse!.Status, Is.EqualTo(BridgeStatus.Error));
-            Assert.That(secondResponse.Error, Is.EqualTo(BridgeProtocolErrorCodes.DuplicateSessionId));
+            Assert.That(secondResponse!.Type, Is.EqualTo(BridgeMessageType.Handshake));
+            Assert.That(secondResponse.Status, Is.EqualTo(BridgeStatus.Ok));
         });
+
+        // Вытеснение абортивно: сервер шлёт close-кадр и сразу обрывает сокет, поэтому клиент
+        // видит либо close, либо сброс соединения. Ждём, пока прежний сокет перестанет быть Open.
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        var probeBuffer = new byte[256];
+        while (DateTime.UtcNow < deadline && firstSocket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+        {
+            try
+            {
+                var result = await firstSocket.ReceiveAsync(probeBuffer.AsMemory(), CancellationToken.None).ConfigureAwait(false);
+                if (result.MessageType is WebSocketMessageType.Close)
+                    break;
+            }
+            catch (WebSocketException)
+            {
+                break;
+            }
+            catch (IOException)
+            {
+                break;
+            }
+        }
+
+        Assert.That(firstSocket.State, Is.Not.EqualTo(WebSocketState.Open), "Вытесненный сокет должен закрыться");
+
+        await BridgeTestHelpers.WaitForConnectionCountAsync(server, expected: 1).ConfigureAwait(false);
+
+        await secondSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None).ConfigureAwait(false);
+        await BridgeTestHelpers.WaitForConnectionCountAsync(server, expected: 0).ConfigureAwait(false);
     }
 
     [Test]

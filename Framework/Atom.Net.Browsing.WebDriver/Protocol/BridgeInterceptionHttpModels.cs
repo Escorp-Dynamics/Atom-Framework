@@ -68,6 +68,15 @@ internal sealed class BridgeInterceptedRequestPayload
 
     public IReadOnlyDictionary<string, string>? Headers { get; init; }
 
+    /// <summary>
+    /// Запрос пришёл от локального навигационного прокси, а не от блокирующего webRequest.
+    /// </summary>
+    /// <remarks>
+    /// В этом режиме решение применяет сам прокси, поэтому оно нужно для ЛЮБОГО типа ресурса,
+    /// а не только для main_frame: блокирующего слушателя, который отработал бы остальные, нет.
+    /// </remarks>
+    public bool DecidedByNavigationProxy { get; init; }
+
     public string? RequestBodyBase64 { get; init; }
 
     public IReadOnlyDictionary<string, string[]>? FormData { get; init; }
@@ -94,6 +103,20 @@ internal sealed class BridgeInterceptedResponsePayload
     public string? ReasonPhrase { get; init; }
 
     public IReadOnlyDictionary<string, string>? Headers { get; init; }
+
+    /// <summary>
+    /// Ответ получен навигационным прокси, а не блокирующим webRequest.
+    /// </summary>
+    public bool DecidedByNavigationProxy { get; init; }
+
+    /// <summary>
+    /// Тело ответа, если оно доступно перехватчику.
+    /// </summary>
+    /// <remarks>
+    /// Заполняется только на пути навигационного прокси: он владеет всем обменом и читает тело
+    /// целиком. Блокирующий webRequest тела не даёт, поэтому там остаётся пустым.
+    /// </remarks>
+    public byte[]? Body { get; init; }
 
     public DateTimeOffset Timestamp { get; init; }
 }

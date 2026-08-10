@@ -84,13 +84,13 @@ public sealed class ShadowRoot : IShadowRoot
         if (typeof(TResult) == typeof(string))
             return (TResult?)(object?)element.GetString();
 
-        if (typeof(TResult) == typeof(bool) && (element.ValueKind is JsonValueKind.True or JsonValueKind.False))
-            return (TResult?)(object)element.GetBoolean();
+        if (typeof(TResult) == typeof(bool) && ScriptResultValue.TryReadBoolean(element, out var boolValue))
+            return (TResult?)(object)boolValue;
 
-        if (typeof(TResult) == typeof(int) && element.TryGetInt32(out var intValue))
+        if (typeof(TResult) == typeof(int) && ScriptResultValue.TryReadInt32(element, out var intValue))
             return (TResult?)(object)intValue;
 
-        if (typeof(TResult) == typeof(double) && element.TryGetDouble(out var doubleValue))
+        if (typeof(TResult) == typeof(double) && ScriptResultValue.TryReadDouble(element, out var doubleValue))
             return (TResult?)(object)doubleValue;
 
         if (typeof(TResult) == typeof(Uri) && element.ValueKind == JsonValueKind.String && Uri.TryCreate(element.GetString(), UriKind.Absolute, out var uri))
@@ -164,7 +164,7 @@ public sealed class ShadowRoot : IShadowRoot
         if (string.IsNullOrWhiteSpace(hostElementId))
             return null;
 
-        var elementId = await bridge.WaitForElementAsync(CreateWaitForElementPayload(selector, kind, timeout, hostElementId), cancellationToken).ConfigureAwait(false);
+        var elementId = await bridge.WaitForElementAsync(CreateWaitForElementPayload(selector, kind, timeout, hostElementId), timeout, cancellationToken).ConfigureAwait(false);
         return CreateBridgeElement(elementId);
     }
 

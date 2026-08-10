@@ -120,8 +120,8 @@ internal sealed class BridgeCommandClient(BridgeServer server)
     public ValueTask<string[]> FindElementsAsync(string sessionId, string tabId, JsonObject payload, CancellationToken cancellationToken = default)
         => server.FindElementsAsync(sessionId, tabId, payload, cancellationToken);
 
-    public ValueTask<string?> WaitForElementAsync(string sessionId, string tabId, JsonObject payload, CancellationToken cancellationToken = default)
-        => server.WaitForElementAsync(sessionId, tabId, payload, cancellationToken);
+    public ValueTask<string?> WaitForElementAsync(string sessionId, string tabId, JsonObject payload, TimeSpan waitTimeout, CancellationToken cancellationToken = default)
+        => server.WaitForElementAsync(sessionId, tabId, payload, waitTimeout, cancellationToken);
 
     public ValueTask<string?> GetElementPropertyAsync(string sessionId, string tabId, string elementId, string propertyName, CancellationToken cancellationToken = default)
         => server.GetElementPropertyAsync(sessionId, tabId, elementId, propertyName, cancellationToken);

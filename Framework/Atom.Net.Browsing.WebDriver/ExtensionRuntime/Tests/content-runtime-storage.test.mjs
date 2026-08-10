@@ -12,8 +12,45 @@ import {
     buildStorageIsolationScript,
     resolveBridgeUtilityPort,
     resolvePreferredBridgeRuntimeConfig,
-    tryLoadDiscoveryDocumentRuntimeConfig,
+    tryReadDiscoveryDocumentEndpointOverride,
 } from '../content.runtime.ts';
+
+function createDiscoveryDocument({ port, proxyPort, secret } = {}) {
+    const values = new Map([
+        ['meta[name="atom-bridge-port"]', port],
+        ['meta[name="atom-bridge-proxy-port"]', proxyPort],
+        ['meta[name="atom-bridge-secret"]', secret],
+    ]);
+
+    return {
+        querySelector(selector) {
+            const value = values.get(selector);
+            return value === undefined
+                ? null
+                : { getAttribute: (name) => (name === 'content' ? value : null) };
+        },
+    };
+}
+
+function createBundledConfig(overrides = {}) {
+    return {
+        host: '127.0.0.1',
+        port: 39999,
+        secret: 'bundled-secret',
+        sessionId: 'content_bundled',
+        protocolVersion: 1,
+        browserFamily: 'firefox',
+        extensionVersion: 'bundled-version',
+        featureFlags: {
+            enableNavigationEvents: true,
+            enableCallbackHooks: true,
+            enableInterception: true,
+            enableDiagnostics: true,
+            enableKeepAlive: true,
+        },
+        ...overrides,
+    };
+}
 
 class FakeStorage {
     #items = new Map();
@@ -50,141 +87,78 @@ class FakeStorage {
     }
 }
 
-test('content runtime prefers live discovery meta config when present', () => {
+test('content runtime reads only bridge ports from the discovery document', () => {
     const originalDocument = globalThis.document;
-    const originalChrome = globalThis.chrome;
-    const originalBrowser = globalThis.browser;
-    const manifestVersion = '0.8.2-test-live';
 
     try {
-        globalThis.document = {
-            querySelector(selector) {
-                if (selector === 'meta[name="atom-bridge-port"]') {
-                    return {
-                        getAttribute(name) {
-                            return name === 'content' ? '43123' : null;
-                        },
-                    };
-                }
+        globalThis.document = createDiscoveryDocument({ port: '43123', proxyPort: '9443', secret: 'must-be-ignored' });
 
-                if (selector === 'meta[name="atom-bridge-proxy-port"]') {
-                    return {
-                        getAttribute(name) {
-                            return name === 'content' ? '9443' : null;
-                        },
-                    };
-                }
-
-                if (selector === 'meta[name="atom-bridge-secret"]') {
-                    return {
-                        getAttribute(name) {
-                            return name === 'content' ? 'stable-live-secret' : null;
-                        },
-                    };
-                }
-
-                return null;
-            },
-        };
-
-        globalThis.browser = undefined;
-        globalThis.chrome = {
-            runtime: {
-                getManifest() {
-                    return { version: manifestVersion };
-                },
-            },
-        };
-
-        const config = tryLoadDiscoveryDocumentRuntimeConfig();
-        assert.ok(config);
-        assert.equal(config.host, '127.0.0.1');
-        assert.equal(config.port, 43123);
-        assert.equal(config.proxyPort, 9443);
-        assert.equal(config.secret, 'stable-live-secret');
-        assert.equal(config.extensionVersion, manifestVersion);
-        assert.equal(config.featureFlags.enableCallbackHooks, true);
+        const override = tryReadDiscoveryDocumentEndpointOverride();
+        assert.deepEqual(override, { port: 43123, proxyPort: 9443 });
+        assert.equal(Object.hasOwn(override, 'secret'), false);
     } finally {
         globalThis.document = originalDocument;
-        globalThis.chrome = originalChrome;
-        globalThis.browser = originalBrowser;
     }
 });
 
-test('content runtime replaces cached bundled config with live discovery meta config when it becomes available', () => {
+test('content runtime refreshes stale bundled ports from the discovery document but keeps the packaged secret', () => {
     const originalDocument = globalThis.document;
-    const originalChrome = globalThis.chrome;
-    const originalBrowser = globalThis.browser;
-    const manifestVersion = '0.8.2-test-refresh';
 
     try {
-        globalThis.document = {
-            querySelector(selector) {
-                if (selector === 'meta[name="atom-bridge-port"]') {
-                    return {
-                        getAttribute(name) {
-                            return name === 'content' ? '43123' : null;
-                        },
-                    };
-                }
+        globalThis.document = createDiscoveryDocument({ port: '43123', proxyPort: '9443', secret: 'must-be-ignored' });
 
-                if (selector === 'meta[name="atom-bridge-proxy-port"]') {
-                    return {
-                        getAttribute(name) {
-                            return name === 'content' ? '9443' : null;
-                        },
-                    };
-                }
-
-                if (selector === 'meta[name="atom-bridge-secret"]') {
-                    return {
-                        getAttribute(name) {
-                            return name === 'content' ? 'stable-live-secret' : null;
-                        },
-                    };
-                }
-
-                return null;
-            },
-        };
-
-        globalThis.browser = undefined;
-        globalThis.chrome = {
-            runtime: {
-                getManifest() {
-                    return { version: manifestVersion };
-                },
-            },
-        };
-
-        const config = resolvePreferredBridgeRuntimeConfig({
-            host: '127.0.0.1',
-            port: 39999,
-            secret: 'stale-bundled-secret',
-            sessionId: 'content_stale',
-            protocolVersion: 1,
-            browserFamily: 'firefox',
-            extensionVersion: 'stale-bundled-version',
-            featureFlags: {
-                enableNavigationEvents: true,
-                enableCallbackHooks: true,
-                enableInterception: true,
-                enableDiagnostics: true,
-                enableKeepAlive: true,
-            },
-        });
+        const config = resolvePreferredBridgeRuntimeConfig(createBundledConfig());
 
         assert.ok(config);
         assert.equal(config.host, '127.0.0.1');
         assert.equal(config.port, 43123);
         assert.equal(config.proxyPort, 9443);
-        assert.equal(config.secret, 'stable-live-secret');
-        assert.equal(config.extensionVersion, manifestVersion);
+        assert.equal(config.secret, 'bundled-secret');
+        assert.equal(config.extensionVersion, 'bundled-version');
     } finally {
         globalThis.document = originalDocument;
-        globalThis.chrome = originalChrome;
-        globalThis.browser = originalBrowser;
     }
+});
+
+test('content runtime keeps the bundled config when the discovery document is absent', () => {
+    const originalDocument = globalThis.document;
+
+    try {
+        globalThis.document = createDiscoveryDocument();
+
+        const bundled = createBundledConfig({ proxyPort: 8080 });
+        assert.equal(resolvePreferredBridgeRuntimeConfig(bundled), bundled);
+        assert.equal(resolvePreferredBridgeRuntimeConfig(null), null);
+    } finally {
+        globalThis.document = originalDocument;
+    }
+});
+
+test('скрипт главного мира не несёт учётных данных моста и не обращается к нему сам', () => {
+    const script = buildMainWorldContextScript(createTabContext());
+
+    // Секрет — единственная авторизация utility-эндпоинтов моста. Ни он сам, ни путь к ним не
+    // имеют права попасть в текст, исполняемый в мире страницы: оттуда его читает любой скрипт
+    // сайта. Заодно проверяем, что главный мир вообще не умеет разговаривать с мостом.
+    for (const forbidden of ['secret', 'XMLHttpRequest', '/callback?', '__atomCallbackBridge', 'bundled-secret']) {
+        assert.equal(script.includes(forbidden), false, `скрипт главного мира содержит «${forbidden}»`);
+    }
+});
+
+test('главный мир не отвечает на callback самостоятельно — это делает изолированный мир', () => {
+    const sandbox = createMainWorldCallbackSandbox();
+
+    vm.runInContext(buildMainWorldContextScript(createTabContext()), sandbox.context);
+    sandbox.dispatchCallback({
+        requestId: 'req-1',
+        name: 'bridgeCallback',
+        args: ['alpha'],
+    });
+
+    // Ни одного исходящего запроса из мира страницы: узел запроса остаётся нетронутым, и его
+    // обслуживает контент-скрипт, у которого секрет есть, а у страницы — нет.
+    assert.equal(sandbox.requests.length, 0);
+    assert.equal(sandbox.getResponseNode('req-1'), null);
 });
 
 test('content runtime prefers proxyPort for utility routes and falls back to main port', () => {
@@ -203,6 +177,23 @@ function createScriptSandbox() {
     }
 
     const document = new HTMLDocument();
+
+    // Резидент главного мира встречается с последующими внедрениями через событие на document,
+    // поэтому песочница обязана уметь их доставлять — как настоящий документ.
+    const documentListeners = new Map();
+    document.addEventListener = (type, listener) => {
+        const listeners = documentListeners.get(type) ?? [];
+        listeners.push(listener);
+        documentListeners.set(type, listeners);
+    };
+    document.dispatchEvent = (event) => {
+        for (const listener of documentListeners.get(event?.type) ?? []) {
+            listener(event);
+        }
+
+        return true;
+    };
+
     const navigator = Object.create(Navigator.prototype);
     navigator.userAgent = 'Mozilla/5.0 Original';
     navigator.appVersion = '5.0 Original';
@@ -213,8 +204,16 @@ function createScriptSandbox() {
     navigator.deviceMemory = 8;
     navigator.maxTouchPoints = 0;
 
+    class SandboxCustomEvent {
+        constructor(type, init) {
+            this.type = type;
+            this.detail = init?.detail ?? null;
+        }
+    }
+
     const sandbox = {
         console,
+        CustomEvent: SandboxCustomEvent,
         document,
         Document,
         HTMLDocument,
@@ -399,8 +398,16 @@ function createMainWorldCallbackSandbox({ port = '43123', proxyPort = '9443', se
         }
     }
 
+    class SandboxCustomEvent {
+        constructor(type, init) {
+            this.type = type;
+            this.detail = init?.detail ?? null;
+        }
+    }
+
     const sandbox = {
         console,
+        CustomEvent: SandboxCustomEvent,
         document,
         JSON,
         __atomTabContext: createTabContext(),
@@ -438,6 +445,9 @@ function createMainWorldCallbackSandbox({ port = '43123', proxyPort = '9443', se
         },
         getResponseNode(requestId) {
             return document.getElementById(`atom-callback-response-${requestId}`);
+        },
+        pendingRequestNodeCount() {
+            return requestNodes.length;
         },
     };
 }
@@ -795,13 +805,14 @@ test('content runtime изолирует document.cookie и принимает b
     installScript(context, buildCookieIsolationScript());
 
     vm.runInContext("document.cookie = 'session=alpha; path=/'", context);
-    assert.equal(vm.runInContext('document.cookie', context), 'session=alpha');
-
-    vm.runInContext(buildCookieSyncScript('session=beta; mode=dark'), context);
-    assert.equal(vm.runInContext('document.cookie', context), 'session=beta; mode=dark');
+    vm.runInContext("document.cookie = 'mode=dark; path=/'", context);
+    assert.equal(vm.runInContext('document.cookie', context), 'session=alpha; mode=dark');
 
     vm.runInContext("document.cookie = 'session=gone; Max-Age=0; path=/'", context);
     assert.equal(vm.runInContext('document.cookie', context), 'mode=dark');
+
+    // Приём синхронизации от background проверяется на полном скрипте главного мира: он идёт через
+    // канал резидента, которого в отдельно установленном блоке изоляции нет по построению.
 });
 
 test('main world context installs document.cookie shim and accepts background sync', () => {
@@ -809,8 +820,9 @@ test('main world context installs document.cookie shim and accepts background sy
 
     vm.runInContext(buildMainWorldContextScript(createTabContext()), context);
 
-    assert.equal(vm.runInContext('typeof globalThis.__atomSyncDocumentCookieHeader', context), 'function');
-    assert.equal(vm.runInContext(buildCookieSyncScript('session=beta; mode=dark'), context), 'session=beta; mode=dark');
+    // Синхронизация идёт через канал резидента: имени в window быть не должно.
+    assert.equal(vm.runInContext('typeof globalThis.__atomSyncDocumentCookieHeader', context), 'undefined');
+    assert.equal(vm.runInContext(buildCookieSyncScript('session=beta; mode=dark', 'session-1'), context), 'session=beta; mode=dark');
     assert.equal(vm.runInContext('document.cookie', context), 'session=beta; mode=dark');
 
     vm.runInContext("document.cookie = 'session=gone; Max-Age=0; path=/'", context);
@@ -944,28 +956,6 @@ test('content runtime публикует ready-контекст после Apply
     } finally {
         harness.restore();
     }
-});
-
-test('main world callback bridge prefers discovery proxyPort and forwards tabId', () => {
-    const sandbox = createMainWorldCallbackSandbox();
-
-    vm.runInContext(buildMainWorldContextScript(createTabContext()), sandbox.context);
-    sandbox.dispatchCallback({
-        requestId: 'req-1',
-        name: 'bridgeCallback',
-        args: ['alpha'],
-    });
-
-    assert.equal(sandbox.requests.length, 1);
-    assert.equal(sandbox.requests[0].url, 'http://127.0.0.1:9443/callback?secret=stable-live-secret');
-    assert.equal(sandbox.requests[0].headers['Content-Type'], 'text/plain;charset=UTF-8');
-    assert.deepEqual(JSON.parse(sandbox.requests[0].body), {
-        requestId: 'req-1',
-        tabId: 'tab-1',
-        name: 'bridgeCallback',
-        args: ['alpha'],
-    });
-    assert.equal(JSON.parse(sandbox.getResponseNode('req-1').textContent).action, 'continue');
 });
 
 test('content runtime relays callback finalized only from dedicated finalized payloads', async () => {

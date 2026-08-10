@@ -566,7 +566,7 @@ public sealed class VirtualDisplay : IAsyncDisposable
 
             if (!process.HasExited)
             {
-                process.Kill(entireProcessTree: true);
+                KillProcessTreeWithinBudget(process);
                 process.WaitForExit(1000);
             }
         }
@@ -1049,7 +1049,7 @@ public sealed class VirtualDisplay : IAsyncDisposable
         {
             if (!process.HasExited)
             {
-                process.Kill(entireProcessTree: true);
+                KillProcessTreeWithinBudget(process);
                 process.WaitForExit(1000);
             }
         }
@@ -1060,5 +1060,117 @@ public sealed class VirtualDisplay : IAsyncDisposable
         {
             process.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Снимает дерево процессов, не позволяя освобождению дисплея зависнуть.
+    /// </summary>
+    /// <remarks>
+    /// Штатный <see cref="Process.Kill(bool)"/> с обходом дерева на Linux для КАЖДОГО процесса в
+    /// системе вычитывает <c>/proc/&lt;pid&gt;/stat</c> и заново проверяет происхождение, поэтому на
+    /// машине с тысячами процессов один вызов занимает минуты, полностью съедая ядро. Освобождение
+    /// дисплея при этом не завершалось, брошенные Xvfb/xpra копились и делали следующий вызов ещё
+    /// дороже. Здесь дерево строится одним проходом по <c>/proc</c>, что превращает квадратичный
+    /// перебор в линейный и возвращает освобождению предсказуемое время.
+    /// </remarks>
+    private static void KillProcessTreeWithinBudget(Process process)
+    {
+        try
+        {
+            // Потомки снимаются от листьев к корню, чтобы никто не успел «убежать» к init.
+            foreach (var descendantId in CollectDescendantProcessIds(process.Id))
+                KillProcessIdDirectly(descendantId);
+        }
+#pragma warning disable ERP022, S2486, S108 // Дерево могло измениться во время обхода.
+        catch { }
+#pragma warning restore ERP022, S2486, S108
+
+        try
+        {
+            process.Kill();
+        }
+#pragma warning disable ERP022, S2486, S108 // Процесс мог завершиться между проверкой и kill.
+        catch { }
+#pragma warning restore ERP022, S2486, S108
+    }
+
+    /// <summary>
+    /// Собирает идентификаторы всех потомков процесса одним проходом по <c>/proc</c>.
+    /// </summary>
+    /// <remarks>
+    /// Возвращает потомков в порядке «от листьев к корню».
+    /// </remarks>
+    private static List<int> CollectDescendantProcessIds(int rootProcessId)
+    {
+        var childrenByParent = new Dictionary<int, List<int>>();
+
+        foreach (var processDirectory in Directory.EnumerateDirectories("/proc"))
+        {
+            if (!int.TryParse(Path.GetFileName(processDirectory), CultureInfo.InvariantCulture, out var processId))
+                continue;
+
+            if (!TryReadParentProcessId(processId, out var parentProcessId))
+                continue;
+
+            if (!childrenByParent.TryGetValue(parentProcessId, out var children))
+                childrenByParent[parentProcessId] = children = [];
+
+            children.Add(processId);
+        }
+
+        var descendants = new List<int>();
+        var pending = new Queue<int>();
+        pending.Enqueue(rootProcessId);
+
+        while (pending.Count > 0)
+        {
+            if (!childrenByParent.TryGetValue(pending.Dequeue(), out var children))
+                continue;
+
+            foreach (var child in children)
+            {
+                descendants.Add(child);
+                pending.Enqueue(child);
+            }
+        }
+
+        descendants.Reverse();
+        return descendants;
+    }
+
+    private static bool TryReadParentProcessId(int processId, out int parentProcessId)
+    {
+        parentProcessId = 0;
+
+        try
+        {
+            var stat = File.ReadAllText("/proc/" + processId.ToString(CultureInfo.InvariantCulture) + "/stat");
+
+            // Имя команды заключено в скобки и само может содержать пробелы и скобки,
+            // поэтому разбор начинается после ПОСЛЕДНЕЙ закрывающей скобки: далее идут
+            // состояние и ppid.
+            var commandEnd = stat.LastIndexOf(')');
+            if (commandEnd < 0)
+                return false;
+
+            var fields = stat[(commandEnd + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return fields.Length >= 2 && int.TryParse(fields[1], CultureInfo.InvariantCulture, out parentProcessId);
+        }
+#pragma warning disable ERP022, S2486, S108 // Процесс мог исчезнуть между перечислением и чтением.
+        catch { return false; }
+#pragma warning restore ERP022, S2486, S108
+    }
+
+    private static void KillProcessIdDirectly(int processId)
+    {
+        try
+        {
+            using var descendant = Process.GetProcessById(processId);
+            if (!descendant.HasExited)
+                descendant.Kill();
+        }
+#pragma warning disable ERP022, S2486, S108 // Процесс мог завершиться сам.
+        catch { }
+#pragma warning restore ERP022, S2486, S108
     }
 }
