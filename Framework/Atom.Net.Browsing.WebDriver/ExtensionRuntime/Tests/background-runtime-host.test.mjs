@@ -2105,7 +2105,10 @@ test('BackgroundRuntimeHost синхронизирует document.cookie пос�
         assert.equal(typeof setScript, 'string');
         assert.equal(typeof deleteScript, 'string');
         assert.match(setScript, /session=alpha/);
-        assert.match(deleteScript, /syncCookieHeader/);
+        // Синхронизация идёт через канал резидента: имени в window больше нет по построению,
+        // иначе автоматика выдавала бы себя перечислением свойств.
+        assert.match(deleteScript, /dispatchEvent\(new CustomEvent\("e[0-9a-f]{8}"/);
+        assert.equal(deleteScript.includes('__atom'), false);
         assert.doesNotMatch(deleteScript, /session=alpha/);
     } finally {
         restore();

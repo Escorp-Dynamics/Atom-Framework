@@ -124,8 +124,8 @@ internal sealed class PageBridgeCommandClient(
     public ValueTask<string[]> FindElementsAsync(JsonObject payload, CancellationToken cancellationToken = default)
         => commands.FindElementsAsync(sessionId, tabId, payload, cancellationToken);
 
-    public ValueTask<string?> WaitForElementAsync(JsonObject payload, CancellationToken cancellationToken = default)
-        => commands.WaitForElementAsync(sessionId, tabId, payload, cancellationToken);
+    public ValueTask<string?> WaitForElementAsync(JsonObject payload, TimeSpan waitTimeout, CancellationToken cancellationToken = default)
+        => commands.WaitForElementAsync(sessionId, tabId, payload, waitTimeout, cancellationToken);
 
     public ValueTask<string?> GetElementPropertyAsync(string elementId, string propertyName, CancellationToken cancellationToken = default)
         => commands.GetElementPropertyAsync(sessionId, tabId, elementId, propertyName, cancellationToken);

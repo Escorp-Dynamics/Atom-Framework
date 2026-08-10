@@ -164,7 +164,7 @@ public sealed class ShadowRoot : IShadowRoot
         if (string.IsNullOrWhiteSpace(hostElementId))
             return null;
 
-        var elementId = await bridge.WaitForElementAsync(CreateWaitForElementPayload(selector, kind, timeout, hostElementId), cancellationToken).ConfigureAwait(false);
+        var elementId = await bridge.WaitForElementAsync(CreateWaitForElementPayload(selector, kind, timeout, hostElementId), timeout, cancellationToken).ConfigureAwait(false);
         return CreateBridgeElement(elementId);
     }
 

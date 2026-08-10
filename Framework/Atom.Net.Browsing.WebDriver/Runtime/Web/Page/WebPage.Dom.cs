@@ -479,13 +479,19 @@ public sealed partial class WebPage
                 element = jsonElement;
             }
 
+            // Через ScriptResultValue, а не через TryGetInt32: браузер отдаёт дробные размеры при
+            // масштабе, отличном от единицы, и приходят они строкой. Прямое чтение целого либо
+            // выбрасывало исключение, либо давало false — и вьюпорт молча подменялся размером
+            // настроенного устройства, то есть вызывающий получал правдоподобную неправду.
             if (element.ValueKind == JsonValueKind.Object
             && element.TryGetProperty("width", out var width)
             && element.TryGetProperty("height", out var height)
-            && width.TryGetInt32(out var viewportWidth)
-            && height.TryGetInt32(out var viewportHeight))
+            && ScriptResultValue.TryReadDouble(width, out var viewportWidth)
+            && ScriptResultValue.TryReadDouble(height, out var viewportHeight)
+            && viewportWidth > 0
+            && viewportHeight > 0)
             {
-                return new Size(viewportWidth, viewportHeight);
+                return new Size((int)Math.Round(viewportWidth), (int)Math.Round(viewportHeight));
             }
         }
         finally

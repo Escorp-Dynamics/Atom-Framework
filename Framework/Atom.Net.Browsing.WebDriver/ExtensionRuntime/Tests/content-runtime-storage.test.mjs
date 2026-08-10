@@ -11,7 +11,6 @@ import {
     buildMainWorldContextScript,
     buildStorageIsolationScript,
     resolveBridgeUtilityPort,
-    resolveMainWorldBridgeEndpoint,
     resolvePreferredBridgeRuntimeConfig,
     tryReadDiscoveryDocumentEndpointOverride,
 } from '../content.runtime.ts';
@@ -135,17 +134,31 @@ test('content runtime keeps the bundled config when the discovery document is ab
     }
 });
 
-test('main world bridge endpoint prefers the navigation proxy port and requires a secret', () => {
-    assert.deepEqual(
-        resolveMainWorldBridgeEndpoint(createBundledConfig({ port: 43123, proxyPort: 9443 })),
-        { host: '127.0.0.1', port: 9443, secret: 'bundled-secret' });
+test('скрипт главного мира не несёт учётных данных моста и не обращается к нему сам', () => {
+    const script = buildMainWorldContextScript(createTabContext());
 
-    assert.deepEqual(
-        resolveMainWorldBridgeEndpoint(createBundledConfig({ port: 43123 })),
-        { host: '127.0.0.1', port: 43123, secret: 'bundled-secret' });
+    // Секрет — единственная авторизация utility-эндпоинтов моста. Ни он сам, ни путь к ним не
+    // имеют права попасть в текст, исполняемый в мире страницы: оттуда его читает любой скрипт
+    // сайта. Заодно проверяем, что главный мир вообще не умеет разговаривать с мостом.
+    for (const forbidden of ['secret', 'XMLHttpRequest', '/callback?', '__atomCallbackBridge', 'bundled-secret']) {
+        assert.equal(script.includes(forbidden), false, `скрипт главного мира содержит «${forbidden}»`);
+    }
+});
 
-    assert.equal(resolveMainWorldBridgeEndpoint(createBundledConfig({ secret: '' })), null);
-    assert.equal(resolveMainWorldBridgeEndpoint(null), null);
+test('главный мир не отвечает на callback самостоятельно — это делает изолированный мир', () => {
+    const sandbox = createMainWorldCallbackSandbox();
+
+    vm.runInContext(buildMainWorldContextScript(createTabContext()), sandbox.context);
+    sandbox.dispatchCallback({
+        requestId: 'req-1',
+        name: 'bridgeCallback',
+        args: ['alpha'],
+    });
+
+    // Ни одного исходящего запроса из мира страницы: узел запроса остаётся нетронутым, и его
+    // обслуживает контент-скрипт, у которого секрет есть, а у страницы — нет.
+    assert.equal(sandbox.requests.length, 0);
+    assert.equal(sandbox.getResponseNode('req-1'), null);
 });
 
 test('content runtime prefers proxyPort for utility routes and falls back to main port', () => {
@@ -164,6 +177,23 @@ function createScriptSandbox() {
     }
 
     const document = new HTMLDocument();
+
+    // Резидент главного мира встречается с последующими внедрениями через событие на document,
+    // поэтому песочница обязана уметь их доставлять — как настоящий документ.
+    const documentListeners = new Map();
+    document.addEventListener = (type, listener) => {
+        const listeners = documentListeners.get(type) ?? [];
+        listeners.push(listener);
+        documentListeners.set(type, listeners);
+    };
+    document.dispatchEvent = (event) => {
+        for (const listener of documentListeners.get(event?.type) ?? []) {
+            listener(event);
+        }
+
+        return true;
+    };
+
     const navigator = Object.create(Navigator.prototype);
     navigator.userAgent = 'Mozilla/5.0 Original';
     navigator.appVersion = '5.0 Original';
@@ -174,8 +204,16 @@ function createScriptSandbox() {
     navigator.deviceMemory = 8;
     navigator.maxTouchPoints = 0;
 
+    class SandboxCustomEvent {
+        constructor(type, init) {
+            this.type = type;
+            this.detail = init?.detail ?? null;
+        }
+    }
+
     const sandbox = {
         console,
+        CustomEvent: SandboxCustomEvent,
         document,
         Document,
         HTMLDocument,
@@ -360,8 +398,16 @@ function createMainWorldCallbackSandbox({ port = '43123', proxyPort = '9443', se
         }
     }
 
+    class SandboxCustomEvent {
+        constructor(type, init) {
+            this.type = type;
+            this.detail = init?.detail ?? null;
+        }
+    }
+
     const sandbox = {
         console,
+        CustomEvent: SandboxCustomEvent,
         document,
         JSON,
         __atomTabContext: createTabContext(),
@@ -759,13 +805,14 @@ test('content runtime изолирует document.cookie и принимает b
     installScript(context, buildCookieIsolationScript());
 
     vm.runInContext("document.cookie = 'session=alpha; path=/'", context);
-    assert.equal(vm.runInContext('document.cookie', context), 'session=alpha');
-
-    vm.runInContext(buildCookieSyncScript('session=beta; mode=dark'), context);
-    assert.equal(vm.runInContext('document.cookie', context), 'session=beta; mode=dark');
+    vm.runInContext("document.cookie = 'mode=dark; path=/'", context);
+    assert.equal(vm.runInContext('document.cookie', context), 'session=alpha; mode=dark');
 
     vm.runInContext("document.cookie = 'session=gone; Max-Age=0; path=/'", context);
     assert.equal(vm.runInContext('document.cookie', context), 'mode=dark');
+
+    // Приём синхронизации от background проверяется на полном скрипте главного мира: он идёт через
+    // канал резидента, которого в отдельно установленном блоке изоляции нет по построению.
 });
 
 test('main world context installs document.cookie shim and accepts background sync', () => {
@@ -773,8 +820,9 @@ test('main world context installs document.cookie shim and accepts background sy
 
     vm.runInContext(buildMainWorldContextScript(createTabContext()), context);
 
-    assert.equal(vm.runInContext('typeof globalThis.__atomSyncDocumentCookieHeader', context), 'function');
-    assert.equal(vm.runInContext(buildCookieSyncScript('session=beta; mode=dark'), context), 'session=beta; mode=dark');
+    // Синхронизация идёт через канал резидента: имени в window быть не должно.
+    assert.equal(vm.runInContext('typeof globalThis.__atomSyncDocumentCookieHeader', context), 'undefined');
+    assert.equal(vm.runInContext(buildCookieSyncScript('session=beta; mode=dark', 'session-1'), context), 'session=beta; mode=dark');
     assert.equal(vm.runInContext('document.cookie', context), 'session=beta; mode=dark');
 
     vm.runInContext("document.cookie = 'session=gone; Max-Age=0; path=/'", context);
@@ -908,68 +956,6 @@ test('content runtime публикует ready-контекст после Apply
     } finally {
         harness.restore();
     }
-});
-
-test('main world callback bridge uses the injected bridge endpoint and forwards tabId', () => {
-    const sandbox = createMainWorldCallbackSandbox();
-
-    vm.runInContext(
-        buildMainWorldContextScript(createTabContext(), { host: '127.0.0.1', port: 9443, secret: 'stable-live-secret' }),
-        sandbox.context);
-    sandbox.dispatchCallback({
-        requestId: 'req-1',
-        name: 'bridgeCallback',
-        args: ['alpha'],
-    });
-
-    assert.equal(sandbox.requests.length, 1);
-    assert.equal(sandbox.requests[0].url, 'http://127.0.0.1:9443/callback?secret=stable-live-secret');
-    assert.equal(sandbox.requests[0].headers['Content-Type'], 'text/plain;charset=UTF-8');
-    assert.deepEqual(JSON.parse(sandbox.requests[0].body), {
-        requestId: 'req-1',
-        tabId: 'tab-1',
-        name: 'bridgeCallback',
-        args: ['alpha'],
-    });
-    assert.equal(JSON.parse(sandbox.getResponseNode('req-1').textContent).action, 'continue');
-});
-
-test('main world callback bridge never reads the bridge secret from document meta tags', () => {
-    const sandbox = createMainWorldCallbackSandbox();
-
-    // Endpoint не внедрён: meta-теги страницы присутствуют, но использоваться не должны.
-    vm.runInContext(buildMainWorldContextScript(createTabContext()), sandbox.context);
-    sandbox.dispatchCallback({
-        requestId: 'req-1',
-        name: 'bridgeCallback',
-        args: ['alpha'],
-    });
-
-    assert.equal(sandbox.requests.length, 0);
-    assert.equal(sandbox.context.globalThis.__atomCallbackBridgeLastError, 'missing-bridge-endpoint');
-});
-
-test('main world callback bridge keeps one-shot request nodes when its decision fails so the content-script fallback can service them', () => {
-    const sandbox = createMainWorldCallbackSandbox();
-
-    // Endpoint не внедрён → main-world мост (Path A) не может разрешить решение (missing-bridge-endpoint).
-    vm.runInContext(buildMainWorldContextScript(createTabContext()), sandbox.context);
-    sandbox.dispatchCallback({
-        requestId: 'req-1',
-        name: 'bridgeCallback',
-        args: ['alpha'],
-    });
-    sandbox.dispatchCallback({
-        requestId: 'req-2',
-        name: 'bridgeCallback',
-        args: ['beta'],
-    });
-
-    // Path A зарегистрирован с capture:true и срабатывает раньше привилегированного content-script
-    // fallback (Path B). Если его синхронный XHR не доходит до моста, одноразовый узел запроса НЕЛЬЗЯ
-    // удалять — иначе Path B его не увидит и callback не долетит до C# (page.Callback не фаярит).
-    // Узлы должны остаться для Path B (который сам удаляет обслуженные узлы, поэтому накопления нет).
-    assert.equal(sandbox.pendingRequestNodeCount(), 2);
 });
 
 test('content runtime relays callback finalized only from dedicated finalized payloads', async () => {

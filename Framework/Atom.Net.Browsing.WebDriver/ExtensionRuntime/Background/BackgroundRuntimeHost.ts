@@ -1,6 +1,7 @@
 import { type RuntimeConfig } from '../Shared/Config';
 import {
     bridgeEventNames,
+    deriveResidentChannelName,
     validateTabContextEnvelope,
     type BridgeMessage,
     type JsonValue,
@@ -2752,7 +2753,7 @@ export class BackgroundRuntimeHost {
             const result = await this.executeInMainWorld(
                 tabId,
                 createInternalMessageId('sync_document_cookie'),
-                buildDocumentCookieSyncScript(cookieHeader),
+                buildDocumentCookieSyncScript(cookieHeader, context.sessionId),
                 true,
             );
 
@@ -2779,14 +2780,17 @@ export class BackgroundRuntimeHost {
     }
 }
 
-function buildDocumentCookieSyncScript(cookieHeader: string): string {
+// Синхронизация идёт через канал резидента главного мира, а не через имя в window: имён там
+// больше нет по построению — они выдавали автоматику простым перечислением свойств. Резидент
+// слушает событие с посессионным именем и возвращает результат в detail.
+function buildDocumentCookieSyncScript(cookieHeader: string, sessionId: string): string {
     return `(() => {
-const syncCookieHeader = globalThis.__atomSyncDocumentCookieHeader;
-if (typeof syncCookieHeader === 'function') {
-    return syncCookieHeader(${JSON.stringify(cookieHeader)});
-}
+const handoff = { cookieHeader: ${JSON.stringify(cookieHeader)}, handled: false, result: null };
+try {
+    document.dispatchEvent(new CustomEvent(${JSON.stringify(deriveResidentChannelName(sessionId))}, { detail: handoff }));
+} catch {}
 
-return '';
+return typeof handoff.result === 'string' ? handoff.result : '';
 })();`;
 }
 

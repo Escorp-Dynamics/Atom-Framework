@@ -96,12 +96,17 @@ public sealed class ElementEventArgs : MutableEventArgs
             && property.ValueKind is JsonValueKind.True or JsonValueKind.False
             && property.GetBoolean();
 
+    // Числа читаем через ScriptResultValue, а не через JsonElement.TryGet*: последний выбрасывает
+    // исключение, когда вид значения не числовой. Скрипт-слушатель отправляет button, clientX и
+    // clientY как JSON null для всех немышиных событий (ввод, клавиатура, фокус, отправка формы),
+    // поэтому прямой вызов ронял создание аргументов, а исключение терялось в незанаблюдённой
+    // задаче ретрансляции — подписка молча не срабатывала вовсе.
     private static int? TryGetInt32(JsonElement payload, string propertyName)
     {
         if (payload.ValueKind != JsonValueKind.Object || !payload.TryGetProperty(propertyName, out var property))
             return null;
 
-        return property.TryGetInt32(out var value) ? value : null;
+        return ScriptResultValue.TryReadInt32(property, out var value) ? value : null;
     }
 
     private static double? TryGetDouble(JsonElement payload, string propertyName)
@@ -109,6 +114,6 @@ public sealed class ElementEventArgs : MutableEventArgs
         if (payload.ValueKind != JsonValueKind.Object || !payload.TryGetProperty(propertyName, out var property))
             return null;
 
-        return property.TryGetDouble(out var value) ? value : null;
+        return ScriptResultValue.TryReadDouble(property, out var value) ? value : null;
     }
 }

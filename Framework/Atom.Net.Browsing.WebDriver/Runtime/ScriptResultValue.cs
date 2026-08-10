@@ -57,7 +57,9 @@ internal static class ScriptResultValue
                 return element.TryGetDouble(out value);
 
             case JsonValueKind.String:
-                return double.TryParse(element.GetString(), NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out value);
+                // Без AllowThousands: JS отдаёт число через String(...) и разделителей разрядов не
+                // ставит, зато с этим флагом «1,5» превратилось бы в 15 — молчаливая порча данных.
+                return double.TryParse(element.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
 
             default:
                 value = 0;

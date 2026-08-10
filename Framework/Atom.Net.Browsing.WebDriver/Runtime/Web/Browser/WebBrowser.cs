@@ -549,7 +549,26 @@ public sealed partial class WebBrowser : IWebBrowser
             return;
         }
 
-        _ = RelayBridgeServerRuntimeEventAsync(message);
+        // Ретрансляция намеренно не ожидается — приём событий моста не должен блокироваться
+        // обработчиками пользователя. Но брошенное исключение обязано быть замечено: раньше задача
+        // отбрасывалась целиком, и любой сбой доставки (например падение при разборе полезной
+        // нагрузки) исчезал бесследно — подписка просто не срабатывала, без ошибки и без записи.
+        _ = ObserveBridgeEventRelayAsync(message);
+    }
+
+    private async Task ObserveBridgeEventRelayAsync(BridgeMessage message)
+    {
+        try
+        {
+            await RelayBridgeServerRuntimeEventAsync(message).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LaunchSettings.Logger?.LogWebBrowserBridgeEventRelayFailed(
+                exception,
+                message.Event?.ToString() ?? "<нет>",
+                message.TabId ?? "<нет>");
+        }
     }
 
     private async Task RelayBridgeServerRuntimeEventAsync(BridgeMessage message)
@@ -688,9 +707,11 @@ public sealed partial class WebBrowser : IWebBrowser
     private async ValueTask PrepareBridgeWindowAsync(WebPage sourcePage, WebWindow window, CancellationToken cancellationToken)
     {
         var currentPage = (WebPage)window.CurrentPage;
-#pragma warning disable CS8602 // Разыменование вероятной пустой ссылки.
-        var (openedTabId, openedWindowId) = await sourcePage.BridgeCommands.OpenWindowAsync(window.Settings?.Position, cancellationToken).ConfigureAwait(false);
-#pragma warning restore CS8602 // Разыменование вероятной пустой ссылки.
+        var position = window.Settings?.Position;
+        var (openedTabId, openedWindowId) = await OpenBridgeSurfaceAsync(
+            sourcePage,
+            (commands, token) => commands.OpenWindowAsync(position, token),
+            cancellationToken).ConfigureAwait(false);
         var registeredTab = await WaitForRegisteredTabAsync(openedTabId, cancellationToken).ConfigureAwait(false);
         window.BindBridgeWindowId(registeredTab.WindowId ?? openedWindowId);
         currentPage.BindBridgeCommands(bridgeSessionId!, registeredTab.TabId, bridgeServer!.Commands);
@@ -698,13 +719,56 @@ public sealed partial class WebBrowser : IWebBrowser
         await currentPage.ApplyEffectiveRequestInterceptionAsync(cancellationToken).ConfigureAwait(false);
     }
 
+
+    // Порт контент-скрипта отключается при КАЖДОЙ навигации, и на это время вкладка снята с
+    // регистрации. Команда, отправленная в это окно, падает с «вкладка-отключена». Пути навигации
+    // и применения перехвата это уже терпят и повторяют; открытие окна и вкладки — не терпело, и
+    // под нагрузкой роняло вызов пользователю. Повторяем ограниченно, каждый раз заново выбирая
+    // страницу-отправитель: исходная могла и не восстановиться, а мост держит любая живая.
+    private async ValueTask<(string TabId, string? WindowId)> OpenBridgeSurfaceAsync(
+        WebPage preferredSourcePage,
+        Func<PageBridgeCommandClient, CancellationToken, ValueTask<(string TabId, string? WindowId)>> open,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + BridgeSurfaceRecoveryBudget;
+        var sourcePage = preferredSourcePage;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (sourcePage.BridgeCommands is { } commands)
+            {
+                try
+                {
+                    return await open(commands, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Protocol.BridgeCommandException exception)
+                    when (Protocol.BridgeCommandException.IsSurfaceDisconnect(exception) && DateTime.UtcNow < deadline)
+                {
+                    // Ожидаемое окно перерегистрации — пробуем снова.
+                }
+            }
+            else if (DateTime.UtcNow >= deadline)
+            {
+                throw new InvalidOperationException("Мостовая поверхность недоступна для открытия окна или вкладки");
+            }
+
+            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            sourcePage = GetBridgeCommandPage() ?? sourcePage;
+        }
+    }
+
+    private static readonly TimeSpan BridgeSurfaceRecoveryBudget = TimeSpan.FromSeconds(5);
+
     private async ValueTask PrepareBridgePageAsync(WebPage sourcePage, WebWindow window, WebPage page, CancellationToken cancellationToken)
     {
         var bridgeWindowId = window.BoundBridgeWindowId
             ?? throw new InvalidOperationException("Bridge-backed OpenPageAsync requires a bound browser window identifier");
-#pragma warning disable CS8602 // Разыменование вероятной пустой ссылки.
-        var (openedTabId, _) = await sourcePage.BridgeCommands.OpenTabAsync(bridgeWindowId, cancellationToken).ConfigureAwait(false);
-#pragma warning restore CS8602 // Разыменование вероятной пустой ссылки.
+        var (openedTabId, _) = await OpenBridgeSurfaceAsync(
+            sourcePage,
+            (commands, token) => commands.OpenTabAsync(bridgeWindowId, token),
+            cancellationToken).ConfigureAwait(false);
         var registeredTab = await WaitForRegisteredTabAsync(openedTabId, cancellationToken).ConfigureAwait(false);
 
         if (!string.IsNullOrWhiteSpace(registeredTab.WindowId))

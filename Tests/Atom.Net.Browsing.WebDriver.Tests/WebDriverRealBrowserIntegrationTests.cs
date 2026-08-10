@@ -125,6 +125,289 @@ public sealed class WebDriverRealBrowserIntegrationTests
         });
     }
 
+    // ОРАКУЛ НЕЗАМЕТНОСТИ. Ключевое требование модуля — страница не должна распознать автоматику.
+    // Проверять это «на глаз» невозможно, поэтому здесь два теста, которые смотрят на окружение
+    // ровно так, как это делает анти-бот-скрипт. Первый — строгий и не имеет права ослабляться:
+    // учётные данные моста не должны быть доступны странице ни под каким именем. Второй —
+    // храповик: он фиксирует нынешний перечень следов и падает, стоит появиться новому. По мере
+    // выноса состояния из главного мира перечень сокращается, но никогда не растёт.
+    private const string EnumeratePageFootprintScript = """
+        (() => {
+            const suspicious = (name) => name !== 'Atomics'
+                && /__atom|atom-|data-atom|webdriver|selenium|puppeteer|playwright/i.test(name);
+            const own = Object.getOwnPropertyNames(globalThis).filter(suspicious);
+
+            const markedNodes = Array.from(document.querySelectorAll('*'))
+                .flatMap((node) => Array.from(node.attributes).map((attribute) => attribute.name))
+                .filter(suspicious);
+
+            const injectedScripts = Array.from(document.querySelectorAll('script'))
+                .map((node) => node.id || node.getAttribute('data-atom-callback-request') || '')
+                .filter((value) => value !== '' && suspicious(value));
+
+            return JSON.stringify({
+                globals: Array.from(new Set(own)).sort(),
+                attributes: Array.from(new Set(markedNodes)).sort(),
+                scripts: Array.from(new Set(injectedScripts)).sort(),
+                webdriverFlag: navigator.webdriver === true,
+            });
+        })()
+        """;
+
+    // Служебные пометки на узлах живут лишь на время операции, поэтому разовый снимок их не
+    // застаёт. Анти-бот-скрипт смотрит иначе: вешает MutationObserver на атрибуты и видит любую
+    // пометку, даже если её снимут через миллисекунду. Смотрим так же.
+    [Test]
+    public async Task RealBrowserElementInteractionLeavesNoAttributeTraceObservableByMutationObserver()
+    {
+        if (!WebDriverTestEnvironment.IsRealBrowserRunConfigured())
+            Assert.Ignore("Real-browser integration test requires ATOM_TEST_WEBDRIVER_BROWSER.");
+
+        await using var browser = await WebDriverTestEnvironment.LaunchAsync();
+        var page = (WebPage)await ((WebWindow)browser.CurrentWindow).OpenPageAsync().ConfigureAwait(false);
+
+        await page.EvaluateAsync("""
+            (() => {
+                const button = document.createElement('button');
+                button.id = 'probe-target';
+                button.textContent = 'цель';
+                document.body.appendChild(button);
+
+                const seen = [];
+                new MutationObserver((records) => {
+                    for (const record of records) {
+                        if (record.type === 'attributes' && record.attributeName) {
+                            seen.push(record.attributeName);
+                        }
+                    }
+                }).observe(document.documentElement, { attributes: true, subtree: true, attributeOldValue: false });
+
+                document.documentElement.setAttribute('data-observer-ready', '1');
+                Object.defineProperty(document, 'atomObservedAttributes', { value: seen, configurable: true });
+            })();
+            """).ConfigureAwait(false);
+
+        var element = await page.WaitForElementAsync("#probe-target", WaitForElementKind.Visible, TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        Assert.That(element, Is.Not.Null);
+
+        // Вычисление скрипта на элементе — как раз та операция, что раньше ставила служебный
+        // атрибут на узел, чтобы скрипт главного мира нашёл его запросом по этому атрибуту.
+        await element!.EvaluateAsync("return element.id").ConfigureAwait(false);
+        await element.EvaluateAsync("return element.tagName").ConfigureAwait(false);
+
+        var observed = await page.EvaluateAsync<string>(
+            "JSON.stringify(Array.from(new Set(document.atomObservedAttributes ?? [])))").ConfigureAwait(false);
+
+        Assert.That(observed, Is.Not.Null);
+        using var parsed = JsonDocument.Parse(observed!);
+        var suspicious = parsed.RootElement.EnumerateArray()
+            .Select(static value => value.GetString() ?? string.Empty)
+            .Where(static name => name.Contains("atom", StringComparison.OrdinalIgnoreCase)
+                && !name.Equals("data-observer-ready", StringComparison.Ordinal))
+            .ToArray();
+
+        // Оставшиеся следы. Передача узла событием работает и DOM не трогает, но резидент держит
+        // лишь ОДИН слот заявленного узла: вложенные операции затирают его друг другу, поэтому
+        // пометка остаётся надёжным путём. Снять её можно, только ключевав слот идентификатором
+        // пометки, а тот через границу миров не проходит. Перечень сокращать можно, расширять
+        // нельзя: любой НОВЫЙ след уронит тест немедленно.
+        string[] knownAttributes = ["data-atom-el", "data-atom-sr", "data-atom-frame"];
+
+        Assert.That(suspicious, Is.SubsetOf(knownAttributes),
+            $"Драйвер оставил на узлах новые служебные атрибуты: {string.Join(", ", suspicious.Except(knownAttributes, StringComparer.Ordinal))}. Их видит любой MutationObserver, даже если пометку сразу снять.");
+    }
+
+    [Test]
+    public async Task RealBrowserPageCannotReachBridgeCredentialsFromItsOwnJavaScript()
+    {
+        if (!WebDriverTestEnvironment.IsRealBrowserRunConfigured())
+            Assert.Ignore("Real-browser integration test requires ATOM_TEST_WEBDRIVER_BROWSER.");
+
+        await using var browser = await WebDriverTestEnvironment.LaunchAsync();
+        var page = (WebPage)await ((WebWindow)browser.CurrentWindow).OpenPageAsync().ConfigureAwait(false);
+
+        // Обходим окно вглубь и ищем что угодно, похожее на секрет или порт моста. Секрет —
+        // единственное, что даёт полный контроль над сеансом: он не имеет права быть достижимым.
+        var leak = await page.EvaluateAsync<string>("""
+            (() => {
+                const seen = new Set();
+                const found = [];
+
+                const visit = (value, path, depth) => {
+                    if (depth > 3 || value === null || value === undefined) { return; }
+                    if (typeof value === 'string') {
+                        if (/^[0-9a-f]{16,}$/i.test(value)) { found.push(path + ' = <строка, похожая на секрет>'); }
+                        return;
+                    }
+                    if (typeof value !== 'object') { return; }
+                    if (seen.has(value)) { return; }
+                    seen.add(value);
+
+                    for (const key of Object.getOwnPropertyNames(value)) {
+                        if (/secret|token|credential/i.test(key)) { found.push(path + '.' + key); continue; }
+                        let nested;
+                        try { nested = value[key]; } catch { continue; }
+                        if (nested !== null && typeof nested === 'object') { visit(nested, path + '.' + key, depth + 1); }
+                    }
+                };
+
+                for (const key of Object.getOwnPropertyNames(globalThis)) {
+                    if (!/atom|bridge|driver/i.test(key)) { continue; }
+                    let value;
+                    try { value = globalThis[key]; } catch { continue; }
+                    visit(value, key, 0);
+                }
+
+                return JSON.stringify(found);
+            })()
+            """).ConfigureAwait(false);
+
+        Assert.That(leak, Is.EqualTo("[]"),
+            "Страница не должна иметь доступа к учётным данным моста: найденное здесь означает полный контроль над сеансом со стороны любого скрипта сайта.");
+    }
+
+    [Test]
+    public async Task RealBrowserPageFootprintDoesNotGrowBeyondTheKnownBaseline()
+    {
+        if (!WebDriverTestEnvironment.IsRealBrowserRunConfigured())
+            Assert.Ignore("Real-browser integration test requires ATOM_TEST_WEBDRIVER_BROWSER.");
+
+        await using var browser = await WebDriverTestEnvironment.LaunchAsync();
+        var page = (WebPage)await ((WebWindow)browser.CurrentWindow).OpenPageAsync().ConfigureAwait(false);
+
+        var footprint = await page.EvaluateAsync<string>(EnumeratePageFootprintScript).ConfigureAwait(false);
+        Assert.That(footprint, Is.Not.Null);
+
+        using var parsed = JsonDocument.Parse(footprint!);
+        var globals = parsed.RootElement.GetProperty("globals").EnumerateArray().Select(static value => value.GetString()!).ToArray();
+        var attributes = parsed.RootElement.GetProperty("attributes").EnumerateArray().Select(static value => value.GetString()!).ToArray();
+        var webdriverFlag = parsed.RootElement.GetProperty("webdriverFlag").GetBoolean();
+
+        // Перечень известных следов в мире СТРАНИЦЫ. Сейчас он пуст: состояние подмены окружения
+        // живёт в замыкании скрипта-резидента, а повторные внедрения находят его через событие с
+        // посессионным именем, а не через свойство window. Перечислить обработчики событий
+        // страничный скрипт не может, поэтому такой точки встречи он не видит. Сокращать перечень
+        // можно; расширять — нельзя: каждое имя здесь означает, что автоматика объявляет о себе.
+        string[] knownGlobals = [];
+
+        var unexpectedGlobals = globals.Except(knownGlobals, StringComparer.Ordinal).ToArray();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(unexpectedGlobals, Is.Empty,
+                $"В главном мире появился новый след автоматики: {string.Join(", ", unexpectedGlobals)}. Любое такое имя выдаёт драйвер странице.");
+            Assert.That(globals, Is.EquivalentTo(knownGlobals),
+                $"Перечень следов разошёлся с задекларированным. Фактически в странице: {string.Join(", ", globals)}. Если след устранён — сократите перечень; расширять его нельзя.");
+            Assert.That(globals, Does.Not.Contain("__atomCallbackBridgeEndpoint"),
+                "Учётные данные моста снова попали в главный мир страницы.");
+            Assert.That(attributes, Is.Empty,
+                $"На узлах страницы остались служебные атрибуты: {string.Join(", ", attributes)}. Их видит любой MutationObserver.");
+            Assert.That(webdriverFlag, Is.False, "navigator.webdriver выдаёт автоматику напрямую.");
+        });
+    }
+
+    // Ожидание вида Visible обязано дождаться именно ВИДИМОСТИ. Прежде поле kind молча
+    // игнорировалось контент-скриптом, и ожидание завершалось на появлении узла в DOM — то есть
+    // возвращало скрытый элемент немедленно. Тест ловит подмену двумя способами сразу: по времени
+    // (мгновенный возврат недопустим) и по фактическому состоянию элемента в момент возврата.
+    [Test]
+    public async Task RealBrowserWaitForElementVisibleWaitsUntilElementActuallyBecomesVisible()
+    {
+        if (!WebDriverTestEnvironment.IsRealBrowserRunConfigured())
+            Assert.Ignore("Real-browser integration test requires ATOM_TEST_WEBDRIVER_BROWSER.");
+
+        await using var browser = await WebDriverTestEnvironment.LaunchAsync();
+        var page = (WebPage)await ((WebWindow)browser.CurrentWindow).OpenPageAsync().ConfigureAwait(false);
+
+        await page.EvaluateAsync("""
+            (() => {
+                const hidden = document.createElement('div');
+                hidden.id = 'late-visible';
+                hidden.textContent = 'ждём видимости';
+                hidden.style.display = 'none';
+                hidden.style.width = '120px';
+                hidden.style.height = '40px';
+                document.body.appendChild(hidden);
+
+                setTimeout(() => { hidden.style.display = 'block'; }, 900);
+            })();
+            """).ConfigureAwait(false);
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var element = await page.WaitForElementAsync("#late-visible", WaitForElementKind.Visible, TimeSpan.FromSeconds(6)).ConfigureAwait(false);
+        watch.Stop();
+
+        var visibleAtReturn = await page.EvaluateAsync<bool>("""
+            (() => {
+                const node = document.getElementById('late-visible');
+                if (!node) { return false; }
+                const rect = node.getBoundingClientRect();
+                return getComputedStyle(node).display !== 'none' && rect.width > 0 && rect.height > 0;
+            })()
+            """).ConfigureAwait(false);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(element, Is.Not.Null, "Ожидание видимости должно вернуть элемент, а не пустой результат.");
+            Assert.That(visibleAtReturn, Is.True, "В момент возврата элемент обязан быть видимым.");
+            Assert.That(watch.ElapsedMilliseconds, Is.GreaterThan(500),
+                "Ожидание завершилось мгновенно — значит вид ожидания был проигнорирован и вернулся скрытый элемент.");
+        });
+    }
+
+    // Ожидание вида Stable обязано дождаться ОСТАНОВКИ элемента. Двигаем его со стороны драйвера,
+    // а не таймером страницы: на Firefox таймеры, заведённые из EvaluateAsync, не переживают
+    // завершения инъекции и молча умирают через доли секунды, а на Chromium живут — тест на них
+    // проверял бы разницу движков вместо самого ожидания.
+    [Test]
+    public async Task RealBrowserWaitForElementStableWaitsUntilElementStopsMoving()
+    {
+        if (!WebDriverTestEnvironment.IsRealBrowserRunConfigured())
+            Assert.Ignore("Real-browser integration test requires ATOM_TEST_WEBDRIVER_BROWSER.");
+
+        await using var browser = await WebDriverTestEnvironment.LaunchAsync();
+        var page = (WebPage)await ((WebWindow)browser.CurrentWindow).OpenPageAsync().ConfigureAwait(false);
+
+        await page.EvaluateAsync("""
+            (() => {
+                const moving = document.createElement('div');
+                moving.id = 'moving-box';
+                moving.style.position = 'absolute';
+                moving.style.left = '0px';
+                moving.style.top = '10px';
+                moving.style.width = '80px';
+                moving.style.height = '30px';
+                moving.style.background = '#0f5f4b';
+                document.body.appendChild(moving);
+            })();
+            """).ConfigureAwait(false);
+
+        var motionTask = Task.Run(async () =>
+        {
+            for (var offset = 8; offset <= 240; offset += 8)
+            {
+                await page.EvaluateAsync($"document.getElementById('moving-box').style.left = '{offset}px'").ConfigureAwait(false);
+                await Task.Delay(60).ConfigureAwait(false);
+            }
+
+            await page.EvaluateAsync("document.getElementById('moving-box').setAttribute('data-done', '1')").ConfigureAwait(false);
+        });
+
+        var element = await page.WaitForElementAsync("#moving-box", WaitForElementKind.Visible | WaitForElementKind.Stable, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+
+        var finishedWhenWaitReturned = await page.EvaluateAsync<bool>(
+            "document.getElementById('moving-box').getAttribute('data-done') === '1'").ConfigureAwait(false);
+
+        await motionTask.ConfigureAwait(false);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(element, Is.Not.Null, "Ожидание стабильности должно вернуть элемент.");
+            Assert.That(finishedWhenWaitReturned, Is.True,
+                "Ожидание вернулось, пока элемент ещё двигался — вид ожидания был проигнорирован.");
+        });
+    }
+
     [Test]
     public async Task RealBrowserBrowserDeviceEmulationPersistsAcrossNavigationReloadAndNewWindow()
     {
@@ -6351,8 +6634,8 @@ public sealed class WebDriverRealBrowserIntegrationTests
                     readyState: null,
                     visibilityState: null,
                     hasFocus: null,
-                    contextId: globalThis.__atomTabContext?.contextId ?? null,
-                    syncFunctionType: typeof globalThis.__atomSyncDocumentCookieHeader,
+                    contextId: ({{ReadTabContextExpression(page)}})?.contextId ?? null,
+                    syncFunctionType: 'канал-резидента',
                     cookieValue: null,
                     cookieReadError: null,
                     documentCookieDescriptor: describeDescriptor(document),
@@ -6596,7 +6879,14 @@ public sealed class WebDriverRealBrowserIntegrationTests
         """;
 
     private static async Task NavigateToDeviceFingerprintPageAsync(WebBrowser browser, WebPage page, Uri url)
-        => await NavigateToRealBrowserPageAsync(browser, page, url).ConfigureAwait(false);
+    {
+        // Фикстура снимает контекст сама, изнутри страницы, поэтому имя канала резидента должно
+        // быть известно серверу до отдачи документа.
+        RealBrowserDeviceFingerprintLoopbackServer.ResidentChannelName =
+            DeriveResidentChannelName(page.BoundBridgeSessionId ?? string.Empty);
+
+        await NavigateToRealBrowserPageAsync(browser, page, url).ConfigureAwait(false);
+    }
 
     private static async Task NavigateToRealBrowserPageAsync(WebBrowser browser, WebPage page, Uri url)
     {
@@ -6732,12 +7022,33 @@ public sealed class WebDriverRealBrowserIntegrationTests
         Assert.Fail($"Timed out waiting for bridge port rebootstrap after real reload of {expectedUrl.AbsoluteUri}. {diagnostics}");
     }
 
+    // Контекст вкладки больше не лежит в window: он живёт в замыкании скрипта-резидента, а
+    // встреча идёт через событие с посессионным именем. Тесты обязаны наблюдать его тем же
+    // способом, что и сам драйвер, — иначе они проверяли бы уже несуществующий механизм.
+    private static string DeriveResidentChannelName(string sessionId)
+    {
+        var hash = 0x811c9dc5u;
+        foreach (var symbol in sessionId)
+        {
+            hash ^= symbol;
+            hash *= 0x01000193u;
+        }
+
+        return string.Concat("e", hash.ToString("x8", System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private static string ReadTabContextExpression(WebPage page, string windowExpression = "globalThis")
+    {
+        var channel = DeriveResidentChannelName(page.BoundBridgeSessionId ?? string.Empty);
+        return $$"""(() => { const handoff = { wantContext: true, handled: false, result: null }; try { {{windowExpression}}.document.dispatchEvent(new CustomEvent("{{channel}}", { detail: handoff })); } catch (error) { } return handoff.result ?? null; })()""";
+    }
+
     private static async Task<JsonDocument> CaptureDeviceFingerprintSnapshotAsync(WebPage page)
     {
-        const string snapshotScript = """
+        var snapshotScript = $$"""
             return JSON.stringify((() => {
                 const targetWindow = window;
-                const pageContext = targetWindow.__atomTabContext ?? null;
+                const pageContext = {{ReadTabContextExpression(page, "targetWindow")}};
                 const contentContext = globalThis.__atomContentRuntimeContext ?? null;
                 return {
                     pageHasContext: pageContext !== null,
@@ -6787,10 +7098,10 @@ public sealed class WebDriverRealBrowserIntegrationTests
 
         if (string.IsNullOrWhiteSpace(snapshotJson))
         {
-            const string diagnosticsScript = """
+            var diagnosticsScript = $$"""
                 return JSON.stringify((() => {
                     const targetWindow = window;
-                    const pageContext = targetWindow.__atomTabContext ?? null;
+                    const pageContext = {{ReadTabContextExpression(page, "targetWindow")}};
                     const contentContext = globalThis.__atomContentRuntimeContext ?? null;
                     return {
                         pageHasContext: pageContext !== null,
@@ -6814,7 +7125,7 @@ public sealed class WebDriverRealBrowserIntegrationTests
     {
         ArgumentNullException.ThrowIfNull(page);
 
-        const string snapshotScript = """
+        var snapshotScript = $$"""
             return await new Promise(resolve => {
                 const snapshot = {
                     latitude: null,
@@ -6898,7 +7209,7 @@ public sealed class WebDriverRealBrowserIntegrationTests
     {
         ArgumentNullException.ThrowIfNull(page);
 
-        const string snapshotScript = """
+        var snapshotScript = $$"""
             return JSON.stringify({
                 doNotTrack: navigator.doNotTrack ?? null,
                 globalPrivacyControl: typeof navigator.globalPrivacyControl === 'boolean'
@@ -6925,7 +7236,7 @@ public sealed class WebDriverRealBrowserIntegrationTests
         var snapshotScript = $$"""
             return JSON.stringify(await (async () => {
                 const shouldRequestVideo = {{requestVideoLiteral}};
-                const pageContext = window.__atomTabContext ?? null;
+                const pageContext = {{ReadTabContextExpression(page, "window")}};
                 const contentContext = globalThis.__atomContentRuntimeContext ?? null;
                 const virtualMediaContext = pageContext?.virtualMediaDevices ?? contentContext?.virtualMediaDevices ?? null;
                 const snapshot = {
@@ -7132,7 +7443,7 @@ public sealed class WebDriverRealBrowserIntegrationTests
             const requestedLocalValue = {{localValueLiteral}};
             const requestedSessionValue = {{sessionValueLiteral}};
             const snapshot = {
-                contextId: globalThis.__atomTabContext?.contextId ?? null,
+                contextId: ({{ReadTabContextExpression(page)}})?.contextId ?? null,
                 hasLocalStorage: typeof localStorage !== 'undefined',
                 hasSessionStorage: typeof sessionStorage !== 'undefined',
                 localValue: null,
@@ -7194,7 +7505,7 @@ public sealed class WebDriverRealBrowserIntegrationTests
         return JSON.stringify(await (async () => {
             const requestedValue = {{valueLiteral}};
             const snapshot = {
-                contextId: globalThis.__atomTabContext?.contextId ?? null,
+                contextId: ({{ReadTabContextExpression(page)}})?.contextId ?? null,
                 hasIndexedDb: typeof indexedDB !== 'undefined' && indexedDB !== null,
                 hasCaches: typeof caches !== 'undefined' && caches !== null,
                 indexedDbValue: null,
@@ -7983,6 +8294,11 @@ public sealed class WebDriverRealBrowserIntegrationTests
         private readonly TcpListener listener = new(IPAddress.Loopback, 0);
         private Task? serverTask;
 
+        // Обслуживаемая страница читает контекст вкладки через канал резидента, как и сам драйвер:
+        // имени в window больше нет. Канал посессионный и общий для набора: тесты непараллельны,
+        // а значение проставляется при каждом переходе на фикстуру.
+        public static string ResidentChannelName { get; set; } = string.Empty;
+
         public Task StartAsync()
         {
             listener.Start();
@@ -8066,7 +8382,9 @@ public sealed class WebDriverRealBrowserIntegrationTests
                                     (() => {
                                         const writeSnapshot = () => {
                                             const targetWindow = window;
-                                            const pageContext = targetWindow.__atomTabContext ?? null;
+                                            const handoff = { wantContext: true, handled: false, result: null };
+                                            try { targetWindow.document.dispatchEvent(new CustomEvent("{{ResidentChannelName}}", { detail: handoff })); } catch (error) { }
+                                            const pageContext = handoff.result ?? null;
                                             const contentContext = globalThis.__atomContentRuntimeContext ?? null;
                                             const payload = {
                                                 pageHasContext: pageContext !== null,

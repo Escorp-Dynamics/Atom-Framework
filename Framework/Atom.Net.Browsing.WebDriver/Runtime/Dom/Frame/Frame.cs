@@ -82,7 +82,7 @@ public sealed class Frame : IFrame
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Observe(ex);
+                Observe(ex, "адрес");
                 return null;
             }
 
@@ -110,7 +110,7 @@ public sealed class Frame : IFrame
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Observe(ex);
+                Observe(ex, "заголовок");
                 return null;
             }
         }
@@ -136,7 +136,7 @@ public sealed class Frame : IFrame
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Observe(ex);
+                Observe(ex, "содержимое");
                 return null;
             }
         }
@@ -272,7 +272,7 @@ public sealed class Frame : IFrame
         if (page.BridgeCommands is not { } bridge)
             return CreateFallbackElement(HtmlFallbackDomQuery.FindFirst(page.CurrentContent, selector));
 
-        var elementId = await bridge.WaitForElementAsync(CreateWaitForElementPayload(selector, kind, timeout), cancellationToken).ConfigureAwait(false);
+        var elementId = await bridge.WaitForElementAsync(CreateWaitForElementPayload(selector, kind, timeout), timeout, cancellationToken).ConfigureAwait(false);
         return CreateBridgeElement(elementId);
     }
 
@@ -459,7 +459,7 @@ public sealed class Frame : IFrame
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Observe(ex);
+            Observe(ex, "снимок экрана");
             return;
         }
 
@@ -528,8 +528,14 @@ public sealed class Frame : IFrame
 
     public ValueTask<string?> GetFrameElementHandleAsync() => GetFrameElementHandleAsync(CancellationToken.None);
 
-    private static void Observe(Exception ex)
-        => Trace.TraceWarning(ex.ToString());
+    // Сбой чтения возвращается вызывающему как пустой результат — отличить его от «значения нет»
+    // нельзя, поэтому запись обязана попасть в настроенный журнал драйвера. Прежде она уходила в
+    // System.Diagnostics.Trace, которого в рабочей настройке никто не слушает, и сбой исчезал.
+    private void Observe(Exception ex, string operation)
+    {
+        page.OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebFrameReadFailed(ex, page.TabId, operation);
+        Trace.TraceWarning(ex.ToString());
+    }
 
     public ValueTask<Memory<byte>> GetScreenshotAsync(CancellationToken cancellationToken)
         => GetScreenshotCoreAsync(cancellationToken);

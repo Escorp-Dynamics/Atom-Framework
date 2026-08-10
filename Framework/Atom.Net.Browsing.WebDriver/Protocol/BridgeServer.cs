@@ -421,8 +421,60 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     internal ValueTask<string[]> FindElementsAsync(string sessionId, string tabId, JsonObject payload, CancellationToken cancellationToken = default)
         => SendStringArrayCommandAsync(sessionId, tabId, BridgeCommand.FindElements, payload, cancellationToken);
 
-    internal ValueTask<string?> WaitForElementAsync(string sessionId, string tabId, JsonObject payload, CancellationToken cancellationToken = default)
-        => SendOptionalStringCommandAsync(sessionId, tabId, BridgeCommand.WaitForElement, payload, cancellationToken, BridgeStatus.NotFound, BridgeStatus.Timeout);
+    // Ожидание элемента — единственная команда, живущая дольше обычного мостового запроса: ждёт
+    // столько, сколько попросил вызывающий. Транспортный бюджет поэтому считаем от его таймаута, а
+    // не от общего RequestTimeout — иначе ожидание в 30 с обрывалось бы на пятой секунде. И обрыв
+    // транспорта нельзя выдавать за «элемент не появился»: статус у них один, различаем по коду.
+    internal async ValueTask<string?> WaitForElementAsync(
+        string sessionId,
+        string tabId,
+        JsonObject payload,
+        TimeSpan waitTimeout,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await SendRequestAsync(
+            sessionId,
+            CreateCommandRequest(
+                tabId,
+                BridgeCommand.WaitForElement,
+                JsonSerializer.SerializeToElement(payload, BridgeJsonContext.Default.JsonObject)),
+            ResolveWaitForElementRequestTimeout(waitTimeout),
+            cancellationToken).ConfigureAwait(false);
+
+        if (response.Status is BridgeStatus.Ok)
+        {
+            if (response.Payload is not JsonElement stringPayload || !TryParseStringPayload(stringPayload, propertyName: null, out var value))
+                throw new BridgeCommandException("Мостовая команда вернула неверные строковые данные");
+
+            return value;
+        }
+
+        if (response.Status is BridgeStatus.NotFound)
+            return null;
+
+        // Истечение ожидания в самой вкладке — законный ответ «не появился». Истечение нашего
+        // транспортного бюджета означает, что вкладка не отвечает вовсе, и это настоящий сбой.
+        if (response.Status is BridgeStatus.Timeout
+            && !string.Equals(response.Error, BridgeProtocolErrorCodes.RequestTimeout, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        throw CreateCommandFailureException(response);
+    }
+
+    private TimeSpan ResolveWaitForElementRequestTimeout(TimeSpan waitTimeout)
+    {
+        if (settings.RequestTimeout <= TimeSpan.Zero)
+            return Timeout.InfiniteTimeSpan;
+
+        if (waitTimeout <= TimeSpan.Zero)
+            return settings.RequestTimeout;
+
+        // Запас в один обычный RequestTimeout: вкладка должна успеть ответить своим «Timeout»
+        // раньше, чем сработает наш бюджет, иначе законный отрицательный ответ выглядел бы сбоем.
+        return waitTimeout + settings.RequestTimeout;
+    }
 
     internal ValueTask<string?> GetElementPropertyAsync(string sessionId, string tabId, string elementId, string propertyName, CancellationToken cancellationToken = default)
         => SendNullableStringCommandAsync(
@@ -508,7 +560,14 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             },
             cancellationToken);
 
-    internal async ValueTask<BridgeMessage> SendRequestAsync(string sessionId, BridgeMessage request, CancellationToken cancellationToken = default)
+    internal ValueTask<BridgeMessage> SendRequestAsync(string sessionId, BridgeMessage request, CancellationToken cancellationToken = default)
+        => SendRequestAsync(sessionId, request, requestTimeoutOverride: null, cancellationToken);
+
+    internal async ValueTask<BridgeMessage> SendRequestAsync(
+        string sessionId,
+        BridgeMessage request,
+        TimeSpan? requestTimeoutOverride,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(request);
@@ -544,7 +603,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         try
         {
-            var response = await completionSource.Task.WaitAsync(settings.RequestTimeout, cancellationToken).ConfigureAwait(false);
+            var response = await completionSource.Task.WaitAsync(requestTimeoutOverride ?? settings.RequestTimeout, cancellationToken).ConfigureAwait(false);
 #pragma warning disable CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
             settings.Logger?.LogBridgeServerRequestCompleted(request.Id, sessionId, tabId, commandName, DescribeStatus(response.Status), response.Error ?? string.Empty);
 #pragma warning restore CA1873 // Избегайте потенциально ресурсоемкого ведения журнала

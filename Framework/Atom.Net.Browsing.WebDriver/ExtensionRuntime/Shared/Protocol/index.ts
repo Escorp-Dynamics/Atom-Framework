@@ -26,3 +26,4 @@ export type { JsonArray, JsonObject, JsonPrimitive, JsonValue } from './JsonValu
 export type { TabContextEnvelope } from './TabContextEnvelope';
 export { validateTabContextEnvelope } from './TabContextEnvelope';
 export { validateBridgeMessageEnvelope } from './TransportEnvelopeValidator';
+export { deriveResidentChannelName } from './ResidentChannel';

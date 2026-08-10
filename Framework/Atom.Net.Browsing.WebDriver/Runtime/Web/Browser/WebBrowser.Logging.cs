@@ -63,4 +63,7 @@ internal static partial class WebBrowserLogs
 
     [LoggerMessage(EventId = 1828, Level = LogLevel.Warning, Message = "Браузер не нашёл вкладку для callback {CallbackName} и таба {TabId}")]
     public static partial void LogWebBrowserCallbackSkipped(this ILogger logger, string callbackName, string tabId);
+
+    [LoggerMessage(EventId = 1829, Level = LogLevel.Error, Message = "Браузер не смог ретранслировать мостовое событие {EventType} для вкладки {TabId}")]
+    public static partial void LogWebBrowserBridgeEventRelayFailed(this ILogger logger, Exception exception, string eventType, string tabId);
 }

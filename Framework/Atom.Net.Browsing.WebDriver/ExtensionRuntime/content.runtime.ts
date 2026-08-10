@@ -1,5 +1,6 @@
 import type { BridgeMessage, JsonValue, TabContextEnvelope } from './Shared/Protocol';
 import { validateTabContextEnvelope } from './Shared/Protocol/TabContextEnvelope';
+import { deriveResidentChannelName } from './Shared/Protocol/ResidentChannel';
 import { loadRuntimeConfig, validateRuntimeConfig, type RuntimeConfig } from './Shared/Config';
 import { BrowserRuntimePortChannel, DeferredContentReadySignal } from './Content/Channel';
 
@@ -685,13 +686,50 @@ class ContentRuntimeHost {
             return;
         }
 
-        const existingElement = findSingle(payload.strategy, payload.value, root);
-        if (existingElement !== null) {
+        // Кандидат, удовлетворяющий виду ожидания. Для Stable требуется два подряд одинаковых
+        // положения: одиночный замер не отличает остановившийся элемент от едущего.
+        let previousBox: ElementBox | null = null;
+        let previousSampleAt = 0;
+
+        const resolveCandidate = (): Element | null => {
+            const element = findSingle(payload.strategy, payload.value, root);
+            if (element === null) {
+                previousBox = null;
+                return null;
+            }
+
+            if (!payload.requireVisible) {
+                return element;
+            }
+
+            if (!isElementVisible(element)) {
+                previousBox = null;
+                return null;
+            }
+
+            if (!payload.requireStable) {
+                return element;
+            }
+
+            const now = typeof performance?.now === 'function' ? performance.now() : 0;
+            if (previousBox !== null && now - previousSampleAt < WAIT_FOR_ELEMENT_STABLE_SAMPLE_INTERVAL_MS) {
+                return null;
+            }
+
+            const box = readElementBox(element);
+            const settled = isSameBox(previousBox, box);
+            previousBox = box;
+            previousSampleAt = now;
+            return settled ? element : null;
+        };
+
+        const immediate = resolveCandidate();
+        if (immediate !== null) {
             await this.channel.sendResponse({
                 id: message.id,
                 type: 'Response',
                 status: 'Ok',
-                payload: registerElement(existingElement),
+                payload: registerElement(immediate),
             });
             return;
         }
@@ -708,34 +746,49 @@ class ContentRuntimeHost {
                 return;
             }
 
-            const observer = new MutationObserver(() => {
-                const element = findSingle(payload.strategy, payload.value, root);
-                if (element === null) {
+            let finished = false;
+
+            const finish = (element: Element | null) => {
+                if (finished) {
                     return;
                 }
 
+                finished = true;
                 observer.disconnect();
+                globalThis.clearInterval(pollId);
                 globalThis.clearTimeout(timerId);
-                void this.channel.sendResponse({
-                    id: message.id,
-                    type: 'Response',
-                    status: 'Ok',
-                    payload: registerElement(element),
-                }).finally(resolve);
-            });
 
-            observer.observe(observeTarget, { childList: true, subtree: true });
+                void this.channel.sendResponse(element === null
+                    ? {
+                        id: message.id,
+                        type: 'Response',
+                        status: 'Timeout',
+                        payload: null,
+                        error: 'Элемент не появился в течение таймаута.',
+                    }
+                    : {
+                        id: message.id,
+                        type: 'Response',
+                        status: 'Ok',
+                        payload: registerElement(element),
+                    }).finally(resolve);
+            };
 
-            const timerId = globalThis.setTimeout(() => {
-                observer.disconnect();
-                void this.channel.sendResponse({
-                    id: message.id,
-                    type: 'Response',
-                    status: 'Timeout',
-                    payload: null,
-                    error: 'Элемент не появился в течение таймаута.',
-                }).finally(resolve);
-            }, payload.timeoutMs);
+            const attempt = () => {
+                const element = resolveCandidate();
+                if (element !== null) {
+                    finish(element);
+                }
+            };
+
+            const observer = new MutationObserver(attempt);
+            observer.observe(observeTarget, { childList: true, subtree: true, attributes: true });
+
+            // Наблюдатель мутаций не видит ни перекомпоновку, ни анимацию, ни изменение стиля из
+            // таблицы стилей — а именно от них зависят видимость и стабильность. Поэтому к нему
+            // нужен опрос; для Attached он безвреден, для остальных видов обязателен.
+            const pollId = globalThis.setInterval(attempt, WAIT_FOR_ELEMENT_POLL_INTERVAL_MS);
+            const timerId = globalThis.setTimeout(() => finish(null), payload.timeoutMs);
         });
     }
 
@@ -1012,7 +1065,7 @@ class ContentRuntimeHost {
     }
 
     private async applyContextInMainWorld(context: TabContextEnvelope): Promise<void> {
-        const script = buildMainWorldContextScript(context, resolveMainWorldBridgeEndpoint(this.bridgeRuntimeConfig));
+        const script = buildMainWorldContextScript(context);
 
         try {
             await this.channel.executeInMain(script);
@@ -1282,8 +1335,9 @@ function normalizeCallbackDecision(value: CallbackDecisionPayload): CallbackDeci
 
 export function buildStorageIsolationScript(): string {
     return `
-    const storageIsolationInstallKey = '__atomStorageIsolationInstalled';
-    if (!globalObject[storageIsolationInstallKey]) {
+    let storageIsolationInstalled = false;
+
+    if (!storageIsolationInstalled) {
         const installStorageIsolation = (storage) => {
             if (!storage) {
                 return;
@@ -1388,15 +1442,15 @@ export function buildStorageIsolationScript(): string {
         } catch {
         }
 
-        globalObject[storageIsolationInstallKey] = true;
+        storageIsolationInstalled = true;
     }
 `;
 }
 
 export function buildCookieIsolationScript(): string {
     return `
-    const cookieIsolationInstallKey = '__atomCookieIsolationInstalled';
-    const cookieIsolationStateKey = '__atomCookieIsolationState';
+    let cookieIsolationInstalled = false;
+    let cookieIsolationState = null;
     const createCookieMap = () => Object.create(null);
     const parseCookieHeader = (header) => {
         const cookies = createCookieMap();
@@ -1429,7 +1483,7 @@ export function buildCookieIsolationScript(): string {
         .map(([name, value]) => name + '=' + value)
         .join('; ');
     const readCookieState = () => {
-        const existingState = globalObject[cookieIsolationStateKey];
+        const existingState = cookieIsolationState;
         if (existingState && typeof existingState === 'object') {
             return existingState;
         }
@@ -1439,7 +1493,7 @@ export function buildCookieIsolationScript(): string {
             header: '',
         };
 
-        globalObject[cookieIsolationStateKey] = state;
+        cookieIsolationState = state;
         return state;
     };
     const syncCookieHeader = (header) => {
@@ -1510,32 +1564,33 @@ export function buildCookieIsolationScript(): string {
         }
     };
 
-    globalObject.__atomSyncDocumentCookieHeader = syncCookieHeader;
+    syncCookieHeaderImpl = syncCookieHeader;
 
-    if (!globalObject[cookieIsolationInstallKey]) {
+    if (!cookieIsolationInstalled) {
         installCookieShim(globalObject.Document?.prototype);
         installCookieShim(globalObject.HTMLDocument?.prototype);
         installCookieShim(globalObject.document);
-        globalObject[cookieIsolationInstallKey] = true;
+        cookieIsolationInstalled = true;
     }
     `;
 }
 
-export function buildCookieSyncScript(cookieHeader: string): string {
+export function buildCookieSyncScript(cookieHeader: string, sessionId: string): string {
     return `(() => {
-const syncCookieHeader = globalThis.__atomSyncDocumentCookieHeader;
-if (typeof syncCookieHeader === 'function') {
-    return syncCookieHeader(${JSON.stringify(cookieHeader)});
-}
+const handoff = { cookieHeader: ${JSON.stringify(cookieHeader)}, handled: false, result: null };
+try {
+    document.dispatchEvent(new CustomEvent(${JSON.stringify(deriveResidentChannelName(sessionId))}, { detail: handoff }));
+} catch {}
 
-return '';
+return typeof handoff.result === 'string' ? handoff.result : '';
 })();`;
 }
 
 export function buildIndexedDbIsolationScript(): string {
     return `
-    const indexedDbIsolationInstallKey = '__atomIndexedDbIsolationInstalled';
-    if (!globalObject[indexedDbIsolationInstallKey] && globalObject.indexedDB) {
+    let indexedDbIsolationInstalled = false;
+
+    if (!indexedDbIsolationInstalled && globalObject.indexedDB) {
         const indexedDb = globalObject.indexedDB;
         const originalOpen = typeof indexedDb.open === 'function'
             ? indexedDb.open.bind(indexedDb)
@@ -1569,15 +1624,16 @@ export function buildIndexedDbIsolationScript(): string {
             });
         }
 
-        globalObject[indexedDbIsolationInstallKey] = true;
+        indexedDbIsolationInstalled = true;
     }
 `;
 }
 
 export function buildCacheIsolationScript(): string {
     return `
-    const cacheIsolationInstallKey = '__atomCacheIsolationInstalled';
-    if (!globalObject[cacheIsolationInstallKey] && globalObject.caches) {
+    let cacheIsolationInstalled = false;
+
+    if (!cacheIsolationInstalled && globalObject.caches) {
         const cacheStorage = globalObject.caches;
         const originalOpen = typeof cacheStorage.open === 'function'
             ? cacheStorage.open.bind(cacheStorage)
@@ -1641,224 +1697,75 @@ export function buildCacheIsolationScript(): string {
             });
         }
 
-        globalObject[cacheIsolationInstallKey] = true;
+        cacheIsolationInstalled = true;
     }
 `;
 }
 
 /**
- * Точка доступа к utility-эндпоинтам моста для кода, исполняемого в основном мире страницы.
- * Значение приходит из конфигурации расширения и внедряется в скрипт напрямую: читать его
- * из meta-тегов документа нельзя — на обычных страницах их нет, а на discovery-странице это
- * раскрывало бы секрет моста любому скрипту страницы.
+ * Строит скрипт, исполняемый в основном мире страницы.
+ *
+ * Всё, что попадает в возвращаемую строку, видно любому скрипту сайта — включая комментарии,
+ * поэтому пояснения держим здесь, а не внутри шаблона.
+ *
+ * Решения по callback доставляет ИСКЛЮЧИТЕЛЬНО изолированный мир контент-скрипта
+ * (registerCallbackObserver -> flushCallbackRequestPayloads -> resolveCallbackDecision). Прежде
+ * тот же путь дублировался в мире страницы, и ради него в window клался объект с секретом и
+ * портом моста. Секрет — единственная авторизация utility-эндпоинтов (/callback, /intercept и
+ * прочих), поэтому любой скрипт сайта получал полный контроль над сеансом автоматики и мог
+ * подделывать либо подавлять её решения. Дубликат удалён: изолированный мир выполняет тот же
+ * запрос сам, а странице не остаётся ни учётных данных, ни повода узнать об автоматике.
  */
-export interface MainWorldBridgeEndpoint {
-    host: string;
-    port: number;
-    secret: string;
-}
-
-export function resolveMainWorldBridgeEndpoint(config: RuntimeConfig | null): MainWorldBridgeEndpoint | null {
-    if (config === null || typeof config.secret !== 'string' || config.secret.length === 0) {
-        return null;
-    }
-
-    const port = resolveBridgeUtilityPort(config);
-    if (!Number.isInteger(port) || port <= 0) {
-        return null;
-    }
-
-    return {
-        host: config.host,
-        port,
-        secret: config.secret,
-    };
-}
-
-export function buildMainWorldContextScript(context: TabContextEnvelope, bridgeEndpoint: MainWorldBridgeEndpoint | null = null): string {
+export function buildMainWorldContextScript(context: TabContextEnvelope): string {
     const serializedContext = JSON.stringify(context);
-    const serializedBridgeEndpoint = JSON.stringify(bridgeEndpoint);
 
     return `(() => {
 const context = ${serializedContext};
-const bridgeEndpoint = ${serializedBridgeEndpoint};
 const globalObject = globalThis;
-const contextKey = '__atomTabContext';
-const stateKey = '__atomTabContextOverrideState';
-const installKey = '__atomTabContextOverridesInstalled';
-const callbackBridgeInstallKey = '__atomCallbackRequestBridgeInstalled';
-const callbackBridgeErrorKey = '__atomCallbackBridgeLastError';
+const channelName = ${JSON.stringify(deriveResidentChannelName(context.sessionId))};
 const callbackRequestEventName = 'atom-webdriver-callback-request';
 const callbackRequestSelector = 'script[data-atom-callback-request="1"]';
 const callbackResponseNodePrefix = 'atom-callback-response-';
 
-const assignContext = (value) => {
-    try {
-        Object.defineProperty(globalObject, contextKey, {
-            configurable: true,
-            writable: true,
-            value,
-        });
-    } catch {
-        globalObject[contextKey] = value;
-    }
-};
+const handoff = { context, handled: false, result: null };
+try {
+    globalObject.document?.dispatchEvent(new CustomEvent(channelName, { detail: handoff }));
+} catch {}
 
-assignContext(context);
-
-const readContext = () => globalObject[contextKey] ?? context;
-
-${buildCookieIsolationScript()}
-
-if (!globalObject[callbackBridgeInstallKey]) {
-    // Конфигурация приходит из расширения вместе со скриптом контекста. Прежняя версия читала
-    // её из meta-тегов discovery-страницы, которых нет на обычных сайтах, из-за чего решения
-    // по callback никогда не доезжали и вызов всегда продолжался как есть.
-    const bridgeEndpointStateKey = '__atomCallbackBridgeEndpoint';
-    if (bridgeEndpoint && typeof bridgeEndpoint.secret === 'string' && bridgeEndpoint.secret.length > 0) {
-        globalObject[bridgeEndpointStateKey] = bridgeEndpoint;
-    }
-
-    const readBridgeEndpoint = () => {
-        const endpoint = globalObject[bridgeEndpointStateKey];
-        if (!endpoint || typeof endpoint.secret !== 'string' || endpoint.secret.length === 0) {
-            return null;
-        }
-
-        if (!Number.isInteger(endpoint.port) || endpoint.port <= 0) {
-            return null;
-        }
-
-        return endpoint;
-    };
-
-    const writeCallbackDecisionPayload = (requestId, payload) => {
-        const documentObject = globalObject.document;
-        const root = documentObject?.documentElement ?? documentObject?.head ?? documentObject?.body;
-        if (!root || !documentObject || typeof documentObject.createElement !== 'function') {
-            return;
-        }
-
-        const responseNodeId = callbackResponseNodePrefix + requestId;
-        documentObject.getElementById?.(responseNodeId)?.remove?.();
-
-        const node = documentObject.createElement('script');
-        node.id = responseNodeId;
-        node.type = 'application/json';
-        node.textContent = JSON.stringify(payload);
-        root.appendChild(node);
-    };
-
-    const tryResolveCallbackDecision = (payload) => {
-        const config = readBridgeEndpoint();
-        if (!config || typeof globalObject.XMLHttpRequest !== 'function') {
-            globalObject[callbackBridgeErrorKey] = !config
-                ? 'missing-bridge-endpoint'
-                : 'xmlhttprequest-unavailable';
-            return null;
-        }
-
-        const callbackContext = readContext();
-        const tabId = typeof callbackContext?.tabId === 'string' ? callbackContext.tabId.trim() : '';
-        if (tabId.length === 0) {
-            globalObject[callbackBridgeErrorKey] = 'missing-tab-id';
-            return null;
-        }
-
-        try {
-            const request = new globalObject.XMLHttpRequest();
-            request.open('POST', 'http://' + config.host + ':' + config.port + '/callback?secret=' + encodeURIComponent(config.secret), false);
-            request.setRequestHeader('Content-Type', 'text/plain;charset=UTF-8');
-            request.send(JSON.stringify({
-                requestId: payload.requestId,
-                tabId,
-                name: payload.name,
-                args: Array.isArray(payload.args) ? payload.args : [],
-                code: typeof payload.code === 'string' && payload.code.length > 0 ? payload.code : undefined,
-            }));
-
-            if (request.status < 200 || request.status >= 300) {
-                globalObject[callbackBridgeErrorKey] = 'http-status-' + request.status;
-                return null;
-            }
-
-            if (typeof request.responseText !== 'string' || request.responseText.trim().length === 0) {
-                globalObject[callbackBridgeErrorKey] = 'empty-response';
-                return null;
-            }
-
-            globalObject[callbackBridgeErrorKey] = '';
-            return JSON.parse(request.responseText);
-        } catch {
-            globalObject[callbackBridgeErrorKey] = 'request-error';
-            return null;
-        }
-    };
-
-    const flushCallbackRequests = (event) => {
-        const documentObject = globalObject.document;
-        if (!documentObject || typeof documentObject.querySelectorAll !== 'function') {
-            return;
-        }
-
-        let handled = false;
-        const nodes = Array.from(documentObject.querySelectorAll(callbackRequestSelector));
-        for (const node of nodes) {
-            // ВАЖНО: этот main-world обработчик (Path A) зарегистрирован с capture:true и срабатывает
-            // РАНЬШЕ привилегированного content-script fallback (Path B, flushCallbackRequestPayloads).
-            // Синхронный XHR из контекста страницы (без extension-привилегий) до моста часто не доходит.
-            // Поэтому одноразовый узел запроса снимаем ТОЛЬКО когда реально записали решение — иначе
-            // Path A удалил бы узел до того, как Path B успеет его обслужить, и callback не долетел бы
-            // до C# (page.Callback не фаярит). Path B сам удаляет обработанные узлы, накопления нет.
-            let servicedNode = false;
-            try {
-                const payload = JSON.parse(node.textContent || 'null');
-                if (!payload || typeof payload.requestId !== 'string' || payload.requestId.length === 0 || typeof payload.name !== 'string' || payload.name.length === 0) {
-                    // Некорректный узел не сможет обслужить ни один обработчик — снимаем, чтобы не висел.
-                    node.remove?.();
-                    continue;
-                }
-
-                const decision = tryResolveCallbackDecision(payload);
-                if (!decision || typeof decision.action !== 'string') {
-                    // Path A не смог разрешить решение: оставляем узел для Path B.
-                    continue;
-                }
-
-                writeCallbackDecisionPayload(payload.requestId, decision);
-                handled = true;
-                servicedNode = true;
-            } catch {
-            } finally {
-                if (servicedNode) {
-                    node.remove?.();
-                }
-            }
-        }
-
-        if (!handled) {
-            return;
-        }
-
-        try {
-            event?.stopImmediatePropagation?.();
-        } catch {
-        }
-    };
-
-    if (typeof globalObject.addEventListener === 'function') {
-        globalObject.addEventListener(callbackRequestEventName, flushCallbackRequests, true);
-    }
-
-    if (typeof globalObject.document?.addEventListener === 'function') {
-        globalObject.document.addEventListener(callbackRequestEventName, flushCallbackRequests, true);
-    }
-
-    globalObject[callbackBridgeInstallKey] = true;
+if (handoff.handled) {
+    return;
 }
 
-if (!globalObject[installKey]) {
-    const state = globalObject[stateKey] ?? (globalObject[stateKey] = {
+let currentContext = context;
+let syncCookieHeaderImpl = null;
+
+try {
+    globalObject.document?.addEventListener(channelName, (event) => {
+        const detail = event?.detail;
+        if (!detail || typeof detail !== 'object') {
+            return;
+        }
+
+        if (detail.context) {
+            currentContext = detail.context;
+        }
+
+        if (typeof detail.cookieHeader === 'string' && typeof syncCookieHeaderImpl === 'function') {
+            detail.result = syncCookieHeaderImpl(detail.cookieHeader);
+        }
+
+        if (detail.wantContext === true) {
+            detail.result = currentContext;
+        }
+
+        detail.handled = true;
+    }, true);
+} catch {}
+
+const readContext = () => currentContext;
+
+{
+    const state = {
         originalDateTimeFormat: Intl.DateTimeFormat,
         originalUserAgent: globalObject.navigator?.userAgent ?? null,
         originalUserAgentData: globalObject.navigator?.userAgentData ?? null,
@@ -1878,7 +1785,7 @@ if (!globalObject[installKey]) {
         originalInnerHeight: globalObject.innerHeight ?? null,
         originalOuterWidth: globalObject.outerWidth ?? null,
         originalOuterHeight: globalObject.outerHeight ?? null,
-    });
+    };
 
     const defineGetter = (target, property, getter) => {
         if (!target) {
@@ -2089,8 +1996,8 @@ ${buildIndexedDbIsolationScript()}
 
 ${buildCacheIsolationScript()}
 
-    if (typeof globalObject.__atomSyncDocumentCookieHeader === 'function') {
-        globalObject.__atomSyncDocumentCookieHeader('');
+    if (typeof syncCookieHeaderImpl === 'function') {
+        syncCookieHeaderImpl('');
     }
 
     defineNavigatorGetter('userAgent', () => readContext().userAgent ?? state.originalUserAgent);
@@ -2720,7 +2627,6 @@ ${buildCacheIsolationScript()}
     } catch {
     }
 
-    globalObject[installKey] = true;
 }
 
 try {
@@ -3382,6 +3288,8 @@ function readWaitForElementPayload(value: JsonValue | undefined): {
     strategy: string;
     value: string;
     timeoutMs: number;
+    requireVisible: boolean;
+    requireStable: boolean;
     parentElementId?: string;
     shadowHostElementId?: string;
     frameHostElementId?: string;
@@ -3396,10 +3304,79 @@ function readWaitForElementPayload(value: JsonValue | undefined): {
         ? value.timeoutMs
         : 10_000;
 
+    // Драйвер всегда присылает вид ожидания. Прежде поле молча игнорировалось, и Visible со
+    // Stable вели себя как Attached: ожидание завершалось на появлении узла в DOM, ещё до того
+    // как элемент становился видимым и переставал двигаться. Перечисление на стороне C# помечено
+    // [Flags], поэтому Visible | Stable приезжает строкой «Visible, Stable» — разбираем список.
+    const requestedKinds = typeof value.kind === 'string'
+        ? value.kind.split(',').map((part) => part.trim())
+        : [];
+    const requireStable = requestedKinds.includes('Stable');
+
+    // Стабильность невидимого элемента лишена смысла, поэтому Stable подразумевает Visible.
+    const requireVisible = requireStable || requestedKinds.includes('Visible');
+
     return {
         ...payload,
         timeoutMs,
+        requireVisible,
+        requireStable,
     };
+}
+
+const WAIT_FOR_ELEMENT_POLL_INTERVAL_MS = 50;
+
+// Минимальный разнос между замерами положения для вида Stable. Наблюдатель мутаций срабатывает на
+// каждое изменение style, поэтому без этого порога два замера могли прийтись на один кадр — они,
+// разумеется, совпадали, и едущий элемент объявлялся стабильным.
+const WAIT_FOR_ELEMENT_STABLE_SAMPLE_INTERVAL_MS = 120;
+
+interface ElementBox {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+}
+
+function readElementBox(element: Element): ElementBox | null {
+    if (typeof element.getBoundingClientRect !== 'function') {
+        return null;
+    }
+
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+}
+
+function isElementVisible(element: Element): boolean {
+    const box = readElementBox(element);
+    if (box === null || box.width <= 0 || box.height <= 0) {
+        return false;
+    }
+
+    const view = element.ownerDocument?.defaultView;
+    if (!view || typeof view.getComputedStyle !== 'function') {
+        return true;
+    }
+
+    const style = view.getComputedStyle(element);
+    if (style.visibility === 'hidden' || style.visibility === 'collapse' || style.display === 'none') {
+        return false;
+    }
+
+    return Number.parseFloat(style.opacity || '1') > 0;
+}
+
+function isSameBox(left: ElementBox | null, right: ElementBox | null): boolean {
+    if (left === null || right === null) {
+        return false;
+    }
+
+    // Полпикселя: браузер отдаёт дробные координаты, и дрожание субпиксельного округления
+    // не должно бесконечно откладывать признание элемента стабильным.
+    return Math.abs(left.x - right.x) < 0.5
+        && Math.abs(left.y - right.y) < 0.5
+        && Math.abs(left.width - right.width) < 0.5
+        && Math.abs(left.height - right.height) < 0.5;
 }
 
 function resolveSearchRoot(payload: {
