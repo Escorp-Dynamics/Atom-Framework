@@ -33,4 +33,10 @@ internal static partial class WebWindowLogs
 
     [LoggerMessage(EventId = 1911, Level = LogLevel.Trace, Message = "Окно {WindowId} завершило поиск вкладки по {QueryKind}: {Query}, результат: {Result}")]
     public static partial void LogWebWindowLookupCompleted(this ILogger logger, string windowId, string queryKind, string query, string result);
+
+    [LoggerMessage(EventId = 1912, Level = LogLevel.Debug, Message = "Окно {WindowId} дождалось фокуса документа вкладки {TabId} за {ElapsedMilliseconds} мс")]
+    public static partial void LogWebWindowDocumentFocusConfirmed(this ILogger logger, string windowId, string tabId, long elapsedMilliseconds);
+
+    [LoggerMessage(EventId = 1913, Level = LogLevel.Warning, Message = "Окно {WindowId} не дождалось фокуса документа вкладки {TabId} за {ElapsedMilliseconds} мс; доверенный ввод может быть отброшен браузером")]
+    public static partial void LogWebWindowDocumentFocusNotConfirmed(this ILogger logger, string windowId, string tabId, long elapsedMilliseconds);
 }

@@ -23,6 +23,87 @@ public sealed partial class WebWindow
         OwnerBrowser.ActivateWindow(this);
     }
 
+    /// <summary>
+    /// Готовит вкладку к доверенному вводу: активирует окно и дожидается, пока браузер признает
+    /// её документ сфокусированным.
+    /// </summary>
+    /// <remarks>
+    /// Ожидание намеренно живёт здесь, а не в <see cref="ActivateAsync(CancellationToken)"/>:
+    /// активация нужна и путям, которым ввод не требуется (например, снимку экрана), и заставлять
+    /// их ждать фокуса — чистые потери. Платит только тот, кто собирается нажимать.
+    /// </remarks>
+    internal async ValueTask PrepareForTrustedInputAsync(WebPage page, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        await ActivateAsync(cancellationToken).ConfigureAwait(false);
+        await WaitForDocumentFocusAsync(page, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Активация окна и вкладки доходит до содержимого асинхронно, и до её завершения браузер
+    // не считает документ сфокусированным. Firefox в этом состоянии отбрасывает ВЕСЬ настоящий
+    // пользовательский ввод во вкладке — и указатель, и клавиатуру, — пропуская наружу только
+    // собственные синтезированные движения; они дают :hover и события пересечения границ, из-за
+    // чего вкладка выглядит отзывчивой, хотя ни одно нажатие до неё не доходит. Прежней
+    // фиксированной паузы в 75 мс не хватало: на виртуальном дисплее активация занимает до
+    // 2,7 с в Firefox (в Chromium — единицы миллисекунд), поэтому доверенный ввод регулярно
+    // уходил в пустоту. Ждём фактической готовности, а не наугад отмеренного срока.
+    private async ValueTask WaitForDocumentFocusAsync(WebPage page, CancellationToken cancellationToken)
+    {
+        if (IsDisposed || page.IsDisposed)
+            return;
+
+        // Полный бюджет платим один раз на страницу. Если фокус подтвердить не удалось (окно
+        // намеренно фоновое, либо у окружения вовсе нет понятия активного окна), выжидать его
+        // целиком перед каждым нажатием — чистые потери на горячем пути; дальше хватит короткой
+        // перепроверки, которая сама снимет пометку, как только фокус всё-таки появится.
+        var budget = ReferenceEquals(documentFocusUnconfirmedPage, page)
+            ? DocumentFocusRecheckBudget
+            : DocumentFocusActivationBudget;
+
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+
+        while (elapsed.Elapsed < budget)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (IsDisposed || page.IsDisposed)
+                return;
+
+            try
+            {
+                if (await page.EvaluateAsync<bool>("document.hasFocus()", cancellationToken).ConfigureAwait(false))
+                {
+                    documentFocusUnconfirmedPage = null;
+                    OwnerBrowser.LaunchSettings.Logger?.LogWebWindowDocumentFocusConfirmed(WindowId, page.TabId, elapsed.ElapsedMilliseconds);
+                    return;
+                }
+            }
+            catch (Protocol.BridgeCommandException exception) when (IsExpectedDuringActivation(exception))
+            {
+                // Вкладка пересоздаёт мост (навигация или перезагрузка) либо не успела ответить —
+                // и то и другое ожидаемо, пока активация ещё идёт. Пробуем снова в пределах бюджета.
+            }
+
+            await Task.Delay(DocumentFocusPollInterval, cancellationToken).ConfigureAwait(false);
+        }
+
+        documentFocusUnconfirmedPage = page;
+        OwnerBrowser.LaunchSettings.Logger?.LogWebWindowDocumentFocusNotConfirmed(WindowId, page.TabId, elapsed.ElapsedMilliseconds);
+    }
+
+    private static bool IsExpectedDuringActivation(Protocol.BridgeCommandException exception)
+        => Protocol.BridgeCommandException.IsSurfaceDisconnect(exception)
+            || exception.Status is Protocol.BridgeStatus.Timeout;
+
+    private WebPage? documentFocusUnconfirmedPage;
+
+    private static readonly TimeSpan DocumentFocusActivationBudget = TimeSpan.FromSeconds(10);
+
+    private static readonly TimeSpan DocumentFocusRecheckBudget = TimeSpan.FromMilliseconds(250);
+
+    private static readonly TimeSpan DocumentFocusPollInterval = TimeSpan.FromMilliseconds(50);
+
     public ValueTask ActivateAsync()
         => ActivateAsync(CancellationToken.None);
 

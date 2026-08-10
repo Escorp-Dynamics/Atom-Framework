@@ -58,7 +58,7 @@ public sealed class Element : IElement
         cancellationToken.ThrowIfCancellationRequested();
         OwnerPage.OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebElementClickStarting(handle, OwnerPage.TabId);
 
-        await OwnerPage.OwnerWindow.ActivateAsync(cancellationToken).ConfigureAwait(false);
+        await OwnerPage.OwnerWindow.PrepareForTrustedInputAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
         var mouse = await OwnerPage.ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         var interactionPoint = await ResolveInteractionPointAsync(cancellationToken).ConfigureAwait(false);
         interactionPoint = await CalibrateInteractionPointAsync(mouse, interactionPoint, cancellationToken).ConfigureAwait(false);
@@ -73,7 +73,7 @@ public sealed class Element : IElement
         cancellationToken.ThrowIfCancellationRequested();
         OwnerPage.OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebElementHoverStarting(handle, OwnerPage.TabId);
 
-        await OwnerPage.OwnerWindow.ActivateAsync(cancellationToken).ConfigureAwait(false);
+        await OwnerPage.OwnerWindow.PrepareForTrustedInputAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
         var mouse = await OwnerPage.ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         await ApproachInteractionPointAsync(mouse, await ResolveInteractionPointAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }
@@ -154,7 +154,7 @@ public sealed class Element : IElement
             return;
         }
 
-        await OwnerPage.OwnerWindow.ActivateAsync(cancellationToken).ConfigureAwait(false);
+        await OwnerPage.OwnerWindow.PrepareForTrustedInputAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
         var mouse = await OwnerPage.ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         var interactionPoint = await ResolveInteractionPointAsync(cancellationToken).ConfigureAwait(false);
         await ApproachInteractionPointAsync(mouse, interactionPoint, cancellationToken).ConfigureAwait(false);
@@ -165,7 +165,7 @@ public sealed class Element : IElement
 
     private async ValueTask PrepareForTrustedKeyboardInputAsync(bool requireDocumentFocus, CancellationToken cancellationToken)
     {
-        await OwnerPage.OwnerWindow.ActivateAsync(cancellationToken).ConfigureAwait(false);
+        await OwnerPage.OwnerWindow.PrepareForTrustedInputAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
 
         if (OwnerPage.BridgeCommands is { } bridge && BridgeElementId is { } elementId)
         {
@@ -868,13 +868,13 @@ return true;
             };
         }
 
-        if (typeof(TResult) == typeof(bool) && (element.ValueKind is JsonValueKind.True or JsonValueKind.False))
-            return (TResult?)(object)element.GetBoolean();
+        if (typeof(TResult) == typeof(bool) && ScriptResultValue.TryReadBoolean(element, out var boolValue))
+            return (TResult?)(object)boolValue;
 
-        if (typeof(TResult) == typeof(int) && element.TryGetInt32(out var intValue))
+        if (typeof(TResult) == typeof(int) && ScriptResultValue.TryReadInt32(element, out var intValue))
             return (TResult?)(object)intValue;
 
-        if (typeof(TResult) == typeof(double) && element.TryGetDouble(out var doubleValue))
+        if (typeof(TResult) == typeof(double) && ScriptResultValue.TryReadDouble(element, out var doubleValue))
             return (TResult?)(object)doubleValue;
 
         if (typeof(TResult) == typeof(Uri) && element.ValueKind == JsonValueKind.String && Uri.TryCreate(element.GetString(), UriKind.Absolute, out var uri))
