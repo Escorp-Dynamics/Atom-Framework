@@ -272,7 +272,6 @@ internal static class ProfileAutomationPresets
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-background-timer-throttling",
-            "--extension-manifest-v2-availability=2",
         ];
 
         foreach (var argument in defaultArguments)
