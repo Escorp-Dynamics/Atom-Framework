@@ -1108,13 +1108,16 @@ internal sealed class BridgeNavigationProxyServer(
         }
         catch (HttpRequestException exception)
         {
+            // Соединение обрывается без ответа. Синтетический 502 — это ВАЛИДНЫЙ HTTP-ответ:
+            // страница и service worker считали бы запрос состоявшимся, и offline-fallback не
+            // срабатывал бы. К тому же настоящий сетевой сбой выглядит иначе, чем ответ прокси,
+            // а расхождение наблюдаемо со стороны страницы.
             logger?.LogBridgeServerNavigationProxyForwardFailed(clientRequest.Method, absoluteTargetUrl, exception);
-            await WriteErrorResponseAsync(stream, HttpStatusCode.BadGateway, "decision-forward-failed", cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            // Истёкший таймаут upstream — тоже сетевой сбой, а не ответ сервера.
             logger?.LogBridgeServerNavigationProxyRejected(clientRequest.Method, absoluteTargetUrl, "forward-timeout");
-            await WriteErrorResponseAsync(stream, HttpStatusCode.GatewayTimeout, "forward-timeout", cancellationToken).ConfigureAwait(false);
         }
     }
 
