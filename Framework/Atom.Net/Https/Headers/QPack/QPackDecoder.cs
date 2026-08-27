@@ -34,9 +34,54 @@ public sealed class QPackDecoder : IHeadersDecoder
 
         DynamicTableSize = dynamicTableSize;
         dynamicTable = new QPackDynamicTable(dynamicTableSize);
+        encoderInstructions = new QPackDecoderStream(dynamicTable);
     }
 
-    /// <inheritdoc/>
+    private readonly QPackDecoderStream encoderInstructions;
+
+    /// <summary>
+    /// Применяет инструкции встречного потока кодировщика к динамической таблице.
+    /// </summary>
+    /// <param name="instructions">Данные однонаправленного потока типа 0x02.</param>
+    /// <returns>Сколько байт разобрано полностью; хвост надо сохранить до следующего куска.</returns>
+    /// <remarks>
+    /// Без этого динамическая таблица остаётся пустой, а сервер ссылается на её записи — и разбор
+    /// заголовков падает на «запись уже вытеснена». Именно поэтому объявлять ненулевую ёмкость
+    /// таблицы можно ТОЛЬКО вместе с обработкой этого потока: одно без другого гарантированно
+    /// ломает ответы.
+    /// </remarks>
+    public int ApplyEncoderInstructions(ReadOnlySpan<byte> instructions)
+    {
+        var consumed = encoderInstructions.Apply(instructions);
+
+        // Будим тех, кто ждёт вставок: блок заголовков мог ссылаться ровно на эти записи.
+        Interlocked.Exchange(ref insertions, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
+
+        return consumed;
+    }
+
+    private TaskCompletionSource insertions = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Сколько вставок в динамическую таблицу принято.</summary>
+    public int InsertCount => dynamicTable.InsertCount;
+
+    /// <summary>
+    /// Задача, завершающаяся с приходом новых вставок.
+    /// </summary>
+    /// <returns>Задача ожидания.</returns>
+    /// <remarks>
+    /// Нужна потому, что вставки идут ПО ДРУГОМУ потоку соединения, чем ответ, и приходят когда
+    /// угодно относительно него. Блок заголовков, сославшийся на ещё не пришедшую запись, — это
+    /// не ошибка, а разрешённое нами же состояние: мы объявляем серверу право так делать
+    /// параметром QPACK_BLOCKED_STREAMS. Не подождав, мы просто не прочитаем ответ.
+    /// </remarks>
+    public Task WaitForInsertionsAsync() => Volatile.Read(ref insertions).Task;
+
+    /// <summary>
+    /// Разбирает блок заголовков QPACK.
+    /// </summary>
+    /// <param name="block">Блок заголовков из кадра HEADERS.</param>
+    /// <returns>Пары «имя, значение».</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [SkipLocalsInit]
     public IEnumerable<KeyValuePair<string, string>> Decode(ReadOnlySpan<byte> block)
@@ -49,20 +94,50 @@ public sealed class QPackDecoder : IHeadersDecoder
         var signAndDeltaPeek = r.PeekByte();
         var sign = (signAndDeltaPeek & 0x80) is not 0;
         var deltaBase = HeadersBinaryPrimitives.ReadVarInt(ref r, 7, 0x7F);
-        var known = dynamicTable.KnownReceivedCount;
+        // ★ Восстановление Required Insert Count по RFC 9204, §4.5.1.1. Значение в блоке
+        // закодировано КОЛЬЦЕВЫМ образом: передаётся не сам счётчик, а «остаток по модулю плюс
+        // единица», и разворачивать его надо строго по алгоритму спецификации.
+        //
+        // Прежняя формула ошибалась дважды. Она не вычитала эту единицу, и она сравнивала с
+        // KnownReceivedCount — величиной, считающей НАШИ подтверждения серверу, тогда как
+        // разворот опирается на число ПРИНЯТЫХ вставок. На пустой или отстающей таблице обе
+        // ошибки складывались в отрицательное значение, проверка на блокировку его пропускала
+        // (отрицательное больше нуля не бывает), и разбор шёл с заведомо неверной базой. Наружу
+        // это выходило сообщением «запись уже вытеснена» — то есть жалобой не на ту причину.
+        // Проявлялось на серверах, которые динамической таблицей действительно пользуются:
+        // www.google.com по HTTP/3 не открывался вовсе, Cloudflare работал.
+        var received = dynamicTable.InsertCount;
         var maxEntries = dynamicTable.MaxEntries;
         int requiredInsertCount;
         int baseValue;
+
         if (maxEntries > 0 && encodedRic is not 0)
         {
             var fullRange = 2 * maxEntries;
-            var ric = encodedRic + (known / fullRange * fullRange);
-            if (ric > known) ric -= fullRange;
+            if (encodedRic > fullRange) throw new InvalidOperationException("QPACK: Required Insert Count вне допустимого диапазона");
+
+            var maxValue = received + maxEntries;
+            var maxWrapped = maxValue / fullRange * fullRange;
+            var ric = maxWrapped + encodedRic - 1;
+
+            if (ric > maxValue)
+            {
+                if (ric <= fullRange) throw new InvalidOperationException("QPACK: Required Insert Count не разворачивается");
+
+                ric -= fullRange;
+            }
+
+            if (ric is 0) throw new InvalidOperationException("QPACK: Required Insert Count оказался нулевым после разворота");
+
             requiredInsertCount = ric;
+
+            // Блокировка — штатное состояние: сервер вправе сослаться на вставки, которые ещё в
+            // пути по встречному потоку. Ждать их обязан вызывающий.
+            if (requiredInsertCount > received) throw new QPackBlockedException(requiredInsertCount);
+
             baseValue = sign
-                ? (requiredInsertCount - deltaBase - 1)
-                : (requiredInsertCount + deltaBase);
-            if (requiredInsertCount > known) throw new QPackBlockedException(requiredInsertCount);
+                ? requiredInsertCount - deltaBase - 1
+                : requiredInsertCount + deltaBase;
         }
         else
         {
@@ -118,8 +193,12 @@ public sealed class QPackDecoder : IHeadersDecoder
             var tStatic = (b & 0b0001_0000) is not 0;
             _ = nFlag;
             var nameIndex = HeadersBinaryPrimitives.ReadVarInt(ref r, 4, 0x0F);
-            var nameBytes = tStatic ? QPackStaticTable.Get(nameIndex).Name : dynamicTable.GetByRelative_RepresentationBase(baseValue, nameIndex).Name;
-            var value = HPackDecoder.ReadStringBytes(ref r);
+            // Имя МАТЕРИАЛИЗУЕМ до чтения значения. Декодировщик Huffman отдаёт срез общего
+            // временного буфера, действительный лишь до следующего вызова, — и чтение значения
+            // затирает имя. Проявляется это так, что именем заголовка становится начало его же
+            // значения: ошибка выглядит как испорченные данные сервера.
+            var nameBytes = (tStatic ? QPackStaticTable.Get(nameIndex).Name : dynamicTable.GetByRelative_RepresentationBase(baseValue, nameIndex).Name).ToArray();
+            var value = HPackDecoder.ReadStringBytes(ref r).ToArray();
             result.Add(new KeyValuePair<string, string>(HPackDecoder.AsciiLowerString(nameBytes), HPackDecoder.AsciiString(value)));
             return true;
         }
@@ -132,8 +211,12 @@ public sealed class QPackDecoder : IHeadersDecoder
         // Literal with literal name
         if ((b & 0b1110_0000) is 0b0010_0000)
         {
-            var name = ReadStringBytes(ref r, 3, 0x07, 0x08);
-            var value = HPackDecoder.ReadStringBytes(ref r);
+            // Имя МАТЕРИАЛИЗУЕМ до чтения значения. Декодировщик Huffman отдаёт срез общего
+            // временного буфера, действительный лишь до следующего вызова, — и чтение значения
+            // затирает имя. Проявляется это так, что именем заголовка становится начало его же
+            // значения: ошибка выглядит как испорченные данные сервера.
+            var name = ReadStringBytes(ref r, 3, 0x07, 0x08).ToArray();
+            var value = HPackDecoder.ReadStringBytes(ref r).ToArray();
             result.Add(new KeyValuePair<string, string>(HPackDecoder.AsciiLowerString(name), HPackDecoder.AsciiString(value)));
             return true;
         }
@@ -153,8 +236,12 @@ public sealed class QPackDecoder : IHeadersDecoder
             var nFlag = (b & 0b0000_1000) is not 0;
             _ = nFlag;
             var postNameIdx = HeadersBinaryPrimitives.ReadVarInt(ref r, 3, 0x07);
-            var name = dynamicTable.GetByAbsolute(baseValue + postNameIdx).Name;
-            var value = HPackDecoder.ReadStringBytes(ref r);
+            // Имя МАТЕРИАЛИЗУЕМ до чтения значения. Декодировщик Huffman отдаёт срез общего
+            // временного буфера, действительный лишь до следующего вызова, — и чтение значения
+            // затирает имя. Проявляется это так, что именем заголовка становится начало его же
+            // значения: ошибка выглядит как испорченные данные сервера.
+            var name = dynamicTable.GetByAbsolute(baseValue + postNameIdx).Name.ToArray();
+            var value = HPackDecoder.ReadStringBytes(ref r).ToArray();
             result.Add(new KeyValuePair<string, string>(HPackDecoder.AsciiLowerString(name), HPackDecoder.AsciiString(value)));
             return true;
         }

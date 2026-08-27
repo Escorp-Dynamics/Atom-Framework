@@ -35,11 +35,21 @@ public readonly struct PskIdentity : IEquatable<PskIdentity>
         _ => default,
     };
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, равны ли две идентичности PSK.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если идентичности совпадают.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator ==(PskIdentity left, PskIdentity right) => left.Equals(right);
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, различаются ли две идентичности PSK.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если идентичности различаются.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator !=(PskIdentity left, PskIdentity right) => !(left == right);
 }

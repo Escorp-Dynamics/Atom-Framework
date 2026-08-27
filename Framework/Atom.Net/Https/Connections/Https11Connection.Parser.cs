@@ -1,4 +1,5 @@
-﻿using System.Net;
+using System.Net;
+using Atom.Net.Https.Headers;
 namespace Atom.Net.Https.Connections;
 
 internal sealed partial class Https11Connection
@@ -13,7 +14,8 @@ internal sealed partial class Https11Connection
             while (true)
             {
                 var statusLine = await ReadLineAsync(headerToken).ConfigureAwait(false)
-                    ?? throw new InvalidOperationException("Сервер закрыл соединение до status line.");
+                    // Ответа не было вовсе — запрос до обработки не дошёл и может быть повторён.
+                    ?? throw new HttpsIdleConnectionClosedException("Сервер закрыл соединение, не прислав строку состояния");
                 AccumulateHeaderBytes(headerBudget, statusLine);
 
                 var (version, statusCode, reasonPhrase) = ParseStatusLine(statusLine);
@@ -52,7 +54,7 @@ internal sealed partial class Https11Connection
         {
             var headersState = await ReadHeadersAsync(response, headerBudget, headerToken).ConfigureAwait(false);
             var body = await ReadResponseBodyAsync(request.Method, statusCode, headersState, cancellationToken).ConfigureAwait(false);
-            response.Content = CreateResponseContent(body, headersState.ContentHeaders);
+            response.Content = CreateResponseContent(body, headersState, options.AutoDecompression);
             ApplyConnectionDisposition(headersState);
 
             var completed = response;
@@ -65,19 +67,40 @@ internal sealed partial class Https11Connection
         }
     }
 
-    private static HttpContent CreateResponseContent(byte[] body, List<KeyValuePair<string, string>> contentHeaders)
+    private static HttpContent CreateResponseContent(byte[] body, ResponseHeadersState state, bool autoDecompression)
     {
+        var decoded = false;
+
+        if (autoDecompression && ContentEncodingDecoder.TryDecode(body, state.ContentEncoding, out var inflated))
+        {
+            body = inflated;
+            decoded = true;
+        }
+
         HttpContent content = new ByteArrayContent(body);
 
-        foreach (var header in contentHeaders)
+        foreach (var header in state.ContentHeaders)
+        {
+            // Распакованному телу противоречат оба заголовка: content-encoding описывает сжатие,
+            // которого в нём уже нет, а content-length — длину сжатого.
+            if (decoded && IsContentDescriptionHeader(header.Key)) continue;
+
             content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        if (decoded) content.Headers.ContentLength = body.Length;
 
         return content;
     }
 
+    private static bool IsContentDescriptionHeader(string name)
+        => string.Equals(name, "Content-Encoding", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, "Content-Length", StringComparison.OrdinalIgnoreCase);
+
     private async ValueTask<ResponseHeadersState> ReadHeadersAsync(HttpResponseMessage response, HeaderBudget headerBudget, CancellationToken cancellationToken)
     {
         var state = new ResponseHeadersState();
+        string? pending = null;
 
         while (true)
         {
@@ -85,9 +108,32 @@ internal sealed partial class Https11Connection
                 ?? throw new InvalidOperationException("Сервер закрыл соединение внутри блока заголовков.");
             AccumulateHeaderBytes(headerBudget, line);
 
-            if (line.Length is 0) return state;
+            if (line.Length is 0)
+            {
+                if (pending is not null) ParseHeaderLine(response, state, pending);
 
-            ParseHeaderLine(response, state, line);
+                return state;
+            }
+
+            // ★ Строка, начинающаяся с пробела или табуляции, — ПРОДОЛЖЕНИЕ предыдущего
+            // заголовка (устаревшее «складывание», RFC 7230 §3.2.4). Спецификация от него
+            // отказалась, но серверы так делают до сих пор, и браузеры такие строки склеивают.
+            // Мы же принимали продолжение за новый заголовок и падали на нём: у куска нет
+            // двоеточия, потому что оно осталось в первой строке.
+            //
+            // Найдено массовым прогоном: длинная политика безопасности, разложенная сервером на
+            // несколько строк, роняла весь ответ.
+            if (line[0] is ' ' or '\t')
+            {
+                if (pending is null) throw new InvalidOperationException($"Продолжение заголовка без самого заголовка: '{line}'.");
+
+                pending = string.Concat(pending, " ", line.Trim());
+                continue;
+            }
+
+            if (pending is not null) ParseHeaderLine(response, state, pending);
+
+            pending = line;
         }
     }
 
@@ -131,6 +177,9 @@ internal sealed partial class Https11Connection
 
         if (string.Equals(name, "Connection", StringComparison.OrdinalIgnoreCase) && value.Contains("close", StringComparison.OrdinalIgnoreCase))
             state.ConnectionClose = true;
+
+        if (string.Equals(name, "Content-Encoding", StringComparison.OrdinalIgnoreCase))
+            state.ContentEncoding = value;
 
         if (string.Equals(name, "Content-Length", StringComparison.OrdinalIgnoreCase)
             && long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsedContentLength)

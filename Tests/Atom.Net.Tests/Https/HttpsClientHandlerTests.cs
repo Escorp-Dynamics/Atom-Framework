@@ -243,9 +243,11 @@ public sealed class HttpsClientHandlerTests
 
             Assert.Multiple(() =>
             {
+                // ★ Сжатие у Safari действительно скромнее, чем у остальных: zstd он не
+                // объявляет. А вот язык у него ПОЛНЫЙ — прежнее ожидание «en-US» без веса было
+                // догадкой и записью Safari 18.4 не подтвердилось.
                 Assert.That(request.Head, Does.Contain("Accept-Encoding: gzip, deflate, br\r\n"));
-                Assert.That(request.Head, Does.Contain("Accept-Language: en-US\r\n"));
-                Assert.That(request.Head, Does.Not.Contain("Accept-Language: en-US,en;q=0.9\r\n"));
+                Assert.That(request.Head, Does.Contain("Accept-Language: en-US,en;q=0.9\r\n"));
                 Assert.That(request.Head, Does.Not.Contain("zstd"));
                 Assert.That(request.Head, Does.Not.Contain("\r\nsec-ch-ua:"));
             });

@@ -31,6 +31,19 @@ public enum NamedGroup : ushort
     /// </summary>
     X448 = 0x001E,
 
+    /// <summary>
+    /// Гибрид X25519 и ML-KEM-768 (draft-kwiatkowski-tls-ecdhe-mlkem).
+    /// </summary>
+    /// <remarks>
+    /// Основная группа современного Chrome: он ставит её ПЕРВОЙ в supported_groups и сразу шлёт
+    /// для неё долю ключа. Клиент без неё отличим от браузера с первого пакета — и заметно, потому
+    /// что доля ключа занимает 1216 байт против 32 у X25519, то есть меняется даже размер
+    /// ClientHello.
+    ///
+    /// Общий секрет — конкатенация: сначала секрет ML-KEM (32 байта), затем X25519 (32 байта).
+    /// </remarks>
+    X25519MLKem768 = 0x11EC,
+
     // --- Finite Field DH (optional, legacy) ---
 
     /// <summary>

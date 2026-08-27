@@ -164,64 +164,50 @@ internal static class HPackHuffman
     {
         EnsureInitialized();
 
-        uint acc = 0;
-        var nBits = 0;
         var outBuf = EnsureScratch(Math.Max(64, data.Length * 2));
         var outPos = 0;
-        var node = 1;
-        for (var i = 0; i < data.Length; i++)
-        {
-            acc = (acc << 8) | data[i];
-            nBits += 8;
-            (node, nBits, outPos, outBuf) = DecodeBits(acc, nBits, node, outPos, outBuf);
-        }
-        ValidateDecodeFinalState(node, nBits, acc);
-        return new ReadOnlySpan<byte>(outBuf, 0, outPos);
-    }
 
-    /// <summary>
-    /// Обрабатывает побитовый обход дерева Хаффмана и эмит символы в буфер.
-    /// </summary>
-    private static (int node, int nBits, int outPos, byte[] outBuf) DecodeBits(uint acc, int nBits, int node, int outPos, byte[] outBuf)
-    {
-        var step = Math.Min(nBits, MaxCodeBits);
-        var consumed = 0;
-        while (nBits > 0 && consumed < step)
+        // Идём строго побитово, без накопителя. Прежняя версия складывала биты в 32-разрядный
+        // регистр и извлекала за один проход ОДИН символ на входной байт: остаток накапливался,
+        // счётчик бит уходил за разрядность, и сдвиг начинал считать по модулю 32 — поток
+        // рассыпался на первом же реальном ответе. Побитовый обход не имеет ни того, ни другого
+        // ограничения и стоит столько же: коды HPACK короткие, а дерево лежит в кеше.
+        var node = 1;
+        var partialBits = 0;
+        var partialAllOnes = true;
+
+        foreach (var value in data)
         {
-            var bitIndex = nBits - 1;
-            var bit = (int)((acc >> bitIndex) & 1);
-            nBits--;
-            consumed++;
-            node = (bit == 0) ? nodes[node].Left : nodes[node].Right;
-            if (node is 0)
-                throw new InvalidOperationException("HPACK Huffman: недопустимая последовательность бит (пустая ветка)");
-            var sym = nodes[node].Symbol;
-            if (sym >= 0)
+            for (var shift = 7; shift >= 0; shift--)
             {
-                if (sym is 256)
-                    throw new InvalidOperationException("HPACK Huffman: недопустимый EOS в середине потока");
-                if (outPos == outBuf.Length)
-                    outBuf = EnsureScratch(outBuf.Length << 1);
-                outBuf[outPos++] = (byte)sym;
+                var bit = (value >> shift) & 1;
+
+                node = bit is 0 ? nodes[node].Left : nodes[node].Right;
+                if (node is 0) throw new InvalidOperationException("HPACK Huffman: недопустимая последовательность бит (пустая ветка)");
+
+                partialBits++;
+                if (bit is 0) partialAllOnes = false;
+
+                var symbol = nodes[node].Symbol;
+                if (symbol < 0) continue;
+
+                if (symbol is 256) throw new InvalidOperationException("HPACK Huffman: недопустимый EOS в середине потока");
+
+                if (outPos == outBuf.Length) outBuf = EnsureScratch(outBuf.Length << 1);
+                outBuf[outPos++] = (byte)symbol;
+
                 node = 1;
-                break;
+                partialBits = 0;
+                partialAllOnes = true;
             }
         }
-        return (node, nBits, outPos, outBuf);
-    }
 
-    /// <summary>
-    /// Проверяет финальное состояние декодирования Huffman-блока.
-    /// </summary>
-    private static void ValidateDecodeFinalState(int node, int nBits, uint acc)
-    {
-        if (node is not 1) throw new InvalidOperationException("HPACK Huffman: незавершённый код символа в конце потока");
-        if (nBits > 0)
-        {
-            var mask = (uint)((1 << nBits) - 1);
-            var tail = acc & mask;
-            if (tail != mask) throw new InvalidOperationException("HPACK Huffman: некорректный паддинг (ожидались единицы)");
-        }
+        // Хвост дополняется старшими битами кода EOS, то есть единицами, и не может быть длиннее
+        // семи бит: восемь единиц означали бы, что отброшен целый символ.
+        if (partialBits > 7 || !partialAllOnes)
+            throw new InvalidOperationException("HPACK Huffman: некорректный паддинг (ожидались единицы длиной не более семи бит)");
+
+        return new ReadOnlySpan<byte>(outBuf, 0, outPos);
     }
 
     /// <summary>

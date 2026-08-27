@@ -67,6 +67,41 @@ public readonly struct Http2Settings() : IEquatable<Http2Settings>
     public IEnumerable<StreamPriority> PriorityTree { get; init; } = [];
 
     /// <summary>
+    /// Номер первого потока, открываемого под запрос.
+    /// </summary>
+    /// <remarks>
+    /// Обязан быть нечётным и БОЛЬШЕ любого идентификатора, упомянутого в дереве приоритетов:
+    /// спецификация требует, чтобы номера открываемых клиентом потоков только возрастали, и
+    /// запрос на потоке, который преамбула уже назвала, сервер просто не обслуживает — соединение
+    /// зависает без единой ошибки. Firefox шлёт дерево из потоков 3–11 и начинает запросы с 15;
+    /// Chrome и Safari дерева не строят и начинают с единицы.
+    /// </remarks>
+    public int InitialStreamId { get; init; } = 1;
+
+    /// <summary>
+    /// Приращение окна соединения, отправляемое сразу после преамбулы.
+    /// </summary>
+    /// <remarks>
+    /// Часть отпечатка: значение у браузеров различается и наблюдаемо в первой же датаграмме.
+    /// Замерено: Chromium 15663105, Firefox 12517377.
+    /// </remarks>
+    public uint ConnectionWindowIncrement { get; init; } = 15_663_105;
+
+    /// <summary>
+    /// Порядок псевдозаголовков в блоке HEADERS.
+    /// </summary>
+    /// <remarks>
+    /// ★ Наблюдаем напрямую: он входит последним полем в сигнатуру HTTP/2, которую строят по
+    /// началу соединения. У браузеров он РАЗНЫЙ и устойчивый — Chrome отправляет
+    /// <c>m,a,s,p</c>, Firefox <c>m,p,a,s</c>. Раньше порядок был зашит хромиумовским для всех, и
+    /// профиль Firefox совпадал с браузером во всём, кроме этого поля.
+    ///
+    /// Буквы — первые буквы имён: m = :method, a = :authority, s = :scheme, p = :path. Так их
+    /// записывают и в самой сигнатуре, поэтому сверять значение с замером можно глазами.
+    /// </remarks>
+    public string PseudoHeaderOrder { get; init; } = "masp";
+
+    /// <summary>
     /// 
     /// </summary>
     public bool UseCookieCrumbling { get; init; } = true;
@@ -184,11 +219,21 @@ public readonly struct Http2Settings() : IEquatable<Http2Settings>
         _ => default,
     };
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, равны ли два набора настроек HTTP/2.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если значения совпадают.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator ==(Http2Settings left, Http2Settings right) => left.Equals(right);
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, различаются ли два набора настроек HTTP/2.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если значения различаются.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator !=(Http2Settings left, Http2Settings right) => !(left == right);
 }

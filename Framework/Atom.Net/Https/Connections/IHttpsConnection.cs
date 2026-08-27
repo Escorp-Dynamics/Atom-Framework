@@ -66,6 +66,18 @@ internal interface IHttpsConnection : IDisposable, IAsyncDisposable
     long LastActivityTimestamp { get; }
 
     /// <summary>
+    /// Момент установки соединения (монотонная метка Stopwatch.GetTimestamp()).
+    /// Используется пулом для принудительной замены слишком долго живущих соединений.
+    /// </summary>
+    /// <remarks>
+    /// Отличается от <see cref="LastActivityTimestamp"/> по смыслу: активность откладывает
+    /// вытеснение по простою, а вот предельное время жизни соединения она откладывать не должна —
+    /// иначе постоянно используемое соединение не сменится никогда, и смена адреса за DNS или
+    /// ротация исходящего IP не произойдут.
+    /// </remarks>
+    long CreatedTimestamp { get; }
+
+    /// <summary>
     /// Учёт трафика по соединению (вход/выход) с момента открытия.
     /// </summary>
     Traffic Traffic { get; }

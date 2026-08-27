@@ -50,9 +50,9 @@ internal static class QPackStaticTable
     {
         0 => new TableEntry(":authority"u8, []),
         1 => new TableEntry(":path"u8, "/"u8),
-        2 => new TableEntry("age"u8, []),
+        2 => new TableEntry("age"u8, "0"u8),
         3 => new TableEntry("content-disposition"u8, []),
-        4 => new TableEntry("content-length"u8, []),
+        4 => new TableEntry("content-length"u8, "0"u8),
         5 => new TableEntry("cookie"u8, []),
         6 => new TableEntry("date"u8, []),
         7 => new TableEntry("etag"u8, []),
@@ -125,8 +125,8 @@ internal static class QPackStaticTable
         71 => new TableEntry(":status"u8, "500"u8),
 
         72 => new TableEntry("accept-language"u8, []),
-        73 => new TableEntry("access-control-allow-credentials"u8, "TRUE"u8), // см. errata; оставляем как в RFC 9204
-        74 => new TableEntry("access-control-allow-credentials"u8, "FALSE"u8),
+        73 => new TableEntry("access-control-allow-credentials"u8, "FALSE"u8),
+        74 => new TableEntry("access-control-allow-credentials"u8, "TRUE"u8),
         75 => new TableEntry("access-control-allow-headers"u8, "*"u8),
         76 => new TableEntry("access-control-allow-methods"u8, "get"u8),
         77 => new TableEntry("access-control-allow-methods"u8, "get, post, options"u8),
@@ -139,18 +139,22 @@ internal static class QPackStaticTable
         84 => new TableEntry("authorization"u8, []),
         85 => new TableEntry("content-security-policy"u8, "script-src 'none'; object-src 'none'; base-uri 'none'"u8),
         86 => new TableEntry("early-data"u8, "1"u8),
-        87 => new TableEntry("expect-ct"u8, "max-age=0"u8),
-        88 => new TableEntry("origin"u8, []),
-        89 => new TableEntry("purpose"u8, "prefetch"u8),
-        90 => new TableEntry("server"u8, []),
-        91 => new TableEntry("timing-allow-origin"u8, "*"u8),
-        92 => new TableEntry("upgrade-insecure-requests"u8, "1"u8),
-        93 => new TableEntry("user-agent"u8, []),
-        94 => new TableEntry("x-forwarded-for"u8, []),
-        95 => new TableEntry("x-frame-options"u8, "deny"u8),
-        96 => new TableEntry("x-frame-options"u8, "sameorigin"u8),
-        97 => new TableEntry(":path"u8, "/index.html"u8),
-        98 => new TableEntry("content-type"u8, "image/svg+xml"u8),
+        // Хвост таблицы сверен с RFC 9204, приложение A. Прежняя редакция теряла записи
+        // "forwarded" и "if-range", из-за чего ВСЁ, что идёт дальше, съезжало на два индекса:
+        // сервер ссылался на "server", а мы читали "upgrade-insecure-requests". Ошибка не ломает
+        // обмен и не даёт исключения — она молча подменяет имена заголовков.
+        87 => new TableEntry("expect-ct"u8, []),
+        88 => new TableEntry("forwarded"u8, []),
+        89 => new TableEntry("if-range"u8, []),
+        90 => new TableEntry("origin"u8, []),
+        91 => new TableEntry("purpose"u8, "prefetch"u8),
+        92 => new TableEntry("server"u8, []),
+        93 => new TableEntry("timing-allow-origin"u8, "*"u8),
+        94 => new TableEntry("upgrade-insecure-requests"u8, "1"u8),
+        95 => new TableEntry("user-agent"u8, []),
+        96 => new TableEntry("x-forwarded-for"u8, []),
+        97 => new TableEntry("x-frame-options"u8, "deny"u8),
+        98 => new TableEntry("x-frame-options"u8, "sameorigin"u8),
 
         _ => throw new ArgumentOutOfRangeException(nameof(index))
     };

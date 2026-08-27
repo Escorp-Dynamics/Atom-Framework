@@ -61,6 +61,18 @@ public static class Grease
     public static ushort Extension => Pick(scope: 3);
 
     /// <summary>
+    /// Возвращает GREASE-значение для расширения по его порядковому месту в списке.
+    /// </summary>
+    /// <param name="slot">Место расширения: 0 — первое, 1 — второе и так далее.</param>
+    /// <returns>Значение из таблицы RFC 8701.</returns>
+    /// <remarks>
+    /// Браузер вставляет в список расширений ДВА значения GREASE, и они РАЗНЫЕ. Выдав обоим одно
+    /// и то же, мы получили бы список с повторяющимся типом расширения — состояние, которого у
+    /// браузера не бывает и которое к тому же запрещено спецификацией.
+    /// </remarks>
+    public static ushort ExtensionAt(int slot) => Pick((byte)(3 + slot));
+
+    /// <summary>
     /// Выбор GREASE по текущему seed и заданному домену.
     /// Бросает InvalidOperationException, если Enter(..) не вызывался.
     /// </summary>

@@ -35,11 +35,21 @@ public readonly struct ConnectionSettings : IEquatable<ConnectionSettings>
         _ => default,
     };
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, равны ли два параметра соединения.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если значения совпадают.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator ==(ConnectionSettings left, ConnectionSettings right) => left.Equals(right);
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, различаются ли два параметра соединения.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если значения различаются.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator !=(ConnectionSettings left, ConnectionSettings right) => !(left == right);
 }

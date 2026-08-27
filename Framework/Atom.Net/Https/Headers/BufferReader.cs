@@ -7,7 +7,11 @@ namespace Atom.Net.Https.Headers;
 internal ref struct BufferReader
 {
     private readonly ReadOnlySpan<byte> span;
+
+    // Поле, а не автосвойство: читатель — ref-структура, и позиция меняется по ссылке.
+#pragma warning disable IDE0032
     private int position;
+#pragma warning restore IDE0032
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public BufferReader(ReadOnlySpan<byte> s)
@@ -17,6 +21,9 @@ internal ref struct BufferReader
     }
 
     public readonly bool Eof => position >= span.Length;
+
+    /// <summary>Сколько байт уже прочитано.</summary>
+    public readonly int Position => position;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public byte ReadByte()

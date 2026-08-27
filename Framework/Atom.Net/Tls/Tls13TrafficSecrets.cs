@@ -54,11 +54,21 @@ public readonly struct Tls13TrafficSecrets(ReadOnlyMemory<byte> ch, ReadOnlyMemo
         _ => default,
     };
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, равны ли два набора секретов.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если наборы совпадают.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator ==(Tls13TrafficSecrets left, Tls13TrafficSecrets right) => left.Equals(right);
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, различаются ли два набора секретов.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если наборы различаются.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator !=(Tls13TrafficSecrets left, Tls13TrafficSecrets right) => !(left == right);
 }

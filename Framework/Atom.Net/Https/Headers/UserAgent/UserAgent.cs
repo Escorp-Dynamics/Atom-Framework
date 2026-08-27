@@ -240,11 +240,21 @@ public readonly struct UserAgent : IParsable<UserAgent>, IEquatable<UserAgent>
         return !secondEnumerator.MoveNext();
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, равны ли значения.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если значения совпадают.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator ==(UserAgent left, UserAgent right) => left.Equals(right);
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, различаются ли значения.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если значения различаются.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator !=(UserAgent left, UserAgent right) => !(left == right);
 }

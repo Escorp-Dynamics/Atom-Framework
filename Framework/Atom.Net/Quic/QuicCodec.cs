@@ -3,6 +3,13 @@ using System.Runtime.CompilerServices;
 
 namespace Atom.Net.Quic;
 
+/// <summary>
+/// Числа переменной длины QUIC (RFC 9000, §16).
+/// </summary>
+/// <remarks>
+/// Два старших бита первого байта задают длину записи: 1, 2, 4 или 8 байт. Формат встречается
+/// буквально в каждом поле протокола, поэтому кодек лежит на самом горячем пути.
+/// </remarks>
 internal static class QuicCodec
 {
     /// <summary>Возвращает закодированную длину (1,2,4,8).</summary>
@@ -64,20 +71,27 @@ internal static class QuicCodec
         written = 0;
         if (dst.IsEmpty) return false;
 
-        if (value <= 0x3Fu)
+        // Разбиение числа на разряды — не потеря данных, но для всего фреймворка включена
+        // проверка переполнения, и без unchecked запись любого значения больше 255 бросала бы
+        // исключение. Та же ловушка уже стоила отладки в кадрах HTTP/2 и в записях TLS 1.2.
+        unchecked
         {
-            dst[0] = (byte)(value & 0x3F);
-            written = 1;
-            return true;
-        }
+            if (value <= 0x3Fu)
+            {
+                dst[0] = (byte)(value & 0x3F);
+                written = 1;
+                return true;
+            }
 
-        if (value <= 0x3FFFu)
-        {
-            if (dst.Length < 2) return false;
-            dst[0] = (byte)(0x40 | ((value >> 8) & 0x3F));
-            dst[1] = (byte)value;
-            written = 2;
-            return true;
+            if (value <= 0x3FFFu)
+            {
+                if (dst.Length < 2) return false;
+
+                dst[0] = (byte)(0x40 | ((value >> 8) & 0x3F));
+                dst[1] = (byte)value;
+                written = 2;
+                return true;
+            }
         }
 
         if (value <= 0x3FFF_FFFFu)

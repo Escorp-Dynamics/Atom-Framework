@@ -47,7 +47,11 @@ public sealed class HPackDecoder : IHeadersDecoder
         return dynamicTable.Get(dynPos);
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Декодирует блок заголовков HPACK.
+    /// </summary>
+    /// <param name="block">Блок в кодировке HPACK.</param>
+    /// <returns>Пары «имя, значение» в порядке следования.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [SkipLocalsInit]
     public IEnumerable<KeyValuePair<string, string>> Decode(ReadOnlySpan<byte> block)
@@ -55,7 +59,7 @@ public sealed class HPackDecoder : IHeadersDecoder
         // Копируем входные данные в массив, чтобы не захватывать stackalloc/Span через iterator state
         var arr = block.ToArray();
         var result = new List<KeyValuePair<string, string>>();
-        int pos = 0;
+        var pos = 0;
         while (pos < arr.Length)
         {
             var b = arr[pos];
@@ -105,7 +109,7 @@ public sealed class HPackDecoder : IHeadersDecoder
     /// </summary>
     private void ProcessIndexedHeader(byte[] arr, ref int pos, List<KeyValuePair<string, string>> result)
     {
-        var index = ReadVarIntFromArray(arr, ref pos, 7, 0b0111_1111);
+        var index = ReadVarIntFromArray(arr, ref pos, 0b0111_1111);
         var e = ResolveIndex(index);
         var nameArr = e.Name.ToArray();
         var valueArr = e.Value.ToArray();
@@ -122,7 +126,7 @@ public sealed class HPackDecoder : IHeadersDecoder
     /// </summary>
     private void ProcessDynamicTableSizeUpdate(byte[] arr, ref int pos)
     {
-        var size = ReadVarIntFromArray(arr, ref pos, 5, 0b0001_1111);
+        var size = ReadVarIntFromArray(arr, ref pos, 0b0001_1111);
         DynamicTableSize = size;
         dynamicTable.SetCapacity(size);
     }
@@ -133,29 +137,26 @@ public sealed class HPackDecoder : IHeadersDecoder
     private void ProcessLiteralHeader(byte[] arr, ref int pos, byte b, List<KeyValuePair<string, string>> result)
     {
         var incremental = (b & 0b1100_0000) == 0b0100_0000;
-        var prefix = incremental ? 6 : 4;
         const byte Mask6 = 0b_0011_1111;
         const byte Mask4 = 0b_0000_1111;
         var mask = incremental ? Mask6 : Mask4;
-        byte[] nameArr = Array.Empty<byte>();
-        int nameOffset = 0, nameLen = 0;
+        byte[] nameArr;
         var nameIndexed = (b & mask) != 0;
         if (nameIndexed)
         {
-            var nameIndex = ReadVarIntFromArray(arr, ref pos, prefix, mask);
+            var nameIndex = ReadVarIntFromArray(arr, ref pos, mask);
             var entry = ResolveIndex(nameIndex);
             nameArr = entry.Name.ToArray();
-            nameOffset = 0;
-            nameLen = nameArr.Length;
         }
         else
         {
             pos++;
             var nameSpan = ReadStringBytesFromArray(arr, pos, out pos);
             nameArr = nameSpan.ToArray();
-            nameOffset = 0;
-            nameLen = nameArr.Length;
         }
+
+        const int nameOffset = 0;
+        var nameLen = nameArr.Length;
         var valueSpan = ReadStringBytesFromArray(arr, pos, out pos);
         var valueArr = valueSpan.ToArray();
         result.Add(new KeyValuePair<string, string>(AsciiLowerString(nameArr, nameOffset, nameLen), AsciiString(valueArr, 0, valueArr.Length)));
@@ -164,11 +165,11 @@ public sealed class HPackDecoder : IHeadersDecoder
     /// <summary>
     /// Читает переменную длину int из массива байт.
     /// </summary>
-    private static int ReadVarIntFromArray(byte[] arr, ref int pos, int prefix, int mask)
+    private static int ReadVarIntFromArray(byte[] arr, ref int pos, int mask)
     {
-        int value = arr[pos++] & mask;
+        var value = arr[pos++] & mask;
         if (value < mask) return value;
-        int m = 0;
+        var m = 0;
         int b;
         do
         {
@@ -186,7 +187,7 @@ public sealed class HPackDecoder : IHeadersDecoder
     {
         var peek = arr[pos];
         var huffman = (peek & 0x80) != 0;
-        var len = ReadVarIntFromArray(arr, ref pos, 7, 0x7F);
+        var len = ReadVarIntFromArray(arr, ref pos, 0x7F);
         var data = new ReadOnlySpan<byte>(arr, pos, len);
         pos += len;
         newPos = pos;
@@ -200,13 +201,34 @@ public sealed class HPackDecoder : IHeadersDecoder
     internal static string AsciiLowerString(byte[] arr, int offset, int length)
     {
         var chars = new char[length];
-        for (int i = 0; i < length; i++)
+        for (var i = 0; i < length; i++)
         {
             var b = arr[offset + i];
-            if ((uint)(b - (byte)'A') <= ('Z' - 'A')) b = (byte)(b + 32);
+            // Приём «вычесть и сравнить как беззнаковое» проверяет попадание в диапазон одним
+            // сравнением. Для байтов меньше 'A' разность отрицательна, и в проверяемом контексте,
+            // включённом для всего фреймворка, приведение бросало бы исключение — хотя именно
+            // переполнение здесь и делает проверку однострочной.
+            if (unchecked((uint)(b - (byte)'A')) <= ('Z' - 'A')) b = unchecked((byte)(b + 32));
             chars[i] = (char)b;
         }
         return new string(chars);
+    }
+
+    /// <summary>
+    /// Приводит последовательность байт ASCII к строке в нижнем регистре.
+    /// </summary>
+    /// <param name="value">Байты ASCII.</param>
+    /// <returns>Строка.</returns>
+    /// <remarks>
+    /// Перегрузка для QPACK: там имена и значения уже лежат отдельными срезами, и передавать
+    /// смещение с длиной было бы лишним шагом на горячем пути разбора заголовков.
+    /// </remarks>
+    internal static string AsciiLowerString(ReadOnlySpan<byte> value)
+    {
+        if (value.IsEmpty) return string.Empty;
+
+        var buffer = value.ToArray();
+        return AsciiLowerString(buffer, 0, buffer.Length);
     }
 
     /// <summary>
@@ -216,12 +238,25 @@ public sealed class HPackDecoder : IHeadersDecoder
     internal static string AsciiString(byte[] arr, int offset, int length)
     {
         var chars = new char[length];
-        for (int i = 0; i < length; i++)
+        for (var i = 0; i < length; i++)
         {
             var b = arr[offset + i];
             chars[i] = (char)(b <= 0x7F ? b : (byte)'?');
         }
         return new string(chars);
+    }
+
+    /// <summary>
+    /// Приводит последовательность байт ASCII к строке.
+    /// </summary>
+    /// <param name="value">Байты ASCII.</param>
+    /// <returns>Строка.</returns>
+    internal static string AsciiString(ReadOnlySpan<byte> value)
+    {
+        if (value.IsEmpty) return string.Empty;
+
+        var buffer = value.ToArray();
+        return AsciiString(buffer, 0, buffer.Length);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

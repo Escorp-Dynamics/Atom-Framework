@@ -63,6 +63,27 @@ public readonly struct TlsSettings() : IEquatable<TlsSettings>
     /// </summary>
     public TimeSpan HandshakeTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
+    /// <summary>
+    /// Переставлять ли расширения ClientHello заново на каждое рукопожатие.
+    /// </summary>
+    /// <remarks>
+    /// Включается профилем браузера, который так себя ведёт. Подробности, замеры и правило
+    /// закрепления — в <see cref="ClientHelloExtensionPermutation"/>.
+    ///
+    /// ★ Отпечаток при этом перестаёт быть постоянным, и это НЕ дефект: у браузера он тоже не
+    /// постоянен. Сверять такие профили нужно по составу расширений, а не по хэшу ja3.
+    /// </remarks>
+    public bool PermuteExtensions { get; init; }
+
+    /// <summary>
+    /// Идентификаторы расширений, которые перестановка не двигает.
+    /// </summary>
+    /// <remarks>
+    /// Подставные значения и расширения, обязанные замыкать сообщение, закрепляются сами;
+    /// здесь перечисляется лишь то, что закреплено особенностью конкретного браузера.
+    /// </remarks>
+    public IReadOnlyCollection<ushort>? PermutationAnchors { get; init; }
+
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override int GetHashCode()
@@ -77,6 +98,8 @@ public readonly struct TlsSettings() : IEquatable<TlsSettings>
         hashCode.Add(SessionIdPolicy);
         hashCode.Add(Delay);
         hashCode.Add(HandshakeTimeout);
+        hashCode.Add(PermuteExtensions);
+        hashCode.Add(PermutationAnchors);
         return hashCode.ToHashCode();
     }
 
@@ -87,7 +110,9 @@ public readonly struct TlsSettings() : IEquatable<TlsSettings>
         && CheckCertificateRevocationList.Equals(other.CheckCertificateRevocationList)
         && Equals(ServerCertificateValidationCallback, other.ServerCertificateValidationCallback)
         && SessionIdPolicy.Equals(other.SessionIdPolicy) && Delay.Equals(other.Delay)
-        && HandshakeTimeout.Equals(other.HandshakeTimeout);
+        && HandshakeTimeout.Equals(other.HandshakeTimeout)
+        && PermuteExtensions.Equals(other.PermuteExtensions)
+        && Equals(PermutationAnchors, other.PermutationAnchors);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

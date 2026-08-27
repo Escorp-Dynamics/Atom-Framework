@@ -12,12 +12,30 @@ namespace Atom.Net.Tls;
 /// </summary>
 public partial class ClientHelloBuilder : IBuilder<ReadOnlySpan<byte>, ClientHelloBuilder>
 {
-    private readonly byte[] buffer = new byte[4096];
+    /// <summary>
+    /// Начальный размер буфера сообщения.
+    /// </summary>
+    /// <remarks>
+    /// Замер нынешних профилей: Chrome 1796 байт, Firefox 1875 — запас двукратный. Но запас
+    /// кончается незаметно: постквантовая доля ключа занимает больше килобайта, и любое
+    /// расширение состава — новая доля, тикет возобновления, длинное имя узла — способно вывести
+    /// сообщение за предел. Поэтому буфер РАСТЁТ, а не обрывает сборку: фиксированный размер
+    /// здесь означал бы жёсткий отказ на ровном месте.
+    /// </remarks>
+    private const int InitialBufferSize = 4096;
+
+    private byte[] buffer = new byte[InitialBufferSize];
 
     private readonly List<ushort> cipherSuites = [];
     private readonly List<ITlsExtension> extensions = [];
     private SessionIdPolicy sessionIdPolicy;
     private bool useVersionFallback;
+
+    /// <summary>Закреплённое случайное число: непусто только для повторного приветствия.</summary>
+    private ReadOnlyMemory<byte> fixedRandom;
+
+    /// <summary>Закреплённый идентификатор сессии: непусто только для повторного приветствия.</summary>
+    private ReadOnlyMemory<byte> fixedSessionId;
 
     private bool IsGreaseCipherSuitesEnabled
     {
@@ -30,6 +48,39 @@ public partial class ClientHelloBuilder : IBuilder<ReadOnlySpan<byte>, ClientHel
             }
 
             return default;
+        }
+    }
+
+    /// <summary>
+    /// Нужно ли добавлять сигнальный набор TLS_EMPTY_RENEGOTIATION_INFO_SCSV.
+    /// </summary>
+    /// <remarks>
+    /// По RFC 5746 клиент сообщает о поддержке защищённого пересогласования ЛИБО этим сигнальным
+    /// набором, ЛИБО расширением renegotiation_info — но не обоими сразу. Браузеры отправляют
+    /// расширение, поэтому при его наличии сигнальный набор лишний: он добавляет в список шифров
+    /// значение, которого у браузера нет, и меняет отпечаток.
+    ///
+    /// ★ Когда предлагается ТОЛЬКО TLS 1.3, не нужно ни то, ни другое: пересогласования в этой
+    /// версии нет как понятия. Замечено на рукопожатии поверх QUIC, где движки Chromium убирают
+    /// renegotiation_info, — сигнальный набор тут же появлялся сам и давал четвёртый набор шифров
+    /// там, где настоящий Chrome отправляет ровно три.
+    /// </remarks>
+    private bool IsRenegotiationScsvRequired
+    {
+        get
+        {
+            foreach (var extension in extensions)
+            {
+                if (extension is RenegotiationInfoTlsExtension) return false;
+
+                if (extension is SupportedVersionsTlsExtension { Versions: var versions }
+                    && !versions.Contains(System.Security.Authentication.SslProtocols.Tls12))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
     }
 
@@ -95,6 +146,24 @@ public partial class ClientHelloBuilder : IBuilder<ReadOnlySpan<byte>, ClientHel
     }
 
     /// <summary>
+    /// Закрепляет случайное число и идентификатор сессии предыдущего приветствия.
+    /// </summary>
+    /// <param name="random">Случайное число первого приветствия.</param>
+    /// <param name="sessionId">Идентификатор сессии первого приветствия.</param>
+    /// <returns>Тот же построитель.</returns>
+    /// <remarks>
+    /// Нужно только для второго приветствия после HelloRetryRequest: спецификация требует
+    /// повторить первое сообщение, изменив лишь долю ключа и добавив эхо cookie.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ClientHelloBuilder WithFixedIdentity(ReadOnlyMemory<byte> random, ReadOnlyMemory<byte> sessionId)
+    {
+        fixedRandom = random;
+        fixedSessionId = sessionId;
+        return this;
+    }
+
+    /// <summary>
     /// Задаёт политику идентификации сессии.
     /// </summary>
     /// <param name="policy">Политика идентификации сессии.</param>
@@ -126,6 +195,9 @@ public partial class ClientHelloBuilder : IBuilder<ReadOnlySpan<byte>, ClientHel
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ReadOnlySpan<byte> Build()
     {
+        // Сборка идёт в один проход, поэтому нужный размер оценивается заранее по составу.
+        EnsureCapacity(EstimateSize());
+
         var span = buffer.AsSpan();
         var offset = 0;
         var stage = "record header";
@@ -148,44 +220,26 @@ public partial class ClientHelloBuilder : IBuilder<ReadOnlySpan<byte>, ClientHel
 
             stage = "client random";
             Span<byte> clientRandom = stackalloc byte[32];
-            RandomNumberGenerator.Fill(clientRandom);
+
+            // ★ Повторное приветствие после HelloRetryRequest обязано совпадать с первым во всём,
+            // кроме доли ключа и эха cookie (RFC 8446, §4.1.2). Свежее случайное число сделало бы
+            // его ЧУЖИМ сообщением: строгий сервер вправе оборвать соединение, а от значения
+            // random зависят ещё и подставные значения GREASE — они разъехались бы вместе с ним.
+            if (fixedRandom.IsEmpty) RandomNumberGenerator.Fill(clientRandom);
+            else fixedRandom.Span.CopyTo(clientRandom);
+
             clientRandom.CopyTo(span.Slice(offset, 32));
             offset += 32;
 
-            if (IsGreaseCipherSuitesEnabled)
-            {
-                using (Grease.Enter(clientRandom))
-                {
-                    stage = "session id";
-                    if (sessionIdPolicy is SessionIdPolicy.Empty)
-                    {
-                        span[offset++] = 0x00;
-                    }
-                    else
-                    {
-                        span[offset++] = 0x20; // 32
-                        RandomNumberGenerator.Fill(span.Slice(offset, 32));
-                        offset += 32;
-                    }
-
-                    stage = "cipher suites";
-                    var pos = cipherSuites.Count > 0 ? 1 : 0;
-                    cipherSuites.Insert(pos, Grease.CipherSuites);
-
-                    if (!cipherSuites.Contains(0x00FF)) cipherSuites.Add(0x00FF);
-                    if (useVersionFallback && !cipherSuites.Contains(0x5600)) cipherSuites.Add(0x5600);
-
-                    WriteCipherSuites(span, ref offset);
-
-                    stage = "compression methods";
-                    span[offset++] = 0x01;
-                    span[offset++] = 0x00;
-
-                    stage = "extensions";
-                    WriteExtensions(span, ref offset);
-                }
-            }
-            else
+            // ★ Область выбора подставных значений открывается ВСЕГДА, даже когда подставных
+            // расширений в профиле нет. Прежде было две ветки — с областью и без, — и профиль,
+            // где подставных расширений нет, а признак GREASE у групп остался, падал изнутри с
+            // «Grease.Enter не вызван». Сочетание законное: состав профиля задаёт вызывающая
+            // сторона, и она не обязана знать о внутренней связи между этими двумя вещами.
+            //
+            // Сама область ничего не отправляет — она лишь делает значения выводимыми из
+            // случайного числа этого приветствия, поэтому лишней не бывает.
+            using (Grease.Enter(clientRandom))
             {
                 stage = "session id";
                 if (sessionIdPolicy is SessionIdPolicy.Empty)
@@ -195,12 +249,19 @@ public partial class ClientHelloBuilder : IBuilder<ReadOnlySpan<byte>, ClientHel
                 else
                 {
                     span[offset++] = 0x20; // 32
-                    RandomNumberGenerator.Fill(span.Slice(offset, 32));
+                    if (fixedSessionId.IsEmpty) RandomNumberGenerator.Fill(span.Slice(offset, 32));
+                    else fixedSessionId.Span.CopyTo(span.Slice(offset, 32));
                     offset += 32;
                 }
 
                 stage = "cipher suites";
-                if (!cipherSuites.Contains(0x00FF)) cipherSuites.Add(0x00FF);
+
+                // ★ ПЕРВЫМ, а не вторым. Браузеры ставят подставной набор в начало списка, и
+                // позиция здесь наблюдаема сама по себе: ни ja3, ни ja4 её не показывают —
+                // оба выбрасывают GREASE перед подсчётом, — а сырые байты показывают.
+                if (IsGreaseCipherSuitesEnabled) cipherSuites.Insert(0, Grease.CipherSuites);
+
+                if (IsRenegotiationScsvRequired && !cipherSuites.Contains(0x00FF)) cipherSuites.Add(0x00FF);
                 if (useVersionFallback && !cipherSuites.Contains(0x5600)) cipherSuites.Add(0x5600);
 
                 WriteCipherSuites(span, ref offset);
@@ -230,7 +291,44 @@ public partial class ClientHelloBuilder : IBuilder<ReadOnlySpan<byte>, ClientHel
         }
     }
 
+    /// <summary>
+    /// Оценивает размер сообщения по нынешнему составу.
+    /// </summary>
+    /// <returns>Оценка сверху в байтах.</returns>
+    /// <remarks>
+    /// Именно СВЕРХУ: занизить оценку значит вернуть жёсткий отказ, ради устранения которого всё
+    /// и делается. Постоянная часть — заголовки записи и рукопожатия, версия, случайное число,
+    /// идентификатор сессии, сжатие и длины векторов.
+    /// </remarks>
+    private int EstimateSize()
+    {
+        const int FixedPart = 5 + 4 + 2 + 32 + 1 + 32 + 2 + 2 + 2;
+
+        var size = FixedPart + (cipherSuites.Count * 2) + 8;
+
+        foreach (var extension in extensions) size += extension.Size + 4;
+
+        return size;
+    }
+
+    /// <summary>
+    /// Обеспечивает вместимость буфера.
+    /// </summary>
+    /// <param name="required">Требуемый размер.</param>
+    private void EnsureCapacity(int required)
+    {
+        if (buffer.Length >= required) return;
+
+        buffer = new byte[Math.Max(required, buffer.Length * 2)];
+    }
+
     /// <inheritdoc/>
+    /// <remarks>
+    /// ★ Сбрасывать надо ВСЁ настраиваемое, без исключений. Построитель пулится, и любое
+    /// оставшееся поле уедет в ClientHello СЛЕДУЮЩЕГО соединения. Признак отката версии
+    /// оставался — а он добавляет в список набор шифров 0x5600, то есть напрямую меняет ja3
+    /// соединения, которое об этом не просило.
+    /// </remarks>
     [Pooled]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void Reset()
@@ -238,6 +336,9 @@ public partial class ClientHelloBuilder : IBuilder<ReadOnlySpan<byte>, ClientHel
         cipherSuites.Clear();
         extensions.Clear();
         sessionIdPolicy = SessionIdPolicy.Empty;
+        useVersionFallback = false;
+        fixedRandom = default;
+        fixedSessionId = default;
         buffer.AsSpan().Clear();
     }
 

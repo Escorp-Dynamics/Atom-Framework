@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Linq;
+using System.Security.Authentication;
 
 namespace Atom.Net.Tls;
 
@@ -52,13 +54,28 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     }
 
     private const string ReadKeyUnset = "Ключи чтения не установлены";
-    private const string PayloadTooShort = "Payload короче explicit IV + tag";
+
+    /// <summary>
+    /// Единственный текст отказа для ЛЮБОЙ неподлинной записи.
+    /// </summary>
+    /// <remarks>
+    /// ★ Раньше отказы различались по месту: «AEAD decrypt failed (TLS1.2)», «…(NST)»,
+    /// «…(post-handshake)», «…(read)», «AEAD length mismatch», «Payload короче explicit IV + tag».
+    /// Для AEAD это было безвредно — подлинность проверяет сам примитив. Для режима CBC
+    /// различимые снаружи причины отказа И ЕСТЬ уязвимость: по ним партнёр превращается в оракул
+    /// (Lucky13/POODLE, RFC 7457 §2.2). Поэтому причина не сообщается ни текстом, ни типом
+    /// исключения, ни кодом алерта.
+    /// </remarks>
+    private const string RecordNotAuthentic = "Запись не прошла проверку подлинности";
 
     private readonly HandshakeTranscript transcript = new();
 
     private State state;
     private ReadOnlyMemory<byte> serverRandom; // 32 байта
     private ReadOnlyMemory<byte> clientRandom; // 32 байта
+
+    /// <summary>Расширения в том порядке, в каком они ушли на провод.</summary>
+    private IEnumerable<Extensions.ITlsExtension>? orderedExtensions;
     private ReadOnlyMemory<byte> premasterSecret; // зависит от KEX, для (EC)DHE получаем из ECDH
     private ushort chosenSuite;
     private NamedGroup chosenGroup; // Выбранная сервером группа (из SKE)
@@ -82,8 +99,21 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     private byte[]? clientWriteIvSalt;    // 4
     private byte[]? serverWriteIvSalt;    // 4
 
+    /// <summary>
+    /// MAC-ключи для наборов на CBC.
+    /// </summary>
+    /// <remarks>
+    /// У AEAD их нет вовсе: подлинность там обеспечивает сам примитив. У CBC подлинность —
+    /// отдельный HMAC на отдельном ключе, и в key_block эти ключи идут ПЕРВЫМИ (RFC 5246 §6.3).
+    /// </remarks>
+    private byte[]? clientWriteMacKey, serverWriteMacKey;
+
     // AEAD и счётчики для 1.2
-    private AesGcmAead? aeadWrite12, aeadRead12;
+    private IAeadCipher? aeadWrite12, aeadRead12;
+
+    /// <summary>Защита записи в режиме CBC — только для наборов «…_CBC_SHA».</summary>
+    private Tls12CbcRecordProtection? cbcWrite12, cbcRead12;
+
     private ulong seqWrite12, seqRead12;
 
     private byte[]? decCache;
@@ -119,9 +149,127 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     private byte[]? serverX25519Pub;
 
     /// <summary>
+    /// Согласован ли набор на основе ChaCha20-Poly1305.
+    /// </summary>
+    /// <remarks>
+    /// Определяет форму записи: у ChaCha20 в TLS 1.2 НЕТ явного вектора инициализации, а nonce
+    /// получается сложением по модулю два фиксированного IV со счётчиком — ровно как в TLS 1.3.
+    /// У AES-GCM запись начинается с восьми байт явного IV. Перепутать эти две формы значит
+    /// получить провал расшифровки на первой же записи.
+    /// </remarks>
+    private bool IsChaChaSuite
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get { EnsureSuiteShape(); return shapeBulk is Tls12BulkCipher.ChaCha20Poly1305; }
+    }
+
+    /// <summary>
+    /// Согласован ли набор на основе AES-CBC с отдельным HMAC.
+    /// </summary>
+    /// <remarks>
+    /// Форма записи у CBC третья, не совпадающая ни с AES-GCM, ни с ChaCha20: явный вектор
+    /// шестнадцатибайтовый и СЛУЧАЙНЫЙ, а длина открытых данных заранее неизвестна — она
+    /// выясняется только после снятия дополнения.
+    /// </remarks>
+    private bool IsCbcSuite
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get { EnsureSuiteShape(); return shapeBulk is Tls12BulkCipher.AesCbc; }
+    }
+
+    /// <summary>Длина явного вектора инициализации в записи для согласованного набора.</summary>
+    /// <remarks>
+    /// Значение берётся из общей таблицы, а не из перечисления кодов по месту: перечисления
+    /// расходятся между собой молча, и расхождение здесь означало бы провал расшифровки на первой
+    /// же записи — то есть «сервер сломался» вместо «мы забыли строчку».
+    /// </remarks>
+    private int RecordExplicitIvLength
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get { EnsureSuiteShape(); return shapeRecordIvLength; }
+    }
+
+    // --- Снимок свойств согласованного набора ------------------------------------------------
+    // ★ Зачем снимок, а не чтение таблицы по месту. Свойства набора нужны по нескольку раз НА
+    // КАЖДУЮ запись, а таблица возвращает структуру из восьми полей: замер показал 4,0 нс на
+    // обращение против 1,6 нс у прежнего перечисления кодов. На запись в 16 КиБ это неразличимо,
+    // но на потоке коротких кадров HTTP/2 набегает уже заметно, а производительность здесь —
+    // главное требование. Снимок оставляет таблицу единственным источником правды и сводит
+    // горячий путь к сравнению двух байт.
+    //
+    // Ключом служит сам chosenSuite, а не флаг «инициализировано»: набор известен только после
+    // ServerHello, и подмена поля (в том числе тестами) обязана подхватываться, а не игнорироваться.
+    // Автосвойство здесь невозможно: значение не хранится само по себе, а обновляется вслед за
+    // chosenSuite, и подсказка анализатора «сделайте auto property» стёрла бы именно эту связь.
+#pragma warning disable IDE0032 // Use auto property
+    private ushort shapeSuite = 0xFFFF;
+    private Tls12BulkCipher shapeBulk;
+    private int shapeRecordIvLength = 8;
+    private Tls12KeyExchange shapeKeyExchange;
+    private HashAlgorithmName shapePrfHash = HashAlgorithmName.SHA256;
+#pragma warning restore IDE0032 // Use auto property
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void EnsureSuiteShape()
+    {
+        if (shapeSuite == chosenSuite) return;
+
+        RefreshSuiteShape();
+    }
+
+    /// <summary>
+    /// Пересчитывает снимок свойств набора.
+    /// </summary>
+    /// <remarks>
+    /// Вынесено отдельно и без встраивания: срабатывает один раз за соединение, а раздувать им
+    /// тело каждого обращения к свойству — значит потерять смысл снимка.
+    ///
+    /// Значения по умолчанию для НЕизвестного набора совпадают с прежним поведением (AES-GCM,
+    /// восьмибайтовый явный вектор, PRF на SHA-256). До ServerHello набор равен нулю, и любое
+    /// другое умолчание меняло бы форму записи задним числом.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void RefreshSuiteShape()
+    {
+        if (Tls12CipherSuiteParameters.TryGet(chosenSuite, out var parameters))
+        {
+            shapeBulk = parameters.Bulk;
+            shapeRecordIvLength = parameters.RecordIvLength;
+            shapeKeyExchange = parameters.KeyExchange;
+            shapePrfHash = parameters.PrfHash;
+        }
+        else
+        {
+            shapeBulk = Tls12BulkCipher.AesGcm;
+            shapeRecordIvLength = 8;
+            shapeKeyExchange = Tls12KeyExchange.Ecdhe;
+            shapePrfHash = HashAlgorithmName.SHA256;
+        }
+
+        shapeSuite = chosenSuite;
+    }
+
+    /// <summary>Собственный эфемерный закрытый ключ X25519 для этого рукопожатия.</summary>
+    private byte[]? x25519Private;
+
+    /// <summary>Открытая часть эфемерного ключа X25519.</summary>
+    private byte[]? x25519Public;
+
+    /// <summary>
     /// Согласованный ALPN ("h2" или "http/1.1").
     /// </summary>
     public ReadOnlyMemory<byte> NegotiatedAlpn { get; protected set; }
+
+    /// <summary>
+    /// Предлагали ли мы в этом рукопожатии TLS 1.3.
+    /// </summary>
+    /// <remarks>
+    /// Определяет, применима ли проверка сигнала понижения версии: она осмысленна лишь тогда,
+    /// когда более высокая версия действительно предлагалась.
+    /// </remarks>
+    protected bool OffersTls13
+        => Settings.MaxVersion.HasFlag(SslProtocols.Tls13)
+        || Settings.Extensions.OfType<Extensions.SupportedVersionsTlsExtension>().Any(static extension => extension.Versions.Contains(SslProtocols.Tls13));
 
     /// <summary>
     /// Сервер запросил клиентский сертификат (CertificateRequest).
@@ -129,12 +277,37 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     private bool serverRequestedClientCert;
 
     /// <summary>
+    /// Приходил ли ServerKeyExchange.
+    /// </summary>
+    /// <remarks>
+    /// Нужен для перекрёстной проверки «набор ↔ наличие сообщения» (RFC 5246 §7.4.3): у эфемерного
+    /// обмена оно обязательно, у обмена на RSA его быть не должно. Оба нарушения без этой проверки
+    /// проходили молча и вылезали лишь на несовпадении Finished.
+    /// </remarks>
+    private bool serverKeyExchangeReceived;
+
+    /// <summary>
+    /// Способ обмена ключами согласованного набора.
+    /// </summary>
+    private Tls12KeyExchange KeyExchangeKind
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get { EnsureSuiteShape(); return shapeKeyExchange; }
+    }
+
+    /// <summary>
     /// Выбор хэш-алгоритма PRF по выбранному шифросьюту (SHA256/384).
     /// </summary>
+    /// <remarks>
+    /// ★ Перечислять здесь коды «на глаз» нельзя. Набор 0x009D (RSA + AES-256-GCM) тоже требует
+    /// SHA-384, и прежнее условие «0xC030 или 0xC02C» его не знало: master secret вышел бы
+    /// неверным, а провалилось бы это в самом конце внешне безупречного рукопожатия — на проверке
+    /// Finished, то есть выглядело бы как ошибка сервера.
+    /// </remarks>
     private HashAlgorithmName PrfHash
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => (chosenSuite is 0xC030 or 0xC02C) ? HashAlgorithmName.SHA384 : HashAlgorithmName.SHA256;
+        get { EnsureSuiteShape(); return shapePrfHash; }
     }
 
     /// <summary>
@@ -159,27 +332,13 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private async ValueTask SendTls12RecordAsync(TlsContentType type, ReadOnlyMemory<byte> plaintext, CancellationToken cancellationToken)
     {
-        if (aeadWrite12 is null || clientWriteIvSalt is null) throw new InvalidOperationException("Ключи записи не установлены");
-
-        var tag = aeadWrite12.TagSize;
         var plainLen = plaintext.Length;
-        var payloadLen = 8 + plainLen + tag; // explicit(8) + data + tag
+        var payloadLen = ProtectedRecordLength(plainLen);
         var payload = ArrayPool<byte>.Shared.Rent(payloadLen);
 
         try
         {
-            var explicitIv = payload.AsSpan(0, 8);
-            var cipherTag = payload.AsSpan(8, plainLen + tag);
-
-            Span<byte> nonce = stackalloc byte[12];
-            Span<byte> aad = stackalloc byte[13];
-            BuildAadAndNonceForWrite(type, plainLen, seqWrite12, explicitIv, nonce, aad);
-
-            if (!aeadWrite12.TryEncrypt(nonce, aad, plaintext.Span, cipherTag, out var written) ||
-                written != plainLen + tag)
-            {
-                throw new CryptographicException("AEAD encrypt failed (TLS1.2)");
-            }
+            ProtectRecord(type, plaintext.Span, payload.AsSpan(0, payloadLen));
 
             await SendPlainRecordAsync(type, payload.AsMemory(0, payloadLen), cancellationToken).ConfigureAwait(false);
             seqWrite12++;
@@ -191,6 +350,127 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         }
     }
 
+    /// <summary>
+    /// Возвращает длину тела записи, в которое превратится указанное количество открытых данных.
+    /// </summary>
+    /// <param name="plainLength">Длина открытых данных.</param>
+    /// <returns>Длина тела записи без пятибайтового заголовка.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int ProtectedRecordLength(int plainLength)
+    {
+        if (cbcWrite12 is not null) return Tls12CbcRecordProtection.ProtectedLength(plainLength);
+        if (aeadWrite12 is null || clientWriteIvSalt is null) throw new InvalidOperationException("Ключи записи не установлены");
+
+        return RecordExplicitIvLength + plainLength + aeadWrite12.TagSize;
+    }
+
+    /// <summary>
+    /// Единственное место, где запись TLS 1.2 защищается.
+    /// </summary>
+    /// <param name="type">Тип содержимого.</param>
+    /// <param name="plain">Открытые данные.</param>
+    /// <param name="record">Буфер тела записи ровно на <see cref="ProtectedRecordLength(int)"/> байт.</param>
+    /// <remarks>
+    /// Счётчик <c>seqWrite12</c> здесь НЕ увеличивается: он принадлежит отправке, а отправка может
+    /// не состояться. Увеличивает его вызывающий, ровно один раз, после успешной записи в сокет.
+    /// </remarks>
+    private void ProtectRecord(TlsContentType type, ReadOnlySpan<byte> plain, Span<byte> record)
+    {
+        Span<byte> nonce = stackalloc byte[12];
+        Span<byte> header = stackalloc byte[13];
+
+        if (cbcWrite12 is not null)
+        {
+            BuildAadAndNonceForWrite(type, plain.Length, seqWrite12, default, nonce, header);
+            _ = cbcWrite12.Protect(header, plain, record);
+            return;
+        }
+
+        if (aeadWrite12 is null) throw new InvalidOperationException("Ключи записи не установлены");
+
+        var explicitIvLength = RecordExplicitIvLength;
+        var explicitIv = record[..explicitIvLength];
+        var cipherTag = record[explicitIvLength..];
+
+        BuildAadAndNonceForWrite(type, plain.Length, seqWrite12, explicitIv, nonce, header);
+
+        if (!aeadWrite12.TryEncrypt(nonce, header, plain, cipherTag, out var written) || written != cipherTag.Length)
+            throw new CryptographicException("AEAD encrypt failed (TLS1.2)");
+    }
+
+    /// <summary>
+    /// Верхняя оценка длины открытых данных для записи указанного размера.
+    /// </summary>
+    /// <param name="recordLength">Длина тела записи.</param>
+    /// <returns>Сколько байт достаточно арендовать под расшифровку.</returns>
+    /// <remarks>
+    /// Для AEAD длина известна точно, для CBC — нет: она выясняется лишь после снятия дополнения,
+    /// а до тех пор всё, что о ней известно, — что она не больше шифротекста. Отсюда оценка
+    /// сверху и обязательный <c>out plainLength</c> у снятия защиты.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int MaxPlaintextForRecord(int recordLength)
+    {
+        if (cbcRead12 is not null) return Math.Max(0, recordLength - Tls12CbcRecordProtection.BlockLength);
+
+        var overhead = RecordExplicitIvLength + (aeadRead12?.TagSize ?? 16);
+        return Math.Max(0, recordLength - overhead);
+    }
+
+    /// <summary>
+    /// Единственное место, где с записи TLS 1.2 снимается защита.
+    /// </summary>
+    /// <param name="type">Тип содержимого записи.</param>
+    /// <param name="record">Тело записи как оно пришло с провода.</param>
+    /// <param name="plain">Буфер не меньше <see cref="MaxPlaintextForRecord(int)"/>.</param>
+    /// <param name="plainLength">Длина открытых данных.</param>
+    /// <returns><see langword="true"/>, если запись подлинна.</returns>
+    /// <remarks>
+    /// ★ Раньше эти десять строк были скопированы в ПЯТЬ мест (Finished, тикеты, post-handshake,
+    /// алерты, прикладные данные), и счётчик чтения увеличивался в каждом отдельно. Для AEAD такие
+    /// копии просто расходились бы со временем; для CBC они означали бы пять разных проверок
+    /// подлинности и пять разных путей отказа — то есть ровно ту различимость, на которой стоит
+    /// Lucky13. Причина отказа не сообщается: вызывающая сторона обязана превратить
+    /// <see langword="false"/> в один и тот же отказ.
+    /// </remarks>
+    private bool TryUnprotectRecord(TlsContentType type, ReadOnlySpan<byte> record, Span<byte> plain, out int plainLength)
+    {
+        plainLength = 0;
+
+        Span<byte> nonce = stackalloc byte[12];
+        Span<byte> header = stackalloc byte[13];
+
+        if (cbcRead12 is not null)
+        {
+            // Длину в заголовке MAC дописывает сам разбор CBC: до снятия дополнения она неизвестна.
+            BuildAadAndNonceForRead(type, plainLen: 0, seqRead12, default, nonce, header);
+
+            if (!cbcRead12.TryUnprotect(record, header, plain, out plainLength)) return default;
+
+            seqRead12++;
+            return true;
+        }
+
+        if (aeadRead12 is null || serverWriteIvSalt is null) throw new InvalidOperationException(ReadKeyUnset);
+
+        var explicitIvLength = RecordExplicitIvLength;
+        if (record.Length < explicitIvLength + aeadRead12.TagSize) return default;
+
+        var explicitIv = record[..explicitIvLength];
+        var cipherTag = record[explicitIvLength..];
+        var expected = cipherTag.Length - aeadRead12.TagSize;
+
+        if (plain.Length < expected) return default;
+
+        BuildAadAndNonceForRead(type, expected, seqRead12, explicitIv, nonce, header);
+
+        if (!aeadRead12.TryDecrypt(nonce, header, cipherTag, plain[..expected], out var got) || got != expected) return default;
+
+        plainLength = expected;
+        seqRead12++;
+        return true;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private async ValueTask<OwnerMemory> ReceiveTls12RecordAsync(TlsContentType expectType, CancellationToken cancellationToken)
     {
@@ -199,32 +479,15 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         try
         {
             if (hdr.ContentType != expectType) throw new InvalidOperationException($"Ожидался {expectType}");
-            if (aeadRead12 is null || serverWriteIvSalt is null) throw new InvalidOperationException(ReadKeyUnset);
-            if (hdr.Length < 8 + aeadRead12.TagSize) throw new InvalidOperationException(PayloadTooShort);
 
-            var explicitIv = payload.AsSpan(0, 8);
-            var cipherTag = payload.AsSpan(8, hdr.Length - 8);
-            var plainLen = cipherTag.Length - aeadRead12.TagSize;
+            var plain = ArrayPool<byte>.Shared.Rent(MaxPlaintextForRecord(hdr.Length));
 
-            Span<byte> nonce = stackalloc byte[12];
-            Span<byte> aad = stackalloc byte[13];
-            BuildAadAndNonceForRead(expectType, plainLen, seqRead12, explicitIv, nonce, aad);
-
-            var plain = ArrayPool<byte>.Shared.Rent(plainLen);
-
-            if (!aeadRead12.TryDecrypt(nonce, aad, cipherTag, plain.AsSpan(0, plainLen), out var got))
+            if (!TryUnprotectRecord(expectType, payload.AsSpan(0, hdr.Length), plain, out var plainLen))
             {
                 ArrayPool<byte>.Shared.Return(plain, clearArray: true);
-                throw new CryptographicException("AEAD decrypt failed (TLS1.2)");
+                throw new CryptographicException(RecordNotAuthentic);
             }
 
-            if (got != plainLen)
-            {
-                ArrayPool<byte>.Shared.Return(plain, clearArray: true);
-                throw new CryptographicException("AEAD length mismatch (TLS1.2)");
-            }
-
-            seqRead12++;
             return new OwnerMemory(plain, plainLen);
         }
         finally
@@ -245,7 +508,12 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         body.Slice(2, 32).CopyTo(sr);
         serverRandom = sr;
 
-        if (IsDowngrade(serverRandom.Span))
+        // Сигнал понижения версии проверяется ТОЛЬКО если мы сами предлагали TLS 1.3.
+        // По RFC 8446 §4.1.3 сервер, поддерживающий 1.3, обязан ставить эту метку в ответ
+        // клиенту, который 1.3 не предложил, — и для такого клиента она означает не атаку, а
+        // штатный ответ. Проверять её безусловно значит объявить враждебным любой современный
+        // сервер: именно так профили TLS 1.2 и переставали работать с Cloudflare.
+        if (OffersTls13 && IsDowngrade(serverRandom.Span))
             throw new InvalidOperationException("Возможный downgrade detected (server_random sentinel)");
 
         var pos = 2 + 32;
@@ -263,19 +531,40 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
             pos += 2;
             var exts = body.Slice(pos, extLen);
 
-            if (!TryReadServerHelloExtensions(exts, out var ems, out var alpn))
+            if (!TryReadServerHelloExtensions(exts, out var ems, out var encryptThenMac, out var alpn))
                 throw new InvalidOperationException("ServerHello extensions corrupted");
 
+            // ★ encrypt_then_mac (RFC 7366) мы не предлагаем ни в одном профиле браузера, а значит
+            // сервер не вправе его согласовать. Раньше любое неизвестное расширение молча
+            // игнорировалось — и согласуй сервер этот режим, мы разбирали бы записи в ОБРАТНОМ
+            // порядке (сначала MAC, потом расшифровка). Симптом — сплошной провал MAC на всех
+            // записях, причина — невидима.
+            if (encryptThenMac)
+                throw new InvalidOperationException("Сервер согласовал encrypt_then_mac, которого мы не предлагали");
+
             useEms = ems;
-            if (!alpn.IsEmpty) NegotiatedAlpn = alpn;
+
+            if (!alpn.IsEmpty)
+            {
+                NegotiatedAlpn = alpn;
+
+                // Дублируем результат в общее строковое свойство: выбор протокола нужен слою
+                // соединений одинаково для обеих версий TLS, и заставлять его разбирать байты
+                // означало бы протащить формат расширения туда, где ему не место.
+                NegotiatedProtocol = Encoding.ASCII.GetString(alpn.Span);
+            }
         }
 
-        if (!IsSupportedSuiteByPolicy(chosenSuite, Settings.CipherSuites))
-            throw new InvalidOperationException($"Сервер выбрал не предлагавшийся или неподдерживаемый suite 0x{chosenSuite:X4}");
+        // ★ Две проверки, а не одна, и в этом порядке. Раньше здесь стояли ДВА перечисления кодов,
+        // записанные по-разному, и правка одного без другого давала тот же обрыв с другим текстом.
+        // Теперь обе опираются на общую таблицу, но разделены по смыслу: «не предлагали» — это
+        // нарушение со стороны сервера (или наша дыра в мимикрии), «не реализовано» — наша
+        // недоделка. Смешивать их в одном сообщении значило бы каждый раз гадать, чей это дефект.
+        if (!IsOfferedSuite(chosenSuite, Settings.CipherSuites))
+            throw new InvalidOperationException($"Сервер выбрал не предлагавшийся suite 0x{chosenSuite:X4}");
 
-        // Проверка поддерживаемости
-        var ok = chosenSuite is 0xC02F or 0xC030 or 0xC02B or 0xC02C or 0xCCA8 or 0xCCA9;
-        if (!ok) throw new NotSupportedException($"Неподдерживаемый suite 0x{chosenSuite:X4}");
+        if (!IsImplementedSuite(chosenSuite))
+            throw new NotSupportedException($"Набор 0x{chosenSuite:X4} предлагается ради отпечатка ja3/ja4, но в этом клиенте не реализован");
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -336,15 +625,12 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         var named = (ushort)((body[pos] << 8) | body[pos + 1]);
         pos += 2;
 
-        // 1) Запоминаем выбранную сервером группу
-        chosenGroup = named switch
-        {
-            0x0017 => NamedGroup.Secp256r1, // P-256
-            0x0018 => NamedGroup.Secp384r1, // P-384
-            0x0019 => NamedGroup.Secp521r1, // P-521
-            0x001D => NamedGroup.X25519,    // X25519 (TLS 1.2 допускает, RFC 8422+)
-            _ => throw new NotSupportedException($"Группа 0x{named:X4} не поддержана в TLS 1.2")
-        };
+        // 1) Запоминаем выбранную сервером группу и 2) разбираем её публичный ключ.
+        // Оба правила живут в отдельных методах и вызываются отсюда. Раньше эти же две таблицы
+        // стояли здесь дословно, а MapServerNamedGroup/UnpackServerPublicKey висели рядом
+        // невостребованными — две копии одного правила расходятся всегда, и расхождение в разборе
+        // ключа сервера означало бы либо отказ на исправном сервере, либо принятую чужую точку.
+        chosenGroup = MapServerNamedGroup(named);
 
         var pkLen = body[pos++];
         if (pkLen <= 0) throw new NotSupportedException("Пустой публичный ключ сервера");
@@ -352,44 +638,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         var pub = body.Slice(pos, pkLen);
         pos += pkLen;
 
-        // 2) Распарсим публичный ключ сервера в зависимости от группы
-        switch (chosenGroup)
-        {
-            case NamedGroup.Secp256r1:
-                {
-                    if (pkLen is not 65 || pub[0] is not 0x04) throw new NotSupportedException("Ожидается некомпрессированный ECPoint P-256");
-                    serverEcQx = pub.Slice(1, 32).ToArray();
-                    serverEcQy = pub.Slice(33, 32).ToArray();
-                    break;
-                }
-
-            case NamedGroup.Secp384r1:
-                {
-                    if (pkLen is not 97 || pub[0] is not 0x04) throw new NotSupportedException("Ожидается некомпрессированный ECPoint P-384");
-                    serverEcQx = pub.Slice(1, 48).ToArray();
-                    serverEcQy = pub.Slice(49, 48).ToArray();
-                    break;
-                }
-
-            case NamedGroup.Secp521r1:
-                {
-                    if (pkLen is not 133 || pub[0] is not 0x04) throw new NotSupportedException("Ожидается некомпрессированный ECPoint P-521");
-                    serverEcQx = pub.Slice(1, 66).ToArray();
-                    serverEcQy = pub.Slice(67, 66).ToArray();
-                    break;
-                }
-
-            case NamedGroup.X25519:
-                {
-                    // Для X25519 серверный pub — ровно 32 байта, без 0x04/XY.
-                    if (pkLen is not 32) throw new NotSupportedException("X25519: ожидается 32-байтовый публичный ключ");
-                    serverX25519Pub = pub.ToArray();
-                    break;
-                }
-
-            default:
-                throw new NotSupportedException("Группа не поддержана");
-        }
+        UnpackServerPublicKey(chosenGroup, pub);
 
         if (pos + 4 > body.Length) throw new InvalidOperationException("Нет подписи SKE");
 
@@ -409,6 +658,18 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void EnsureEcdheForGroup()
     {
+        // X25519 обслуживается собственной реализацией: платформа отказывает на кривой
+        // 1.3.101.110 (PlatformNotSupportedException), а это ОСНОВНАЯ группа современных
+        // браузеров — без неё профиль пришлось бы уводить на кривые NIST и терять сходство.
+        if (chosenGroup is NamedGroup.X25519)
+        {
+            if (x25519Private is not null) return;
+
+            x25519Private = X25519.CreatePrivateKey();
+            x25519Public = X25519.GetPublicKey(x25519Private);
+            return;
+        }
+
         if (ecdhe is not null) return;
 
         ecdhe = chosenGroup switch
@@ -416,7 +677,6 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
             NamedGroup.Secp256r1 => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             NamedGroup.Secp384r1 => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP384),
             NamedGroup.Secp521r1 => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP521),
-            NamedGroup.X25519 => ECDiffieHellman.Create(ECCurve.CreateFromFriendlyName("X25519")),
             _ => throw new NotSupportedException("Группа не поддержана")
         };
     }
@@ -482,7 +742,12 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
 
             if (ecdsa is not null && sigAlg is 3)
             {
-                if (!ecdsa.VerifyHash(digest, signature)) throw new CryptographicException("ECDSA-подпись SKE неверна");
+                // Подпись в TLS передаётся ПОСЛЕДОВАТЕЛЬНОСТЬЮ DER, а не парой r‖s фиксированной
+                // длины, которую VerifyHash подразумевает по умолчанию. Без явного указания
+                // формата проверка не проходит НИКОГДА — а выглядит это как «сервер прислал
+                // неверную подпись», то есть как чужая ошибка.
+                if (!ecdsa.VerifyHash(digest, signature, DSASignatureFormat.Rfc3279DerSequence))
+                    throw new CryptographicException("ECDSA-подпись SKE неверна");
                 return;
             }
 
@@ -525,9 +790,16 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
             Tls12Prf(premasterSecret.Span, "master secret"u8, seed, masterSecret, prfHash);
         }
 
-        // key_block
-        var keyLen = (chosenSuite is 0xC030 or 0xC02C) ? 32 : 16;
-        var blockLen = (keyLen * 2) + 8; // 2*key + 2*IV(4)
+        // key_block. Длины берутся из общей таблицы: ChaCha20 — 32-байтовый ключ и 12-байтовый
+        // фиксированный IV, AES-GCM — 16/32 байта ключа и 4 байта соли, CBC — 16/32 байта ключа,
+        // 20-байтовый MAC-ключ и НОЛЬ байт фиксированного вектора (он явный и случайный).
+        if (!Tls12CipherSuiteParameters.TryGet(chosenSuite, out var suite))
+            throw new NotSupportedException($"Неподдерживаемый suite 0x{chosenSuite:X4}");
+
+        var keyLen = suite.EncKeyLength;
+        var ivLen = suite.FixedIvLength;
+        var macLen = suite.MacKeyLength;
+        var blockLen = (macLen * 2) + (keyLen * 2) + (ivLen * 2);
         var keyBlock = new byte[blockLen];
 
         Span<byte> seedKb = stackalloc byte[64];
@@ -537,21 +809,54 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
 
         var p = 0;
 
+        // ★ Порядок задан RFC 5246 §6.3 и начинается ИМЕННО с MAC-ключей. Поставить их после
+        // ключей шифрования — значит получить корректные по длине, но неверные ключи: рукопожатие
+        // дойдёт до конца и рассыплется на проверке Finished, будто виноват сервер.
+        if (macLen > 0)
+        {
+            clientWriteMacKey = keyBlock.AsSpan(p, macLen).ToArray();
+            p += macLen;
+
+            serverWriteMacKey = keyBlock.AsSpan(p, macLen).ToArray();
+            p += macLen;
+        }
+
         clientWriteKey = keyBlock.AsSpan(p, keyLen).ToArray();
         p += keyLen;
 
         serverWriteKey = keyBlock.AsSpan(p, keyLen).ToArray();
         p += keyLen;
 
-        clientWriteIvSalt = keyBlock.AsSpan(p, 4).ToArray();
-        p += 4;
+        clientWriteIvSalt = keyBlock.AsSpan(p, ivLen).ToArray();
+        p += ivLen;
 
-        serverWriteIvSalt = keyBlock.AsSpan(p, 4).ToArray();
+        serverWriteIvSalt = keyBlock.AsSpan(p, ivLen).ToArray();
 
         aeadWrite12?.Dispose();
         aeadRead12?.Dispose();
-        aeadWrite12 = new AesGcmAead(clientWriteKey);
-        aeadRead12 = new AesGcmAead(serverWriteKey);
+        cbcWrite12?.Dispose();
+        cbcRead12?.Dispose();
+        aeadWrite12 = aeadRead12 = null;
+        cbcWrite12 = cbcRead12 = null;
+
+        switch (suite.Bulk)
+        {
+            case Tls12BulkCipher.ChaCha20Poly1305:
+                aeadWrite12 = new ChaCha20Poly1305Aead(clientWriteKey);
+                aeadRead12 = new ChaCha20Poly1305Aead(serverWriteKey);
+                break;
+
+            case Tls12BulkCipher.AesCbc:
+                cbcWrite12 = new Tls12CbcRecordProtection(clientWriteKey, clientWriteMacKey!);
+                cbcRead12 = new Tls12CbcRecordProtection(serverWriteKey, serverWriteMacKey!);
+                break;
+
+            default:
+                aeadWrite12 = new AesGcmAead(clientWriteKey);
+                aeadRead12 = new AesGcmAead(serverWriteKey);
+                break;
+        }
+
         seqWrite12 = seqRead12 = 0;
 
         CryptographicOperations.ZeroMemory(keyBlock);
@@ -560,27 +865,25 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ReadOnlyMemory<byte> BuildClientKeyExchangeBodyAndAppend()
     {
+        if (KeyExchangeKind is Tls12KeyExchange.Rsa) return BuildRsaClientKeyExchangeAndAppend();
+
         EnsureEcdheForGroup();
 
         ReadOnlyMemory<byte> cke;
 
         if (chosenGroup is NamedGroup.X25519)
         {
-            // клиентский pub = 32 байта
-            var p = ecdhe!.ExportParameters(includePrivateParameters: false);
-            if (p.Q.X is not { Length: 32 }) throw new CryptographicException("X25519 pub invalid");
+            if (x25519Public is not { Length: 32 }) throw new CryptographicException("X25519 pub invalid");
+            if (serverX25519Pub is not { Length: 32 }) throw new CryptographicException("X25519: сервер не прислал 32-байтовый ключ");
 
             Span<byte> body = stackalloc byte[1 + 32];
             body[0] = 32;
-            p.Q.X.CopyTo(body[1..]);
+            x25519Public.CopyTo(body[1..]);
 
             cke = BuildHandshake(TlsHandshakeType.ClientKeyExchange, body);
             transcript.Append(cke.Span);
 
-            // premaster = ECDH(X25519)
-            using var sp = ECDiffieHellman.Create(ECCurve.CreateFromFriendlyName("X25519"));
-            sp.ImportParameters(new ECParameters { Curve = ECCurve.CreateFromFriendlyName("X25519"), Q = new ECPoint { X = serverX25519Pub!, Y = null } });
-            premasterSecret = ecdhe.DeriveRawSecretAgreement(sp.PublicKey);
+            premasterSecret = X25519.DeriveSharedSecret(x25519Private!, serverX25519Pub);
             return cke;
         }
         else
@@ -629,11 +932,96 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         }
     }
 
+    /// <summary>
+    /// ClientKeyExchange для наборов с обменом ключами на RSA (0x009C, 0x009D, 0x002F, 0x0035).
+    /// </summary>
+    /// <returns>Готовое сообщение, уже добавленное в транскрипт.</returns>
+    /// <remarks>
+    /// Здесь нет ServerKeyExchange вовсе: premaster придумывает клиент и зашифровывает его
+    /// ОТКРЫТЫМ ключом сервера из сертификата (RSAES-PKCS1-v1_5, RFC 5246 §7.4.7.1).
+    ///
+    /// ★ Отдельной проверки подлинности сервера в этой ветке нет — и это не пропуск. Сервер
+    /// доказывает владение закрытым ключом тем, что сумел расшифровать premaster и прислать
+    /// верный Finished; ошибись он ключом — verify_data не сойдётся. Не написав этого, следующий
+    /// читатель будет искать здесь «потерянную» проверку подписи и, не найдя, добавит лишнюю.
+    /// </remarks>
+    [SuppressMessage("Security", "CA5373:Do not use obsolete key derivation function", Justification = "Схема обмена ключами задана набором шифров TLS 1.2; выбор делает сервер.")]
+    private ReadOnlyMemory<byte> BuildRsaClientKeyExchangeAndAppend()
+    {
+        if (serverLeaf is null) throw new InvalidOperationException("Нет сертификата сервера для обмена ключами RSA");
+
+        using var rsa = serverLeaf.GetRSAPublicKey()
+            ?? throw new CryptographicException("Набор с обменом ключами RSA выбран под сертификат без ключа RSA");
+
+        var premaster = new byte[48];
+
+        try
+        {
+            // ★ Первые два байта — версия из НАШЕГО ClientHello, а не согласованная. Сервер сверяет
+            // её, чтобы поймать откат версии (RFC 5246 §7.4.7.1). Наш ClientHelloBuilder всегда
+            // пишет в legacy_version 0x0303 — если он когда-нибудь начнёт писать другое, эту
+            // константу придётся менять здесь же, иначе часть серверов начнёт молча отвергать
+            // рукопожатие «по неизвестной причине».
+            premaster[0] = 0x03;
+            premaster[1] = 0x03;
+            RandomNumberGenerator.Fill(premaster.AsSpan(2));
+
+            // ★ Дополнение — именно RSAES-PKCS1-v1_5, а не OAEP. Анализатор справедливо считает
+            // PKCS#1 v1.5 устаревшим (Bleichenbacher), но здесь выбора нет: схема прибита к
+            // формату ClientKeyExchange в RFC 5246 §7.4.7.1, и OAEP сервер попросту не поймёт.
+            // Смягчение по RFC — сервер обязан при ошибке расшифровки продолжать со СЛУЧАЙНЫМ
+            // premaster, а не отвечать отличимой ошибкой; это его сторона, не наша.
+#pragma warning disable S5542 // Encryption algorithms should be used with secure mode and padding scheme
+            var encrypted = rsa.Encrypt(premaster, RSAEncryptionPadding.Pkcs1);
+#pragma warning restore S5542
+
+            // ★ Двухбайтовая длина шифротекста в TLS 1.0+ ПРИСУТСТВУЕТ (её нет только в SSLv3).
+            // Забыть её — получить от сервера decrypt_error без единого пояснения.
+            var body = new byte[2 + encrypted.Length];
+
+            unchecked
+            {
+                body[0] = (byte)(encrypted.Length >> 8);
+                body[1] = (byte)encrypted.Length;
+            }
+
+            encrypted.CopyTo(body.AsSpan(2));
+
+            var cke = BuildHandshake(TlsHandshakeType.ClientKeyExchange, body);
+            transcript.Append(cke.Span);
+
+            premasterSecret = premaster.AsSpan().ToArray();
+            return cke;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(premaster);
+        }
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private async ValueTask SendClientKeyExchangeCcsFinishedAsync(CancellationToken cancellationToken)
     {
-        EnsureEcdheForGroup();
-        if (ecdhe is null) throw new InvalidOperationException();
+        // ★ Развилка обязана быть ПЕРЕД созданием эфемерного ключа. При обмене на RSA группа не
+        // согласуется вовсе (ServerKeyExchange не приходит), chosenGroup остаётся нулём — а нуля
+        // среди значений NamedGroup нет, и EnsureEcdheForGroup честно падал бы на «Группа не
+        // поддержана». Выглядело бы это как отказ в поддержке кривой там, где кривых нет вовсе.
+        if (KeyExchangeKind is Tls12KeyExchange.Ecdhe)
+        {
+            // Перекрёстная проверка с RFC 5246 §7.4.3: у эфемерного обмена ServerKeyExchange
+            // обязателен. Без неё сервер, «забывший» это сообщение, получил бы premaster,
+            // посчитанный на НУЛЕВЫХ полях, — и ошибка вылезла бы только на Finished.
+            if (!serverKeyExchangeReceived)
+                throw new InvalidOperationException("Набор требует ServerKeyExchange, а сервер его не прислал (RFC 5246 §7.4.3)");
+
+            EnsureEcdheForGroup();
+
+            // Ключ обмена готов, если создан подходящий для группы: для кривых NIST это объект
+            // платформы, для X25519 — собственная пара. Требовать здесь именно платформенный значило
+            // бы отвергать X25519, который платформа как раз и не поддерживает.
+            if (chosenGroup is NamedGroup.X25519 ? x25519Private is null : ecdhe is null)
+                throw new InvalidOperationException("Эфемерный ключ для согласованной группы не создан");
+        }
 
         // (1) при запросе клиентского сертификата — пустой Certificate
         if (serverRequestedClientCert)
@@ -763,9 +1151,6 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private async ValueTask ReadOptionalNewSessionTicketsAsync(CancellationToken cancellationToken)
     {
-        var nonceBuffer = new byte[12];
-        var aadBuffer = new byte[13];
-
         while (true)
         {
             var (hdr, payload) = await ReadRecordAsync(cancellationToken).ConfigureAwait(false);
@@ -773,26 +1158,13 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
             try
             {
                 if (hdr.ContentType is not TlsContentType.Handshake) return; // вышли на другой тип — как в браузерах
-                if (aeadRead12 is null || serverWriteIvSalt is null) throw new InvalidOperationException(ReadKeyUnset);
-                if (hdr.Length < 8 + aeadRead12.TagSize) throw new InvalidOperationException(PayloadTooShort);
 
-                var explicitIv = payload.AsSpan(0, 8);
-                var cipherTag = payload.AsSpan(8, hdr.Length - 8);
-                var plainLen = cipherTag.Length - aeadRead12.TagSize;
-
-                var nonce = nonceBuffer.AsSpan(); // 4 (salt) + 8 (explicit_iv)
-                var aad = aadBuffer.AsSpan(); // 8 + 1 + 2 + 2
-
-                BuildAadAndNonceForRead(TlsContentType.Handshake, plainLen, seqRead12, explicitIv, nonce, aad);
-
-                var plain = ArrayPool<byte>.Shared.Rent(plainLen);
+                var plain = ArrayPool<byte>.Shared.Rent(MaxPlaintextForRecord(hdr.Length));
 
                 try
                 {
-                    if (!aeadRead12.TryDecrypt(nonce, aad, cipherTag, plain.AsSpan(0, plainLen), out var got) || got != plainLen)
-                        throw new CryptographicException("AEAD decrypt failed (NST)");
-
-                    seqRead12++;
+                    if (!TryUnprotectRecord(TlsContentType.Handshake, payload.AsSpan(0, hdr.Length), plain, out var plainLen))
+                        throw new CryptographicException(RecordNotAuthentic);
 
                     var span = plain.AsSpan(0, plainLen);
                     if (span.Length < 4) throw new InvalidOperationException("Handshake record too short");
@@ -863,6 +1235,9 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected override void Dispose(bool disposing)
     {
+        // Транскрипт держит пуловские буферы — освобождаем вместе с потоком.
+        if (disposing) transcript.Dispose();
+
         if (disposing)
         {
             if (masterSecret is not null)
@@ -895,6 +1270,20 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
                 serverWriteIvSalt = default;
             }
 
+            // MAC-ключи CBC — такой же секрет, как ключи шифрования: имея их, можно подделать
+            // запись целиком. Забыть их здесь значило бы оставить их в куче до сборки мусора.
+            if (clientWriteMacKey is not null)
+            {
+                CryptographicOperations.ZeroMemory(clientWriteMacKey);
+                clientWriteMacKey = default;
+            }
+
+            if (serverWriteMacKey is not null)
+            {
+                CryptographicOperations.ZeroMemory(serverWriteMacKey);
+                serverWriteMacKey = default;
+            }
+
             if (serverCerts is not null)
             {
                 foreach (var c in serverCerts) c.Dispose();
@@ -905,6 +1294,8 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
             ecdhe?.Dispose();
             aeadWrite12?.Dispose();
             aeadRead12?.Dispose();
+            cbcWrite12?.Dispose();
+            cbcRead12?.Dispose();
         }
 
         base.Dispose(disposing);
@@ -914,9 +1305,14 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected override int BuildClientHello(Span<byte> destination)
     {
+        // Порядок берётся один раз: пересборка приветствия обязана дать то же сообщение.
+        orderedExtensions ??= Settings.PermuteExtensions
+            ? ClientHelloExtensionPermutation.Apply(Settings.Extensions, Settings.PermutationAnchors)
+            : Settings.Extensions;
+
         var builder = ClientHelloBuilder.Create()
             .WithCipherSuites(Settings.CipherSuites)
-            .WithExtensions(Settings.Extensions)
+            .WithExtensions(orderedExtensions)
             .WithSessionIdPolicy(Settings.SessionIdPolicy);
 
         var clientHello = builder.Build();
@@ -930,7 +1326,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         destination.Slice(11, 32).CopyTo(cr);
         clientRandom = cr;
         var recordLen = (destination[3] << 8) | destination[4];
-        sniHost = GetServerName(Settings.Extensions);
+        sniHost = GetServerName(orderedExtensions);
         transcript.Append(destination.Slice(5, recordLen)); // 5 = размер record hdr
         ClientHelloBuilder.Return(builder);
         return clientHello.Length;
@@ -1047,7 +1443,15 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
                 return default;
 
             case TlsHandshakeType.ServerKeyExchange:
+                // При обмене ключами на RSA этого сообщения быть не должно (RFC 5246 §7.4.3).
+                // Разбирать его «на всякий случай» нельзя: его тело описывает параметры кривой,
+                // и попытка вычитать их из чего-то другого даст либо мусорную группу, либо
+                // исключение о неподдержанной кривой — то есть уведёт диагностику в сторону.
+                if (KeyExchangeKind is Tls12KeyExchange.Rsa)
+                    throw new InvalidOperationException($"Набор 0x{chosenSuite:X4} не предусматривает ServerKeyExchange (RFC 5246 §7.4.3)");
+
                 ParseServerKeyExchange(body);
+                serverKeyExchangeReceived = true;
                 return default;
 
             case TlsHandshakeType.CertificateRequest:
@@ -1082,13 +1486,30 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected virtual void BuildAadAndNonceForWrite(TlsContentType type, int plainLen, ulong seq, Span<byte> explicitIvDest, Span<byte> nonceDest, Span<byte> aadDest)
     {
-        // TLS 1.2: explicit_iv = seq (big-endian). Для единообразия — через помощник.
-        WriteSeq(seq, explicitIvDest); // 8 байт
+        if (IsCbcSuite)
+        {
+            // У CBC нет nonce вовсе, а явный вектор — случайный и создаётся при шифровании записи,
+            // а не выводится из счётчика. Здесь остаются только тринадцать байт ниже: для CBC они
+            // служат ЗАГОЛОВКОМ MAC (RFC 5246 §6.2.3.1), а не дополнительными данными AEAD.
+            // Собирать их вторым методом было бы ошибкой: расхождение между отправкой и приёмом
+            // проявилось бы как сплошной провал MAC, то есть как «сервер шлёт битые записи».
+        }
+        else if (IsChaChaSuite)
+        {
+            // RFC 7905: nonce = IV(12) XOR seq, дополненный нулями слева. Явного IV в записи нет,
+            // поэтому explicitIvDest здесь пуст.
+            BuildChaChaNonce(clientWriteIvSalt, seq, nonceDest);
+        }
+        else
+        {
+            // TLS 1.2: explicit_iv = seq (big-endian). Для единообразия — через помощник.
+            WriteSeq(seq, explicitIvDest); // 8 байт
 
-        // nonce = salt(4) + explicit_iv(8)
-        nonceDest.Clear();
-        clientWriteIvSalt.CopyTo(nonceDest[..4]);
-        explicitIvDest.CopyTo(nonceDest[4..]);
+            // nonce = salt(4) + explicit_iv(8)
+            nonceDest.Clear();
+            clientWriteIvSalt.CopyTo(nonceDest[..4]);
+            explicitIvDest.CopyTo(nonceDest[4..]);
+        }
 
         // AAD = seq(8) | type(1) | 0x0303(2) | length(2)
         aadDest.Clear();
@@ -1096,8 +1517,15 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         aadDest[8] = (byte)type;
         aadDest[9] = 0x03;
         aadDest[10] = 0x03;
-        aadDest[11] = (byte)(plainLen >> 8);
-        aadDest[12] = (byte)plainLen;
+
+        // Длина записи занимает два байта, и разбиение числа на разряды — не потеря данных.
+        // Для фреймворка включена проверка переполнения, из-за чего эта запись бросала исключение
+        // на ЛЮБОЙ длине больше 255 байт: TLS 1.2 не мог отправить ни одного реального запроса.
+        unchecked
+        {
+            aadDest[11] = (byte)(plainLen >> 8);
+            aadDest[12] = (byte)plainLen;
+        }
     }
 
     /// <summary>
@@ -1113,17 +1541,33 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected virtual void BuildAadAndNonceForRead(TlsContentType type, int plainLen, ulong seq, ReadOnlySpan<byte> explicitIv, Span<byte> nonceDest, Span<byte> aadDest)
     {
-        nonceDest.Clear();
-        serverWriteIvSalt.CopyTo(nonceDest[..4]);
-        explicitIv.CopyTo(nonceDest[4..]);
+        if (IsCbcSuite)
+        {
+            // См. пояснение в BuildAadAndNonceForWrite: у CBC nonce нет, нужен только заголовок MAC.
+        }
+        else if (IsChaChaSuite)
+        {
+            BuildChaChaNonce(serverWriteIvSalt, seq, nonceDest);
+        }
+        else
+        {
+            nonceDest.Clear();
+            serverWriteIvSalt.CopyTo(nonceDest[..4]);
+            explicitIv.CopyTo(nonceDest[4..]);
+        }
 
         aadDest.Clear();
         WriteSeq(seq, aadDest[..8]);
         aadDest[8] = (byte)type;
         aadDest[9] = 0x03;
         aadDest[10] = 0x03;
-        aadDest[11] = (byte)(plainLen >> 8);
-        aadDest[12] = (byte)plainLen;
+
+        // См. пояснение в BuildAadAndNonceForWrite: разбиение длины на два байта.
+        unchecked
+        {
+            aadDest[11] = (byte)(plainLen >> 8);
+            aadDest[12] = (byte)plainLen;
+        }
     }
 
     /// <summary>
@@ -1135,24 +1579,12 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected virtual async ValueTask HandlePostHandshakeRecordAsync(ReadOnlyMemory<byte> encryptedHandshake, CancellationToken cancellationToken)
     {
-        if (aeadRead12 is null || serverWriteIvSalt is null) throw new InvalidOperationException(ReadKeyUnset);
-        if (encryptedHandshake.Length < 8 + aeadRead12.TagSize) throw new InvalidOperationException(PayloadTooShort);
+        var plain = ArrayPool<byte>.Shared.Rent(MaxPlaintextForRecord(encryptedHandshake.Length));
 
-        var explicitIv = encryptedHandshake.Span[..8];
-        var cipherTag = encryptedHandshake.Span[8..];
-        var plainLen = cipherTag.Length - aeadRead12.TagSize;
-
-        Span<byte> nonce = stackalloc byte[12];
-        Span<byte> aad = stackalloc byte[13];
-        BuildAadAndNonceForRead(TlsContentType.Handshake, plainLen, seqRead12, explicitIv, nonce, aad);
-
-        var plain = ArrayPool<byte>.Shared.Rent(plainLen);
         try
         {
-            if (!aeadRead12.TryDecrypt(nonce, aad, cipherTag, plain.AsSpan(0, plainLen), out var got) || got != plainLen)
-                throw new CryptographicException("AEAD decrypt failed (post-handshake)");
-
-            seqRead12++;
+            if (!TryUnprotectRecord(TlsContentType.Handshake, encryptedHandshake.Span, plain, out var plainLen))
+                throw new CryptographicException(RecordNotAuthentic);
 
             var span = plain.AsSpan(0, plainLen);
             if (span.Length < 4) throw new InvalidOperationException("Handshake record too short");
@@ -1191,36 +1623,25 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected virtual PostAlertAction HandleAlertRecord(ReadOnlySpan<byte> encryptedAlert)
     {
-        if (aeadRead12 is null || serverWriteIvSalt is null) throw new InvalidOperationException(ReadKeyUnset);
-        if (encryptedAlert.Length < 8 + aeadRead12.TagSize) throw new InvalidOperationException(PayloadTooShort);
-
-        var explicitIv = encryptedAlert[..8];
-        var cipherTag = encryptedAlert[8..];
-        var plainLen = cipherTag.Length - aeadRead12.TagSize;
+        var capacity = MaxPlaintextForRecord(encryptedAlert.Length);
 
         scoped Span<byte> plain;
         byte[]? rented = null;
 
         try
         {
-            if (plainLen <= 256)
+            if (capacity <= 256)
             {
-                plain = stackalloc byte[plainLen];
+                plain = stackalloc byte[capacity];
             }
             else
             {
-                rented = ArrayPool<byte>.Shared.Rent(plainLen);
-                plain = rented.AsSpan(0, plainLen);
+                rented = ArrayPool<byte>.Shared.Rent(capacity);
+                plain = rented.AsSpan(0, capacity);
             }
 
-            Span<byte> nonce = stackalloc byte[12];
-            Span<byte> aad = stackalloc byte[13];
-            BuildAadAndNonceForRead(TlsContentType.Alert, plainLen, seqRead12, explicitIv, nonce, aad);
-
-            if (!aeadRead12.TryDecrypt(nonce, aad, cipherTag, plain, out var got) || got != plainLen)
+            if (!TryUnprotectRecord(TlsContentType.Alert, encryptedAlert, plain, out var plainLen))
                 return PostAlertAction.Fatal;
-
-            seqRead12++;
 
             if (plainLen < 2) return PostAlertAction.Fatal;
 
@@ -1273,25 +1694,14 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     {
         var payload = payloadMem.Span;
 
-        if (aeadRead12 is null || serverWriteIvSalt is null) throw new InvalidOperationException(ReadKeyUnset);
-        if (recordLen < 8 + aeadRead12.TagSize) throw new InvalidOperationException(PayloadTooShort);
-
-        var explicitIv = payload[..8];
-        var cipherTag = payload[8..recordLen];
-        var plainLen = cipherTag.Length - aeadRead12.TagSize;
-
-        Span<byte> nonce = stackalloc byte[12];
-        Span<byte> aad = stackalloc byte[13];
-        BuildAadAndNonceForRead(TlsContentType.ApplicationData, plainLen, seqRead12, explicitIv, nonce, aad);
-
-        var plain = ArrayPool<byte>.Shared.Rent(plainLen);
+        // Форма записи зависит от набора: у ChaCha20 явного вектора инициализации нет, у CBC он
+        // шестнадцатибайтовый и случайный, а длина открытых данных заранее неизвестна.
+        var plain = ArrayPool<byte>.Shared.Rent(MaxPlaintextForRecord(recordLen));
 
         try
         {
-            if (!aeadRead12.TryDecrypt(nonce, aad, cipherTag, plain.AsSpan(0, plainLen), out var got) || got != plainLen)
-                throw new CryptographicException("AEAD decrypt failed (read)");
-
-            seqRead12++;
+            if (!TryUnprotectRecord(TlsContentType.ApplicationData, payload[..recordLen], plain, out var plainLen))
+                throw new CryptographicException(RecordNotAuthentic);
 
             var copy = Math.Min(plainLen, userBuffer.Length);
             plain.AsSpan(0, copy).CopyTo(userBuffer.Span);
@@ -1355,11 +1765,30 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
             try
             {
                 if (hdr.ContentType is TlsContentType.Handshake)
+                {
                     done = await OnHandshakeRecordAsync(payload.AsMemory(0, hdr.Length), cancellationToken).ConfigureAwait(false);
+                }
                 else if (hdr.ContentType is TlsContentType.Alert)
-                    throw new InvalidOperationException("Alert во время рукопожатия");
+                {
+                    // ★ Оповещение УРОВНЯ ПРЕДУПРЕЖДЕНИЯ рукопожатие не прерывает (RFC 5246,
+                    // §7.2): сторона вправе его пропустить и продолжить. Мы же роняли соединение
+                    // на любом, включая безобидное unrecognized_name — его сервер шлёт, когда имя
+                    // из SNI ему незнакомо, но обслужить он всё равно готов.
+                    //
+                    // Найдено массовым прогоном: так терялся dunkindonuts.com, который отдаётся
+                    // любому другому клиенту. Тот же разбор есть и в пути TLS 1.3.
+                    var level = hdr.Length >= 1 ? payload[0] : (byte)2;
+                    var description = hdr.Length >= 2 ? payload[1] : (byte)0;
+
+                    if (level is not 1 || description == (byte)TlsAlertDescription.CloseNotify)
+                    {
+                        throw new InvalidOperationException($"Во время рукопожатия получен TLS alert: {DescribeAlert(payload.AsSpan(0, hdr.Length))}");
+                    }
+                }
                 else
+                {
                     throw new InvalidOperationException("Неожиданный тип записи");
+                }
             }
             finally
             {
@@ -1480,14 +1909,20 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void WriteSeq(ulong seq, Span<byte> dst)
     {
-        dst[0] = (byte)(seq >> 56);
-        dst[1] = (byte)(seq >> 48);
-        dst[2] = (byte)(seq >> 40);
-        dst[3] = (byte)(seq >> 32);
-        dst[4] = (byte)(seq >> 24);
-        dst[5] = (byte)(seq >> 16);
-        dst[6] = (byte)(seq >> 8);
-        dst[7] = (byte)seq;
+        // Разбиение 64-битного счётчика на восемь разрядов. Без unchecked проверка переполнения
+        // срабатывала бы уже на 256-й записи соединения — то есть на первом же ответе средних
+        // размеров, и выглядело бы это как случайный сбой посреди обмена.
+        unchecked
+        {
+            dst[0] = (byte)(seq >> 56);
+            dst[1] = (byte)(seq >> 48);
+            dst[2] = (byte)(seq >> 40);
+            dst[3] = (byte)(seq >> 32);
+            dst[4] = (byte)(seq >> 24);
+            dst[5] = (byte)(seq >> 16);
+            dst[6] = (byte)(seq >> 8);
+            dst[7] = (byte)seq;
+        }
     }
 
     /// <summary>
@@ -1656,6 +2091,30 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         if (pooled is not null) ArrayPool<byte>.Shared.Return(pooled, clearArray: true);
     }
 
+    /// <summary>
+    /// Строит nonce для наборов ChaCha20-Poly1305.
+    /// </summary>
+    /// <param name="iv">Фиксированный вектор инициализации длиной 12 байт.</param>
+    /// <param name="seq">Счётчик записей.</param>
+    /// <param name="destination">Куда писать nonce.</param>
+    /// <remarks>
+    /// По RFC 7905 счётчик дополняется нулями слева до длины IV и складывается с ним по модулю
+    /// два. Именно эта схема принята и в TLS 1.3, поэтому запись ChaCha20 в TLS 1.2 не несёт
+    /// явного вектора инициализации.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void BuildChaChaNonce(ReadOnlySpan<byte> iv, ulong seq, Span<byte> destination)
+    {
+        iv[..12].CopyTo(destination);
+
+        // Счётчик занимает младшие восемь байт: складываем побайтно, начиная с конца.
+        unchecked
+        {
+            for (var index = 0; index < 8; index++)
+                destination[11 - index] ^= (byte)(seq >> (index * 8));
+        }
+    }
+
     private static bool IsDowngrade(ReadOnlySpan<byte> rnd)
     {
         // Значения «сентинелов» по RFC8446 (TLS 1.3), оба варианта допустимо проверять
@@ -1712,22 +2171,32 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
             throw new CryptographicException("Не удалось построить цепочку сертификатов сервера");
 
         if ((sslPolicyErrors & SslPolicyErrors.RemoteCertificateNameMismatch) is not 0)
-            throw new CryptographicException("Имя хоста не соответствует сертификату сервера");
+        {
+            throw new CryptographicException(
+                $"Имя хоста не соответствует сертификату сервера: ожидалось '{sniHost}', в сертификате {DescribeCertificateNames(leaf)}");
+        }
     }
 
-    /// <summary>Проверка соответствия имени хоста по SAN/CN, с поддержкой wildcard вида *.example.com.</summary>
+    /// <summary>
+    /// Проверяет соответствие имени хоста сертификату.
+    /// </summary>
+    /// <param name="cert">Сертификат сервера.</param>
+    /// <param name="host">Запрошенное имя.</param>
+    /// <returns><see langword="true"/>, если имя соответствует.</returns>
+    /// <remarks>
+    /// Проверка делегируется общей: своя копия здесь уже была, и она отличалась от общей —
+    /// брала из SAN только первое имя. Две реализации одного правила расходятся всегда, а
+    /// расхождение в проверке имени сертификата — это либо отказ на исправном сервере, либо
+    /// принятый чужой сертификат.
+    /// </remarks>
     private static bool HostnameMatches(X509Certificate2 cert, string host)
-    {
-        // Быстрый путь: .NET вернёт предпочитаемое имя (обычно SAN).
-        var name = cert.GetNameInfo(X509NameType.DnsName, forIssuer: false);
-        if (!string.IsNullOrEmpty(name) && WildcardMatch(name, host)) return true;
+        => ServerCertificateVerifier.HostnameMatches(cert, host);
 
-        // Запасной путь: если SAN не прочитался, попробуем CN:
-        var cn = cert.GetNameInfo(X509NameType.SimpleName, forIssuer: false);
-        if (!string.IsNullOrEmpty(cn) && WildcardMatch(cn, host)) return true;
-
-        return default;
-    }
+    /// <summary>Перечисляет имена сертификата для сообщения об ошибке.</summary>
+    /// <param name="certificate">Сертификат.</param>
+    /// <returns>Имена через запятую.</returns>
+    private static string DescribeCertificateNames(X509Certificate2 certificate)
+        => ServerCertificateVerifier.DescribeCertificateNames(certificate);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool WildcardMatch(string pattern, string host)
@@ -1745,9 +2214,10 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool TryReadServerHelloExtensions(ReadOnlySpan<byte> exts, out bool ems, out ReadOnlyMemory<byte> alpn)
+    private static bool TryReadServerHelloExtensions(ReadOnlySpan<byte> exts, out bool ems, out bool encryptThenMac, out ReadOnlyMemory<byte> alpn)
     {
         ems = false;
+        encryptThenMac = false;
         alpn = default;
         var epos = 0;
 
@@ -1778,6 +2248,10 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
             {
                 ems = true;
             }
+            else if (et is 0x0016) // encrypt_then_mac (RFC 7366)
+            {
+                encryptThenMac = true;
+            }
 
             epos += el;
         }
@@ -1785,13 +2259,34 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
         return true;
     }
 
+    /// <summary>
+    /// Реализован ли набор в этом клиенте.
+    /// </summary>
+    /// <param name="suite">Код набора.</param>
+    /// <returns><see langword="true"/>, если набор можно довести до конца.</returns>
+    /// <remarks>
+    /// Единственный источник — общая таблица. Объявлять набор поддержанным раньше, чем он
+    /// действительно работает, ХУЖЕ отказа: вместо внятного «не реализован» получится непонятная
+    /// поломка посреди обмена, которую придётся ловить по дампу.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsSupportedSuiteByPolicy(ushort suite, IEnumerable<CipherSuite> offered)
+    internal static bool IsImplementedSuite(ushort suite)
+        => Tls12CipherSuiteParameters.TryGet(suite, out var parameters) && parameters.IsAvailable;
+
+    /// <summary>
+    /// Предлагали ли мы этот набор в ClientHello.
+    /// </summary>
+    /// <param name="suite">Код набора.</param>
+    /// <param name="offered">Список из настроек — ровно тот, что ушёл на провод.</param>
+    /// <returns><see langword="true"/>, если набор был в предложении.</returns>
+    /// <remarks>
+    /// Проверка обязательна и отдельно от «реализовано»: расширяя список реализованного, легко
+    /// случайно разрешить серверу выбрать НЕПРЕДЛАГАВШИЙСЯ набор — а это уже не мимикрия, а дыра.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool IsOfferedSuite(ushort suite, IEnumerable<CipherSuite> offered)
     {
-        if (suite is 0xC02F or 0xC030 or 0xC02B or 0xC02C)
-        {
-            foreach (var s in offered) if ((ushort)s == suite) return true;
-        }
+        foreach (var s in offered) if ((ushort)s == suite) return true;
 
         return default;
     }

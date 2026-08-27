@@ -69,6 +69,17 @@ public enum TlsHandshakeType : byte
     /// 
     /// </summary>
     KeyUpdate = 24,  // TLS 1.3, post-handshake
+
+    /// <summary>
+    /// CompressedCertificate (RFC 8879).
+    /// </summary>
+    /// <remarks>
+    /// Сервер присылает ЭТО вместо Certificate, если клиент объявил расширение
+    /// compress_certificate. Браузеры его объявляют, значит и получать сжатый сертификат придётся:
+    /// объявить расширение и не уметь разобрать ответ — верный способ оборвать рукопожатие на
+    /// каждом сервере, который сжатие поддерживает.
+    /// </remarks>
+    CompressedCertificate = 25,
     /// <summary>
     /// 
     /// </summary>

@@ -1949,9 +1949,11 @@ public sealed class Https11ConnectionTests
 
     private static Task<T> Within<T>(ValueTask<T> task) => task.AsTask().WaitAsync(TimeSpan.FromMilliseconds(TestTimeoutMs));
 
+    // Сборка настроек транспорта переехала из соединения в общий коннектор: протокол выбирается по
+    // ALPN уже после рукопожатия, поэтому одна версия соединения не может ею владеть.
     private static TcpSettings InvokeCreateTcpSettings(HttpsConnectionOptions options)
     {
-        var method = typeof(Https11Connection).GetMethod("CreateTcpSettings", BindingFlags.Static | BindingFlags.NonPublic)
+        var method = typeof(HttpsTransportConnector).GetMethod("CreateTcpSettings", BindingFlags.Static | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("CreateTcpSettings not found.");
 
         return (TcpSettings)(method.Invoke(obj: null, [options])
@@ -1960,10 +1962,10 @@ public sealed class Https11ConnectionTests
 
     private static TlsSettings InvokeCreateTlsSettings(HttpsConnectionOptions options)
     {
-        var method = typeof(Https11Connection).GetMethod("CreateTlsSettings", BindingFlags.Static | BindingFlags.NonPublic)
+        var method = typeof(HttpsTransportConnector).GetMethod("CreateTlsSettings", BindingFlags.Static | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("CreateTlsSettings not found.");
 
-        return (TlsSettings)(method.Invoke(obj: null, [options])
+        return (TlsSettings)(method.Invoke(obj: null, [options, HttpsTransportConnector.Http11Only])
             ?? throw new InvalidOperationException("CreateTlsSettings invocation returned null."));
     }
 

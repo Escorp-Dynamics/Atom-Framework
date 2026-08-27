@@ -382,6 +382,20 @@ public abstract class HeadersFormattingPolicy : IHeadersFormattingPolicy
         for (var i = 0; i < arr.Length; i++) yield return arr[i];
     }
 
+    /// <summary>
+    /// Порядок обычных заголовков, свойственный этому браузеру.
+    /// </summary>
+    /// <remarks>
+    /// ★ Порядок наблюдаем и у браузеров РАЗНЫЙ. Замер настоящего Firefox 154 (его собственный
+    /// журнал <c>nsHttp</c>) даёт последовательность, отличную от хромиумовской сразу в трёх
+    /// местах: <c>accept-language</c> раньше <c>accept-encoding</c>, <c>upgrade-insecure-requests</c>
+    /// не в начале, а после них, и порядок <c>sec-fetch-*</c> обратный.
+    ///
+    /// По умолчанию берётся порядок движков Chromium — он снят с настоящего Chrome и совпал с ним
+    /// заголовок в заголовок.
+    /// </remarks>
+    protected virtual IEnumerable<string> OrderCommon => DefaultOrderCommon;
+
     /// <inheritdoc/>
-    public IEnumerable<KeyValuePair<string, string>> Format(IDictionary<string, string> input, Version requestVersion, RequestKind requestKind, bool useCookieCrumbling) => Format(input, requestVersion, requestKind, DefaultOrderCommon, useCookieCrumbling);
+    public IEnumerable<KeyValuePair<string, string>> Format(IDictionary<string, string> input, Version requestVersion, RequestKind requestKind, bool useCookieCrumbling) => Format(input, requestVersion, requestKind, OrderCommon, useCookieCrumbling);
 }

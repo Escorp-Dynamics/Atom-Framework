@@ -20,6 +20,12 @@ public sealed class HPackEncoder : IHeadersEncoder
     /// </summary>
     public int DynamicTableSize { get; private set; }
 
+    /// <summary>Сколько записей сейчас в динамической таблице.</summary>
+    public int DynamicTableCount => dynamicTable.Count;
+
+    /// <summary>Сколько байт таблицы занято по правилам подсчёта RFC 7541.</summary>
+    public int DynamicTableSizeInUse => dynamicTable.Size;
+
     /// <summary>
     /// Пользовательская стратегия выбора режима индексирования по имени заголовка.
     /// </summary>
@@ -211,14 +217,38 @@ public sealed class HPackEncoder : IHeadersEncoder
         bw.Flush();
     }
 
+    /// <summary>
+    /// Выбирает режим индексирования для заголовка.
+    /// </summary>
+    /// <param name="name">Имя заголовка.</param>
+    /// <returns>Режим кодирования.</returns>
+    /// <remarks>
+    /// ★ Обычные заголовки индексируются НАКОПИТЕЛЬНО — ради этого динамическая таблица и
+    /// существует. Прежде здесь для всего возвращался режим «без индексирования», то есть
+    /// таблица не заполнялась НИКОГДА: каждый запрос по соединению отправлял свои заголовки
+    /// целиком, тогда как браузер со второго запроса ссылается на записи одним байтом.
+    ///
+    /// Это и лишний трафик, и отличие от браузера: сервер видит клиента, который за всё
+    /// соединение не проиндексировал ни одной записи, — сжатие заголовков у него как бы есть, а
+    /// пользы от него никакой.
+    ///
+    /// Исключение — заголовки с тайной. Для них режим «никогда не индексировать» задан RFC 7541
+    /// §7.1.3 и означает запрет не только нам, но и промежуточным узлам: значение не должно
+    /// осесть в таблице, живущей дольше запроса.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static HPackIndexingMode DefaultMode(ReadOnlySpan<char> name)
     {
         if (name.Length is 6 && name.SequenceEqual("cookie".AsSpan())) return HPackIndexingMode.NeverIndexed;
         if (name.Length is 13 && name.SequenceEqual("authorization".AsSpan())) return HPackIndexingMode.NeverIndexed;
         if (name.Length is 19 && name.SequenceEqual("proxy-authorization".AsSpan())) return HPackIndexingMode.NeverIndexed;
+        if (name.Length is 10 && name.SequenceEqual("set-cookie".AsSpan())) return HPackIndexingMode.NeverIndexed;
 
-        return HPackIndexingMode.WithoutIndexing;
+        // Псевдозаголовки меняются от запроса к запросу (:path почти всегда свой), и
+        // индексировать их значит вытеснять из таблицы то, что действительно повторяется.
+        if (name.Length > 0 && name[0] is ':') return HPackIndexingMode.WithoutIndexing;
+
+        return HPackIndexingMode.Incremental;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

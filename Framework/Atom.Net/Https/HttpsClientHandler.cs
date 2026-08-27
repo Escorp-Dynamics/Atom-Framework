@@ -40,6 +40,9 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     private int isDisposed;
     private readonly ConcurrentDictionary<ConnectionPoolKey, ConnectionPoolState> connectionPool = new();
 
+    /// <summary>Счётчик обращений к пулу: по нему решается, когда пора убирать записи.</summary>
+    private int poolSweepCountdown;
+
     /// <summary>
     /// Возвращает или задает значение, которое указывает, должен ли обработчик следовать ответам перенаправления.
     /// </summary>
@@ -48,7 +51,13 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// <summary>
     /// Возвращает или задает тип метода распаковки, используемый обработчиком для автоматической распаковки содержимого HTTP-ответа.
     /// </summary>
-    public DecompressionMethods AutomaticDecompression { get; set; }
+    /// <remarks>
+    /// По умолчанию включено ВСЁ — как у браузера. Значение относится только к разбору ответа и
+    /// на провод не влияет: заголовок <c>accept-encoding</c> формирует профиль браузера, потому
+    /// что он входит в отпечаток. Из этого следует и обратное: выключив распаковку, вы получите
+    /// сжатое тело, но по-прежнему будете объявлять серверу, что принимаете сжатие.
+    /// </remarks>
+    public DecompressionMethods AutomaticDecompression { get; set; } = DecompressionMethods.All;
 
     /// <summary>
     /// Получает или задает значение, указывающее, проверяется ли сертификат по списку отзыва центра сертификации.
@@ -72,6 +81,15 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     public CookieContainer CookieContainer { get; set; } = new();
 
     /// <summary>
+    /// Объявления альтернативных служб, полученные от узлов (<c>alt-svc</c>).
+    /// </summary>
+    /// <remarks>
+    /// Живёт вместе с обработчиком, как и пул соединений: узел объявляет поддержку HTTP/3 один
+    /// раз, а пользуются объявлением все последующие запросы к нему.
+    /// </remarks>
+    public AlternativeServiceCache AlternativeServices { get; } = new();
+
+    /// <summary>
     /// Возвращает или задает сведения о проверке подлинности, используемые данным обработчиком.
     /// </summary>
     public ICredentials? Credentials { get; set; }
@@ -86,7 +104,14 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// <summary>
     /// Возвращает или задает максимальное количество переадресаций, выполняемых обработчиком.
     /// </summary>
-    public int MaxAutomaticRedirections { get; set; } = 50;
+    /// <remarks>
+    /// Двадцать — столько же, сколько у браузеров. Прежние пятьдесят достались от умолчания
+    /// платформы и стоили времени: узел, перенаправляющий сам на себя (а такие в сети есть —
+    /// например отдающий <c>location: https://он же:443/</c>), заставлял делать полсотни
+    /// запросов, прежде чем признать петлю. Заодно это и вопрос мимикрии: клиент, готовый идти
+    /// по полусотне переходов, ведёт себя не как браузер.
+    /// </remarks>
+    public int MaxAutomaticRedirections { get; set; } = 20;
 
     /// <summary>
     /// Возвращает или задает максимально допустимое число одновременных подключений (для каждой конечной точки сервера)
@@ -107,6 +132,11 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// Например, если значение равно 64, для максимальной длины заголовков ответов разрешено использовать 65536 байт.
     /// </summary>
     public int MaxResponseHeadersLength { get; set; } = 65536;
+
+    /// <summary>
+    /// Предел размера тела ответа в байтах; ноль — без предела.
+    /// </summary>
+    public long MaxResponseContentLength { get; set; }
 
     /// <summary>
     /// Возвращает или задает объект для <see cref="IMeterFactory"/> создания пользовательского <see cref="Meter"/>
@@ -146,7 +176,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "The property is part of the instance handler surface.")]
     [SuppressMessage("Maintainability", "MA0041:Use a method group instead of a lambda", Justification = "The analyzer misfires on expression-bodied instance properties.")]
     [SuppressMessage("Major Code Smell", "S2325:Methods and properties that don't access instance data should be static", Justification = "The property is part of the instance handler surface.")]
-    public bool SupportsAutomaticDecompression => false;
+    public bool SupportsAutomaticDecompression => true;
 
     /// <summary>
     /// Получает значение, указывающее, поддерживает ли обработчик параметры прокси.
@@ -163,7 +193,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "The property is part of the instance handler surface.")]
     [SuppressMessage("Maintainability", "MA0041:Use a method group instead of a lambda", Justification = "The analyzer misfires on expression-bodied instance properties.")]
     [SuppressMessage("Major Code Smell", "S2325:Methods and properties that don't access instance data should be static", Justification = "The property is part of the instance handler surface.")]
-    public bool SupportsRedirectConfiguration => false;
+    public bool SupportsRedirectConfiguration => true;
 
     /// <summary>
     /// Возвращает или задает значение, указывающее, использует <see cref="CookieContainer"/> ли обработчик свойство
@@ -272,10 +302,24 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         }
 
         var versionPolicy = profile?.VersionPolicy ?? request.VersionPolicy;
+        var upstreamProxy = ResolveUpstreamProxy(uri);
+        var preferredVersion = ResolvePreferredVersion(request, profile, upstreamProxy);
 
-        var preferredVersion = request.Version == default
-            ? profile?.PreferredHttpVersion ?? HttpVersion.Version11
-            : request.Version;
+        // Узел мог объявить поддержку HTTP/3 — так браузер её и узнаёт. Поднимаем версию только
+        // при точном совпадении происхождения: объявление относится к узлу, а не к схеме.
+        // ★ Профилю, который QUIC не описывает, HTTP/3 не предлагается вовсе. Иначе он ушёл бы
+        // туда с чужими параметрами транспорта и чужими SETTINGS — то есть сменил бы личность
+        // на полпути, стоило серверу объявить alt-svc. Лучше остаться на HTTP/2 целиком, чем
+        // быть одним браузером по TCP и другим по QUIC.
+        if (isHttps
+            && preferredVersion == HttpVersion.Version20
+            && request.VersionPolicy is not HttpVersionPolicy.RequestVersionExact
+            && upstreamProxy is null
+            && (profile is null || profile.Value.Http3 is not null)
+            && AlternativeServices.SupportsHttp3(FormatOrigin(uri.IdnHost, port)))
+        {
+            preferredVersion = HttpVersion.Version30;
+        }
 
         var tcpSettings = BuildTcpSettings(profile);
         var tlsSettings = BuildTlsSettings(profile, request);
@@ -288,7 +332,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             PreferredVersion = preferredVersion,
             VersionPolicy = versionPolicy,
             LocalEndPoint = null,
-            ConnectTimeout = ConnectTimeout,
+            ConnectTimeout = preferredVersion == HttpVersion.Version30 ? GetHttp3ConnectTimeout() : ConnectTimeout,
             ResponseHeadersTimeout = ResponseHeadersTimeout,
             RequestSendTimeout = RequestSendTimeout,
             ResponseBodyTimeout = ResponseBodyTimeout,
@@ -298,13 +342,98 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
                 ? null
                 : (certificate, chain, sslPolicyErrors) => ServerCertificateCustomValidationCallback(request, certificate, chain, sslPolicyErrors),
             MaxResponseHeadersBytes = MaxResponseHeadersLength <= 0 ? int.MaxValue : checked(MaxResponseHeadersLength * 1024),
+            MaxResponseContentBytes = MaxResponseContentLength,
             IdleTimeout = PooledConnectionIdleTimeout,
             MaxConcurrentStreams = 1,
-            AutoDecompression = false,
+            AutoDecompression = AutomaticDecompression is not DecompressionMethods.None,
             ProfileTcpSettings = tcpSettings,
             ProfileTlsSettings = tlsSettings,
+            ProfileHttp2Settings = profile?.Http2,
+            ProfileHttp3Settings = profile?.Http3,
+            ProfileQuicTransport = profile?.QuicTransport,
+            UpstreamProxy = upstreamProxy,
         };
     }
+
+    /// <summary>
+    /// Определяет апстрим-прокси для целевого адреса.
+    /// </summary>
+    /// <param name="uri">Целевой адрес.</param>
+    /// <returns>Адрес прокси либо <see langword="null"/> для прямого подключения.</returns>
+    /// <remarks>
+    /// Решение принимает сам <see cref="IWebProxy"/>: он же знает и о списках исключений. Прокси,
+    /// вернувший адрес самой цели, означает «идти напрямую» — таково соглашение платформы.
+    /// </remarks>
+    private Uri? ResolveUpstreamProxy(Uri uri)
+    {
+        if (!UseProxy || Proxy is null) return null;
+        if (Proxy.IsBypassed(uri)) return null;
+
+        var proxyUri = Proxy.GetProxy(uri);
+        if (proxyUri is null || Uri.Equals(proxyUri, uri)) return null;
+
+        // Учётные данные хранятся отдельно от адреса, а туннелю CONNECT они нужны вместе с ним.
+        if (Proxy.Credentials?.GetCredential(proxyUri, "Basic") is not { } credential) return proxyUri;
+        if (string.IsNullOrEmpty(credential.UserName)) return proxyUri;
+
+        var builder = new UriBuilder(proxyUri)
+        {
+            UserName = Uri.EscapeDataString(credential.UserName),
+            Password = Uri.EscapeDataString(credential.Password ?? string.Empty),
+        };
+
+        return builder.Uri;
+    }
+
+    /// <summary>
+    /// Определяет версию HTTP, которую следует предложить серверу.
+    /// </summary>
+    /// <param name="request">Запрос.</param>
+    /// <param name="profile">Профиль браузера, если он задан.</param>
+    /// <param name="upstreamProxy">Апстрим-прокси, если он настроен.</param>
+    /// <returns>Предпочитаемая версия.</returns>
+    /// <remarks>
+    /// Профиль — это описание браузера, за который мы себя выдаём, поэтому объявленная им версия
+    /// задаёт нижнюю границу: Chrome не станет обращаться по HTTP/1.1 туда, где сервер предлагает
+    /// h2, и клиент, который так делает, отличим по одному этому признаку. Запрос вправе поднять
+    /// планку выше, а <see cref="HttpVersionPolicy.RequestVersionExact"/> означает прямое
+    /// требование вызывающей стороны и перекрывает профиль в обе стороны.
+    ///
+    /// Без профиля решает запрос — поведение обычного клиента остаётся прежним.
+    ///
+    /// ★ При настроенном прокси HTTP/3 НЕ ПРЕДЛАГАЕТСЯ никогда. Причина не в удобстве: HTTP/3
+    /// работает поверх UDP, а обычный прокси умеет только туннель CONNECT поверх TCP. Соединение
+    /// QUIC ушло бы МИМО прокси — напрямую с настоящего адреса, молча и с полностью рабочим
+    /// ответом. Для того, кто поставил прокси именно ради подмены адреса, это худший из возможных
+    /// исходов: утечка, ничем себя не проявляющая.
+    ///
+    /// Ровно так же поступает браузер: Chrome при заданном прокси QUIC отключает, потому что
+    /// туннелировать его через CONNECT нечем. То есть откат на HTTP/2 здесь не только безопасен,
+    /// но и соответствует поведению, под которое мы маскируемся.
+    /// </remarks>
+    private static Version ResolvePreferredVersion(HttpRequestMessage request, BrowserProfile? profile, Uri? upstreamProxy)
+    {
+        var requested = request.Version == default ? HttpVersion.Version11 : request.Version;
+
+        if (profile is not { } browserProfile)
+            return Downgrade(requested, upstreamProxy);
+
+        if (request.VersionPolicy is HttpVersionPolicy.RequestVersionExact)
+            return Downgrade(requested, upstreamProxy);
+
+        var preferred = requested > browserProfile.PreferredHttpVersion ? requested : browserProfile.PreferredHttpVersion;
+
+        return Downgrade(preferred, upstreamProxy);
+    }
+
+    /// <summary>
+    /// Опускает HTTP/3 до HTTP/2, когда трафик обязан идти через прокси.
+    /// </summary>
+    /// <param name="version">Желаемая версия.</param>
+    /// <param name="upstreamProxy">Апстрим-прокси, если он настроен.</param>
+    /// <returns>Версия, которую действительно можно использовать.</returns>
+    private static Version Downgrade(Version version, Uri? upstreamProxy)
+        => upstreamProxy is not null && version >= HttpVersion.Version30 ? HttpVersion.Version20 : version;
 
     private TcpSettings BuildTcpSettings(BrowserProfile? profile)
     {
@@ -342,8 +471,443 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             : configuredProtocols;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    /// <summary>
+    /// Выполняет запрос, при необходимости проходя цепочку перенаправлений.
+    /// </summary>
+    /// <param name="request">Запрос.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Ответ, завершающий цепочку.</returns>
+    /// <remarks>
+    /// ★ Свойство <see cref="AllowAutoRedirect"/> объявлено включённым по умолчанию, а цепочки не
+    /// было: вызывающая сторона получала голый 302 с пустым телом вместо целевого ответа. Для
+    /// клиента, выдающего себя за браузер, это ещё и расхождение в поведении — браузер идёт по
+    /// перенаправлению всегда, а вход через страницу проверки без этого попросту не работает.
+    ///
+    /// Правила взяты у браузера, а не буквально из RFC 9110 §15.4: коды 301, 302 и 303 меняют
+    /// метод на GET и отбрасывают тело — спецификация для 301 и 302 этого не требует, но так
+    /// делают все браузеры, и сервер рассчитывает именно на это. Коды 307 и 308 сохраняют и метод,
+    /// и тело.
+    ///
+    /// Заголовок авторизации при уходе на ДРУГОЙ узел снимается: пересылать его туда, куда он не
+    /// предназначался, — способ отдать учётные данные постороннему.
+    /// </remarks>
     internal async Task<HttpsResponseMessage> SendInternalAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var response = await SendWithRetryAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if (!AllowAutoRedirect) return response;
+
+        HttpRequestMessage? redirected = null;
+        var hops = 0;
+
+        try
+        {
+#pragma warning disable CA2000 // Владение переходит переменной redirected; освобождает DisposeRedirect в цикле и в finally.
+            while (TryCreateRedirect(redirected ?? request, response, out var next))
+            {
+                if (++hops > MaxAutomaticRedirections)
+                {
+                    DisposeRedirect(next);
+                    throw new HttpRequestException($"Превышен предел перенаправлений ({MaxAutomaticRedirections})");
+                }
+
+                response.Dispose();
+                DisposeRedirect(redirected);
+                redirected = next;
+
+                response = await SendWithRetryAsync(redirected, cancellationToken).ConfigureAwait(false);
+            }
+#pragma warning restore CA2000
+
+            return response;
+        }
+        finally
+        {
+            DisposeRedirect(redirected);
+        }
+    }
+
+    /// <summary>
+    /// Сколько раз повторять запрос, который заведомо не был обработан.
+    /// </summary>
+    /// <remarks>
+    /// Двух попыток хватает: повтор нужен против ОДНОРАЗОВЫХ причин — соединение из пула успело
+    /// умереть, сервер упёрся в предел потоков, началось закрытие соединения. Если и вторая
+    /// попытка на свежем соединении не удалась, дело не в стечении обстоятельств.
+    /// </remarks>
+    private const int MaxSendAttempts = 3;
+
+    /// <summary>
+    /// Отправляет запрос, повторяя его, если он заведомо не был обработан сервером.
+    /// </summary>
+    /// <param name="request">Запрос.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Ответ.</returns>
+    /// <remarks>
+    /// ★ Повторов не было вовсе — и это самый заметный пробел в надёжности. Долгоживущий клиент
+    /// неизбежно натыкается на соединение, которое партнёр закрыл секунду назад: проверка перед
+    /// выдачей из пула сужает окно, но закрыть его полностью нельзя — между проверкой и отправкой
+    /// всегда остаётся зазор. Один такой случай означал потерю запроса, хотя сервер о нём даже не
+    /// узнал.
+    ///
+    /// Повторяется ТОЛЬКО то, что заведомо не дошло до обработки, — иначе повтор превращается в
+    /// повторное действие на стороне сервера. Признаки перечислены в <see cref="IsRetryable"/>.
+    /// </remarks>
+    private async Task<HttpsResponseMessage> SendWithRetryAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= MaxSendAttempts; attempt++)
+        {
+            HttpsResponseMessage response;
+
+            try
+            {
+                response = await SendWithHttp3FallbackAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception error) when (attempt < MaxSendAttempts
+                && !cancellationToken.IsCancellationRequested
+                && IsRetryable(error, request))
+            {
+                await PauseBeforeRetryAsync(attempt, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            // ★ Отказ транспорта приходит сюда ЗНАЧЕНИЕМ, а не исключением: собственный контракт
+            // модуля возвращает сбой в поле ответа, и превращается он в исключение только на
+            // границе с HttpClient. Ловить одни лишь исключения здесь бесполезно — как раз то,
+            // из-за чего повтор сначала и не срабатывал ни разу.
+            if (response.Exception is not { } failure
+                || attempt >= MaxSendAttempts
+                || cancellationToken.IsCancellationRequested
+                || !IsRetryable(failure, request))
+            {
+                return response;
+            }
+
+            response.Dispose();
+
+            await PauseBeforeRetryAsync(attempt, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Сюда попасть нельзя: последняя попытка либо возвращает ответ, либо бросает — условие
+        // отбора повторов её уже не пропускает.
+        throw new InvalidOperationException("Исчерпаны попытки отправки запроса");
+    }
+
+    /// <summary>
+    /// Выжидает перед следующей попыткой.
+    /// </summary>
+    /// <param name="attempt">Номер только что провалившейся попытки.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Задача ожидания.</returns>
+    /// <remarks>
+    /// Первый повтор идёт сразу: самая частая причина — соединение, закрытое партнёром, и ждать
+    /// там нечего. Дальше пауза растёт: если сервер разгружается, мгновенный повтор попадёт
+    /// ровно в ту же обстановку.
+    /// </remarks>
+    private static ValueTask PauseBeforeRetryAsync(int attempt, CancellationToken cancellationToken)
+        => attempt <= 1
+            ? ValueTask.CompletedTask
+            : new ValueTask(Task.Delay(TimeSpan.FromMilliseconds(50 * attempt), cancellationToken));
+
+    /// <summary>
+    /// Решает, можно ли повторить запрос после этого отказа.
+    /// </summary>
+    /// <param name="error">Отказ попытки.</param>
+    /// <param name="request">Запрос.</param>
+    /// <returns><see langword="true"/>, если повтор безопасен.</returns>
+    /// <remarks>
+    /// Два условия, и оба обязательны.
+    ///
+    /// Первое: отказ обязан означать, что запрос НЕ БЫЛ обработан. Отказ сервера в потоке
+    /// (REFUSED_STREAM), обрыв соединения и закрытие его партнёром — это именно такие случаи:
+    /// ответа не было, а значит и действия на той стороне не произошло. Всё остальное —
+    /// включая любой полученный ответ, даже с кодом ошибки, — не повторяется.
+    ///
+    /// Второе: тело запроса обязано быть отправляемым ПОВТОРНО. Поток, который вызывающая
+    /// сторона отдала однажды, второй раз прочитать нельзя, и молча отправить пустое тело было бы
+    /// хуже отказа. Запросы без тела этим не ограничены.
+    /// </remarks>
+    private static bool IsRetryable(Exception error, HttpRequestMessage request)
+    {
+        if (request.Content is not null && !IsReplayableContent(request.Content)) return false;
+
+        var inner = error;
+        while (inner.InnerException is not null) inner = inner.InnerException;
+
+        return inner switch
+        {
+            Http2.Http2StreamRefusedException => true,
+            Connections.HttpsIdleConnectionClosedException => true,
+
+            // Не дозвонились — запрос не отправлялся вовсе. Отдельный тип, а не общий
+            // TimeoutException: таймаут на ОТВЕТЕ означает обратное, там сервер мог всё сделать.
+            Connections.HttpsConnectTimeoutException => true,
+            Tls.TlsConnectionClosedException => true,
+            System.Net.Sockets.SocketException socket => socket.SocketErrorCode
+                is System.Net.Sockets.SocketError.ConnectionReset
+                or System.Net.Sockets.SocketError.ConnectionAborted
+                or System.Net.Sockets.SocketError.Shutdown,
+            IOException io => io.Message.Contains("закрыто удалённой стороной", StringComparison.Ordinal)
+                || io.Message.Contains("Сеанс HTTP/2 завершён", StringComparison.Ordinal),
+
+            // ★ Внутренний срок истёк (внешнюю отмену сюда не пускает условие повтора выше).
+            // Повторяем ТОЛЬКО безопасные методы: срок мог истечь и на чтении ответа, а значит
+            // сервер запрос уже выполнил. Для GET и HEAD повторное выполнение ничего не меняет
+            // по определению, для POST — меняет, и рисковать этим нельзя.
+            OperationCanceledException or TimeoutException => IsIdempotent(request.Method),
+
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Безопасно ли выполнить запрос этим методом дважды.
+    /// </summary>
+    /// <param name="method">Метод запроса.</param>
+    /// <returns><see langword="true"/> для методов без побочного действия.</returns>
+    /// <remarks>
+    /// Список намеренно узкий. PUT и DELETE спецификация тоже называет идемпотентными, но на
+    /// деле их обработчики часто ведут счётчики и журналы, а цена ошибки здесь несимметрична:
+    /// лишний повтор GET не стоит ничего, лишний повтор PUT может стоить данных.
+    /// </remarks>
+    private static bool IsIdempotent(HttpMethod method)
+        => method == HttpMethod.Get
+        || method == HttpMethod.Head
+        || method == HttpMethod.Options;
+
+    /// <summary>
+    /// Можно ли отправить это тело ещё раз.
+    /// </summary>
+    /// <param name="content">Тело запроса.</param>
+    /// <returns><see langword="true"/>, если тело лежит в памяти и перечитывается.</returns>
+    private static bool IsReplayableContent(HttpContent content)
+        => content is ByteArrayContent or StringContent or FormUrlEncodedContent;
+
+    /// <summary>
+    /// Решает, уместен ли откат с HTTP/3 после этого отказа.
+    /// </summary>
+    /// <param name="error">Отказ попытки по HTTP/3.</param>
+    /// <param name="cancellationToken">Токен вызывающей стороны.</param>
+    /// <returns><see langword="true"/>, если следует повторить по HTTP/2.</returns>
+    /// <remarks>
+    /// Отмену, пришедшую СНАРУЖИ, повторять нельзя — вызывающая сторона отказалась от запроса.
+    /// А вот собственное время ожидания, истёкшее внутри, — обычная причина отката: именно так
+    /// выглядит закрытый UDP.
+    /// </remarks>
+    private static bool ShouldFallBackFromHttp3(Exception error, CancellationToken cancellationToken)
+        => error is not OperationCanceledException || !cancellationToken.IsCancellationRequested;
+
+    /// <summary>
+    /// Через сколько бездействия запись пула считается ненужной.
+    /// </summary>
+    private static readonly TimeSpan AbandonedPoolLifetime = TimeSpan.FromMinutes(5);
+
+    /// <summary>Как часто проверять пул на брошенные записи — раз в столько обращений.</summary>
+    private const int PoolSweepInterval = 256;
+
+    /// <summary>
+    /// Убирает записи пула для узлов, к которым давно не обращались.
+    /// </summary>
+    /// <remarks>
+    /// ★ Ключ пула — это УЗЕЛ, а при обходе тысяч сайтов узлов столько же. Раньше запись
+    /// заводилась навсегда: даже после того как все соединения к узлу закрылись, в словаре
+    /// оставались сама запись и два семафора, и это росло вместе с числом посещённых сайтов, ни
+    /// разу не уменьшаясь. Ни отказа, ни записи в журнале — просто медленно текущая память.
+    ///
+    /// Убираются только ПУСТЫЕ записи: с живым соединением запись трогать нельзя. Проверка идёт
+    /// не по таймеру, а раз в несколько сотен обращений — отдельный поток ради этого заводить
+    /// незачем, а на горячем пути проверка почти всегда сводится к уменьшению счётчика.
+    /// </remarks>
+    private void SweepAbandonedPools()
+    {
+        if (Interlocked.Decrement(ref poolSweepCountdown) > 0) return;
+
+        Volatile.Write(ref poolSweepCountdown, PoolSweepInterval);
+
+        foreach (var pair in connectionPool)
+        {
+            if (!pair.Value.IsAbandoned(AbandonedPoolLifetime)) continue;
+            if (!connectionPool.TryRemove(pair)) continue;
+
+            // Между проверкой и удалением записью могли начать пользоваться. Тогда возвращаем её
+            // на место: потерять запись с соединением куда хуже, чем оставить лишнюю пустую.
+            if (!pair.Value.IsAbandoned(TimeSpan.Zero)) connectionPool.TryAdd(pair.Key, pair.Value);
+            else pair.Value.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Сколько ждать соединения по HTTP/3, прежде чем откатиться на HTTP/2.
+    /// </summary>
+    /// <returns>Время ожидания попытки HTTP/3.</returns>
+    /// <remarks>
+    /// ★ Заметно меньше общего: попытка по HTTP/3 всегда ОПОРТУНИСТИЧНА — есть заведомо рабочий
+    /// путь по HTTP/2, и цена неудачи здесь не отказ, а задержка. Ждать полное время ожидания
+    /// соединения незачем: узел, до которого UDP не доходит, не ответит и за минуту, а
+    /// работающий отвечает за сотни миллисекунд.
+    ///
+    /// Замер: на узле с объявленным, но недоступным HTTP/3 полное ожидание давало 10 секунд
+    /// задержки на первый запрос; браузеры в такой обстановке дают QUIC доли секунды форы и
+    /// уходят на TCP.
+    /// </remarks>
+    private TimeSpan GetHttp3ConnectTimeout()
+    {
+        var limit = TimeSpan.FromSeconds(3);
+
+        return ConnectTimeout > TimeSpan.Zero && ConnectTimeout < limit ? ConnectTimeout : limit;
+    }
+
+    /// <summary>
+    /// Освобождает промежуточный запрос перенаправления, не трогая его тело.
+    /// </summary>
+    /// <param name="redirect">Запрос очередного перехода либо <see langword="null"/>.</param>
+    /// <remarks>
+    /// ★ Тело у перехода — ЧУЖОЕ: для 307 и 308 метод и тело сохраняются, поэтому
+    /// <c>TryCreateRedirect</c> передаёт сюда ту же самую ссылку на <c>HttpContent</c>, что и в
+    /// исходном запросе. Освобождая запрос целиком, мы освобождали и её — а дальше либо
+    /// следующий переход той же цепочки пытался это тело отправить и получал обращение к
+    /// освобождённому объекту, либо тело просто исчезало у вызывающей стороны, которая своим
+    /// запросом ещё владеет и вправе им пользоваться.
+    /// </remarks>
+    private static void DisposeRedirect(HttpRequestMessage? redirect)
+    {
+        if (redirect is null) return;
+
+        redirect.Content = null;
+        redirect.Dispose();
+    }
+
+    /// <summary>
+    /// Выполняет запрос, откатываясь с HTTP/3 на HTTP/2, если по HTTP/3 не вышло.
+    /// </summary>
+    /// <param name="request">Запрос.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Ответ.</returns>
+    /// <remarks>
+    /// ★ Откат обязателен ровно потому, что HTTP/3 у нас берётся из объявления сервера, а не из
+    /// уверенности: объявление могло устареть, а UDP до узла может не доходить вовсе — в
+    /// корпоративных сетях он закрыт сплошь и рядом. Без отката один такой узел или одна такая
+    /// сеть делают все запросы к нему безнадёжными.
+    ///
+    /// Браузер поступает так же: не сумев по HTTP/3, он возвращается на HTTP/2 и перестаёт
+    /// доверять объявлению — поэтому запись здесь и забывается, иначе неудача повторялась бы на
+    /// каждом запросе.
+    ///
+    /// Откат делается ТОЛЬКО когда версию выбрали мы: прямое требование вызывающей стороны
+    /// подменять нельзя.
+    /// </remarks>
+    private async Task<HttpsResponseMessage> SendWithHttp3FallbackAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var origin = request.RequestUri is { } uri ? FormatOrigin(uri.IdnHost, uri.Port) : null;
+        var mayFallBack = origin is not null
+            && request.VersionPolicy is not HttpVersionPolicy.RequestVersionExact
+            && request.Version < HttpVersion.Version30
+            && AlternativeServices.SupportsHttp3(origin);
+
+        try
+        {
+            var response = await SendOnceAsync(request, cancellationToken).ConfigureAwait(false);
+
+            // Удачное соединение снимает отсрочку: узел мог быть недоступен временно.
+            if (mayFallBack && response.Version == HttpVersion.Version30) AlternativeServices.MarkHttp3Working(origin!);
+
+            return response;
+        }
+        catch (Exception error) when (mayFallBack && ShouldFallBackFromHttp3(error, cancellationToken))
+        {
+            // ★ Не «забыть», а ОТЛОЖИТЬ: забытое объявление тут же возвращается из заголовка
+            // ответа по HTTP/2, и попытка повторяется на каждом запросе — см. MarkHttp3Broken.
+            AlternativeServices.MarkHttp3Broken(origin!);
+        }
+
+        return await SendOnceAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Строит запрос по перенаправлению, если ответ его требует.
+    /// </summary>
+    /// <param name="current">Текущий запрос.</param>
+    /// <param name="response">Полученный ответ.</param>
+    /// <param name="redirect">Готовый запрос по новому адресу.</param>
+    /// <returns><see langword="true"/>, если перенаправление нужно выполнить.</returns>
+    private static bool TryCreateRedirect(HttpRequestMessage current, HttpsResponseMessage response, [NotNullWhen(true)] out HttpRequestMessage? redirect)
+    {
+        redirect = null;
+
+        var status = (int)response.StatusCode;
+        if (status is not (301 or 302 or 303 or 307 or 308)) return false;
+
+        var location = response.Headers.Location;
+        if (location is null) return false;
+
+        var origin = current.RequestUri;
+        if (origin is null) return false;
+
+        var target = location.IsAbsoluteUri ? location : new Uri(origin, location);
+
+        // Уход со схемы http(s) браузер не выполняет: перенаправление на произвольную схему —
+        // это уже не запрос, а передача управления чему-то другому.
+        if (!string.Equals(target.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(target.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var keepsMethod = status is 307 or 308;
+        var method = keepsMethod || current.Method == HttpMethod.Head ? current.Method : HttpMethod.Get;
+
+        var next = new HttpRequestMessage(method, target)
+        {
+            Version = current.Version,
+            VersionPolicy = current.VersionPolicy,
+            Content = keepsMethod ? current.Content : null,
+        };
+
+        var sameOrigin = Uri.Compare(
+            origin,
+            target,
+            UriComponents.SchemeAndServer,
+            UriFormat.UriEscaped,
+            StringComparison.OrdinalIgnoreCase) is 0;
+
+        foreach (var header in current.Headers)
+        {
+            // Учётные данные не следуют за перенаправлением на чужой узел.
+            if (!sameOrigin && string.Equals(header.Key, "Authorization", StringComparison.OrdinalIgnoreCase)) continue;
+
+            // Заголовки, которые обязаны быть пересчитаны под новый адрес, не переносим:
+            // ими займётся ApplyBrowserProfileDefaults на следующем витке.
+            if (IsRecomputedOnRedirect(header.Key)) continue;
+
+            next.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        foreach (var option in current.Options)
+            next.Options.Set(new HttpRequestOptionsKey<object?>(option.Key), option.Value);
+
+        redirect = next;
+        return true;
+    }
+
+    /// <summary>
+    /// Сообщает, что заголовок пересчитывается заново на каждом витке перенаправления.
+    /// </summary>
+    /// <param name="name">Имя заголовка.</param>
+    /// <returns><see langword="true"/>, если переносить его не следует.</returns>
+    /// <remarks>
+    /// Эти заголовки описывают ОТНОШЕНИЕ запроса к адресу: узел, происхождение, назначение
+    /// выборки, набор cookie. Перенесённые как есть, они описывали бы прошлый адрес — и это
+    /// заметно снаружи ровно так же, как их отсутствие.
+    /// </remarks>
+    private static bool IsRecomputedOnRedirect(string name)
+        => string.Equals(name, "Host", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, "Cookie", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, "Origin", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, "Referer", StringComparison.OrdinalIgnoreCase)
+        || name.StartsWith("Sec-Fetch-", StringComparison.OrdinalIgnoreCase);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private async Task<HttpsResponseMessage> SendOnceAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed) is not 0, this);
         cancellationToken.ThrowIfCancellationRequested();
@@ -351,37 +915,32 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
 
         HttpsRequestMessage? preparedRequest = null;
         var ownsPreparedRequest = false;
-        Https11Connection? connection = null;
-        ConnectionPoolState? poolState = null;
-        var leaseHeld = false;
+        var lease = default(ConnectionLease);
+        var leaseTaken = false;
+        var retained = false;
+
         try
         {
 #pragma warning disable CA2000
             preparedRequest = PrepareRequest(request, out ownsPreparedRequest);
-
-            var unsupported = TryCreateUnsupportedResponse(request, preparedRequest);
-            if (unsupported is not null) return unsupported;
+            _ = preparedRequest.RequestUri ?? throw new InvalidOperationException("RequestUri не задан");
 
             ApplyBrowserProfileDefaults(preparedRequest);
             ApplyRequestCookies(preparedRequest);
 
             var options = BuildConnectionOptions(preparedRequest);
-            (connection, poolState, leaseHeld) = await AcquireConnectionAsync(options, cancellationToken).ConfigureAwait(false);
+            lease = await AcquireConnectionAsync(options, cancellationToken).ConfigureAwait(false);
+            leaseTaken = true;
 #pragma warning restore CA2000
 
-            var (response, returnedToPool) = await SendOverConnectionAsync(preparedRequest, connection, poolState, options, cancellationToken).ConfigureAwait(false);
-            if (returnedToPool)
-                connection = null;
+            var (response, connectionRetained) = await SendOverConnectionAsync(preparedRequest, lease, options, cancellationToken).ConfigureAwait(false);
+            retained = connectionRetained;
 
             return response;
         }
         finally
         {
-            if (connection is not null)
-                await DisposeLeasedConnectionAsync(connection).ConfigureAwait(false);
-
-            if (leaseHeld && poolState is not null)
-                poolState.ReleaseLease();
+            if (leaseTaken) await ReleaseLeaseAsync(lease, retained).ConfigureAwait(false);
 
             DisposePreparedRequest(preparedRequest, ownsPreparedRequest);
 
@@ -389,10 +948,63 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         }
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Возвращает пулу всё, что было взято под запрос.
+    /// </summary>
+    /// <param name="lease">Выданная аренда.</param>
+    /// <param name="retained">Осталось ли соединение жить дальше.</param>
+    /// <returns>Задача освобождения.</returns>
+    /// <remarks>
+    /// Общее соединение HTTP/2 не закрывается никогда: по нему в этот момент могут идти чужие
+    /// запросы. Если оно испортилось, его снимают с должности общего и откладывают до момента,
+    /// когда закончатся начатые потоки, — закрыть сразу значило бы оборвать соседей.
+    /// </remarks>
+    private static async ValueTask ReleaseLeaseAsync(ConnectionLease lease, bool retained)
+    {
+        var connection = lease.Connection;
+
+        if (lease.IsShared)
+        {
+            if (lease.PoolState is { } poolState && (!connection.IsConnected || connection.IsDraining) && poolState.TryClearMultiplexed(connection))
+                poolState.Retire(connection);
+        }
+        else if (!retained && connection is not null)
+        {
+            await DisposeConnectionAsync(connection).ConfigureAwait(false);
+        }
+
+        if (lease.LeaseHeld) lease.PoolState?.ReleaseLease();
+    }
+
+    /// <summary>
+    /// Отправляет запрос по контракту <see cref="HttpMessageHandler"/>.
+    /// </summary>
+    /// <param name="request">Запрос.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Ответ сервера.</returns>
+    /// <remarks>
+    /// Сбой транспорта здесь ОБЯЗАН стать исключением. Собственный API возвращает такой сбой
+    /// значением — в этом и смысл <see cref="HttpsClient"/>, — но под <see cref="HttpClient"/>
+    /// действует контракт платформы: вызывающий код ждёт <see cref="HttpRequestException"/>, а
+    /// не ответ «500» с исключением внутри. Отдать вместо исключения синтетический ответ значит
+    /// превратить обрыв связи в успешно полученный отказ сервера: повторы не сработают, а
+    /// диагностика укажет на чужую сторону.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected override async Task<HttpResponseMessage> SendAsync([NotNull] HttpRequestMessage request, CancellationToken cancellationToken)
-        => await SendInternalAsync(request, cancellationToken).ConfigureAwait(false);
+    {
+        var response = await SendInternalAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if (response.Exception is not { } failure) return response;
+
+        response.Dispose();
+
+        // Отмену пробрасываем как отмену: превращать её в сбой запроса значит скрыть от
+        // вызывающей стороны, что остановку запросила она сама.
+        if (failure is OperationCanceledException canceled) throw canceled;
+
+        throw new HttpRequestException(failure.Message, failure);
+    }
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -424,8 +1036,11 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
 
         ownsPreparedRequest = true;
 
-        foreach (var header in request.Headers)
-            prepared.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        // Копируем НЕРАЗОБРАННЫЕ значения: обычный обход отдаёт их поэлементно, и уже здесь,
+        // на клонировании, заголовок вызывающей стороны распался бы на куски — а дальше уехал бы
+        // на провод несколькими строками вместо одной.
+        foreach (var header in request.Headers.NonValidated)
+            prepared.Headers.TryAddWithoutValidation(header.Key, header.Value.ToString());
 
         foreach (var option in request.Options)
             prepared.Options.Set(new HttpRequestOptionsKey<object?>(option.Key), option.Value);
@@ -433,38 +1048,265 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         return prepared;
     }
 
-    private HttpsResponseMessage? TryCreateUnsupportedResponse(HttpRequestMessage originalRequest, HttpsRequestMessage preparedRequest)
+    /// <summary>
+    /// Выдаёт соединение под запрос, открывая новое или переиспользуя имеющееся.
+    /// </summary>
+    /// <param name="options">Параметры соединения.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Аренда соединения.</returns>
+    /// <remarks>
+    /// Три пути, и выбор между ними определяется тем, что известно о протоколе узла.
+    ///
+    /// Общее соединение HTTP/2 выдаётся без всякой синхронизации — это самый частый путь под
+    /// нагрузкой, и он обязан быть свободен от блокировок.
+    ///
+    /// Известный HTTP/1.1 — прежнее поведение: слот пула, очередь, эксклюзивное владение.
+    ///
+    /// Незнакомый узел проходит через ворота: пока протокол не выяснен, параллельные подключения
+    /// рискуют оказаться лишними, а каждое из них — это полное рукопожатие TLS.
+    /// </remarks>
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "Владение соединением передаётся в аренду; освобождает его ReleaseLeaseAsync.")]
+    private async ValueTask<ConnectionLease> AcquireConnectionAsync(HttpsConnectionOptions options, CancellationToken cancellationToken)
     {
-        _ = preparedRequest.RequestUri ?? throw new InvalidOperationException("RequestUri не задан");
+        var allowHttp2 = options.IsHttps && options.PreferredVersion.Major >= 2;
+        var isMultiplexingExpected = allowHttp2 || options.PreferredVersion.Major >= 3;
 
-        if (UseProxy && Proxy is not null)
-            return HttpsResponseMessage.FromException(originalRequest, TimeSpan.Zero, new NotSupportedException("Прокси path для минимального H1 handler пока не подключён."));
+        if (MaxConnectionsPerServer <= 0)
+        {
+            var direct = await ConnectNegotiatedAsync(options, allowHttp2, cancellationToken).ConfigureAwait(false);
+            return new ConnectionLease(direct, PoolState: null, LeaseHeld: false, IsShared: false);
+        }
 
-        if (preparedRequest.Version.Major >= 2)
-            return HttpsResponseMessage.FromException(originalRequest, TimeSpan.Zero, new NotSupportedException("Минимальный handler path пока поддерживает только HTTP/1.1."));
+        var poolKey = new ConnectionPoolKey(options.Host, options.Port, options.IsHttps, options.UpstreamProxy?.ToString(), options.PreferredVersion.Major >= 3);
+        var poolState = connectionPool.GetOrAdd(poolKey, static (_, arg) => new ConnectionPoolState(arg.MaxConnections), new ConnectionPoolStateFactoryArg(MaxConnectionsPerServer));
+
+        poolState.Touch();
+        poolState.SweepRetired();
+        SweepAbandonedPools();
+
+        if (TryTakeShared(poolState, poolKey) is { } shared)
+            return new ConnectionLease(shared, poolState, LeaseHeld: false, IsShared: true);
+
+        if (!isMultiplexingExpected || poolState.Hint is PoolProtocolHint.Exclusive)
+            return await AcquireExclusiveAsync(options, poolState, poolKey, allowHttp2, cancellationToken).ConfigureAwait(false);
+
+        return await AcquireNegotiatedAsync(options, poolState, poolKey, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Забирает общее соединение, попутно снимая непригодное.
+    /// </summary>
+    /// <summary>
+    /// Пытается взять общее соединение узла.
+    /// </summary>
+    /// <param name="poolState">Состояние пула узла.</param>
+    /// <param name="poolKey">Ключ пула.</param>
+    /// <returns>Соединение либо <see langword="null"/>, если брать нечего.</returns>
+    /// <remarks>
+    /// ★ «Занято» и «непригодно» — РАЗНЫЕ вещи, и раньше они лечились одинаково. Соединение,
+    /// упёршееся в предел одновременных потоков сервера, снималось с должности общего и
+    /// уничтожалось — совершенно исправное, с живым рукопожатием и наполненной таблицей сжатия.
+    ///
+    /// Под нагрузкой это выворачивает мультиплексирование наизнанку: при пятистах запросах к
+    /// узлу с пределом в сто потоков каждое переполнение выбрасывает соединение и заставляет
+    /// делать полное рукопожатие TCP и TLS заново. То есть чем выше нагрузка, тем ближе
+    /// поведение к HTTP/1.1 — ровно наоборот тому, ради чего HTTP/2 и нужен.
+    ///
+    /// Теперь занятость возвращает «сейчас нечего взять» и соединение остаётся на месте, а
+    /// снимается оно только по настоящей непригодности.
+    /// </remarks>
+    private HttpsConnection? TryTakeShared(ConnectionPoolState poolState, ConnectionPoolKey poolKey)
+    {
+        if (poolState.Multiplexed is not { } shared) return null;
+        if (CanUseMultiplexed(shared, poolKey)) return shared;
+
+        // Единственная причина — заняты все потоки: соединение исправно, просто сейчас полное.
+        if (IsMerelyBusy(shared, poolKey)) return null;
+
+        if (poolState.TryClearMultiplexed(shared)) poolState.Retire(shared);
 
         return null;
     }
 
-    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "Connection ownership is transferred to SendInternalAsync, which releases or returns the connection from its finally block.")]
-    private async ValueTask<(Https11Connection Connection, ConnectionPoolState? PoolState, bool LeaseHeld)> AcquireConnectionAsync(HttpsConnectionOptions options, CancellationToken cancellationToken)
-    {
-        if (MaxConnectionsPerServer <= 0)
-            return (new Https11Connection(), null, false);
+    /// <summary>
+    /// Проверяет, отказано ли соединению только из-за занятости.
+    /// </summary>
+    /// <param name="connection">Общее соединение.</param>
+    /// <param name="key">Ключ пула.</param>
+    /// <returns><see langword="true"/>, если соединение исправно и лишь заполнено.</returns>
+    private bool IsMerelyBusy(HttpsConnection connection, ConnectionPoolKey key)
+        => connection.IsConnected
+        && !connection.IsDraining
+        && connection.MatchesTarget(key.Host, key.Port, key.IsHttps)
+        && !IsConnectionExpired(connection)
+        && !IsConnectionLifetimeExpired(connection)
+        && !connection.HasCapacity;
 
-        var poolKey = new ConnectionPoolKey(options.Host, options.Port, options.IsHttps);
-        var poolState = connectionPool.GetOrAdd(poolKey, static (_, arg) => new ConnectionPoolState(arg.MaxConnections), new ConnectionPoolStateFactoryArg(MaxConnectionsPerServer));
+    /// <summary>
+    /// Выдаёт эксклюзивное соединение под слот пула.
+    /// </summary>
+    private async ValueTask<ConnectionLease> AcquireExclusiveAsync(
+        HttpsConnectionOptions options,
+        ConnectionPoolState poolState,
+        ConnectionPoolKey poolKey,
+        bool allowHttp2,
+        CancellationToken cancellationToken)
+    {
         await poolState.WaitForLeaseAsync(cancellationToken).ConfigureAwait(false);
 
-        var pooledConnection = TryRentConnection(poolKey, poolState);
-        if (pooledConnection is not null)
-            return (pooledConnection, poolState, true);
+        try
+        {
+#pragma warning disable CA2000 // Владение соединением переходит в аренду; освобождает его ReleaseLeaseAsync.
+            if (await TryRentConnectionAsync(poolKey, poolState, cancellationToken).ConfigureAwait(false) is { } pooled)
+                return new ConnectionLease(pooled, poolState, LeaseHeld: true, IsShared: false);
+#pragma warning restore CA2000
 
-        return (new Https11Connection(), poolState, true);
+            var opened = await ConnectNegotiatedAsync(options, allowHttp2, cancellationToken).ConfigureAwait(false);
+
+            // Сервер мог согласовать h2 даже там, где прошлый раз выбрал http/1.1. Такое
+            // соединение эксклюзивным быть не должно: слот освобождаем сразу, иначе одно
+            // мультиплексируемое соединение навсегда займёт место, рассчитанное на один запрос.
+            if (!opened.IsMultiplexing) return new ConnectionLease(opened, poolState, LeaseHeld: true, IsShared: false);
+
+            poolState.SetHint(PoolProtocolHint.Multiplexed);
+            poolState.ReleaseLease();
+
+            return poolState.TryPublishMultiplexed(opened)
+                ? new ConnectionLease(opened, poolState, LeaseHeld: false, IsShared: true)
+                : new ConnectionLease(opened, poolState, LeaseHeld: false, IsShared: false);
+        }
+        catch
+        {
+            poolState.ReleaseLease();
+            throw;
+        }
     }
 
-    private async ValueTask<(HttpsResponseMessage Response, bool ReturnedToPool)> SendOverConnectionAsync(HttpsRequestMessage preparedRequest, Https11Connection connection, ConnectionPoolState? poolState, HttpsConnectionOptions options, CancellationToken cancellationToken)
+    /// <summary>
+    /// Выясняет протокол узла под воротами и выдаёт соединение согласно результату.
+    /// </summary>
+    private async ValueTask<ConnectionLease> AcquireNegotiatedAsync(
+        HttpsConnectionOptions options,
+        ConnectionPoolState poolState,
+        ConnectionPoolKey poolKey,
+        CancellationToken cancellationToken)
     {
+        HttpsConnection opened;
+
+        await poolState.EnterConnectGateAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            // Пока мы ждали ворота, соединение мог установить кто-то другой — ради этого они и нужны.
+            if (TryTakeShared(poolState, poolKey) is { } shared)
+                return new ConnectionLease(shared, poolState, LeaseHeld: false, IsShared: true);
+
+            opened = await ConnectNegotiatedAsync(options, allowHttp2: true, cancellationToken).ConfigureAwait(false);
+
+            if (opened.IsMultiplexing)
+            {
+                poolState.SetHint(PoolProtocolHint.Multiplexed);
+
+                return poolState.TryPublishMultiplexed(opened)
+                    ? new ConnectionLease(opened, poolState, LeaseHeld: false, IsShared: true)
+                    : new ConnectionLease(opened, poolState, LeaseHeld: false, IsShared: false);
+            }
+
+            poolState.SetHint(PoolProtocolHint.Exclusive);
+        }
+        finally
+        {
+            poolState.ExitConnectGate();
+        }
+
+        // Слот берём уже ВНЕ ворот: ожидание свободного слота может быть долгим, и держать на нём
+        // ворота значило бы задерживать всех, кому досталось бы готовое общее соединение.
+        try
+        {
+            await poolState.WaitForLeaseAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await DisposeConnectionAsync(opened).ConfigureAwait(false);
+            throw;
+        }
+
+        return new ConnectionLease(opened, poolState, LeaseHeld: true, IsShared: false);
+    }
+
+    /// <summary>
+    /// Устанавливает соединение и выбирает его тип по согласованному в ALPN протоколу.
+    /// </summary>
+    /// <param name="options">Параметры соединения.</param>
+    /// <param name="allowHttp2">Предлагать ли HTTP/2.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Открытое соединение.</returns>
+    /// <remarks>
+    /// Именно так решает браузер: он предлагает <c>h2</c> и <c>http/1.1</c>, а выбирает сервер.
+    /// Транспорт при этом устанавливается ровно один раз — подключаться повторно ради «нужного»
+    /// класса соединения означало бы лишнее рукопожатие TLS на каждый первый запрос к узлу.
+    /// </remarks>
+    private static async ValueTask<HttpsConnection> ConnectNegotiatedAsync(HttpsConnectionOptions options, bool allowHttp2, CancellationToken cancellationToken)
+    {
+        // HTTP/3 согласованию по ALPN не подлежит: он живёт на другом транспорте, поверх UDP, и
+        // выбирается ДО подключения. Обычный путь для браузера — узнать о поддержке из заголовка
+        // Alt-Svc и переключиться на следующем запросе; здесь версия задаётся явно.
+        if (options.PreferredVersion.Major >= 3)
+        {
+            var http3 = new Https3Connection();
+
+            try
+            {
+                await http3.OpenAsync(options, cancellationToken).ConfigureAwait(false);
+                return http3;
+            }
+            catch
+            {
+                await http3.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        var alpn = allowHttp2 && options.IsHttps
+            ? HttpsTransportConnector.Http2AndHttp11
+            : HttpsTransportConnector.Http11Only;
+
+        var established = await HttpsTransportConnector.ConnectAsync(options, alpn, cancellationToken).ConfigureAwait(false);
+
+        if (!established.IsHttp2)
+        {
+            var http11 = new Https11Connection();
+            http11.Adopt(established, options);
+            return http11;
+        }
+
+        var http2 = new Https2Connection();
+
+        try
+        {
+            await http2.AdoptAsync(established, options, cancellationToken).ConfigureAwait(false);
+            return http2;
+        }
+        catch
+        {
+            await http2.DisposeAsync().ConfigureAwait(false);
+
+            if (!ReferenceEquals(established.Transport, established.Socket))
+                await established.Transport.DisposeAsync().ConfigureAwait(false);
+
+            await established.Socket.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async ValueTask<(HttpsResponseMessage Response, bool Retained)> SendOverConnectionAsync(
+        HttpsRequestMessage preparedRequest,
+        ConnectionLease lease,
+        HttpsConnectionOptions options,
+        CancellationToken cancellationToken)
+    {
+        var connection = lease.Connection;
+
         if (!connection.IsConnected)
             await connection.OpenAsync(options, cancellationToken).ConfigureAwait(false);
 
@@ -472,7 +1314,14 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         var response = await connection.SendAsync(preparedRequest, cancellationToken).ConfigureAwait(false);
         ApplyResponseCookies(uri, response);
 
-        if (poolState is not null && CanReuseConnection(connection, response))
+        if (response.Headers.NonValidated.TryGetValues("alt-svc", out var altSvc))
+            AlternativeServices.Remember(FormatOrigin(uri.IdnHost, uri.Port), altSvc.ToString());
+
+        // Общее соединение остаётся жить в пуле независимо от исхода одного запроса: его судьбу
+        // решает состояние соединения, а не результат конкретного обмена.
+        if (lease.IsShared) return (response, true);
+
+        if (lease.PoolState is { } poolState && CanReuseConnection(connection, response))
         {
             ReturnConnection(poolState, connection);
             return (response, true);
@@ -488,9 +1337,6 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         preparedRequest.Content = null;
         preparedRequest.Dispose();
     }
-
-    private static ValueTask DisposeLeasedConnectionAsync(Https11Connection connection)
-        => DisposeConnectionAsync(connection);
 
     private void ApplyRequestCookies(HttpsRequestMessage request)
     {
@@ -536,7 +1382,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
 
         ApplyRangeDefaults(request, requestContext);
 
-        ApplyRequestKindDefaults(request, requestContext);
+        ApplyRequestKindDefaults(request, profile.Value, requestContext);
 
         if (headerProfile.UseConnectionKeepAlive && !request.Headers.Contains("Connection") && request.Headers.ConnectionClose != true)
         {
@@ -557,8 +1403,13 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         }
 
         AddHeaderIfMissing(request, "sec-ch-ua", secChUa);
-        AddHeaderIfMissing(request, "sec-ch-ua-mobile", "?0");
-        AddHeaderIfMissing(request, "sec-ch-ua-platform", GetSecChUaPlatformValue(profile.UserAgent));
+        // Подсказка о мобильности берётся из профиля, а не подставляется постоянной: телефон,
+        // объявляющий «?0», противоречит собственной строке агента, и это противоречие видно в
+        // каждом запросе.
+        AddHeaderIfMissing(request, "sec-ch-ua-mobile", profile.IsMobile ? "?1" : "?0");
+        AddHeaderIfMissing(request, "sec-ch-ua-platform", profile.ClientHintsPlatform is { Length: > 0 } platform
+            ? "\"" + platform + "\""
+            : GetSecChUaPlatformValue(profile.UserAgent));
     }
 
     private static void ApplyPriorityDefaults(HttpsRequestMessage request, BrowserProfile profile, in RequestContextSnapshot requestContext)
@@ -630,7 +1481,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             isFormSubmission);
     }
 
-    private static void ApplyRequestKindDefaults(HttpsRequestMessage request, in RequestContextSnapshot requestContext)
+    private static void ApplyRequestKindDefaults(HttpsRequestMessage request, in BrowserProfile profile, in RequestContextSnapshot requestContext)
     {
         request.Headers.Referrer = requestContext.DerivedReferrer;
         AddHeaderIfMissing(request, "sec-fetch-site", requestContext.SecFetchSite);
@@ -640,6 +1491,11 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         switch (requestContext.Kind)
         {
             case RequestKind.Navigation:
+                // ★ Ни того, ни другого Safari не отправляет: sec-fetch-user в нём не реализован
+                // вовсе, а признака навигации у него нет. В записанном обмене их НЕТ, и лишний
+                // заголовок здесь так же заметен, как недостающий у остальных.
+                if (IsSafariProfile(profile)) break;
+
                 if (requestContext.IsUserActivated)
                 {
                     AddHeaderIfMissing(request, "sec-fetch-user", "?1");
@@ -809,9 +1665,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     private static string GetDefaultAcceptLanguageValue(in BrowserProfile profile)
         => IsFirefoxProfile(profile)
             ? "en-US,en;q=0.5"
-            : IsSafariProfile(profile)
-                ? "en-US"
-                : "en-US,en;q=0.9";
+            : "en-US,en;q=0.9";
 
     private static string GetDefaultAcceptEncodingValue(in BrowserProfile profile, in RequestContextSnapshot requestContext)
     {
@@ -850,9 +1704,12 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
 
     private static string? GetDefaultPriorityValue(in BrowserProfile profile, in RequestContextSnapshot requestContext)
     {
+        // Приоритет запроса Safari ОТПРАВЛЯЕТ — это видно в записанном обмене, где он стоит
+        // предпоследним. Косвенно за то же говорит и его параметр HTTP/2 «отказ от приоритетов
+        // RFC 7540»: механизм заменён заголовком, а не выброшен.
         if (IsSafariProfile(profile))
         {
-            return null;
+            return requestContext.Kind is RequestKind.Navigation ? "u=0, i" : null;
         }
 
         if (IsFirefoxProfile(profile))
@@ -1164,7 +2021,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         }
 
         if (profile.DisplayName.Contains("Edge", StringComparison.OrdinalIgnoreCase)
-            || profile.UserAgent.Contains("Edg/", StringComparison.OrdinalIgnoreCase))
+            || IsEdgeUserAgent(profile.UserAgent))
         {
             return HeadersFormattingPolicy.Edge;
         }
@@ -1199,7 +2056,11 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
 
     private static bool TryCreateSecChUaValue(string userAgent, [NotNullWhen(true)] out string? value)
     {
-        var brand = userAgent.Contains("Edg/", StringComparison.OrdinalIgnoreCase)
+        // ★ Мобильный Edge помечает себя иначе: на Android это «EdgA/», на iOS «EdgiOS/», и
+        // маркер «Edg/» их НЕ покрывает. Профиль Edge для Android поэтому объявлял себя брендом
+        // Google Chrome, тогда как строка агента говорила EdgA, — расхождение между подсказкой
+        // клиента и строкой агента проверяется тривиально и выдаёт подделку сразу.
+        var brand = IsEdgeUserAgent(userAgent)
             ? "Microsoft Edge"
             : userAgent.Contains("Chrome/", StringComparison.OrdinalIgnoreCase) || userAgent.Contains("Chromium/", StringComparison.OrdinalIgnoreCase)
                 ? "Google Chrome"
@@ -1224,13 +2085,31 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             return ExtractVersionComponent(userAgent, chromeMarker + "Chrome/".Length);
         }
 
-        var edgeMarker = userAgent.IndexOf("Edg/", StringComparison.OrdinalIgnoreCase);
-        if (edgeMarker >= 0)
+        foreach (var marker in EdgeMarkers)
         {
-            return ExtractVersionComponent(userAgent, edgeMarker + "Edg/".Length);
+            var edgeMarker = userAgent.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (edgeMarker >= 0) return ExtractVersionComponent(userAgent, edgeMarker + marker.Length);
         }
 
         return "0";
+    }
+
+    /// <summary>Как Edge помечает себя в строке агента на разных платформах.</summary>
+    private static readonly string[] EdgeMarkers = ["Edg/", "EdgA/", "EdgiOS/", "Edge/"];
+
+    /// <summary>
+    /// Определяет, принадлежит ли строка агента браузеру Edge.
+    /// </summary>
+    /// <param name="userAgent">Строка агента.</param>
+    /// <returns><see langword="true"/> для любой платформы Edge.</returns>
+    private static bool IsEdgeUserAgent(string userAgent)
+    {
+        foreach (var marker in EdgeMarkers)
+        {
+            if (userAgent.Contains(marker, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
     }
 
     private static string ExtractVersionComponent(string value, int startIndex)
@@ -1244,13 +2123,121 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         return endIndex > startIndex ? value[startIndex..endIndex] : "0";
     }
 
+    /// <summary>
+    /// Составляет ключ узла для объявлений альтернативных служб.
+    /// </summary>
+    /// <param name="host">Имя узла.</param>
+    /// <param name="port">Порт.</param>
+    /// <returns>Ключ.</returns>
+    private static string FormatOrigin(string host, int port)
+        => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{host}:{port}");
+
+    /// <summary>
+    /// Сохраняет куки ответа, не позволяя одной испорченной уронить запрос.
+    /// </summary>
+    /// <param name="uri">Адрес, с которого пришёл ответ.</param>
+    /// <param name="response">Ответ.</param>
+    /// <remarks>
+    /// ★ <see cref="CookieContainer.SetCookies"/> бросает исключение на куке, которую браузер
+    /// просто ОТБРАСЫВАЕТ, — и запрос падал целиком, уже после успешного получения ответа.
+    /// Замер на двух сотнях узлов: так терялись <c>dotnet.microsoft.com</c>, <c>www.target.com</c>,
+    /// <c>www.ikea.com</c>, <c>www.ebay.com</c>, <c>www.edx.org</c> — то есть около двух процентов
+    /// живых сайтов, и ни один из них не «сломан» с точки зрения браузера.
+    ///
+    /// Две причины, обе встречены на проводе: чужой домен в атрибуте (Azure отдаёт куку для
+    /// <c>*.azurewebsites.net</c> на запрос к <c>dotnet.microsoft.com</c>) и попросту битое
+    /// значение, где сервер склеил куку саму с собой посреди даты.
+    ///
+    /// Поведение приведено к браузерному: негодная кука отбрасывается молча, остальные из того же
+    /// ответа сохраняются. Разбирать их по одной приходится потому, что отказ на одной строке
+    /// иначе унёс бы и годные объявления, если сервер сложил несколько в одно поле.
+    /// </remarks>
     private void ApplyResponseCookies(Uri uri, HttpsResponseMessage response)
     {
         if (!UseCookies || response.Exception is not null) return;
         if (!response.Headers.TryGetValues("Set-Cookie", out var values)) return;
 
         foreach (var value in values)
-            CookieContainer.SetCookies(uri, value);
+        {
+            try
+            {
+                CookieContainer.SetCookies(uri, value);
+            }
+            catch (CookieException)
+            {
+                StoreCookiesSeparately(uri, value);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Сохраняет по отдельности те объявления, что удаётся разобрать.
+    /// </summary>
+    /// <param name="uri">Адрес ответа.</param>
+    /// <param name="value">Поле <c>Set-Cookie</c> целиком.</param>
+    private void StoreCookiesSeparately(Uri uri, string value)
+    {
+        foreach (var declaration in SplitCookieDeclarations(value))
+        {
+            try
+            {
+                CookieContainer.SetCookies(uri, declaration);
+            }
+            catch (CookieException)
+            {
+                // Негодная кука — ровно то, что браузер здесь и делает: пропускает молча.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Разбивает поле на отдельные объявления кук.
+    /// </summary>
+    /// <param name="value">Поле <c>Set-Cookie</c>.</param>
+    /// <returns>Объявления по одному.</returns>
+    /// <remarks>
+    /// Запятая разделяет объявления только тогда, когда следом идёт <c>имя=</c>. Внутри даты
+    /// (<c>Expires=Thu, 24 Sep 2026 …</c>) запятая тоже есть, и деление по ней вслепую разорвало
+    /// бы годную куку пополам.
+    /// </remarks>
+    private static List<string> SplitCookieDeclarations(string value)
+    {
+        var result = new List<string>();
+        var start = 0;
+
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (value[index] is not ',') continue;
+            if (!StartsNewCookie(value, index + 1)) continue;
+
+            result.Add(value[start..index]);
+            start = index + 1;
+        }
+
+        result.Add(value[start..]);
+
+        return result;
+    }
+
+    /// <summary>
+    /// Определяет, начинается ли с этого места новое объявление куки.
+    /// </summary>
+    /// <param name="value">Поле целиком.</param>
+    /// <param name="position">Позиция сразу после запятой.</param>
+    /// <returns><see langword="true"/>, если дальше идёт <c>имя=</c>.</returns>
+    private static bool StartsNewCookie(string value, int position)
+    {
+        while (position < value.Length && value[position] is ' ') position++;
+
+        for (var index = position; index < value.Length; index++)
+        {
+            var current = value[index];
+
+            if (current is '=') return index > position;
+            if (current is ';' or ',' or ' ') return false;
+        }
+
+        return false;
     }
 
     /// <summary>

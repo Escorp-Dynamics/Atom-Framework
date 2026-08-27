@@ -14,13 +14,29 @@ public class KeyShareTlsExtension : TlsExtension
     /// <inheritdoc/>
     public override ushort Id { get; set; } = 0x0033;
 
+    /// <summary>
+    /// Добавлять ли подставную долю ключа в начало списка.
+    /// </summary>
+    /// <remarks>
+    /// Движки Chromium и Safari ставят её первой, и она несёт ОДИН нулевой байт — настоящей доли
+    /// для несуществующей группы быть не может. Номер группы обязан совпадать с подставной
+    /// группой в supported_groups: библиотека браузера берёт их из одного места, и расхождение
+    /// между двумя списками заметно.
+    ///
+    /// Firefox GREASE не использует вовсе.
+    /// </remarks>
+    public bool UseGrease { get; set; }
+
+    /// <summary>Размер подставной записи: номер группы, длина и один байт.</summary>
+    private const int GreaseEntrySize = 2 + 2 + 1;
+
     /// <inheritdoc/>
     public override int Size
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            var total = 0;
+            var total = UseGrease ? GreaseEntrySize : 0;
             foreach (var entry in cache) total += 2 + 2 + entry.PublicKey.Length; // group + length + key
             return 2 + 2 + 2 + total;
             // 2 — ExtensionId
@@ -55,7 +71,7 @@ public class KeyShareTlsExtension : TlsExtension
         offset += 2;
 
         // [Length]
-        var bodyLength = 2 + cache.Sum(e => 4 + e.PublicKey.Length);
+        var bodyLength = 2 + (UseGrease ? GreaseEntrySize : 0) + cache.Sum(e => 4 + e.PublicKey.Length);
         BinaryPrimitives.WriteUInt16BigEndian(buffer[offset..], (ushort)bodyLength);
         offset += 2;
 
@@ -64,6 +80,17 @@ public class KeyShareTlsExtension : TlsExtension
         offset += 2;
 
         // [KeyShareEntry list]
+        if (UseGrease)
+        {
+            BinaryPrimitives.WriteUInt16BigEndian(buffer[offset..], Atom.Net.Tls.Grease.Groups);
+            offset += 2;
+
+            BinaryPrimitives.WriteUInt16BigEndian(buffer[offset..], 1);
+            offset += 2;
+
+            buffer[offset++] = 0x00;
+        }
+
         foreach (var entry in cache)
         {
             BinaryPrimitives.WriteUInt16BigEndian(buffer[offset..], (ushort)entry.Group);

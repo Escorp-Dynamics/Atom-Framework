@@ -8,7 +8,7 @@ namespace Atom.Net.Tls;
 /// Пуловский аккумулятор Handshake-сообщений с возможностью посчитать хэш без сброса.
 /// Не вызывает GC на «счастливом пути», большие куски (Certificate) складируются чанками.
 /// </summary>
-internal sealed class HandshakeTranscript
+internal sealed class HandshakeTranscript : IDisposable
 {
     private const int ChunkSize = 16 * 1024;
     private readonly List<byte[]> chunks = new(capacity: 8);
@@ -39,8 +39,39 @@ internal sealed class HandshakeTranscript
     }
 
     /// <summary>
-    /// Вычисляет хэш всех записанных байт под указанный алгоритм, без изменений внутреннего состояния.
+    /// Заменяет накопленный транскрипт синтетическим сообщением message_hash.
     /// </summary>
+    /// <param name="alg">Хэш-функция согласованного набора шифров.</param>
+    /// <remarks>
+    /// ★ Требование RFC 8446 §4.4.1 и единственное место во всём протоколе, где транскрипт
+    /// переписывается задним числом. При HelloRetryRequest первое приветствие клиента заменяется
+    /// сообщением типа 254 с его ХЭШЕМ внутри — так обе стороны получают одинаковый транскрипт,
+    /// не храня первое сообщение целиком.
+    ///
+    /// Забыть эту замену значит получить неверный verify_data в Finished, то есть отказ уже в
+    /// самом конце успешного во всём остальном рукопожатия.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void ReplaceWithMessageHash(HashAlgorithmName alg)
+    {
+        var hash = ComputeHash(alg);
+
+        // ★ Буферы возвращаются в пул, а не бросаются. Прежде здесь стоял голый Clear, и при
+        // HelloRetryRequest все накопленные куски терялись мимо пула — а это единственное место,
+        // где транскрипт переписывается целиком.
+        ReturnChunks();
+
+        ReadOnlySpan<byte> header = [254, 0, 0, (byte)hash.Length];
+
+        Append(header);
+        Append(hash);
+    }
+
+    /// <summary>
+    /// Вычисляет хэш всех записанных байт под указанный алгоритм, не меняя состояния.
+    /// </summary>
+    /// <param name="alg">Хэш-функция.</param>
+    /// <returns>Хэш транскрипта.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public byte[] ComputeHash(HashAlgorithmName alg)
     {
@@ -52,10 +83,36 @@ internal sealed class HandshakeTranscript
         return ih.GetHashAndReset(); // локальный инкрементальный, безопасно
     }
 
+    /// <summary>
+    /// Возвращает накопленные куски в пул.
+    /// </summary>
+    /// <remarks>
+    /// ★ Освобождать транскрипт надо СРАЗУ по завершении рукопожатия, а не по смерти соединения.
+    /// Дальше он не нужен: все хэши, что от него требуются, уже сняты. Прежде метода не было
+    /// вовсе — только финализатор, — и каждое живое соединение держало один-три арендованных
+    /// куска по шестнадцать килобайт до самого конца. При тысяче одновременных соединений это
+    /// десятки мегабайт, занятых ничем, да ещё и мимо пула: сборщик возвращает их не сразу.
+    /// </remarks>
+    public void Dispose()
+    {
+        ReturnChunks();
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Возвращает все куски в пул и очищает список.
+    /// </summary>
+    private void ReturnChunks()
+    {
+        foreach (var chunk in chunks) ArrayPool<byte>.Shared.Return(chunk, clearArray: true);
+
+        chunks.Clear();
+        lastLen = 0;
+    }
+
     ~HandshakeTranscript()
     {
-        // На случай, если Dispose не вызовут: возвращаем чанки в пул.
-        foreach (var c in chunks)
-            ArrayPool<byte>.Shared.Return(c, clearArray: true);
+        // На случай, если Dispose не вызовут: возвращаем куски в пул.
+        foreach (var chunk in chunks) ArrayPool<byte>.Shared.Return(chunk, clearArray: true);
     }
 }

@@ -18,8 +18,8 @@ public readonly struct QuicSettings() : IEquatable<QuicSettings>
     /// Настройки UDP-уровня, применимые к используемому сокету (буферы, DSCP, TTL/HopLimit, pktinfo, и т.д.).
     /// </summary>
     /// <remarks>
-    /// Если конструктор <see cref="QuicConnection"/> вызывается с параметром <see cref="UdpStream"/>,
-    /// и это свойство не задано (<c>default</c>), будут использованы настройки из <c>udpStream.Settings</c>.
+    /// Если конструктор <c>QuicConnection</c> вызывается с параметром <see cref="UdpStream"/>,
+    /// и это свойство не задано (<see langword="default"/>), будут использованы настройки из <c>udpStream.Settings</c>.
     /// </remarks>
     public UdpSettings Udp { get; init; }
 
@@ -92,11 +92,21 @@ public readonly struct QuicSettings() : IEquatable<QuicSettings>
         _ => default,
     };
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, равны ли настройки.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если настройки совпадают.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator ==(QuicSettings left, QuicSettings right) => left.Equals(right);
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, различаются ли настройки.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если настройки различаются.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator !=(QuicSettings left, QuicSettings right) => !(left == right);
 }

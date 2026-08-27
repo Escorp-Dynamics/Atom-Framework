@@ -51,6 +51,17 @@ public abstract class TlsStream([NotNull] NetworkStream stream, in TlsSettings s
     /// </summary>
     public TlsSettings Settings { get; protected set; } = settings;
 
+    /// <summary>
+    /// Протокол, выбранный сервером в ALPN, либо <see langword="null"/>, если ALPN не согласован.
+    /// </summary>
+    /// <remarks>
+    /// Свойство живёт в базовом классе намеренно: выбор прикладного протокола — свойство
+    /// рукопожатия, а не его версии. Держать его только в TLS 1.3 значило бы, что HTTP/2 поверх
+    /// TLS 1.2 (а такие серверы есть) остаётся недостижимым, и вызывающей стороне пришлось бы
+    /// приводить поток к конкретному типу, чтобы узнать результат согласования.
+    /// </remarks>
+    public string? NegotiatedProtocol { get; protected set; }
+
     /// <inheritdoc/>
     public override bool CanRead => true;
 
@@ -118,21 +129,65 @@ public abstract class TlsStream([NotNull] NetworkStream stream, in TlsSettings s
     /// <summary>
     /// Читает следующую TLS-запись (заголовок+пейлоад). Возвращает пейлоад в пуловском буфере.
     /// </summary>
+    /// <remarks>
+    /// Вариант для тех, кому запись НУЖНА: её отсутствие здесь — отказ. Закрытие партнёром
+    /// сообщается отдельным типом <see cref="TlsConnectionClosedException"/>, потому что для
+    /// прикладного чтения это не отказ, а конец данных, и различать два события по тексту
+    /// сообщения нельзя. Кому конец потока допустим — берёт <see cref="TryReadRecordAsync"/>.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected async ValueTask<(TlsRecordHeader header, byte[] payload)> ReadRecordAsync(CancellationToken cancellationToken)
+    {
+        var (header, payload, endOfStream) = await TryReadRecordAsync(cancellationToken).ConfigureAwait(false);
+
+        if (endOfStream) throw new TlsConnectionClosedException();
+
+        return (header, payload!);
+    }
+
+    /// <summary>
+    /// Читает следующую запись, отличая конец потока от повреждения.
+    /// </summary>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Запись либо признак конца потока.</returns>
+    /// <remarks>
+    /// ★ Обрыв НА ГРАНИЦЕ записи и обрыв ПОСРЕДИ неё — разные события, и смешивать их нельзя.
+    /// Партнёр, закрывший соединение обычным FIN без предупреждения close_notify, — обыденность:
+    /// так поступают балансировщики, серверы в стиле HTTP/1.0 и часть потоковых обработчиков.
+    /// Для ответа без длины и без кусочной передачи именно закрытие соединения и означает конец
+    /// тела — а мы бросали исключение и теряли уже полученные данные целиком.
+    ///
+    /// Обрыв внутри начатой записи — по-прежнему ошибка: там половина сообщения, и делать вид,
+    /// что всё в порядке, нельзя.
+    /// </remarks>
+    protected async ValueTask<(TlsRecordHeader Header, byte[]? Payload, bool EndOfStream)> TryReadRecordAsync(CancellationToken cancellationToken)
     {
         var hdr = ArrayPool<byte>.Shared.Rent(5);
 
         try
         {
-            await ReadExactAsync(hdr.AsMemory(0, 5), cancellationToken).ConfigureAwait(false);
+            var read = 0;
+
+            while (read < 5)
+            {
+                var got = await transportStream.ReadAsync(hdr.AsMemory(read, 5 - read), cancellationToken).ConfigureAwait(false);
+
+                if (got <= 0)
+                {
+                    if (read is 0) return (default, null, true);
+
+                    throw new InvalidOperationException("Разрыв соединения посреди заголовка записи TLS");
+                }
+
+                read += got;
+            }
 
             var header = TlsRecordHeader.Read(hdr);
 
             var buf = ArrayPool<byte>.Shared.Rent(header.Length);
             await ReadExactAsync(buf.AsMemory(0, header.Length), cancellationToken).ConfigureAwait(false);
 
-            return (header, buf);
+            return (header, buf, false);
         }
         finally
         {
@@ -208,5 +263,26 @@ public abstract class TlsStream([NotNull] NetworkStream stream, in TlsSettings s
         if (ivWrite is not null) ArrayPool<byte>.Shared.Return(ivWrite, clearArray: true);
 
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Расшифровывает содержимое записи alert в читаемый вид.
+    /// </summary>
+    /// <param name="body">Тело записи: уровень и описание.</param>
+    /// <returns>Описание для сообщения об ошибке.</returns>
+    /// <remarks>
+    /// Существует ради одного: alert без описания превращает внятную причину в загадку. Ровно на
+    /// этом была потеряна отладка ALPS — сервер присылал «уровень 2, описание 10», то есть
+    /// фатальный unexpected_message, прямо называющий проблему, а в исключение попадала строка
+    /// «Получен TLS alert», по которой нельзя понять решительно ничего.
+    /// </remarks>
+    protected static string DescribeAlert(ReadOnlySpan<byte> body)
+    {
+        if (body.Length < 2) return "тело alert не разобрано";
+
+        var level = (TlsAlertLevel)body[0];
+        var description = (TlsAlertDescription)body[1];
+
+        return $"уровень {level} ({body[0]}), описание {description} ({body[1]})";
     }
 }

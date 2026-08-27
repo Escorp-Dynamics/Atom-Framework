@@ -221,11 +221,21 @@ public readonly struct OsInfo() : IParsable<OsInfo>, IEquatable<OsInfo>
         return info;
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, равны ли значения.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если значения совпадают.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator ==(OsInfo left, OsInfo right) => left.Equals(right);
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Определяет, различаются ли значения.
+    /// </summary>
+    /// <param name="left">Левый операнд.</param>
+    /// <param name="right">Правый операнд.</param>
+    /// <returns><see langword="true"/>, если значения различаются.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator !=(OsInfo left, OsInfo right) => !left.Equals(right);
 }
@@ -328,11 +338,8 @@ file ref struct Parser
 
         var content = StripArchitecture(trimmed, ref architecture, ref architectureSet, ref architecturePlacement);
 
-        if (content.IsEmpty)
-        {
-            if (architectureSet) return;
-            return;
-        }
+        // Токен, состоящий из одной только архитектуры, уже учтён: разбирать в нём больше нечего.
+        if (content.IsEmpty) return;
 
         if (TryHandlePlatform(content))
         {
@@ -352,7 +359,7 @@ file ref struct Parser
             return;
         }
 
-        if (TryHandleVersion(content)) return;
+        _ = TryHandleVersion(content);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

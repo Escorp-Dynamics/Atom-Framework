@@ -87,6 +87,17 @@ internal readonly record struct HttpsConnectionOptions
     public int MaxResponseHeadersBytes { get; init; }
 
     /// <summary>
+    /// Предел размера тела ответа в байтах; ноль — без предела.
+    /// </summary>
+    /// <remarks>
+    /// Предел на заголовки был, на тело — нет. Значение по умолчанию оставлено нулевым, чтобы не
+    /// ломать выгрузку крупных файлов: от исчерпания памяти защищает не он, а отказ выделять
+    /// память по ЗАЯВЛЕННОЙ длине (см. <c>Https11Connection.MaxEagerBodyAllocation</c>). Предел
+    /// нужен там, где размер ответа заведомо ограничен и превышение стоит считать отказом.
+    /// </remarks>
+    public long MaxResponseContentBytes { get; init; }
+
+    /// <summary>
     /// Таймаут простоя соединения, после которого оно переводится в drain/закрывается пулом.
     /// Управляется внешним пулом, но соединение предоставляет <see cref="IHttpsConnection.LastActivityTimestamp"/>.
     /// </summary>
@@ -115,4 +126,34 @@ internal readonly record struct HttpsConnectionOptions
     /// Используются как базовый снимок handshake-поведения и затем могут быть уточнены explicit handler overrides.
     /// </summary>
     public TlsSettings? ProfileTlsSettings { get; init; }
+
+    /// <summary>
+    /// Получает параметры HTTP/2 из профиля браузера.
+    /// </summary>
+    /// <remarks>
+    /// Определяют наблюдаемую сервером часть соединения: состав и порядок SETTINGS, приращение
+    /// окна, кадры приоритетов, дробление cookie. Без профиля соединение соберётся по умолчаниям
+    /// спецификации — рабочим, но не совпадающим ни с одним браузером.
+    /// </remarks>
+    public Http.Http2Settings? ProfileHttp2Settings { get; init; }
+
+    /// <summary>
+    /// Профильные параметры HTTP/3, выбранные на уровне профиля браузера.
+    /// </summary>
+    public IReadOnlyList<(Http3.Http3SettingId Id, ulong Value)>? ProfileHttp3Settings { get; init; }
+
+    /// <summary>Профильные параметры транспорта QUIC.</summary>
+    public Quic.QuicTransportParameters? ProfileQuicTransport { get; init; }
+
+    /// <summary>
+    /// Апстрим-прокси, через который следует устанавливать соединение.
+    /// </summary>
+    /// <remarks>
+    /// Только HTTP-прокси с туннелем CONNECT: именно так работают браузеры и именно такие прокси
+    /// используются для смены исходящего адреса. Учётные данные берутся из <c>UserInfo</c> адреса.
+    ///
+    /// Влияет на тождество соединения: соединения, установленные через разные прокси, ведут в
+    /// разные точки сети и переиспользовать их вперемешку нельзя.
+    /// </remarks>
+    public Uri? UpstreamProxy { get; init; }
 }

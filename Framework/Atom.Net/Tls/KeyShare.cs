@@ -29,37 +29,70 @@ public class KeyShare
     public object? Ephemeral { get; }
 
     /// <summary>
-    /// Эфемерный ключ для X25519. Требует поддержки платформой ECDH X25519.
-    /// Каждый вызов создаёт новый ключ.
+    /// Эфемерный ключ для X25519. Каждый вызов создаёт новый ключ.
     /// </summary>
+    /// <remarks>
+    /// Опирается на собственную реализацию <see cref="Tls.X25519"/>, а не на платформенный
+    /// <see cref="ECDiffieHellman"/>: .NET на ряде систем отказывает в кривой <c>1.3.101.110</c>
+    /// с <see cref="PlatformNotSupportedException"/> (проверено на этой машине). Без X25519 состав
+    /// ключевых долей в ClientHello отличается от браузерного, поэтому зависеть здесь от платформы
+    /// нельзя — иначе мимикрия ломается на ровном месте, причём только на части окружений.
+    ///
+    /// В <see cref="Ephemeral"/> кладём приватный скаляр (32 байта): для X25519 этого достаточно,
+    /// объект ключа не нужен, а лишних аллокаций на горячем пути не возникает.
+    /// </remarks>
     public static KeyShare X25519
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            var privateKey = Tls.X25519.CreatePrivateKey();
+            return new KeyShare(NamedGroup.X25519, Tls.X25519.GetPublicKey(privateKey), privateKey);
+        }
+    }
+
+    /// <summary>
+    /// Эфемерный гибридный ключ X25519 + ML-KEM-768.
+    /// </summary>
+    /// <remarks>
+    /// Основная группа современного Chrome. Доля ключа — конкатенация в порядке
+    /// draft-kwiatkowski-tls-ecdhe-mlkem: сначала ключ инкапсуляции ML-KEM-768 (1184 байта), затем
+    /// открытый ключ X25519 (32 байта), всего 1216. Порядок обратный привычному «сначала
+    /// классика» — перепутав его, получим отказ рукопожатия, а не молчаливое расхождение.
+    ///
+    /// Доступность проверяется через <see cref="IsMLKemSupported"/>: примитив опирается на
+    /// криптографическую библиотеку системы и присутствует не везде.
+    /// </remarks>
+    public static KeyShare X25519MLKem768
     {
         get
         {
-            // Некоторые платформы .NET 9 позволяют FriendlyName("X25519")
+            var kem = MLKem.GenerateKey(MLKemAlgorithm.MLKem768);
+
             try
             {
-                var curve = ECCurve.CreateFromFriendlyName("X25519");
-                var ecdh = ECDiffieHellman.Create(curve);
-                var p = ecdh.ExportParameters(includePrivateParameters: false);
+                var encapsulationKey = kem.ExportEncapsulationKey();
+                var x25519Private = Tls.X25519.CreatePrivateKey();
+                var x25519Public = Tls.X25519.GetPublicKey(x25519Private);
 
-                if (p.Q.X is { Length: 32 })
-                {
-                    var pub = new byte[32];
-                    Buffer.BlockCopy(p.Q.X, 0, pub, 0, 32);
-                    return new KeyShare(NamedGroup.X25519, pub, ecdh);
-                }
+                var share = new byte[encapsulationKey.Length + x25519Public.Length];
+                encapsulationKey.CopyTo(share.AsSpan());
+                x25519Public.CopyTo(share.AsSpan(encapsulationKey.Length));
 
-                ecdh.Dispose();
+                return new KeyShare(NamedGroup.X25519MLKem768, share, new HybridKeyMaterial(kem, x25519Private));
             }
             catch
             {
-                // Игнор — упадём ниже с NotSupportedException
+                kem.Dispose();
+                throw;
             }
-
-            throw new NotSupportedException("X25519 недоступен на текущей платформе .NET/OS");
         }
     }
+
+    /// <summary>
+    /// Доступен ли примитив ML-KEM на этой платформе.
+    /// </summary>
+    public static bool IsMLKemSupported => MLKem.IsSupported;
 
     /// <summary>
     /// Эфемерный ключ для NIST P‑256. Гарантированно доступен на .NET 9.
@@ -75,8 +108,8 @@ public class KeyShare
             // Формируем ANSI X9.62 uncompressed: 0x04 | X(32) | Y(32)
             var pub = new byte[1 + p.Q.X!.Length + p.Q.Y!.Length];
             pub[0] = 0x04;
-            Buffer.BlockCopy(p.Q.X!, 0, pub, 1, p.Q.X!.Length);
-            Buffer.BlockCopy(p.Q.Y!, 0, pub, 1 + p.Q.X!.Length, p.Q.Y!.Length);
+            Buffer.BlockCopy(p.Q.X, 0, pub, 1, p.Q.X.Length);
+            Buffer.BlockCopy(p.Q.Y, 0, pub, 1 + p.Q.X.Length, p.Q.Y.Length);
 
             return new KeyShare(NamedGroup.Secp256r1, pub, ecdh);
         }
@@ -86,6 +119,50 @@ public class KeyShare
     /// Эфемерный ключ для NIST P‑384 (пригодится позже; опционально включайте в профили).
     /// Каждый вызов создаёт новый ключ.
     /// </summary>
+    /// <summary>
+    /// Доля ключа на кривой P-521.
+    /// </summary>
+    /// <remarks>
+    /// Нужна не для первого сообщения, а для ответа на HelloRetryRequest: группу P-521 профиль
+    /// Firefox объявляет, но долю для неё заранее не отправляет, и сервер, предпочитающий именно
+    /// её, попросит повторить приветствие уже с ней.
+    /// </remarks>
+    public static KeyShare P521
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP521);
+            var p = ecdh.ExportParameters(includePrivateParameters: false);
+            var pub = new byte[1 + p.Q.X!.Length + p.Q.Y!.Length];
+            pub[0] = 0x04;
+            Buffer.BlockCopy(p.Q.X, 0, pub, 1, p.Q.X.Length);
+            Buffer.BlockCopy(p.Q.Y, 0, pub, 1 + p.Q.X.Length, p.Q.Y.Length);
+
+            return new KeyShare(NamedGroup.Secp521r1, pub, ecdh);
+        }
+    }
+
+    /// <summary>
+    /// Создаёт долю ключа для заданной группы.
+    /// </summary>
+    /// <param name="group">Группа.</param>
+    /// <returns>Доля ключа.</returns>
+    /// <remarks>
+    /// Конечнополевые группы (ffdhe) намеренно не поддержаны: в открытой сети их не выбирает
+    /// никто, а модульное возведение в степень на трёх тысячах бит стоило бы дороже всего
+    /// рукопожатия. Отказ здесь внятный — лучше, чем молчаливый обрыв.
+    /// </remarks>
+    public static KeyShare ForGroup(NamedGroup group) => group switch
+    {
+        NamedGroup.X25519 => X25519,
+        NamedGroup.X25519MLKem768 => X25519MLKem768,
+        NamedGroup.Secp256r1 => P256,
+        NamedGroup.Secp384r1 => P384,
+        NamedGroup.Secp521r1 => P521,
+        _ => throw new NotSupportedException($"Доля ключа для группы {group} (0x{(ushort)group:X4}) не поддержана"),
+    };
+
     public static KeyShare P384
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -95,8 +172,8 @@ public class KeyShare
             var p = ecdh.ExportParameters(includePrivateParameters: false);
             var pub = new byte[1 + p.Q.X!.Length + p.Q.Y!.Length];
             pub[0] = 0x04;
-            Buffer.BlockCopy(p.Q.X!, 0, pub, 1, p.Q.X!.Length);
-            Buffer.BlockCopy(p.Q.Y!, 0, pub, 1 + p.Q.X!.Length, p.Q.Y!.Length);
+            Buffer.BlockCopy(p.Q.X, 0, pub, 1, p.Q.X.Length);
+            Buffer.BlockCopy(p.Q.Y, 0, pub, 1 + p.Q.X.Length, p.Q.Y.Length);
 
             return new KeyShare(NamedGroup.Secp384r1, pub, ecdh);
         }

@@ -27,13 +27,22 @@ namespace Atom.Net.Https.Connections;
 [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed", Justification = "transport and socketTransport are released through Dispose(bool), DisposeAsyncCore, CloseAsync, and Abort via Interlocked.Exchange.")]
 internal sealed partial class Https11Connection : HttpsConnection
 {
-    private static readonly NamedGroup[] defaultSupportedGroups = CreateSupportedGroups();
     private static readonly SearchValues<char> tokenSeparators = SearchValues.Create(" ;");
     private Traffic traffic;
     private Stream? transport;
     private TcpStream? socketTransport;
     private HttpsConnectionOptions options;
     private readonly byte[] receiveBuffer = new byte[4096];
+
+    /// <summary>
+    /// Словарь заголовков, переиспользуемый между запросами этого соединения.
+    /// </summary>
+    /// <remarks>
+    /// Соединение HTTP/1.1 обслуживает запросы строго по очереди, поэтому словарь можно
+    /// переиспользовать — и это заметно: на каждый запрос иначе создаётся словарь со своими
+    /// внутренними массивами, а запросов на соединение проходят тысячи.
+    /// </remarks>
+    private readonly Dictionary<string, string> headerMap = new(StringComparer.OrdinalIgnoreCase);
     private int receiveOffset;
     private int receiveCount;
     private int activeStreams;
@@ -72,7 +81,7 @@ internal sealed partial class Https11Connection : HttpsConnection
 
 #pragma warning disable MA0196 // Do not use inheritdoc on non-inheriting members
     /// <inheritdoc/>
-    internal long CreatedTimestamp => Volatile.Read(ref createdTimestamp);
+    public override long CreatedTimestamp => Volatile.Read(ref createdTimestamp);
 #pragma warning restore MA0196 // Do not use inheritdoc on non-inheriting members
 
     /// <inheritdoc/>
@@ -171,52 +180,35 @@ internal sealed partial class Https11Connection : HttpsConnection
             throw new InvalidOperationException("Соединение уже открыто для другой цели.");
         }
 
-        var settings = CreateTcpSettings(options);
+        // Предлагаем в ALPN только http/1.1: это соединение умеет говорить лишь на нём, и позволить
+        // серверу выбрать h2 значило бы продолжить обмен по 1.1 и развалиться на первом же кадре.
+        // Когда протокол выбирает вызывающая сторона по результату согласования, транспорт приходит
+        // готовым через Adopt, и этот путь не используется.
+        var established = await HttpsTransportConnector.ConnectAsync(options, HttpsTransportConnector.Http11Only, cancellationToken).ConfigureAwait(false);
 
-        var tcpStream = new TcpStream(settings);
-        Stream applicationTransport = tcpStream;
-        var openToken = CreateOpenToken(options.ConnectTimeout, cancellationToken, out var openTimeoutCts);
-
-        try
+        if (established.IsSecure && established.NegotiatedProtocol is { Length: > 0 } protocol && !string.Equals(protocol, "http/1.1", StringComparison.Ordinal))
         {
-            await tcpStream.ConnectAsync(options.Host, options.Port, openToken).ConfigureAwait(false);
-
-            if (options.IsHttps)
-            {
-                var tlsStream = new Tls12Stream(tcpStream, CreateTlsSettings(options));
-
-                try
-                {
-                    await tlsStream.HandshakeAsync(openToken).ConfigureAwait(false);
-                }
-                catch
-                {
-                    await tlsStream.DisposeAsync().ConfigureAwait(false);
-                    throw;
-                }
-
-                applicationTransport = tlsStream;
-            }
-        }
-        catch (OperationCanceledException exception) when (openTimeoutCts is not null && openTimeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException($"Не удалось открыть HTTP/1.1 соединение с {options.Host}:{options.Port} за {options.ConnectTimeout}.", exception);
-        }
-        catch
-        {
-            if (!ReferenceEquals(applicationTransport, tcpStream))
-                await applicationTransport.DisposeAsync().ConfigureAwait(false);
-
-            await tcpStream.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
-        finally
-        {
-            openTimeoutCts?.Dispose();
+            await DisposeTransportsAsync(established.Transport, established.Socket).ConfigureAwait(false);
+            throw new NotSupportedException($"Сервер согласовал протокол '{protocol}', а это соединение поддерживает только http/1.1");
         }
 
-        transport = applicationTransport;
-        socketTransport = tcpStream;
+        Adopt(established, options);
+    }
+
+    /// <summary>
+    /// Принимает уже установленный транспорт.
+    /// </summary>
+    /// <param name="established">Установленный транспорт.</param>
+    /// <param name="options">Параметры соединения.</param>
+    /// <remarks>
+    /// Нужен там, где протокол выбирается по ALPN: рукопожатие к этому моменту уже состоялось, и
+    /// повторное подключение ради «правильного» класса соединения означало бы лишний оборот
+    /// TCP и TLS на каждый первый запрос к узлу.
+    /// </remarks>
+    internal void Adopt(in HttpsTransport established, HttpsConnectionOptions options)
+    {
+        transport = established.Transport;
+        socketTransport = established.Socket;
         this.options = options;
         receiveOffset = 0;
         receiveCount = 0;
@@ -224,18 +216,6 @@ internal sealed partial class Https11Connection : HttpsConnection
         Volatile.Write(ref isConnected, 1);
         Volatile.Write(ref isDraining, 0);
         TouchActivity();
-    }
-
-    private static CancellationToken CreateOpenToken(TimeSpan connectTimeout, CancellationToken cancellationToken, out CancellationTokenSource? timeoutCts)
-    {
-        timeoutCts = null;
-
-        if (connectTimeout <= TimeSpan.Zero || connectTimeout == Timeout.InfiniteTimeSpan)
-            return cancellationToken;
-
-        timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(connectTimeout);
-        return timeoutCts.Token;
     }
 
     private CancellationToken CreateSendToken(CancellationToken cancellationToken, out CancellationTokenSource? timeoutCts)
@@ -339,201 +319,19 @@ internal sealed partial class Https11Connection : HttpsConnection
     }
 
     [SuppressMessage("Security", "CA5398:Do not hardcode SslProtocols values", Justification = "The first custom TLS seam intentionally pins the only supported protocol version.")]
-    private static TcpSettings CreateTcpSettings(HttpsConnectionOptions options)
-    {
-        var profileSettings = options.ProfileTcpSettings;
-        if (profileSettings is null)
-        {
-            return new TcpSettings
-            {
-                IsNagleDisabled = true,
-                ConnectTimeout = options.ConnectTimeout,
-                AttemptTimeout = options.ConnectTimeout > TimeSpan.Zero ? options.ConnectTimeout : TimeSpan.FromSeconds(3),
-                LocalEndPoint = options.LocalEndPoint,
-            };
-        }
-
-        return profileSettings.Value with
-        {
-            ConnectTimeout = options.ConnectTimeout,
-            LocalEndPoint = options.LocalEndPoint,
-        };
-    }
-
-    [SuppressMessage("Security", "CA5398:Do not hardcode SslProtocols values", Justification = "The first custom TLS seam intentionally pins the only supported protocol version.")]
-    private static TlsSettings CreateTlsSettings(HttpsConnectionOptions options)
-    {
-        var profileSettings = options.ProfileTlsSettings;
-        var requestedProtocols = options.SslProtocols;
-        if (requestedProtocols is not SslProtocols.None && (requestedProtocols & SslProtocols.Tls12) == SslProtocols.None)
-            throw new NotSupportedException("Минимальный custom TLS path пока поддерживает только TLS 1.2.");
-
-        var defaultCipherSuites = new[]
-        {
-            CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-            CipherSuite.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-            CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-            CipherSuite.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-        };
-
-        var defaultExtensions = new ITlsExtension[]
-        {
-            new ServerNameTlsExtension { HostName = options.Host },
-            new AlpnTlsExtension { Protocols = [AlpnTlsExtension.Http11] },
-            new SupportedVersionsTlsExtension { Versions = [SslProtocols.Tls12] },
-            new SupportedGroupsTlsExtension { Groups = defaultSupportedGroups },
-            new EcPointFormatsTlsExtension { Formats = [0x00] },
-            new SignatureAlgorithmsTlsExtension
-            {
-                Algorithms =
-                [
-                    SignatureAlgorithm.EcdsaSecp256r1Sha256,
-                    SignatureAlgorithm.RsaPssRsaeSha256,
-                    SignatureAlgorithm.RsaPkcs1Sha256,
-                    SignatureAlgorithm.EcdsaSecp384r1Sha384,
-                    SignatureAlgorithm.RsaPssRsaeSha384,
-                    SignatureAlgorithm.RsaPkcs1Sha384,
-                ]
-            },
-            new ExtendedMasterSecretTlsExtension { IsEnabled = true },
-            new RenegotiationInfoTlsExtension(),
-            new SessionTicketExtension(),
-        };
-
-        var cipherSuites = profileSettings is { } profileTls && profileTls.CipherSuites.Any()
-            ? profileTls.CipherSuites
-            : defaultCipherSuites;
-
-        var extensions = MergeTlsExtensions(options.Host, defaultExtensions, profileSettings?.Extensions);
-
-        var handshakeTimeout = profileSettings?.HandshakeTimeout ?? options.ConnectTimeout;
-        if (handshakeTimeout <= TimeSpan.Zero || handshakeTimeout == Timeout.InfiniteTimeSpan)
-        {
-            handshakeTimeout = options.ConnectTimeout;
-        }
-
-        return new TlsSettings
-        {
-            MinVersion = SslProtocols.Tls12,
-            MaxVersion = SslProtocols.Tls12,
-            CipherSuites = cipherSuites,
-            Extensions = extensions,
-            SessionIdPolicy = SessionIdPolicy.Fixed32,
-            CheckCertificateRevocationList = options.CheckCertificateRevocationList,
-            ServerCertificateValidationCallback = options.ServerCertificateValidationCallback,
-            Delay = profileSettings?.Delay ?? TimeSpan.Zero,
-            HandshakeTimeout = handshakeTimeout,
-        };
-    }
-
-    private static List<ITlsExtension> MergeTlsExtensions(string host, IEnumerable<ITlsExtension> defaultExtensions, IEnumerable<ITlsExtension>? profileExtensions)
-    {
-        if (profileExtensions is null)
-        {
-            return [.. defaultExtensions.Select(extension => MaterializeTlsExtension(extension, host))];
-        }
-
-        var merged = new List<ITlsExtension>();
-        var overriddenExtensionIds = new HashSet<ushort>();
-
-        foreach (var extension in profileExtensions)
-        {
-            merged.Add(MaterializeTlsExtension(extension, host));
-            overriddenExtensionIds.Add(extension.Id);
-        }
-
-        foreach (var extension in defaultExtensions)
-        {
-            if (overriddenExtensionIds.Contains(extension.Id))
-            {
-                continue;
-            }
-
-            merged.Add(MaterializeTlsExtension(extension, host));
-        }
-
-        return merged;
-    }
-
-    private static ITlsExtension MaterializeTlsExtension(ITlsExtension extension, string host)
-        => extension switch
-        {
-            ServerNameTlsExtension serverName => new ServerNameTlsExtension
-            {
-                Id = serverName.Id,
-                HostName = string.IsNullOrWhiteSpace(serverName.HostName) ? host : serverName.HostName,
-            },
-            AlpnTlsExtension alpn => new AlpnTlsExtension
-            {
-                Id = alpn.Id,
-                Protocols = alpn.Protocols.Any() ? [.. alpn.Protocols] : [AlpnTlsExtension.Http11],
-            },
-            SupportedVersionsTlsExtension supportedVersions => new SupportedVersionsTlsExtension
-            {
-                Id = supportedVersions.Id,
-                Versions = supportedVersions.Versions.Any() ? [.. supportedVersions.Versions] : [SslProtocols.Tls12],
-            },
-            SupportedGroupsTlsExtension supportedGroups => new SupportedGroupsTlsExtension
-            {
-                Id = supportedGroups.Id,
-                Groups = [.. supportedGroups.Groups],
-            },
-            EcPointFormatsTlsExtension ecPointFormats => new EcPointFormatsTlsExtension
-            {
-                Id = ecPointFormats.Id,
-                Formats = [.. ecPointFormats.Formats],
-            },
-            SignatureAlgorithmsTlsExtension signatureAlgorithms => new SignatureAlgorithmsTlsExtension
-            {
-                Id = signatureAlgorithms.Id,
-                Algorithms = [.. signatureAlgorithms.Algorithms],
-            },
-            ExtendedMasterSecretTlsExtension extendedMasterSecret => new ExtendedMasterSecretTlsExtension
-            {
-                Id = extendedMasterSecret.Id,
-                IsEnabled = extendedMasterSecret.IsEnabled,
-            },
-            RenegotiationInfoTlsExtension renegotiationInfo => new RenegotiationInfoTlsExtension
-            {
-                Id = renegotiationInfo.Id,
-                RenegotiatedConnection = renegotiationInfo.RenegotiatedConnection.ToArray(),
-            },
-            SessionTicketExtension sessionTicket => new SessionTicketExtension
-            {
-                Id = sessionTicket.Id,
-                Ticket = sessionTicket.Ticket.ToArray(),
-            },
-            _ => extension,
-        };
-
-    private static NamedGroup[] CreateSupportedGroups()
-    {
-        if (!IsX25519Supported())
-            return [NamedGroup.Secp256r1, NamedGroup.Secp384r1];
-
-        return [NamedGroup.X25519, NamedGroup.Secp256r1, NamedGroup.Secp384r1];
-    }
-
-    private static bool IsX25519Supported()
-    {
-        try
-        {
-            using var _ = ECDiffieHellman.Create(ECCurve.CreateFromFriendlyName("X25519"));
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private static async ValueTask<byte[]> ReadRequestBodyAsync(HttpContent? content, CancellationToken cancellationToken)
         => content is null ? [] : await content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
 
     private byte[] BuildRequestHead(HttpsRequestMessage request, int bodyLength)
     {
         var uri = request.RequestUri ?? throw new InvalidOperationException("RequestUri не задан.");
-        var target = string.IsNullOrEmpty(uri.PathAndQuery) ? "/" : uri.PathAndQuery;
+
+        // Прокси без туннеля обслуживает запрос сам, и адрес ему нужен целиком: по одному пути он
+        // не знает, к какому узлу обращаться. За туннелем и при прямом подключении, наоборот,
+        // абсолютный адрес — нарушение формы запроса.
+        var target = options.UpstreamProxy is not null && !options.IsHttps
+            ? uri.AbsoluteUri
+            : string.IsNullOrEmpty(uri.PathAndQuery) ? "/" : uri.PathAndQuery;
         var hostHeader = BuildHostHeader(uri, options.IsHttps);
         var hasBody = bodyLength > 0;
         var builder = new ValueStringBuilder(256);
@@ -559,11 +357,17 @@ internal sealed partial class Https11Connection : HttpsConnection
                 AppendFormattedHeaders(ref builder, request, hasBody, hostHeader);
             }
 
-            if (hasBody)
-                builder.Append("Content-Length: ").Append(bodyLength.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
+            // ★ Нулевую длину объявлять ОБЯЗАТЕЛЬНО, если метод подразумевает тело. Запрос
+            // POST без Content-Length и без Transfer-Encoding сервер вправе отвергнуть, и
+            // отвергает: nginx, Apache и IIS отвечают на такой «411 Length Required».
+            if (hasBody || MethodImpliesBody(request.Method))
+                builder.Append("Content-Length: ").Append((hasBody ? bodyLength : 0).ToString(CultureInfo.InvariantCulture)).Append("\r\n");
 
             builder.Append("\r\n");
-            return Encoding.ASCII.GetBytes(builder.ToString());
+            // Latin1, а не ASCII: она переносит байты 1:1. ASCII молча заменяла всё старше
+            // 0x7F на «?», то есть портила значение, которое вызывающая сторона задала сама —
+            // например куку или referer с непроцентированным путём.
+            return Encoding.Latin1.GetBytes(builder.ToString());
         }
         finally
         {
@@ -581,25 +385,28 @@ internal sealed partial class Https11Connection : HttpsConnection
             return;
         }
 
-        var headers = BuildHeaderMap(request, hasBody, hostHeader, IsDraining);
+        var headers = BuildHeaderMap(headerMap, request, hasBody, hostHeader, IsDraining);
         foreach (var header in formattingPolicy.Format(headers, HttpVersion.Version11, request.EffectiveKind, request.UseCookieCrumbling))
         {
             builder.Append(header.Key).Append(": ").Append(header.Value).Append("\r\n");
         }
     }
 
-    private static Dictionary<string, string> BuildHeaderMap(HttpsRequestMessage request, bool hasBody, string? hostHeader, bool isDraining)
+    private static Dictionary<string, string> BuildHeaderMap(Dictionary<string, string> headers, HttpsRequestMessage request, bool hasBody, string? hostHeader, bool isDraining)
     {
-        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        headers.Clear();
 
         if (!string.IsNullOrEmpty(hostHeader))
         {
             headers[nameof(HttpRequestHeader.Host)] = request.Headers.Host ?? hostHeader;
         }
 
-        foreach (var header in request.Headers)
+        // Значения берутся НЕРАЗОБРАННЫМИ — теми, что были записаны. Прежде здесь стояла ручная
+        // склейка, разбиравшая каждый типизированный заголовок особым случаем: она повторяла
+        // работу платформы и расходилась с ней на всём, чего не предусмотрела.
+        foreach (var header in request.Headers.NonValidated)
         {
-            headers[header.Key] = SerializeRequestHeader(request.Headers, header.Key, header.Value);
+            headers[header.Key] = header.Value.ToString();
         }
 
         if (isDraining && !headers.ContainsKey(nameof(HttpRequestHeader.Connection)))
@@ -612,88 +419,17 @@ internal sealed partial class Https11Connection : HttpsConnection
             return headers;
         }
 
-        foreach (var header in request.Content.Headers)
+        foreach (var header in request.Content.Headers.NonValidated)
         {
             if (string.Equals(header.Key, "Content-Length", StringComparison.OrdinalIgnoreCase) && hasBody)
             {
                 continue;
             }
 
-            headers[header.Key] = string.Join(", ", header.Value);
+            headers[header.Key] = header.Value.ToString();
         }
 
         return headers;
-    }
-
-    private static string SerializeRequestHeader(HttpRequestHeaders headers, string name, IEnumerable<string> fallbackValues)
-    {
-        if (string.Equals(name, "User-Agent", StringComparison.OrdinalIgnoreCase) && headers.UserAgent.Count > 0)
-        {
-            return string.Join(' ', headers.UserAgent.Select(static value => value.ToString()));
-        }
-
-        if (string.Equals(name, "Accept", StringComparison.OrdinalIgnoreCase) && headers.Accept.Count > 0)
-        {
-            return string.Join(',', headers.Accept.Select(SerializeAcceptValue));
-        }
-
-        if (string.Equals(name, "Accept-Language", StringComparison.OrdinalIgnoreCase) && headers.AcceptLanguage.Count > 0)
-        {
-            return string.Join(',', headers.AcceptLanguage.Select(SerializeAcceptLanguageValue));
-        }
-
-        if (string.Equals(name, "Accept-Encoding", StringComparison.OrdinalIgnoreCase) && headers.AcceptEncoding.Count > 0)
-        {
-            return string.Join(", ", headers.AcceptEncoding.Select(SerializeAcceptEncodingValue));
-        }
-
-        if (string.Equals(name, "Connection", StringComparison.OrdinalIgnoreCase) && headers.Connection.Count > 0)
-        {
-            return string.Join(", ", headers.Connection);
-        }
-
-        if (string.Equals(name, "Referer", StringComparison.OrdinalIgnoreCase) && headers.Referrer is not null)
-        {
-            return headers.Referrer.OriginalString;
-        }
-
-        return string.Join(", ", fallbackValues);
-    }
-
-    private static string SerializeAcceptLanguageValue(StringWithQualityHeaderValue value)
-        => value.Quality.HasValue
-            ? string.Concat(value.Value, ";q=", value.Quality.Value.ToString("0.0###", CultureInfo.InvariantCulture))
-            : value.Value;
-
-    private static string SerializeAcceptEncodingValue(StringWithQualityHeaderValue value)
-        => value.Quality.HasValue
-            ? string.Concat(value.Value, ";q=", value.Quality.Value.ToString("0.###", CultureInfo.InvariantCulture))
-            : value.Value;
-
-    private static string SerializeAcceptValue(MediaTypeWithQualityHeaderValue value)
-    {
-        using var builder = new ValueStringBuilder(value.MediaType ?? "*/*");
-
-        foreach (var parameter in value.Parameters)
-        {
-            if (string.Equals(parameter.Name, "q", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            builder.Append(';').Append(parameter.Name);
-            if (!string.IsNullOrEmpty(parameter.Value))
-            {
-                builder.Append('=').Append(parameter.Value);
-            }
-        }
-
-        if (value.Quality.HasValue)
-        {
-            builder.Append(";q=").Append(value.Quality.Value.ToString("0.0###", CultureInfo.InvariantCulture));
-        }
-
-        return builder.ToString();
     }
 
     private static void AppendHostHeader(ref ValueStringBuilder builder, HttpHeaders headers, string hostHeader)
@@ -721,6 +457,20 @@ internal sealed partial class Https11Connection : HttpsConnection
             AppendHeader(ref builder, header.Key, header.Value);
         }
     }
+
+    /// <summary>
+    /// Подразумевает ли метод наличие тела.
+    /// </summary>
+    /// <param name="method">Метод запроса.</param>
+    /// <returns><see langword="true"/> для методов, у которых тело ожидается.</returns>
+    /// <remarks>
+    /// Для таких методов длину надо объявлять даже при пустом теле: отсутствие и длины, и
+    /// признака кусочной передачи сервер вправе счесть ошибкой запроса.
+    /// </remarks>
+    private static bool MethodImpliesBody(HttpMethod method)
+        => method == HttpMethod.Post
+        || method == HttpMethod.Put
+        || method == HttpMethod.Patch;
 
     private static bool ContainsHeader(HttpHeaders headers, string name)
     {
@@ -787,6 +537,9 @@ internal sealed partial class Https11Connection : HttpsConnection
         public List<KeyValuePair<string, string>> ContentHeaders { get; } = [];
 
         public long? ContentLength { get; set; }
+
+        /// <summary>Объявленная сервером кодировка содержимого.</summary>
+        public string? ContentEncoding { get; set; }
 
         public bool TransferEncodingChunked { get; set; }
 

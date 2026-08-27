@@ -47,6 +47,22 @@ public enum SignatureAlgorithm : ushort
     /// <summary>
     /// 
     /// </summary>
+    /// <summary>
+    /// ML-DSA-44 (постквантовая подпись, 0x0904).
+    /// </summary>
+    /// <remarks>
+    /// Три алгоритма ML-DSA современный Chrome ставит первыми в signature_algorithms. Выбраны они
+    /// сегодня быть не могут — сертификатов с такими подписями в обращении нет, — но само их
+    /// объявление входит в отпечаток и в хэш расширений JA4.
+    /// </remarks>
+    MlDsa44 = 0x0904,
+
+    /// <summary>ML-DSA-65 (постквантовая подпись, 0x0905).</summary>
+    MlDsa65 = 0x0905,
+
+    /// <summary>ML-DSA-87 (постквантовая подпись, 0x0906).</summary>
+    MlDsa87 = 0x0906,
+
     RsaPssRsaeSha256 = 0x0804,
     /// <summary>
     /// 

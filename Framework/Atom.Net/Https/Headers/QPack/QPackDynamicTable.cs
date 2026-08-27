@@ -83,7 +83,7 @@ internal sealed class QPackDynamicTable(int capacity)
         {
             var tail = (head + count - 1) & (entries.Length - 1);
             Size -= entries[tail].Size;
-            ReturnToPool(in entries[tail]);
+            ReturnToPool(entries[tail]);
             entries[tail] = default;
             count--;
         }
@@ -95,7 +95,7 @@ internal sealed class QPackDynamicTable(int capacity)
         for (var i = 0; i < entries.Length; i++)
         {
             if (entries[i].Name is null && entries[i].Value is null) continue;
-            ReturnToPool(in entries[i]);
+            ReturnToPool(entries[i]);
             entries[i] = default;
         }
 
@@ -142,11 +142,13 @@ internal sealed class QPackDynamicTable(int capacity)
         var n = InsertCount; // n = count of inserted (absoluteIndex in [0..n-1])
         var dropped = Math.Max(0, n - count); // сколько «свалилось» из-за эвикции
 
-        ArgumentOutOfRangeException.ThrowIfLessThan((uint)absoluteIndex, (uint)dropped);
+        // Сравниваются вычисленные величины, а не параметры, поэтому проверка обычная: помощник
+        // с именем параметра здесь ввёл бы в заблуждение, указав не на ту величину.
+        if (absoluteIndex < dropped) throw new ArgumentOutOfRangeException(nameof(absoluteIndex), "Запись уже вытеснена из таблицы");
 
         var relFromHead = n - 1 - absoluteIndex; // MRU=0
 
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)relFromHead, (uint)count);
+        if (relFromHead >= count) throw new ArgumentOutOfRangeException(nameof(absoluteIndex), "Индекс вне таблицы");
 
         var idx = (head + relFromHead) & (entries.Length - 1);
         ref readonly var e = ref entries[idx];
@@ -158,7 +160,7 @@ internal sealed class QPackDynamicTable(int capacity)
     public TableEntry GetByRelative_EncoderStream(int relativeIndex)
     {
         // Относительный индекс на encoder stream: 0 — последняя вставка
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)relativeIndex, (uint)count);
+        if ((uint)relativeIndex >= (uint)count) throw new ArgumentOutOfRangeException(nameof(relativeIndex), "Индекс вне таблицы");
 
         var idx = (head + relativeIndex) & (entries.Length - 1);
         ref readonly var e = ref entries[idx];
@@ -191,7 +193,7 @@ internal sealed class QPackDynamicTable(int capacity)
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ReturnToPool(in Entry e)
+    private static void ReturnToPool(Entry e)
     {
         if (e.Name is not null) Pool.Return(e.Name);
         if (e.Value is not null) Pool.Return(e.Value);

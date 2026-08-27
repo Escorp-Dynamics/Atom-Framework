@@ -10,7 +10,46 @@ namespace Atom.Net.Tls.Extensions;
 public class ApplicationSettingsTlsExtension : TlsExtension
 {
     /// <inheritdoc/>
-    public override ushort Id { get; set; } = 0x00FF;
+    /// <summary>
+    /// Идентификатор расширения.
+    /// </summary>
+    /// <remarks>
+    /// Значение 0x44CD (17613) — то, что отправляет современный Chrome. Более ранние сборки
+    /// использовали 0x4469 (17513); подставить не тот номер значит объявить расширение, которого
+    /// у заявленной версии браузера нет.
+    /// </remarks>
+    public override ushort Id { get; set; } = 0x44CD;
+
+    /// <summary>
+    /// Создаёт расширение со списком протоколов, для которых применимы настройки приложения.
+    /// </summary>
+    /// <param name="protocols">Протоколы в порядке предпочтения; Chrome отправляет один «h2».</param>
+    /// <returns>Готовое расширение.</returns>
+    /// <remarks>
+    /// Полезная нагрузка повторяет форму ALPN: двухбайтовая длина списка, затем для каждого
+    /// протокола однобайтовая длина и имя.
+    /// </remarks>
+    public static ApplicationSettingsTlsExtension Create(params ReadOnlyMemory<byte>[] protocols)
+    {
+        ArgumentNullException.ThrowIfNull(protocols);
+
+        var listLength = 0;
+        foreach (var protocol in protocols) listLength += 1 + protocol.Length;
+
+        var payload = new byte[2 + listLength];
+        BinaryPrimitives.WriteUInt16BigEndian(payload.AsSpan(0, 2), (ushort)listLength);
+
+        var position = 2;
+
+        foreach (var protocol in protocols)
+        {
+            payload[position++] = (byte)protocol.Length;
+            protocol.Span.CopyTo(payload.AsSpan(position));
+            position += protocol.Length;
+        }
+
+        return new ApplicationSettingsTlsExtension { Data = payload };
+    }
 
     /// <inheritdoc/>
     public override int Size => 2 + 2 + Data.Length;

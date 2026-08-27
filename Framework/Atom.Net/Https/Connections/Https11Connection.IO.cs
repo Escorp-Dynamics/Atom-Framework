@@ -1,24 +1,87 @@
 ﻿using System.Buffers;
 using System.Text;
+using Atom.Net.Tls;
 
 namespace Atom.Net.Https.Connections;
 
 internal sealed partial class Https11Connection
 {
+    /// <summary>
+    /// Наибольший размер, который выделяется под тело СРАЗУ, по заявленной длине.
+    /// </summary>
+    /// <remarks>
+    /// ★ Раньше массив выделялся ровно по <c>Content-Length</c>, каким бы тот ни был. Заявленной
+    /// длине верить нельзя: она приходит от чужой стороны, и одного узла из тысячи с
+    /// <c>Content-Length: 1500000000</c> — зеркала, сломанного CDN или намеренной ловушки —
+    /// хватало, чтобы отобрать полтора гигабайта ДО получения хотя бы одного байта тела. При
+    /// нескольких таких запросах разом процесс падал целиком, унося все остальные запросы.
+    ///
+    /// Теперь большие тела дочитываются по мере поступления: врущий сервер не получает от нас
+    /// памяти вперёд, а честный отдаёт данные и буфер дорастает естественным образом.
+    /// </remarks>
+    private const int MaxEagerBodyAllocation = 4 * 1024 * 1024;
+
     private async ValueTask<byte[]> ReadFixedLengthBodyAsync(long contentLength, CancellationToken cancellationToken)
     {
         if (contentLength is 0) return [];
         if (contentLength > int.MaxValue) throw new NotSupportedException("Минимальный H1 slice пока не поддерживает body > 2GB.");
 
-        var buffer = new byte[(int)contentLength];
-        await ReadExactAsync(buffer, cancellationToken).ConfigureAwait(false);
-        return buffer;
+        EnsureBodyWithinLimit(contentLength);
+
+        if (contentLength <= MaxEagerBodyAllocation)
+        {
+            var buffer = new byte[(int)contentLength];
+            await ReadExactAsync(buffer, cancellationToken).ConfigureAwait(false);
+            return buffer;
+        }
+
+        var writer = new ArrayBufferWriter<byte>(MaxEagerBodyAllocation);
+        var remaining = contentLength;
+
+        while (remaining > 0)
+        {
+            var take = (int)Math.Min(remaining, 65536);
+            var slice = writer.GetMemory(take)[..take];
+
+            await ReadExactAsync(slice, cancellationToken).ConfigureAwait(false);
+
+            writer.Advance(take);
+            remaining -= take;
+        }
+
+        return writer.WrittenSpan.ToArray();
+    }
+
+    /// <summary>
+    /// Проверяет, укладывается ли тело в заданный предел.
+    /// </summary>
+    /// <param name="length">Длина тела: заявленная или уже накопленная.</param>
+    private void EnsureBodyWithinLimit(long length)
+    {
+        var limit = options.MaxResponseContentBytes;
+
+        if (limit > 0 && length > limit)
+            throw new InvalidOperationException($"Размер тела ответа ({length} Б) превысил предел {limit} Б.");
     }
 
     private async ValueTask<byte[]> ReadChunkedBodyAsync(CancellationToken cancellationToken)
     {
         using var body = new MemoryStream();
 
+        try
+        {
+            return await ReadChunkedBodyCoreAsync(body, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (body.Length > 0)
+        {
+            // Срок вышел на середине потока кусков: отдаём то, что успели получить, — см.
+            // пояснение в ReadToEndBodyAsync.
+            return body.ToArray();
+        }
+    }
+
+    private async ValueTask<byte[]> ReadChunkedBodyCoreAsync(MemoryStream body, CancellationToken cancellationToken)
+    {
         while (true)
         {
             var sizeLine = await ReadLineAsync(cancellationToken).ConfigureAwait(false)
@@ -69,12 +132,19 @@ internal sealed partial class Https11Connection
         {
             while (true)
             {
-                var read = await current.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
+                var read = await ReadTransportAsync(current, buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
                 if (read is 0) break;
 
                 TrackReceived(read);
                 await body.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
             }
+        }
+        catch (OperationCanceledException) when (body.Length > 0)
+        {
+            // ★ Срок вышел, но данные УЖЕ есть. Тело здесь ограничено закрытием соединения, а
+            // значит его «правильная» длина никому не известна — и узлы, которые соединение не
+            // закрывают вовсе, встречаются в сети регулярно. Выбросить полученное значило бы
+            // потерять весь ответ там, где браузер давно показал бы страницу.
         }
         finally
         {
@@ -144,7 +214,11 @@ internal sealed partial class Https11Connection
                 if (next != '\n')
                     throw new InvalidOperationException("Некорректный CRLF в HTTP header block.");
 
-                return Encoding.ASCII.GetString(line.GetBuffer(), 0, (int)line.Length);
+                // ★ Latin1, а не ASCII: она сохраняет байты 1:1. Разбор в ASCII превращал любой
+                // байт старше 0x7F в «?», и заголовок с сырым UTF-8 — например, Location с
+                // непроцентированным путём — приходил необратимо испорченным, а автоматическое
+                // перенаправление уходило по адресу из вопросительных знаков.
+                return Encoding.Latin1.GetString(line.GetBuffer(), 0, (int)line.Length);
             }
 
             line.WriteByte((byte)value);
@@ -169,11 +243,46 @@ internal sealed partial class Https11Connection
     {
         var current = transport ?? throw new InvalidOperationException("Соединение не открыто.");
         receiveOffset = 0;
-        receiveCount = await current.ReadAsync(receiveBuffer.AsMemory(0, receiveBuffer.Length), cancellationToken).ConfigureAwait(false);
+        receiveCount = await ReadTransportAsync(current, receiveBuffer.AsMemory(0, receiveBuffer.Length), cancellationToken).ConfigureAwait(false);
 
         if (receiveCount > 0)
             TrackReceived(receiveCount);
 
         return receiveCount;
+    }
+
+    /// <summary>
+    /// Читает из транспорта, считая закрытие партнёром концом потока, а не отказом.
+    /// </summary>
+    /// <param name="transport">Транспорт соединения.</param>
+    /// <param name="buffer">Приёмник.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Число прочитанных байт; ноль означает конец потока.</returns>
+    /// <remarks>
+    /// ★ Ответ, тело которого ограничено ЗАКРЫТИЕМ соединения, — законная и распространённая
+    /// форма HTTP/1.1: ни <c>Content-Length</c>, ни кусочной передачи в нём нет, и конец тела
+    /// объявляется разрывом. Так отвечают, например, корневые адреса craigslist.org и cisco.com —
+    /// «302 Found» с одним лишь заголовком Location.
+    ///
+    /// Читатель тела это учитывает и завершается по нулю (см. <see cref="ReadToEndBodyAsync"/>),
+    /// но ноля он не получал: поток TLS 1.2 превращал обычный FIN в исключение, и весь ответ
+    /// пропадал вместе с ним. Отказ выглядел сетевым сбоем и потому уводил поиск в приветствие —
+    /// хотя рукопожатие к тому моменту давно состоялось, запрос ушёл и ответ пришёл целиком.
+    /// Поток TLS 1.3 то же самое обрабатывает верно, отчего беда казалась избирательной по узлам:
+    /// проявлялась ровно там, где сервер остался на TLS 1.2.
+    ///
+    /// Настоящее сокращение ответа этим не маскируется: чтение по объявленной длине проверяет
+    /// полноту само и на нуле сообщает о преждевременном закрытии.
+    /// </remarks>
+    private static async ValueTask<int> ReadTransportAsync(Atom.IO.Stream transport, Memory<byte> buffer, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await transport.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TlsConnectionClosedException)
+        {
+            return 0;
+        }
     }
 }

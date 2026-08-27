@@ -85,4 +85,14 @@ public class AlpnTlsExtension : TlsExtension
     /// 
     /// </summary>
     public static ReadOnlyMemory<byte> Http11 { get; } = "http/1.1"u8.ToArray();
+
+    /// <summary>
+    /// Идентификатор HTTP/2 для ALPN.
+    /// </summary>
+    /// <remarks>
+    /// Современный браузер по HTTPS предлагает <c>h2</c> первым и переходит на <c>http/1.1</c>
+    /// только если сервер не поддерживает HTTP/2. Предлагать один лишь <c>http/1.1</c> — заметное
+    /// отличие от браузера, видимое ещё до исполнения скриптов страницы.
+    /// </remarks>
+    public static ReadOnlyMemory<byte> Http2 { get; } = "h2"u8.ToArray();
 }

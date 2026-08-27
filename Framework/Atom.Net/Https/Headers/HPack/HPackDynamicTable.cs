@@ -79,7 +79,7 @@ internal sealed class HPackDynamicTable(int capacity)
         while (Size > capacity && Count > 0)
         {
             var tail = (head + Count - 1) & (entries.Length - 1);
-            ReturnToPool(in entries[tail]);
+            ReturnToPool(entries[tail]);
             var sz = entries[tail].Size;
             entries[tail] = default;
             Count--;
@@ -93,7 +93,7 @@ internal sealed class HPackDynamicTable(int capacity)
         for (var i = 0; i < entries.Length; i++)
         {
             if (entries[i].Name == null && entries[i].Value == null) continue;
-            ReturnToPool(in entries[i]);
+            ReturnToPool(entries[i]);
             entries[i] = default;
         }
         head = 0; Count = 0; Size = 0;
@@ -138,7 +138,7 @@ internal sealed class HPackDynamicTable(int capacity)
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ReturnToPool(in Entry e)
+    private static void ReturnToPool(Entry e)
     {
         if (e.Name is not null) Pool.Return(e.Name);
         if (e.Value is not null) Pool.Return(e.Value);

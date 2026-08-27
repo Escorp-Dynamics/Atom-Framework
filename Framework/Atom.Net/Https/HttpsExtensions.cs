@@ -43,7 +43,8 @@ public static class HttpsExtensions
     {
         if (data is not IReadOnlyDictionary<string, object> items) return data;
 
-        var form = new Dictionary<string, object?>();
+        // Имена полей формы сравниваются как есть, без учёта культуры: это данные протокола.
+        var form = new Dictionary<string, object?>(StringComparer.Ordinal);
 
         foreach (var (key, value) in items)
         {

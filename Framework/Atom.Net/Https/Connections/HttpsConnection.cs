@@ -40,6 +40,9 @@ internal abstract class HttpsConnection : IHttpsConnection
     public abstract long LastActivityTimestamp { get; }
 
     /// <inheritdoc/>
+    public abstract long CreatedTimestamp { get; }
+
+    /// <inheritdoc/>
     public abstract Traffic Traffic { get; }
 
     /// <inheritdoc/>
