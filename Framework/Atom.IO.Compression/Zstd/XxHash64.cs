@@ -34,25 +34,22 @@ internal struct XxHash64
         memSize = 0;
     }
 
+    /// <summary>
+    /// Свёртывает один блок из 32 байт по адресу <paramref name="source"/>.
+    /// </summary>
+    /// <remarks>
+    /// Работает по управляемой ссылке, без закрепления памяти: прежняя версия закрепляла буфер
+    /// на КАЖДЫЕ 32 байта, и на длинных данных закрепление съедало больше времени, чем сама свёртка.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ProcessChunk(ReadOnlySpan<byte> chunk)
+    private void ProcessChunk(ref byte source)
     {
         unchecked
         {
-            unsafe
-            {
-                fixed (byte* p = &chunk.GetPinnableReference())
-                {
-                    var p0 = Unsafe.ReadUnaligned<ulong>(p + 0);
-                    var p1 = Unsafe.ReadUnaligned<ulong>(p + 8);
-                    var p2 = Unsafe.ReadUnaligned<ulong>(p + 16);
-                    var p3 = Unsafe.ReadUnaligned<ulong>(p + 24);
-                    v1 = Round(v1, p0);
-                    v2 = Round(v2, p1);
-                    v3 = Round(v3, p2);
-                    v4 = Round(v4, p3);
-                }
-            }
+            v1 = Round(v1, Unsafe.ReadUnaligned<ulong>(ref source));
+            v2 = Round(v2, Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref source, 8)));
+            v3 = Round(v3, Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref source, 16)));
+            v4 = Round(v4, Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref source, 24)));
         }
     }
 
@@ -85,14 +82,23 @@ internal struct XxHash64
         if (memSize > 0)
         {
             while (memSize < 32 && index < data.Length) memory[memSize++] = data[index++];
-            ProcessChunk(new ReadOnlySpan<byte>(Unsafe.AsPointer(ref memory[0]), 32));
+            fixed (byte* buffered = memory)
+            {
+                ProcessChunk(ref *buffered);
+            }
+
             memSize = 0;
         }
 
-        while (index + 32 <= data.Length)
+        if (index + 32 <= data.Length)
         {
-            ProcessChunk(data.Slice(index, 32));
-            index += 32;
+            ref var start = ref MemoryMarshal.GetReference(data);
+            do
+            {
+                ProcessChunk(ref Unsafe.Add(ref start, index));
+                index += 32;
+            }
+            while (index + 32 <= data.Length);
         }
 
         for (; index < data.Length; index++) memory[memSize++] = data[index];

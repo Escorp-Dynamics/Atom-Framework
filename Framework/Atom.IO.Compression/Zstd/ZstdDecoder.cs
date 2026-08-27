@@ -52,11 +52,8 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     private ref ZstdDecoderWorkspace.SequenceTableBlock LlTables => ref workspace.LiteralLengthTables;
     private ref ZstdDecoderWorkspace.SequenceTableBlock MlTables => ref workspace.MatchLengthTables;
     private ref ZstdDecoderWorkspace.SequenceTableBlock OfTables => ref workspace.OffsetTables;
-    private bool hasSeqTables;
-    // Запоминаем используемые tableLog'и для Repeat_Mode
-    private int lastLlLog = ZstdLengthsTables.LL_AccuracyLog;
-    private int lastMlLog = ZstdLengthsTables.ML_AccuracyLog;
-    private int lastOfLog = ZstdLengthsTables.OffsetsAccuracyLog;
+    // Признак «таблица уже построена» и её Accuracy_Log хранит сам блок рабочего пространства
+    // (SequenceTableBlock.HasTable/TableLog) — отдельно для каждого из трёх символьных классов.
 
     // Huffman таблица литералов (для Treeless)
     private bool hasHuffTable;
@@ -123,9 +120,21 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         {
             if (blockKind != ZstdBlockKind.None && blockRemaining > 0) return true;
 
-            if (!inFrame && !TryStartNextFrame()) return false;
+            // Compressed-блок кладёт ВЕСЬ свой выход в pending и не оставляет blockRemaining.
+            // Без этой проверки цикл сразу читал следующий блок и затирал ещё не выданные данные,
+            // а на последнем блоке возвращал false — весь распакованный кадр терялся.
+            // Раньше это не проявлялось: собственный кодировщик compressed-блоков не пишет.
+            if (pendingLen > 0) return true;
 
-            TryBeginNextBlock();
+            if (!inFrame)
+            {
+                if (!TryStartNextFrame()) return false;
+                continue;
+            }
+
+            // false при живом кадре означает усечённый заголовок блока; false с закрытым кадром —
+            // что кадр только что завершился и надо попробовать следующий.
+            if (!TryBeginNextBlock() && inFrame) return false;
         }
     }
 
@@ -225,9 +234,22 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     private void InitializeFrameState()
     {
         inFrame = true;
+
+        // ★ Окно истории поднимается СРАЗУ на старте кадра. Раньше оно поднималось лениво,
+        // в первом compressed-блоке, и InitFrameWindow обнулял winPos/winFill — то есть
+        // выбрасывал всё, что успели дописать предшествующие RAW- и RLE-блоки. Совпадение,
+        // уходящее в такую историю, читало мусор (а с проверкой границ — отвергалось).
+        InitFrameWindow();
         if (hasChecksum) hash = new XxHash64();
         rep1 = 1; rep2 = 4; rep3 = 8;
         if (!hasPendingDict) return;
+
+        // Содержимое словаря — это история ПЕРЕД первым байтом кадра, поэтому оно кладётся
+        // в окно сразу. Раньше оно дописывалось лениво, в первом compressed-блоке: если кадр
+        // начинался с RAW- или RLE-блока, словарь ложился в окно уже ПОСЛЕ его данных.
+        AppendToWindow(pendingDictContent.Span);
+        hasPendingDict = false;
+
         if (dictRep1 == 0 || dictRep2 == 0 || dictRep3 == 0) return;
         rep1 = dictRep1;
         rep2 = dictRep2;
@@ -428,11 +450,17 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         winFill = 0;
         windowSize = 0;
         isWindowInitialized = false;
-        // Сбрасываем Huffman таблицу
+        // Сбрасываем таблицы: Repeat_Mode в новом кадре не имеет права смотреть на предыдущий.
         workspace.HuffmanTable.Reset();
+        LlTables.Reset();
+        MlTables.Reset();
+        OfTables.Reset();
         hasHuffTable = false;
-        inPos = 0;
-        inLen = 0;
+
+        // ★ inPos/inLen НЕ сбрасываются: во входном буфере лежат уже прочитанные из потока байты,
+        // которые принадлежат СЛЕДУЮЩЕМУ кадру. Раньше они выбрасывались, и склейка нескольких
+        // кадров (а также пропускаемые кадры между ними) разваливалась с «Unknown magic» —
+        // ровно там, где буфер успел захватить хвост за границей кадра.
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -572,13 +600,19 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     private LiteralsInfo DecodeCompressedLiterals(ReadOnlySpan<byte> body, ref ZstdDecoderWorkspace.HuffmanTableBlock huffmanBlock, int literalType)
     {
         ParseCompressedLiteralsHeader(body, out var headerLen, out var regeneratedSize, out var compressedSize, out var isFourStreams);
+
+        // RFC 8878, §3.1.1.2: содержимое блока не превышает 128 КиБ. Раньше значение из заголовка
+        // нигде не проверялось, и мусорный размер валился ArgumentOutOfRangeException из Span.Slice
+        // вместо диагностируемого InvalidDataException.
+        if ((uint)regeneratedSize > ZstdStream.MaxRawBlockSize) throw new InvalidDataException("Literals regenerated size exceeds block limit");
         if (body.Length < headerLen + compressedSize) throw new InvalidDataException("Truncated compressed literals body");
+
         var payload = body.Slice(headerLen, compressedSize);
         if (payload.IsEmpty) throw new InvalidDataException("Empty compressed literals payload");
 
         var table = BuildHuffmanTable(payload, literalType, ref huffmanBlock, out var streams);
         var target = workspace.GetLiteralsSpan();
-        DecodeHuffmanStreams(streams, isFourStreams, target[..regeneratedSize], regeneratedSize, in table);
+        DecodeHuffmanStreams(streams, isFourStreams, target[..regeneratedSize], in table);
         return new LiteralsInfo(headerLen, headerLen + compressedSize, regeneratedSize, isRle: false, default, usesWorkspace: true, rawData: []);
     }
 
@@ -632,12 +666,20 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         }
     }
 
+    /// <summary>
+    /// Декодирует один или четыре потока литералов, сжатых префиксными кодами.
+    /// </summary>
+    /// <remarks>
+    /// RFC 8878, §3.1.1.3.1.6. Разбор самой Jump_Table был верен, а вот раскладка выхода — нет:
+    /// каждому потоку передавался остаток буфера, а декодер заполнял его С КОНЦА, поэтому потоки
+    /// затирали друг друга. Размер сегмента вычисляется как (Regenerated_Size+3)/4.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void DecodeHuffmanStreams(ReadOnlySpan<byte> streams, bool isFourStreams, Span<byte> destination, int regeneratedSize, in HuffmanTable table)
+    private static void DecodeHuffmanStreams(ReadOnlySpan<byte> streams, bool isFourStreams, Span<byte> destination, in HuffmanTable table)
     {
         if (!isFourStreams)
         {
-            HuffmanDecoder.DecodeReverseStreamExact(streams, destination, in table);
+            ZstdHuffman.DecodeStream(streams, destination, in table);
             return;
         }
 
@@ -648,17 +690,18 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         var total = streams.Length - 6;
         var s4 = total - (s1 + s2 + s3);
         if (s4 < 0) throw new InvalidDataException("Invalid Huffman streams sizes");
-        var off1 = 6;
-        var off2 = off1 + s1;
+
+        var off2 = 6 + s1;
         var off3 = off2 + s2;
         var off4 = off3 + s3;
-        if (off4 + s4 != streams.Length) throw new InvalidDataException("Huffman streams size mismatch");
-        var written = 0;
-        written += HuffmanDecoder.DecodeReverseStream(streams.Slice(off1, s1), destination[written..], in table);
-        written += HuffmanDecoder.DecodeReverseStream(streams.Slice(off2, s2), destination[written..], in table);
-        written += HuffmanDecoder.DecodeReverseStream(streams.Slice(off3, s3), destination[written..], in table);
-        written += HuffmanDecoder.DecodeReverseStream(streams.Slice(off4, s4), destination[written..], in table);
-        if (written != regeneratedSize) throw new InvalidDataException("Huffman regenerated size mismatch");
+
+        ZstdHuffman.Decode4Streams(
+            streams.Slice(6, s1),
+            streams.Slice(off2, s2),
+            streams.Slice(off3, s3),
+            streams.Slice(off4, s4),
+            destination,
+            in table);
     }
 
     [StructLayout(LayoutKind.Auto)]
@@ -667,29 +710,27 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         int llMode,
         int ofMode,
         int mlMode,
-        byte llRle,
-        byte ofRle,
-        byte mlRle,
-        ReadOnlySpan<byte> tableData,
-        int headerLength,
-        ReadOnlySpan<byte> bitstream)
+        ReadOnlySpan<byte> tableData)
     {
         public int NbSeq { get; } = nbSeq;
         public int LlMode { get; } = llMode;
         public int OfMode { get; } = ofMode;
         public int MlMode { get; } = mlMode;
-        public byte LlRle { get; } = llRle;
-        public byte OfRle { get; } = ofRle;
-        public byte MlRle { get; } = mlRle;
+
+        /// <summary>Описания таблиц и следующий за ними битовый поток.</summary>
         public ReadOnlySpan<byte> TableData { get; } = tableData;
-        public int FseHeaderLength { get; } = headerLength;
-        public ReadOnlySpan<byte> Bitstream { get; } = bitstream;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static SequenceHeader ParseSequenceHeader(ReadOnlySpan<byte> seq)
     {
         ParseNbSeq(seq, out var nbSeq, out var nbHdrLen);
+
+        // RFC 8878, §3.1.1.3.2.1: при Number_Of_Sequences == 0 секция на этом заканчивается —
+        // байта Symbol_Compression_Modes нет. Раньше он требовался безусловно, и блок
+        // «только литералы» (секция из единственного 0x00) отвергался как усечённый.
+        if (nbSeq == 0) return new SequenceHeader(0, 0, 0, 0, []);
+
         if (seq.Length < nbHdrLen + 1) throw new InvalidDataException("Truncated modes byte");
 
         var modes = seq[nbHdrLen];
@@ -697,211 +738,168 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         var ofMode = (modes >> 4) & 0x3;
         var mlMode = (modes >> 2) & 0x3;
 
+        // ★ Описания трёх таблиц идут ПОДРЯД и переменной длины, поэтому разобрать их можно
+        // только одним проходом — по порядку LL, OF, ML. Раньше здесь пропускались лишь
+        // однобайтовые описания (RLE), а сжатые объявлялись неподдерживаемыми; из-за этого и
+        // граница битового потока считалась в двух местах по-разному.
         var tableData = seq[(nbHdrLen + 1)..];
-        var hdrOff = 0;
-        byte llRleSym = 0, ofRleSym = 0, mlRleSym = 0;
 
-        if (llMode == 1)
-        {
-            if (hdrOff >= tableData.Length) throw new InvalidDataException("Truncated LL RLE table");
-            llRleSym = tableData[hdrOff++];
-        }
-        else if (llMode == 2)
-        {
-            throw new NotSupportedException("FSE-compressed LL table not yet supported");
-        }
-
-        if (ofMode == 1)
-        {
-            if (hdrOff >= tableData.Length) throw new InvalidDataException("Truncated OF RLE table");
-            ofRleSym = tableData[hdrOff++];
-        }
-        else if (ofMode == 2)
-        {
-            throw new NotSupportedException("FSE-compressed OF table not yet supported");
-        }
-
-        if (mlMode == 1)
-        {
-            if (hdrOff >= tableData.Length) throw new InvalidDataException("Truncated ML RLE table");
-            mlRleSym = tableData[hdrOff++];
-        }
-        else if (mlMode == 2)
-        {
-            throw new NotSupportedException("FSE-compressed ML table not yet supported");
-        }
-
-        var bitstream = tableData[hdrOff..];
-        return new SequenceHeader(nbSeq, llMode, ofMode, mlMode, llRleSym, ofRleSym, mlRleSym, tableData, hdrOff, bitstream);
+        return new SequenceHeader(nbSeq, llMode, ofMode, mlMode, tableData);
     }
 
     [StructLayout(LayoutKind.Auto)]
-    private ref struct SequenceDecoders(int nbSeq, byte llRle, byte ofRle, byte mlRle)
+    private ref struct SequenceDecoders(int nbSeq)
     {
         public int NbSeq { get; } = nbSeq;
-        public bool UseFseLL;
-        public bool UseFseOF;
-        public bool UseFseML;
         public FseDecoder DecLL;
         public FseDecoder DecOF;
         public FseDecoder DecML;
         public uint StateLL;
         public uint StateOF;
         public uint StateML;
-        public int LlLog;
-        public int OfLog;
-        public int MlLog;
-        public byte LlRleSymbol { get; } = llRle;
-        public byte OfRleSymbol { get; } = ofRle;
-        public byte MlRleSymbol { get; } = mlRle;
-        public ReverseBitReader BitReader;
+        public ZstdReverseBitReader BitReader;
     }
 
-    [StructLayout(LayoutKind.Auto)]
-    private readonly struct SequenceCommand(int literalLength, int matchLength, int offset)
-    {
-        public int LiteralLength { get; } = literalLength;
-        public int MatchLength { get; } = matchLength;
-        public int Offset { get; } = offset;
-    }
-
+    /// <summary>
+    /// Готовит три FSE-декодера и обратный битовый поток секции последовательностей.
+    /// </summary>
+    /// <remarks>
+    /// RFC 8878, §3.1.1.3.2.2: режим задаётся ОТДЕЛЬНО для каждого из трёх символьных классов.
+    /// Раньше при любом Predefined_Mode перестраивались сразу ВСЕ ТРИ таблицы, поэтому сочетание
+    /// вида LL=0, OF=3, ML=0 уничтожало сохранённую с прошлого блока таблицу OF и подменяло её
+    /// предопределённой — расхождение данных без единого исключения. Заодно общий признак
+    /// «таблицы уже есть» взводился до проверки Repeat_Mode и обезвреживал её.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private SequenceDecoders PrepareSequenceDecoders(in SequenceHeader header, ref ZstdDecoderWorkspace.SequenceTableBlock llTables, ref ZstdDecoderWorkspace.SequenceTableBlock mlTables, ref ZstdDecoderWorkspace.SequenceTableBlock ofTables)
+    private static SequenceDecoders PrepareSequenceDecoders(
+        in SequenceHeader header,
+        ref ZstdDecoderWorkspace.SequenceTableBlock llTables,
+        ref ZstdDecoderWorkspace.SequenceTableBlock mlTables,
+        ref ZstdDecoderWorkspace.SequenceTableBlock ofTables)
     {
-        var decoders = new SequenceDecoders(header.NbSeq, header.LlRle, header.OfRle, header.MlRle);
-
-        var llMode = header.LlMode;
-        var ofMode = header.OfMode;
-        var mlMode = header.MlMode;
-
-        var useFseLL = llMode != 1;
-        var useFseOF = ofMode != 1;
-        var useFseML = mlMode != 1;
-
-        if (llMode == 0 || ofMode == 0 || mlMode == 0)
-        {
-            EnsurePredefinedTables();
-        }
-        if ((llMode == 3 || ofMode == 3 || mlMode == 3) && !hasSeqTables)
-        {
-            throw new InvalidDataException("Repeat mode without previous tables");
-        }
-
+        // Описания трёх таблиц идут подряд и имеют переменную длину, поэтому разбираются
+        // одним проходом строго в порядке LL, OF, ML; битовый поток начинается сразу за последним.
         var tableData = header.TableData;
-        var hdrOff = 0;
+        var headerOffset = 0;
 
-        var llLog = PrepareSequenceTable(llMode, tableData, ref hdrOff, ZstdLengthsTables.LL_AccuracyLog, ref lastLlLog, maxSymbol: 35, ref llTables, "LL");
-        var ofLog = PrepareSequenceTable(ofMode, tableData, ref hdrOff, ZstdLengthsTables.OffsetsAccuracyLog, ref lastOfLog, ZstdLengthsTables.OffsetsMaxN, ref ofTables, "OF");
-        var mlLog = PrepareSequenceTable(mlMode, tableData, ref hdrOff, ZstdLengthsTables.ML_AccuracyLog, ref lastMlLog, maxSymbol: 52, ref mlTables, "ML");
+        var llLog = PrepareSequenceTable(
+            header.LlMode, tableData, ref headerOffset,
+            ZstdLengthsTables.LL_DefaultNorm, ZstdLengthsTables.LL_AccuracyLog,
+            ZstdLengthsTables.LL_MaxAccuracyLog, ZstdLengthsTables.LL_MaxSymbol, ref llTables, "LL");
 
-        ConfigureDecoders(ref decoders, useFseLL, useFseOF, useFseML, llLog, ofLog, mlLog, ref llTables, ref ofTables, ref mlTables);
-        InitializeDecoderStates(ref decoders, header, useFseLL, useFseOF, useFseML, llLog, ofLog, mlLog);
+        var ofLog = PrepareSequenceTable(
+            header.OfMode, tableData, ref headerOffset,
+            ZstdLengthsTables.OffsetsDefaultNorm, ZstdLengthsTables.OffsetsAccuracyLog,
+            ZstdLengthsTables.OffsetsMaxAccuracyLog, ZstdLengthsTables.OffsetsMaxSymbol, ref ofTables, "OF");
+
+        var mlLog = PrepareSequenceTable(
+            header.MlMode, tableData, ref headerOffset,
+            ZstdLengthsTables.ML_DefaultNorm, ZstdLengthsTables.ML_AccuracyLog,
+            ZstdLengthsTables.ML_MaxAccuracyLog, ZstdLengthsTables.ML_MaxSymbol, ref mlTables, "ML");
+
+        var decoders = new SequenceDecoders(header.NbSeq)
+        {
+            DecLL = FseDecoder.FromTables(llLog, llTables.GetSymbols(), llTables.GetNbBits(), llTables.GetBase()),
+            DecOF = FseDecoder.FromTables(ofLog, ofTables.GetSymbols(), ofTables.GetNbBits(), ofTables.GetBase()),
+            DecML = FseDecoder.FromTables(mlLog, mlTables.GetSymbols(), mlTables.GetNbBits(), mlTables.GetBase()),
+        };
+
+        InitializeDecoderStates(ref decoders, in header, tableData[headerOffset..], llLog, ofLog, mlLog);
         return decoders;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ConfigureDecoders(
-        ref SequenceDecoders decoders,
-        bool useFseLL,
-        bool useFseOF,
-        bool useFseML,
-        int llLog,
-        int ofLog,
-        int mlLog,
-        ref ZstdDecoderWorkspace.SequenceTableBlock llTables,
-        ref ZstdDecoderWorkspace.SequenceTableBlock ofTables,
-        ref ZstdDecoderWorkspace.SequenceTableBlock mlTables)
-    {
-        decoders.UseFseLL = useFseLL;
-        decoders.UseFseOF = useFseOF;
-        decoders.UseFseML = useFseML;
-        decoders.LlLog = llLog;
-        decoders.OfLog = ofLog;
-        decoders.MlLog = mlLog;
-
-        if (useFseLL)
-        {
-            EnsureSequenceTableAvailable(llTables, "LL");
-            decoders.DecLL = FseDecoder.FromTables(llLog, llTables.GetSymbols(), llTables.GetNbBits(), llTables.GetBase());
-        }
-        if (useFseOF)
-        {
-            EnsureSequenceTableAvailable(ofTables, "OF");
-            decoders.DecOF = FseDecoder.FromTables(ofLog, ofTables.GetSymbols(), ofTables.GetNbBits(), ofTables.GetBase());
-        }
-        if (useFseML)
-        {
-            EnsureSequenceTableAvailable(mlTables, "ML");
-            decoders.DecML = FseDecoder.FromTables(mlLog, mlTables.GetSymbols(), mlTables.GetNbBits(), mlTables.GetBase());
-        }
-    }
-
-    private static void EnsureSequenceTableAvailable(ZstdDecoderWorkspace.SequenceTableBlock tables, string name)
-    {
-        if (!tables.HasTable)
-            throw new InvalidDataException($"{name} table missing for FSE mode");
-    }
-
+    /// <summary>
+    /// Снимает набивку обратного потока и читает начальные состояния в порядке LL, OF, ML.
+    /// </summary>
     private static void InitializeDecoderStates(
         ref SequenceDecoders decoders,
         in SequenceHeader header,
-        bool useFseLL,
-        bool useFseOF,
-        bool useFseML,
+        ReadOnlySpan<byte> bitstream,
         int llLog,
         int ofLog,
         int mlLog)
     {
-        var reader = new ReverseBitReader(header.Bitstream);
-        if (!reader.TrySkipPadding()) throw new InvalidDataException("Bitstream underflow while skipping padding");
+        var reader = new ZstdReverseBitReader(bitstream);
+        if (!reader.IsValid) throw new InvalidDataException("Malformed sequences bitstream padding");
 
-        if (useFseLL && !reader.TryReadBits(llLog, out decoders.StateLL))
-            throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Underflow reading initial LL state (llLog={llLog}, nbSeq={header.NbSeq}, bitstreamLen={header.Bitstream.Length})"));
-        if (useFseOF && !reader.TryReadBits(ofLog, out decoders.StateOF))
-            throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Underflow reading initial OF state (ofLog={ofLog}, nbSeq={header.NbSeq}, bitstreamLen={header.Bitstream.Length})"));
-        if (useFseML && !reader.TryReadBits(mlLog, out decoders.StateML))
-            throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Underflow reading initial ML state (mlLog={mlLog}, nbSeq={header.NbSeq}, bitstreamLen={header.Bitstream.Length})"));
+        if (!reader.TryReadBits(llLog, out decoders.StateLL))
+            throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Underflow reading initial LL state (llLog={llLog}, nbSeq={header.NbSeq}, bitstreamLen={bitstream.Length})"));
+        if (!reader.TryReadBits(ofLog, out decoders.StateOF))
+            throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Underflow reading initial OF state (ofLog={ofLog}, nbSeq={header.NbSeq}, bitstreamLen={bitstream.Length})"));
+        if (!reader.TryReadBits(mlLog, out decoders.StateML))
+            throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Underflow reading initial ML state (mlLog={mlLog}, nbSeq={header.NbSeq}, bitstreamLen={bitstream.Length})"));
 
         decoders.BitReader = reader;
     }
 
-    private int PrepareSequenceTable(
+    /// <summary>
+    /// Готовит таблицу одного символьного класса согласно её режиму.
+    /// </summary>
+    /// <returns>Accuracy_Log подготовленной таблицы.</returns>
+    private static int PrepareSequenceTable(
         int mode,
         ReadOnlySpan<byte> tableData,
         ref int offset,
-        int defaultLog,
-        ref int lastLog,
+        ReadOnlySpan<short> predefinedNorm,
+        int predefinedLog,
+        int maxAccuracyLog,
         int maxSymbol,
         ref ZstdDecoderWorkspace.SequenceTableBlock tables,
         string tableName)
     {
-        return mode switch
+        switch (mode)
         {
-            0 or 1 => defaultLog,
-            2 => BuildSequenceTable(tableData, ref offset, ref tables, maxSymbol, ref lastLog),
-            3 => lastLog,
-            _ => throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Unsupported {tableName} mode: {mode}")),
-        };
+            case 0: // Predefined_Mode
+                BuildTableFromNorm(predefinedNorm, predefinedLog, ref tables);
+                return predefinedLog;
+
+            case 1: // RLE_Mode
+                {
+                    if (offset >= tableData.Length) throw new InvalidDataException($"Truncated {tableName} RLE table");
+                    var symbol = tableData[offset++];
+                    if (symbol > maxSymbol) throw new InvalidDataException($"{tableName} RLE symbol is out of range");
+
+                    // RLE_Mode — это полноценная таблица из одного состояния (Accuracy_Log = 0).
+                    // Раньше она нигде не сохранялась, и следующий блок в Repeat_Mode получал
+                    // устаревшую FSE- или предопределённую таблицу.
+                    BuildRleTable(symbol, ref tables);
+                    return 0;
+                }
+
+            case 2: // FSE_Compressed_Mode
+                {
+                    Span<short> norm = stackalloc short[maxSymbol + 1];
+                    var consumed = ZstdFseTable.ParseNormalizedCounts(tableData[offset..], maxSymbol, maxAccuracyLog, norm, out var log, out var lastSymbol);
+                    offset += consumed;
+                    BuildTableFromNorm(norm[..(lastSymbol + 1)], log, ref tables);
+                    return log;
+                }
+
+            case 3: // Repeat_Mode
+                if (!tables.HasTable) throw new InvalidDataException($"Repeat mode without previous {tableName} table");
+                return tables.TableLog;
+
+            default:
+                throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Unsupported {tableName} mode: {mode}"));
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int BuildSequenceTable(
-        ReadOnlySpan<byte> tableData,
-        ref int offset,
-        ref ZstdDecoderWorkspace.SequenceTableBlock tables,
-        int maxSymbol,
-        ref int lastLog)
+    private static void BuildTableFromNorm(ReadOnlySpan<short> norm, int log, ref ZstdDecoderWorkspace.SequenceTableBlock tables)
     {
-        Span<short> norm = stackalloc short[maxSymbol + 1];
-        var consumed = ParseFseTable(tableData[offset..], maxSymbol, out var log, out var lastSym, norm);
-        var normSpan = norm[..(lastSym + 1)];
-        tables.GetWritable(log, out var symbols, out var nbBits, out var baseArr);
-        FseDecoder.Build(normSpan, log, symbols, nbBits, baseArr);
+        tables.GetWritable(log, out var symbols, out var nbBits, out var baseTable);
+        FseDecoder.Build(norm, log, symbols, nbBits, baseTable);
         tables.Commit(log);
-        hasSeqTables = true;
-        lastLog = log;
-        offset += consumed;
-        return log;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void BuildRleTable(byte symbol, ref ZstdDecoderWorkspace.SequenceTableBlock tables)
+    {
+        tables.GetWritable(0, out var symbols, out var nbBits, out var baseTable);
+        symbols[0] = symbol;
+        nbBits[0] = 0;
+        baseTable[0] = 0;
+        tables.Commit(0);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -913,23 +911,21 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         if (literals.IsRle)
         {
             target.Fill(literals.RleValue);
-            AppendToWindow(target);
-            if (hasChecksum) hash.UpdateRepeat(literals.RleValue, literals.Size);
         }
         else
         {
-            var source = GetLiteralData(literals);
-            source.CopyTo(target);
-            AppendToWindow(source);
-            if (hasChecksum) hash.Update(source);
+            GetLiteralData(literals).CopyTo(target);
         }
+
+        AppendToWindow(target);
+        if (hasChecksum) hash.Update(target);
 
         pendingPos = 0;
         pendingLen = literals.Size;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ExecuteSequences(ref SequenceDecoders decoders, in LiteralsInfo literals, in SequenceHeader header)
+    private void ExecuteSequences(ref SequenceDecoders decoders, in LiteralsInfo literals)
     {
         var output = workspace.GetPendingSpan();
         var windowSpan = WindowSpan;
@@ -937,31 +933,58 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         var literalPosition = 0;
         ref var bitReader = ref decoders.BitReader;
 
+        var lastIndex = decoders.NbSeq - 1;
         for (var sequenceIndex = 0; sequenceIndex < decoders.NbSeq; sequenceIndex++)
         {
-            var command = DecodeSequence(ref decoders, header, ref bitReader, sequenceIndex);
-            outPos = ConsumeLiteralsForSequence(command.LiteralLength, literals, ref literalPosition, output, outPos);
-            if (command.MatchLength != 0)
+            DecodeSequence(ref decoders, ref bitReader, sequenceIndex, sequenceIndex == lastIndex, out var literalLength, out var matchLength, out var offset);
+            outPos = ConsumeLiteralsForSequence(literalLength, literals, ref literalPosition, output, outPos, windowSpan);
+            if (matchLength != 0)
             {
-                AppendMatch(windowSpan, output, ref outPos, command.MatchLength, command.Offset);
+                AppendMatch(windowSpan, output, ref outPos, matchLength, offset);
             }
         }
 
+        // RFC 8878, §3.1.1.3.2.1.3: после последней последовательности поток обязан быть исчерпан.
+        if (bitReader.AvailableBits != 0) throw new InvalidDataException("Sequences bitstream not fully consumed");
+
         AppendRemainingLiterals(literals, output, ref outPos, ref literalPosition);
+
+        // Контрольная сумма снимается один раз со всего собранного блока. Раньше xxHash
+        // вызывался на каждый прогон литералов и на каждое совпадение, то есть кусками
+        // по несколько байт — а на таких кусках инкрементальный буфер xxHash работает побайтно.
+        if (hasChecksum) hash.Update(output[..outPos]);
+
         pendingPos = 0;
         pendingLen = outPos;
     }
 
+    /// <summary>
+    /// Декодирует одну последовательность и, если она не последняя, переводит состояния FSE.
+    /// </summary>
+    /// <remarks>
+    /// RFC 8878, §3.1.1.3.2.1.3: состояния обновляются МЕЖДУ последовательностями, то есть
+    /// Number_Of_Sequences − 1 раз. Раньше обновление выполнялось безусловно, в том числе после
+    /// последней последовательности: бит на него в корректном потоке уже нет, и на каждом
+    /// настоящем блоке вылетало «Bitstream underflow while updating LL state».
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private SequenceCommand DecodeSequence(
+    private void DecodeSequence(
         ref SequenceDecoders decoders,
-        in SequenceHeader header,
-        ref ReverseBitReader bitReader,
-        int sequenceIndex)
+        ref ZstdReverseBitReader bitReader,
+        int sequenceIndex,
+        bool isLast,
+        out int literalLength,
+        out int matchLength,
+        out int offset)
     {
-        var llCode = decoders.UseFseLL ? decoders.DecLL.PeekSymbol(decoders.StateLL) : header.LlRle;
-        var mlCode = decoders.UseFseML ? decoders.DecML.PeekSymbol(decoders.StateML) : header.MlRle;
-        var ofCode = decoders.UseFseOF ? decoders.DecOF.PeekSymbol(decoders.StateOF) : header.OfRle;
+        var llCode = decoders.DecLL.PeekSymbol(decoders.StateLL);
+        var mlCode = decoders.DecML.PeekSymbol(decoders.StateML);
+        var ofCode = decoders.DecOF.PeekSymbol(decoders.StateOF);
+
+        if (llCode > ZstdLengthsTables.LL_MaxSymbol || mlCode > ZstdLengthsTables.ML_MaxSymbol || ofCode > ZstdLengthsTables.OffsetsMaxSymbol)
+        {
+            throw new InvalidDataException("Sequence code is out of range");
+        }
 
         var ofExtra = ReadOptionalBits(ref bitReader, ofCode, "OF extra bits", sequenceIndex, decoders.NbSeq);
         var mlAdd = ZstdLengthsTables.MLAddBits[mlCode];
@@ -969,18 +992,19 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         var llAdd = ZstdLengthsTables.LLAddBits[llCode];
         var llExtra = ReadOptionalBits(ref bitReader, llAdd, "LL extra bits", sequenceIndex, decoders.NbSeq);
 
-        UpdateDecoderStates(ref decoders, ref bitReader, sequenceIndex);
+        if (!isLast)
+        {
+            UpdateDecoderStates(ref decoders, ref bitReader, sequenceIndex);
+        }
 
-        var literalLength = llCode <= 15 ? llCode : (int)(ZstdLengthsTables.LLBase[llCode] + llExtra);
-        var matchLength = mlCode <= 31 ? (mlCode + 3) : (int)(ZstdLengthsTables.MLBase[mlCode] + mlExtra);
-        var offset = ResolveOffset(literalLength, (1u << ofCode) + ofExtra);
-
-        return new SequenceCommand(literalLength, matchLength, offset);
+        literalLength = llCode <= 15 ? llCode : (int)(ZstdLengthsTables.LLBase[llCode] + llExtra);
+        matchLength = mlCode <= 31 ? (mlCode + 3) : (int)(ZstdLengthsTables.MLBase[mlCode] + mlExtra);
+        offset = ResolveOffset(literalLength, ((ulong)1 << ofCode) + ofExtra);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static uint ReadOptionalBits(
-        ref ReverseBitReader bitReader,
+        ref ZstdReverseBitReader bitReader,
         int bitCount,
         string context,
         int sequenceIndex,
@@ -1007,21 +1031,12 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         in LiteralsInfo literals,
         ref int literalPosition,
         Span<byte> output,
-        int outPos)
+        int outPos,
+        Span<byte> windowSpan)
     {
         if (literalLength == 0)
         {
             return outPos;
-        }
-
-        if (literals.IsRle)
-        {
-            EnsureOutputCapacity(output, outPos, literalLength);
-            var span = output.Slice(outPos, literalLength);
-            span.Fill(literals.RleValue);
-            AppendToWindow(span);
-            if (hasChecksum) hash.UpdateRepeat(literals.RleValue, literalLength);
-            return outPos + literalLength;
         }
 
         var nextLiteralPosition = literalPosition + literalLength;
@@ -1032,182 +1047,189 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
                 $"LL exceeds literals: litPos={literalPosition}, ll={literalLength}, litRegSize={literals.Size}"));
         }
 
+        if (literals.IsRle)
+        {
+            EnsureOutputCapacity(output, outPos, literalLength);
+            var span = output.Slice(outPos, literalLength);
+            span.Fill(literals.RleValue);
+            AppendToWindow(span, windowSpan);
+
+            // ★ Курсор литералов обязан двигаться и в RLE-ветке. Раньше он оставался нулевым,
+            // и AppendRemainingLiterals дописывал в конец блока ВСЮ секцию литералов повторно —
+            // хвост блока затирался Regenerated_Size одинаковых байт. Дефект не был виден,
+            // потому что собственный кодировщик RLE-литералы не пишет.
+            literalPosition = nextLiteralPosition;
+            return outPos + literalLength;
+        }
+
         var source = GetLiteralSlice(literals, literalPosition, literalLength);
         EnsureOutputCapacity(output, outPos, literalLength);
         source.CopyTo(output.Slice(outPos, literalLength));
-        AppendToWindow(source);
-        if (hasChecksum) hash.Update(source);
+        AppendToWindow(source, windowSpan);
         literalPosition = nextLiteralPosition;
         return outPos + literalLength;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void UpdateDecoderStates(ref SequenceDecoders decoders, ref ReverseBitReader br, int sequenceIndex)
+    private static void UpdateDecoderStates(ref SequenceDecoders decoders, ref ZstdReverseBitReader br, int sequenceIndex)
     {
-        if (decoders.UseFseLL)
-        {
-            var nbLL = decoders.DecLL.PeekNbBits(decoders.StateLL);
-            var addLL = 0u;
-            if (nbLL != 0 && !br.TryReadBits(nbLL, out addLL))
-                throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Bitstream underflow while updating LL state (seq={sequenceIndex + 1}/{decoders.NbSeq})"));
-            decoders.DecLL.UpdateState(ref decoders.StateLL, addLL);
-        }
+        // Порядок обновления между последовательностями: LL, ML, OF (RFC 8878, §3.1.1.3.2.1.3).
+        var nbLL = decoders.DecLL.PeekNbBits(decoders.StateLL);
+        var addLL = 0u;
+        if (nbLL != 0 && !br.TryReadBits(nbLL, out addLL))
+            throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Bitstream underflow while updating LL state (seq={sequenceIndex + 1}/{decoders.NbSeq})"));
+        decoders.DecLL.UpdateState(ref decoders.StateLL, addLL);
 
-        if (decoders.UseFseML)
-        {
-            var nbML = decoders.DecML.PeekNbBits(decoders.StateML);
-            var addML = 0u;
-            if (nbML != 0 && !br.TryReadBits(nbML, out addML))
-                throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Bitstream underflow while updating ML state (seq={sequenceIndex + 1}/{decoders.NbSeq})"));
-            decoders.DecML.UpdateState(ref decoders.StateML, addML);
-        }
+        var nbML = decoders.DecML.PeekNbBits(decoders.StateML);
+        var addML = 0u;
+        if (nbML != 0 && !br.TryReadBits(nbML, out addML))
+            throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Bitstream underflow while updating ML state (seq={sequenceIndex + 1}/{decoders.NbSeq})"));
+        decoders.DecML.UpdateState(ref decoders.StateML, addML);
 
-        if (decoders.UseFseOF)
-        {
-            var nbOF = decoders.DecOF.PeekNbBits(decoders.StateOF);
-            var addOF = 0u;
-            if (nbOF != 0 && !br.TryReadBits(nbOF, out addOF))
-                throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Bitstream underflow while updating OF state (seq={sequenceIndex + 1}/{decoders.NbSeq})"));
-            decoders.DecOF.UpdateState(ref decoders.StateOF, addOF);
-        }
+        var nbOF = decoders.DecOF.PeekNbBits(decoders.StateOF);
+        var addOF = 0u;
+        if (nbOF != 0 && !br.TryReadBits(nbOF, out addOF))
+            throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"Bitstream underflow while updating OF state (seq={sequenceIndex + 1}/{decoders.NbSeq})"));
+        decoders.DecOF.UpdateState(ref decoders.StateOF, addOF);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int ResolveOffset(int ll, uint offValue)
+    private int ResolveOffset(int ll, ulong offValue)
     {
         if (offValue > 3)
         {
-            var offset = (int)(offValue - 3);
+            var raw = offValue - 3;
+            if (raw > ZstdStream.MaxWindowSize) throw new InvalidDataException("Offset exceeds maximum window size");
+
+            var offset = (int)raw;
             rep3 = rep2;
             rep2 = rep1;
             rep1 = (uint)offset;
             return offset;
         }
 
-        int resolved;
-        if (ll == 0)
+        return ll == 0 ? ResolveRepeatAfterEmptyLiterals(offValue) : ResolveRepeat(offValue);
+    }
+
+    /// <summary>
+    /// Повторные смещения при ненулевой длине литералов (RFC 8878, §3.1.1.3.2.1.2).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int ResolveRepeat(ulong offValue)
+    {
+        if (offValue == 1) return (int)rep1;
+
+        if (offValue == 2)
         {
-            if (offValue == 1) { resolved = (int)rep2; rep2 = rep1; rep1 = (uint)resolved; }
-            else if (offValue == 2) { resolved = (int)rep3; rep3 = rep2; rep2 = rep1; rep1 = (uint)resolved; }
-            else
-            {
-                resolved = (int)rep1 - 1;
-                if (resolved == 0) throw new InvalidDataException("offset=0");
-                rep3 = rep2;
-                rep2 = rep1;
-                rep1 = (uint)resolved;
-            }
+            var second = (int)rep2;
+            (rep2, rep1) = (rep1, rep2);
+            return second;
+        }
+
+        var third = (int)rep3;
+        var temp = rep1;
+        rep1 = rep3;
+        rep3 = rep2;
+        rep2 = temp;
+        return third;
+    }
+
+    /// <summary>
+    /// Повторные смещения при нулевой длине литералов: коды сдвинуты, а третий означает «rep1 − 1».
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int ResolveRepeatAfterEmptyLiterals(ulong offValue)
+    {
+        if (offValue == 1)
+        {
+            var second = (int)rep2;
+            rep2 = rep1;
+            rep1 = (uint)second;
+            return second;
+        }
+
+        if (offValue == 2)
+        {
+            var third = (int)rep3;
+            rep3 = rep2;
+            rep2 = rep1;
+            rep1 = (uint)third;
+            return third;
+        }
+
+        var previous = (int)rep1 - 1;
+        if (previous == 0) throw new InvalidDataException("offset=0");
+        rep3 = rep2;
+        rep2 = rep1;
+        rep1 = (uint)previous;
+        return previous;
+    }
+
+    /// <summary>
+    /// Дописывает совпадение: сначала берёт из окна не более offset байт, затем размножает их
+    /// удвоением прямо в выходном буфере.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// RFC 8878, §3.1.1.3.2: при offset меньше длины совпадения оно периодично с периодом offset.
+    /// </para>
+    /// <para>
+    /// Раньше здесь было три ветки. Одна (AppendBufferedMatch, смещения 2,3,4,8,16) копировала
+    /// источник длиной filled в приёмник длиной chunk и падала ArgumentException на любом
+    /// matchLength меньше 2*filled. Вторая (AppendGenericMatch, все прочие смещения) копировала
+    /// порциями не длиннее offset, вызывая на каждую порцию дописывание в окно: совпадение длиной
+    /// 300 при offset 5 разбивалось на шестьдесят копирований по пять байт. Теперь порция из окна
+    /// берётся один раз, а хвост достраивается удвоением с одним дописыванием в окно.
+    /// </para>
+    /// </remarks>
+    private void AppendMatch(Span<byte> windowSpan, Span<byte> outBuf, ref int outPos, int matchLength, int offset)
+    {
+        // RFC 8878, §3.1.1.3.2.1.2: смещение не должно уходить дальше уже выданной истории
+        // (литералы текущей последовательности к этому моменту уже дописаны в окно).
+        if (offset <= 0 || offset > winFill) throw new InvalidDataException("Offset exceeds available history");
+
+        EnsureOutputCapacity(outBuf, outPos, matchLength);
+        var destination = outBuf.Slice(outPos, matchLength);
+
+        if (offset == 1)
+        {
+            destination.Fill(GetFromWindow(1));
         }
         else
         {
-            if (offValue == 1) { resolved = (int)rep1; }
-            else if (offValue == 2)
+            var initial = Math.Min(offset, matchLength);
+            CopyFromWindow(windowSpan, offset, destination[..initial]);
+
+            var filled = initial;
+            while (filled < matchLength)
             {
-                resolved = (int)rep2;
-                (rep2, rep1) = (rep1, rep2);
-            }
-            else
-            {
-                resolved = (int)rep3;
-                var temp = rep1;
-                rep1 = rep3;
-                rep3 = rep2;
-                rep2 = temp;
+                // filled всегда кратно offset, поэтому destination[filled + i] == destination[i].
+                var chunk = Math.Min(filled, matchLength - filled);
+                destination[..chunk].CopyTo(destination.Slice(filled, chunk));
+                filled += chunk;
             }
         }
 
-        return resolved;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AppendMatch(Span<byte> windowSpan, Span<byte> outBuf, ref int outPos, int matchLength, int offset)
-    {
-        switch (offset)
-        {
-            case 1:
-                AppendRepeatByteMatch(outBuf, ref outPos, matchLength);
-                return;
-            case 3:
-                AppendBufferedMatch(windowSpan, outBuf, ref outPos, matchLength, offset, 3);
-                return;
-            case 2:
-            case 4:
-            case 8:
-            case 16:
-                AppendBufferedMatch(windowSpan, outBuf, ref outPos, matchLength, offset, offset);
-                return;
-            default:
-                AppendGenericMatch(windowSpan, outBuf, ref outPos, matchLength, offset);
-                return;
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AppendRepeatByteMatch(Span<byte> outBuf, ref int outPos, int matchLength)
-    {
-        EnsureOutputCapacity(outBuf, outPos, matchLength);
-        var value = GetFromWindow(1);
-        var dst = outBuf.Slice(outPos, matchLength);
-        dst.Fill(value);
-        AppendToWindow(dst);
-        if (hasChecksum) hash.UpdateRepeat(value, matchLength);
+        AppendToWindow(destination, windowSpan);
         outPos += matchLength;
     }
 
+    /// <summary>
+    /// Копирует из кольцевого окна участок, начинающийся за <paramref name="offset"/> байт до
+    /// текущей позиции записи, с учётом перехода через край буфера.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AppendBufferedMatch(Span<byte> windowSpan, Span<byte> outBuf, ref int outPos, int matchLength, int offset, int initialCopyLength)
+    private void CopyFromWindow(Span<byte> windowSpan, int offset, Span<byte> destination)
     {
-        EnsureOutputCapacity(outBuf, outPos, matchLength);
-        var dst = outBuf.Slice(outPos, matchLength);
-        var baseIdx = winPos - offset;
-        if (baseIdx < 0) baseIdx += windowSize;
-        var init = Math.Min(initialCopyLength, matchLength);
-        for (var k = 0; k < init; k++)
+        var start = winPos - offset;
+        if (start < 0) start += windowSize;
+
+        var first = Math.Min(destination.Length, windowSize - start);
+        windowSpan.Slice(start, first).CopyTo(destination[..first]);
+        if (first < destination.Length)
         {
-            var idx = baseIdx + k;
-            if (idx >= windowSize) idx -= windowSize;
-            dst[k] = windowSpan[idx];
+            windowSpan[..(destination.Length - first)].CopyTo(destination[first..]);
         }
-
-        var filled = init;
-        while (filled < matchLength)
-        {
-            var chunk = Math.Min(filled, matchLength - filled);
-            dst[..filled].CopyTo(dst.Slice(filled, chunk));
-            filled += chunk;
-        }
-
-        AppendToWindow(dst);
-        if (hasChecksum) hash.Update(dst);
-        outPos += matchLength;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AppendGenericMatch(Span<byte> windowSpan, Span<byte> outBuf, ref int outPos, int matchLength, int offset)
-    {
-        var remaining = matchLength;
-        while (remaining > 0)
-        {
-            var srcIndex = winPos - offset;
-            if (windowSize != 0)
-            {
-                srcIndex %= windowSize;
-                if (srcIndex < 0) srcIndex += windowSize;
-            }
-
-            var contiguous = windowSize - srcIndex;
-            var toCopy = remaining < offset ? remaining : offset;
-            if (toCopy > contiguous) toCopy = contiguous;
-
-            EnsureOutputCapacity(outBuf, outPos, toCopy);
-            var dstSpan = outBuf.Slice(outPos, toCopy);
-            windowSpan.Slice(srcIndex, toCopy).CopyTo(dstSpan);
-            AppendToWindow(dstSpan);
-            outPos += toCopy;
-            remaining -= toCopy;
-        }
-
-        if (hasChecksum) hash.Update(outBuf.Slice(outPos - matchLength, matchLength));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1221,7 +1243,6 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
             EnsureOutputCapacity(outBuf, outPos, tailSpan.Length);
             tailSpan.CopyTo(outBuf.Slice(outPos, tailSpan.Length));
             AppendToWindow(tailSpan);
-            if (hasChecksum) hash.Update(tailSpan);
             outPos += tailSpan.Length;
         }
         else
@@ -1231,7 +1252,6 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
             var dst = outBuf.Slice(outPos, remaining);
             dst.Fill(literals.RleValue);
             AppendToWindow(dst);
-            if (hasChecksum) hash.UpdateRepeat(literals.RleValue, remaining);
             outPos += remaining;
         }
     }
@@ -1240,11 +1260,6 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     private void DecompressCompressedBlock(int size)
     {
         if (!isWindowInitialized) InitFrameWindow();
-        if (hasPendingDict)
-        {
-            AppendToWindow(pendingDictContent.Span);
-            hasPendingDict = false;
-        }
 
         var body = workspace.AcquireCompressed(size);
         if (!ReadExact(body)) throw new InvalidDataException("Truncated compressed block body");
@@ -1265,7 +1280,7 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         ref var ofTables = ref OfTables;
         var decoders = PrepareSequenceDecoders(header, ref llTables, ref mlTables, ref ofTables);
 
-        ExecuteSequences(ref decoders, literals, header);
+        ExecuteSequences(ref decoders, literals);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1296,49 +1311,49 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         }
     }
 
-    // Compressed/Treeless literals header
+    /// <summary>
+    /// Разбирает заголовок сжатой (Compressed/Treeless) секции литералов.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// RFC 8878, §3.1.1.3.1.1: заголовок читается как одно little-endian целое, в котором биты 0-1 —
+    /// тип, биты 2-3 — Size_Format, далее подряд Regenerated_Size шириной rBits и сразу за ним
+    /// Compressed_Size шириной cBits. Обе величины начинаются не на границе байта.
+    /// </para>
+    /// <para>
+    /// Прежняя версия собирала поля побайтно: Regenerated_Size никогда не маскировался до своей
+    /// ширины (для sf=2 получалось 20 бит вместо 14 — например 605730 вместо 15906), а Compressed_Size
+    /// начинался со следующей ЦЕЛОЙ байтовой границы, теряя общие с ним биты и захватывая чужой байт
+    /// (616 превращалось в 14490 → «Truncated compressed literals body»). Плюс чтение вылезало
+    /// на байт за проверенную длину заголовка.
+    /// </para>
+    /// </remarks>
     private static void ParseCompressedLiteralsHeader(ReadOnlySpan<byte> src, out int headerLen, out int regeneratedSize, out int compressedSize, out bool isFourStreams)
     {
-        var b0 = src[0];
-        var sf = (b0 >> 2) & 0x3;
-        isFourStreams = sf != 0;
-        if (sf == 0)
+        var sizeFormat = (src[0] >> 2) & 0x3;
+        isFourStreams = sizeFormat != 0;
+
+        int sizeBits, headerBytes;
+        switch (sizeFormat)
         {
-            // 3 bytes, 10+10 bits (LE)
-            if (src.Length < 3) throw new InvalidDataException("Truncated compressed literals header");
-            var b1 = src[1];
-            var b2 = src[2];
-            regeneratedSize = (b0 >> 4) | ((b1 & 0xFC) << 2);
-            compressedSize = (b1 & 0x03) | (b2 << 2);
-            headerLen = 3;
-            return;
+            case 0:
+            case 1: sizeBits = 10; headerBytes = 3; break;
+            case 2: sizeBits = 14; headerBytes = 4; break;
+            default: sizeBits = 18; headerBytes = 5; break;
         }
 
-        int rBits, cBits, hdr;
-        if (sf == 1) { rBits = cBits = 10; hdr = 3; }
-        else if (sf == 2) { rBits = cBits = 14; hdr = 4; }
-        else { rBits = cBits = 18; hdr = 5; }
-        if (src.Length < hdr) throw new InvalidDataException("Truncated compressed literals header");
+        if (src.Length < headerBytes) throw new InvalidDataException("Truncated compressed literals header");
 
-        var reg = b0 >> 4;
-        var cmp = 0;
-        var bitPos = 4;
-        var bytePos = 1;
-        int read;
-        while (bitPos < rBits)
+        ulong packed = 0;
+        for (var i = 0; i < headerBytes; i++)
         {
-            reg |= src[bytePos++] << bitPos;
-            bitPos += 8;
+            packed |= (ulong)src[i] << (i * 8);
         }
-        read = 0;
-        while (read < cBits)
-        {
-            cmp |= src[bytePos] << read;
-            bytePos++; read += 8;
-        }
-        regeneratedSize = reg;
-        compressedSize = cmp;
-        headerLen = hdr;
+
+        var mask = (1UL << sizeBits) - 1;
+        regeneratedSize = (int)((packed >> 4) & mask);
+        compressedSize = (int)((packed >> (4 + sizeBits)) & mask);
+        headerLen = headerBytes;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1366,30 +1381,6 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         }
         if (src.Length < 3) throw new InvalidDataException("Truncated nbSeq");
         nbSeq = 0x7F00 + src[1] + (src[2] << 8); headerLen = 3;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void EnsurePredefinedTables()
-    {
-        LlTables.GetWritable(ZstdLengthsTables.LL_AccuracyLog, out var llSym, out var llNb, out var llBase);
-        FseDecoder.Build(ZstdLengthsTables.LL_DefaultNorm, ZstdLengthsTables.LL_AccuracyLog,
-            llSym, llNb, llBase);
-        LlTables.Commit(ZstdLengthsTables.LL_AccuracyLog);
-
-        MlTables.GetWritable(ZstdLengthsTables.ML_AccuracyLog, out var mlSym, out var mlNb, out var mlBase);
-        FseDecoder.Build(ZstdLengthsTables.ML_DefaultNorm, ZstdLengthsTables.ML_AccuracyLog,
-            mlSym, mlNb, mlBase);
-        MlTables.Commit(ZstdLengthsTables.ML_AccuracyLog);
-
-        OfTables.GetWritable(ZstdLengthsTables.OffsetsAccuracyLog, out var ofSym, out var ofNb, out var ofBase);
-        FseDecoder.Build(ZstdLengthsTables.OffsetsDefaultNorm, ZstdLengthsTables.OffsetsAccuracyLog,
-            ofSym, ofNb, ofBase);
-        OfTables.Commit(ZstdLengthsTables.OffsetsAccuracyLog);
-
-        hasSeqTables = true;
-        lastLlLog = ZstdLengthsTables.LL_AccuracyLog;
-        lastMlLog = ZstdLengthsTables.ML_AccuracyLog;
-        lastOfLog = ZstdLengthsTables.OffsetsAccuracyLog;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1426,7 +1417,16 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     private void AppendToWindow(ReadOnlySpan<byte> data)
     {
         if (windowSize == 0 || data.IsEmpty) return;
-        var windowSpan = WindowSpan;
+        AppendToWindow(data, WindowSpan);
+    }
+
+    /// <summary>
+    /// Дописывает данные в кольцевое окно, когда окно уже получено вызывающим кодом.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void AppendToWindow(ReadOnlySpan<byte> data, Span<byte> windowSpan)
+    {
+        if (windowSize == 0 || data.IsEmpty) return;
         var size = windowSize;
         var pos = winPos;
         var len = data.Length;
@@ -1485,103 +1485,6 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         var idx = winPos - distance;
         if (idx < 0) idx += windowSize;
         return windowSpan[idx];
-    }
-
-    // ---------- Вспомогательные: чтение FSE-таблиц (NCount) ----------
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int FloorLog2(int v) => 31 - System.Numerics.BitOperations.LeadingZeroCount((uint)v);
-
-    // Возвращает число байт, потреблённых из src; на выходе tableLog, lastSym (последний индекс символа) и norm[0..lastSym].
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int ParseFseTable(ReadOnlySpan<byte> src, int maxSymbol, out int tableLog, out int lastSym, Span<short> norm)
-    {
-        var reader = new BitReader(src, lsbFirst: true);
-        tableLog = (int)reader.ReadBits(4) + 5;
-        var remaining = 1 << tableLog;
-        var symbol = 0;
-
-        while (remaining > 0 && symbol <= maxSymbol)
-        {
-            var value = ReadNormalizedCode(ref reader, remaining);
-            if (TryHandleSpecialNormalizedValue(ref reader, value, norm, ref symbol, maxSymbol, ref remaining))
-            {
-                continue;
-            }
-
-            var probability = (int)value - 1;
-            norm[symbol++] = (short)probability;
-            remaining -= probability;
-        }
-
-        lastSym = symbol - 1;
-        return reader.BytesConsumed;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static uint ReadNormalizedCode(ref BitReader reader, int remaining)
-    {
-        var range = remaining + 1;
-        var bits = FloorLog2(range);
-        var threshold = (1 << (bits + 1)) - range;
-        var value = reader.ReadBits(bits);
-        if (value >= (uint)threshold)
-        {
-            value = ((value << 1) | reader.ReadBits(1)) - (uint)threshold;
-        }
-
-        return value;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool TryHandleSpecialNormalizedValue(
-        ref BitReader reader,
-        uint value,
-        Span<short> norm,
-        ref int symbol,
-        int maxSymbol,
-        ref int remaining)
-    {
-        switch (value)
-        {
-            case 0:
-                norm[symbol++] = -1;
-                remaining -= 1;
-                return true;
-            case 1:
-                norm[symbol++] = 0;
-                var zeroRun = ReadZeroRun(ref reader);
-                AppendZeroRun(norm, ref symbol, maxSymbol, zeroRun);
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int ReadZeroRun(ref BitReader reader)
-    {
-        var run = 0;
-        while (true)
-        {
-            var next = (int)reader.ReadBits(2);
-            run += next;
-            if (next != 3)
-            {
-                break;
-            }
-        }
-
-        return run;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void AppendZeroRun(Span<short> norm, ref int symbol, int maxSymbol, int count)
-    {
-        while (count-- > 0 && symbol <= maxSymbol)
-        {
-            norm[symbol++] = 0;
-        }
     }
 
     // ---------- Словари ----------
@@ -1691,10 +1594,9 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
         ref var mlTables = ref MlTables;
         ref var llTables = ref LlTables;
 
-        position += ParseDictFseTable(src[position..], ZstdLengthsTables.OffsetsMaxN, ref ofTables, out lastOfLog);
-        position += ParseDictFseTable(src[position..], 52, ref mlTables, out lastMlLog);
-        position += ParseDictFseTable(src[position..], 35, ref llTables, out lastLlLog);
-        hasSeqTables = true;
+        position += ParseDictFseTable(src[position..], ZstdLengthsTables.OffsetsMaxSymbol, ZstdLengthsTables.OffsetsMaxAccuracyLog, ref ofTables);
+        position += ParseDictFseTable(src[position..], ZstdLengthsTables.ML_MaxSymbol, ZstdLengthsTables.ML_MaxAccuracyLog, ref mlTables);
+        position += ParseDictFseTable(src[position..], ZstdLengthsTables.LL_MaxSymbol, ZstdLengthsTables.LL_MaxAccuracyLog, ref llTables);
         return position;
     }
 
@@ -1730,14 +1632,11 @@ internal sealed class ZstdDecoder([NotNull] System.IO.Stream input, IZstdDiction
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int ParseDictFseTable(ReadOnlySpan<byte> src, int maxSymbol, ref ZstdDecoderWorkspace.SequenceTableBlock table, out int tableLog)
+    private static int ParseDictFseTable(ReadOnlySpan<byte> src, int maxSymbol, int maxAccuracyLog, ref ZstdDecoderWorkspace.SequenceTableBlock table)
     {
         Span<short> norm = stackalloc short[maxSymbol + 1];
-        var consumed = ParseFseTable(src, maxSymbol, out tableLog, out var lastSym, norm);
-        var normSpan = norm[..(lastSym + 1)];
-        table.GetWritable(tableLog, out var sym, out var nbBits, out var baseArr);
-        FseDecoder.Build(normSpan, tableLog, sym, nbBits, baseArr);
-        table.Commit(tableLog);
+        var consumed = ZstdFseTable.ParseNormalizedCounts(src, maxSymbol, maxAccuracyLog, norm, out var tableLog, out var lastSymbol);
+        BuildTableFromNorm(norm[..(lastSymbol + 1)], tableLog, ref table);
         return consumed;
     }
 }
