@@ -519,18 +519,59 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// </remarks>
     internal async Task<HttpsResponseMessage> SendInternalAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        var response = await SendWithRetryAsync(request, cancellationToken).ConfigureAwait(false);
+        ApplyPreAuthenticatedAuthorization(request);
 
-        if (!AllowAutoRedirect) return response;
+        var response = await SendWithRetryAsync(request, cancellationToken).ConfigureAwait(false);
 
         HttpRequestMessage? redirected = null;
         var hops = 0;
+        var authAttempts = 0;
+        var proxyAuthAttempts = 0;
 
         try
         {
 #pragma warning disable CA2000 // Владение переходит переменной redirected; освобождает DisposeRedirect в цикле и в finally.
-            while (TryCreateRedirect(redirected ?? request, response, out var next))
+            while (true)
             {
+                // ★ Браузер, знающий пароль узла, молча отвечает на Basic-задачу повторным
+                // запросом — ровно это и делаем: один виток на 401 и один на 407, чтобы
+                // неудачные учётные данные не зациклили цепочку.
+                var current = redirected ?? request;
+
+                if ((int)response.StatusCode == 401 && authAttempts == 0
+                    && TryBuildBasicAuthorization(current.RequestUri, response.Headers.WwwAuthenticate.ToString(), out var authorization))
+                {
+                    authAttempts++;
+                    current.Headers.TryAddWithoutValidation("Authorization", authorization);
+                    response.Dispose();
+                    response = await SendWithRetryAsync(current, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                if ((int)response.StatusCode == 407 && proxyAuthAttempts == 0
+                    && Proxy?.Credentials is not null
+                    && IsBasicChallenge(response.Headers.ProxyAuthenticate.ToString())
+                    && ResolveUpstreamProxy(current.RequestUri ?? new Uri("http://localhost/")) is { } proxyUri
+                    && Proxy.Credentials.GetCredential(proxyUri, "Basic") is { } proxyCredential)
+                {
+                    proxyAuthAttempts++;
+                    current.Headers.TryAddWithoutValidation("Proxy-Authorization", BuildBasicAuthorization(proxyCredential));
+                    response.Dispose();
+                    response = await SendWithRetryAsync(current, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                // Учётные данные подтверждены удачным ответом — запоминаем для PreAuthenticate.
+                if (authAttempts > 0 && current.RequestUri is { } successUri && (int)response.StatusCode < 400)
+                {
+                    if (current.Headers.TryGetValues("Authorization", out var values))
+                        preAuthenticatedAuthorization[AuthorizationCacheKey(successUri)] = string.Join(" ", values);
+                }
+
+                if (!AllowAutoRedirect) break;
+
+                if (!TryCreateRedirect(current, response, out var next)) break;
+
                 if (++hops > MaxAutomaticRedirections)
                 {
                     DisposeRedirect(next);
@@ -540,8 +581,6 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
                 response.Dispose();
                 DisposeRedirect(redirected);
                 redirected = next;
-
-                response = await SendWithRetryAsync(redirected, cancellationToken).ConfigureAwait(false);
             }
 #pragma warning restore CA2000
 
@@ -551,6 +590,50 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         {
             DisposeRedirect(redirected);
         }
+    }
+
+    // Подтверждённые учётные данные узла для PreAuthenticate: после первого успешного ответа
+    // Authorization уходит сразу, без лишнего витка 401 — ровно как у браузера с паролем в кэше.
+    private readonly ConcurrentDictionary<string, string> preAuthenticatedAuthorization = new(StringComparer.Ordinal);
+
+    private static string AuthorizationCacheKey(Uri uri)
+        => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{uri.Scheme}://{uri.IdnHost}:{uri.Port}");
+
+    /// <summary>
+    /// Ставит заголовок Authorization из кэша PreAuthenticate, если он подтверждён для узла.
+    /// </summary>
+    private void ApplyPreAuthenticatedAuthorization(HttpRequestMessage request)
+    {
+        if (!PreAuthenticate || request.RequestUri is not { } uri) return;
+        if (request.Headers.Authorization is not null) return;
+        if (!preAuthenticatedAuthorization.TryGetValue(AuthorizationCacheKey(uri), out var value)) return;
+
+        request.Headers.TryAddWithoutValidation("Authorization", value);
+    }
+
+    /// <summary>
+    /// Пробует собрать заголовок Authorization для Basic-задачи из учётных данных обработчика.
+    /// </summary>
+    private bool TryBuildBasicAuthorization(Uri? uri, string challenge, out string authorization)
+    {
+        authorization = string.Empty;
+
+        if (uri is null || !IsBasicChallenge(challenge)) return false;
+
+        var credential = Credentials?.GetCredential(uri, "Basic");
+        if (credential is null) return false;
+
+        authorization = BuildBasicAuthorization(credential);
+        return true;
+    }
+
+    private static bool IsBasicChallenge(string challenge)
+        => challenge.Contains("basic", StringComparison.OrdinalIgnoreCase);
+
+    private static string BuildBasicAuthorization(NetworkCredential credential)
+    {
+        var raw = string.Concat(credential.UserName, ":", credential.Password);
+        return "Basic " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(raw));
     }
 
     /// <summary>

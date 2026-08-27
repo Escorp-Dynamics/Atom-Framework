@@ -4057,6 +4057,167 @@ public sealed class HttpsClientHandlerTests
         await serverTask.ConfigureAwait(false);
     }
 
+    [Test]
+    public async Task HttpsClientHandlerAnswersBasicChallengeWithCredentials()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+
+        var serverTask = RunServerAsync(listener, async stream =>
+        {
+            _ = await ReadRequestAsync(stream).ConfigureAwait(false);
+            var response = "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"x\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"u8.ToArray();
+            await stream.WriteAsync(response).ConfigureAwait(false);
+        }, async stream =>
+        {
+            var request = await ReadRequestAsync(stream).ConfigureAwait(false);
+
+            Assert.That(request.Head, Does.Contain("Authorization: Basic dXNlcjpwYXNz\r\n"));
+
+            var response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"u8.ToArray();
+            await stream.WriteAsync(response).ConfigureAwait(false);
+        });
+
+        using var handler = new HttpsClientHandler { Credentials = new System.Net.NetworkCredential("user", "pass") };
+        using var client = new HttpClient(handler, disposeHandler: false);
+
+        var responseMessage = await client.GetAsync(new Uri($"http://127.0.0.1:{GetPort(listener)}/auth")).ConfigureAwait(false);
+        var body = await responseMessage.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+        Assert.That(body, Is.EqualTo("ok"));
+        await serverTask.ConfigureAwait(false);
+    }
+
+    [Test]
+    public async Task HttpsClientHandlerReusesConfirmedAuthorizationWithPreAuthenticate()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+
+        var sawAuthorization = new bool[2];
+
+        var serverTask = RunServerAsync(listener, async stream =>
+        {
+            _ = await ReadRequestAsync(stream).ConfigureAwait(false);
+            var response = "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"x\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"u8.ToArray();
+            await stream.WriteAsync(response).ConfigureAwait(false);
+        }, async stream =>
+        {
+            var request = await ReadRequestAsync(stream).ConfigureAwait(false);
+            sawAuthorization[0] = request.Head.Contains("Authorization: Basic dXNlcjpwYXNz", StringComparison.Ordinal);
+            var response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"u8.ToArray();
+            await stream.WriteAsync(response).ConfigureAwait(false);
+        }, async stream =>
+        {
+            // Третий запрос идёт с PreAuthenticate: заголовок обязан уехать СРАЗУ, без 401-витка.
+            var request = await ReadRequestAsync(stream).ConfigureAwait(false);
+            sawAuthorization[1] = request.Head.Contains("Authorization: Basic dXNlcjpwYXNz", StringComparison.Ordinal);
+            var response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"u8.ToArray();
+            await stream.WriteAsync(response).ConfigureAwait(false);
+        });
+
+        using var handler = new HttpsClientHandler
+        {
+            Credentials = new System.Net.NetworkCredential("user", "pass"),
+            PreAuthenticate = true,
+        };
+        using var client = new HttpClient(handler, disposeHandler: false);
+
+        _ = await client.GetAsync(new Uri($"http://127.0.0.1:{GetPort(listener)}/first")).ConfigureAwait(false);
+        var second = await client.GetAsync(new Uri($"http://127.0.0.1:{GetPort(listener)}/second")).ConfigureAwait(false);
+        var body = await second.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+        Assert.That(body, Is.EqualTo("ok"));
+        Assert.That(sawAuthorization[0], Is.True, "повторный запрос после 401 обязан нести Authorization");
+        Assert.That(sawAuthorization[1], Is.True, "PreAuthenticate обязан приложить подтверждённый заголовок сразу");
+        await serverTask.ConfigureAwait(false);
+    }
+
+    [Test]
+    public async Task HttpsClientHandlerAnswersProxyAuthenticationChallenge()
+    {
+        var proxy = new RecordingAuthProxy();
+
+        try
+        {
+            using var handler = new HttpsClientHandler
+            {
+                UseProxy = true,
+                Proxy = new WebProxy(proxy.Address) { Credentials = new System.Net.NetworkCredential("user", "pass") },
+            };
+            using var client = new HttpClient(handler, disposeHandler: false);
+
+            var responseMessage = await client.GetAsync(new Uri($"http://example.com/proxy-auth")).ConfigureAwait(false);
+            var body = await responseMessage.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+            Assert.That(body, Is.EqualTo("ok"));
+            Assert.That(proxy.SawProxyAuthorization, Is.True);
+        }
+        finally
+        {
+            await proxy.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private sealed class RecordingAuthProxy : IAsyncDisposable
+    {
+        private readonly TcpListener listener;
+        private readonly CancellationTokenSource lifetime = new();
+        private readonly Task acceptLoop;
+
+        public RecordingAuthProxy()
+        {
+            listener = new TcpListener(IPAddress.Loopback, port: 0);
+            listener.Start();
+            Address = new Uri($"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}");
+            acceptLoop = Task.Run(() => AcceptAsync(lifetime.Token));
+        }
+
+        public Uri Address { get; }
+
+        public bool SawProxyAuthorization { get; private set; }
+
+        private async Task AcceptAsync(CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                using var client = await listener.AcceptTcpClientAsync(cancellationToken);
+                await using var stream = client.GetStream();
+
+                var header = await ReadLinesAsync(stream, cancellationToken);
+                SawProxyAuthorization |= header.Contains("Proxy-Authorization: Basic dXNlcjpwYXNz", StringComparison.Ordinal);
+
+                var answer = SawProxyAuthorization
+                    ? "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                    : "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"x\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
+                await stream.WriteAsync(System.Text.Encoding.ASCII.GetBytes(answer), cancellationToken);
+            }
+        }
+
+        private static async Task<string> ReadLinesAsync(System.Net.Sockets.NetworkStream stream, CancellationToken cancellationToken)
+        {
+            var buffer = new byte[2048];
+            var total = 0;
+            while (total < buffer.Length)
+            {
+                var read = await stream.ReadAsync(buffer.AsMemory(total), cancellationToken);
+                if (read is 0) break;
+                total += read;
+                if (System.Text.Encoding.ASCII.GetString(buffer, 0, total).Contains("\r\n\r\n")) break;
+            }
+
+            return System.Text.Encoding.ASCII.GetString(buffer, 0, total);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await lifetime.CancelAsync();
+            listener.Stop();
+            lifetime.Dispose();
+        }
+    }
+
     private static string InvokeGetSecFetchSite(Uri? requestUri, Uri? referrer, RequestKind requestKind, HttpsRequestDestination destination = HttpsRequestDestination.Empty)
     {
         var method = typeof(HttpsClientHandler).GetMethod("GetSecFetchSite", BindingFlags.Static | BindingFlags.NonPublic)

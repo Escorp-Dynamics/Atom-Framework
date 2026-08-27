@@ -1021,7 +1021,9 @@ Priority уже появился, но пока это coarse heuristic layer.
 
 - Прокси в кастомном стеке работает: CONNECT-туннель (`HttpsTransportConnector`), Basic-credentials, bypass-list; H3 за прокси намеренно даунгрейдится до H2.
 - Мёртвые `ProxyValidator`/`Ja3`/`JitterSettings` удалены из модуля.
-- Remaining gaps: 401/407 challenge flows, Negotiate/NTLM-поверхности, прокси-специфичный request shaping.
+- Basic-задачи 401/407 отвечаются автоматически из Credentials/Proxy.Credentials;
+  PreAuthenticate кэширует подтверждённый Authorization на узел (по семантике SocketsHttpHandler).
+- Remaining gaps: Negotiate/Digest-поверхности, прокси-специфичный request shaping.
 
 ### Why
 
