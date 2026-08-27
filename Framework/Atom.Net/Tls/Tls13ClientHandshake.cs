@@ -465,6 +465,13 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
         // CertificateVerify пропускается: решение о допуске принимает сервер.
         var signatureAlgorithm = certificate is null ? null : SelectClientSignatureAlgorithm(certificate);
 
+        // Подпись обязана быть среди алгоритмов, объявленных сервером в CertificateRequest.
+        if (signatureAlgorithm is not null && clientAuthSignatureAlgorithms is { Length: > 0 }
+            && !((ReadOnlySpan<ushort>)clientAuthSignatureAlgorithms).Contains(signatureAlgorithm.Value))
+        {
+            signatureAlgorithm = null;
+        }
+
         if (signatureAlgorithm is null)
         {
             var emptyBody = 1 + context.Length + 3;
@@ -583,7 +590,6 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
         if (!clientCertificateSent || clientCertificateSentCertificate is null) return null;
 
         var hash = transcript.ComputeHash(HashAlgorithm);
-        System.IO.File.WriteAllBytes("/tmp/our_transcript.bin", transcript.CopyRaw());
         var content = new byte[64 + ClientCertificateVerifyContext.Length + 1 + hash.Length];
         content.AsSpan(0, 64).Fill(0x20);
         System.Text.Encoding.ASCII.GetBytes(ClientCertificateVerifyContext, content.AsSpan(64));
@@ -592,7 +598,7 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
 
         byte[] signature;
         var certificate = clientCertificateSentCertificate;
-        var rsa = certificate!.GetRSAPrivateKey();
+        var rsa = certificate.GetRSAPrivateKey();
         if (rsa is not null)
         {
             signature = rsa.SignData(content, clientSignatureHash, System.Security.Cryptography.RSASignaturePadding.Pss);
@@ -660,7 +666,7 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
         var count = BinaryPrimitives.ReadUInt16BigEndian(body) / 2;
         var algorithms = new ushort[count];
         for (var index = 0; index < count; index++)
-            algorithms[index] = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(2 + index * 2, 2));
+            algorithms[index] = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(2 + (index * 2), 2));
 
         return algorithms;
     }
