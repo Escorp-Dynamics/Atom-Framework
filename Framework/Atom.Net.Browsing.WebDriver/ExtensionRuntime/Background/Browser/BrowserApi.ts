@@ -20,6 +20,8 @@ export interface BrowserTab {
     readonly title?: string;
     readonly status?: string;
     readonly pendingUrl?: string;
+    /** Выбрана ли вкладка в своём окне. Нужна, чтобы подтверждать факт активации, а не верить вызову. */
+    readonly active?: boolean;
 }
 
 export interface BrowserWindowInfo {
@@ -193,12 +195,12 @@ export async function updateTab(runtime: any, tabsApi: any, tabId: number, updat
     return invokeBrowserCall<BrowserTab>(runtime, tabsApi.update, tabsApi, tabId, updateProperties);
 }
 
-export async function reloadTab(runtime: any, tabsApi: any, tabId: number): Promise<void> {
+export async function reloadTab(runtime: any, tabsApi: any, tabId: number, bypassCache = false): Promise<void> {
     if (tabsApi === undefined) {
         throw new Error('API вкладок недоступен');
     }
 
-    await invokeBrowserCall(runtime, tabsApi.reload, tabsApi, tabId);
+    await invokeBrowserCall(runtime, tabsApi.reload, tabsApi, tabId, { bypassCache });
 }
 
 export async function removeTab(runtime: any, tabsApi: any, tabId: number): Promise<void> {

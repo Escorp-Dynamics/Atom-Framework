@@ -35,6 +35,9 @@ import {
     ensureDiscoveryTab,
     executeScriptInFrames,
     evaluateMainWorldScript,
+    hasIdentityOverrides,
+    injectIdentityIntoFrames,
+    readProbeLogFromFrames,
     findFirstWindowTab,
     getAllWindows,
     getBrowserHost,
@@ -168,6 +171,78 @@ type BackgroundRuntimeGlobalState = typeof globalThis & {
 };
 
 const bridgeEventNameSet = new Set(bridgeEventNames);
+/// Тело перехваченного запроса в том виде, в каком его отдаёт браузер.
+interface InterceptedRequestBody {
+    readonly requestBodyBase64?: string;
+    readonly formData?: Record<string, string[]>;
+}
+
+/// Максимум придержанных тел: записи снимаются в onBeforeSendHeaders и терминальными событиями,
+/// но запрос может не дойти ни до одного из них (отмена, редирект), поэтому карта ограничена.
+const maxPendingRequestBodies = 256;
+
+function encodeRequestBodyBytes(raw: unknown): string | undefined {
+    if (!Array.isArray(raw)) {
+        return undefined;
+    }
+
+    const chunks: Uint8Array[] = [];
+    for (const entry of raw) {
+        const bytes: unknown = isNonEmptyRecord(entry) ? entry.bytes : undefined;
+        if (typeof bytes === 'object' && bytes !== null && bytes instanceof ArrayBuffer) {
+            chunks.push(new Uint8Array(bytes));
+        }
+    }
+
+    if (chunks.length === 0) {
+        return undefined;
+    }
+
+    const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+        merged.set(chunk, offset);
+        offset += chunk.length;
+    }
+
+    let binary = '';
+    for (const byte of merged) {
+        binary += String.fromCharCode(byte);
+    }
+
+    return btoa(binary);
+}
+
+function readRequestFormData(value: unknown): Record<string, string[]> | undefined {
+    if (!isNonEmptyRecord(value)) {
+        return undefined;
+    }
+
+    const formData: Record<string, string[]> = {};
+    for (const [key, entry] of Object.entries(value)) {
+        if (Array.isArray(entry)) {
+            formData[key] = entry.map((item) => String(item));
+        }
+    }
+
+    return Object.keys(formData).length > 0 ? formData : undefined;
+}
+
+function readInterceptedRequestBody(details: WebRequestDetails): InterceptedRequestBody | undefined {
+    const requestBody = (details as { requestBody?: unknown }).requestBody;
+    if (!isNonEmptyRecord(requestBody)) {
+        return undefined;
+    }
+
+    const requestBodyBase64 = encodeRequestBodyBytes(requestBody.raw);
+    const formData = readRequestFormData(requestBody.formData);
+
+    return requestBodyBase64 === undefined && formData === undefined
+        ? undefined
+        : { requestBodyBase64, formData };
+}
+
 const maxLateNavigateRetryCount = 4;
 const transportReconnectBaseDelayMs = 500;
 const transportReconnectMaxDelayMs = 30_000;
@@ -207,6 +282,15 @@ export class BackgroundRuntimeHost {
     private readonly interceptEnabledTabs = new Set<string>();
     private readonly interceptPatterns = new Map<string, readonly RegExp[]>();
     private readonly pendingResponseHeaderOverrides = new Map<string, HeaderMap>();
+
+    /// Вкладки, по которым уже прошли разовым обходом всех фреймов (см. applyIdentityToAllFrames).
+    private readonly identityCoveredTabs = new Set<string>();
+    private identityFrameListenerAttached = false;
+
+    /// Тела запросов, снятые в onBeforeRequest: единственном событии, которому браузер их отдаёт.
+    /// Перехват поднимается позже, в onBeforeSendHeaders, поэтому тело приходится придержать
+    /// между этими двумя событиями по requestId.
+    private readonly pendingRequestBodies = new Map<string, InterceptedRequestBody>();
     private health = new ConsoleSessionHealthReporter(this.sessionIdValue);
     private coordinator = this.createCoordinator(this.sessionIdValue);
     private started = false;
@@ -222,6 +306,31 @@ export class BackgroundRuntimeHost {
         void this.handlePortConnected(port);
     };
 
+    /// Снимает тело запроса. Это единственное событие webRequest, которому браузер отдаёт
+    /// requestBody: к onBeforeSendHeaders, где поднимается перехват, тела уже нет. Слушатель
+    /// неблокирующий — он только наблюдает и на ход запроса не влияет.
+    private readonly onBeforeRequestCaptureBody = (details: WebRequestDetails): undefined => {
+        const requestId = typeof details.requestId === 'string' ? details.requestId : '';
+        if (requestId.length === 0) {
+            return undefined;
+        }
+
+        const body = readInterceptedRequestBody(details);
+        if (body === undefined) {
+            return undefined;
+        }
+
+        if (this.pendingRequestBodies.size >= maxPendingRequestBodies) {
+            const oldest = this.pendingRequestBodies.keys().next();
+            if (oldest.done !== true) {
+                this.pendingRequestBodies.delete(oldest.value);
+            }
+        }
+
+        this.pendingRequestBodies.set(requestId, body);
+        return undefined;
+    };
+
     private readonly onBeforeSendHeaders = (details: WebRequestDetails) => {
         const tabId = getWebRequestTabId(details.tabId);
         const context = tabId === null ? undefined : this.getTabContext(tabId);
@@ -231,11 +340,28 @@ export class BackgroundRuntimeHost {
             (contextId) => ensureVirtualCookieStore(this.virtualCookies, contextId),
         );
 
-        const mutation = handleClientHintsRequestInterception(
+        let mutation = handleClientHintsRequestInterception(
             details,
             (tabId) => this.getTabContext(tabId),
             cookieMutation?.requestHeaders,
         ) ?? cookieMutation;
+
+        // Firefox доставляет route token 407-вызовом ЛОКАЛЬНОГО прокси, но кэширует прокси-креды
+        // ПО ПРОКСИ (127.0.0.1:port), а не по вкладке, и НЕ перевызывает 407 на других/переиспользуемых
+        // вкладках — все CONNECT'ы уходят с токеном ПЕРВОЙ вкладки, и nav-proxy сопоставляет навигацию
+        // не с той вкладкой (override не отдаётся, навигация срывается). Ставим правильный per-tab route
+        // token заголовком X-Atom-Route прямо на main_frame-запрос: внутри туннеля он ПРИОРИТЕТНЕЕ токена
+        // CONNECT (HandleConnectTunnelAsync), поэтому корректирует маршрут даже при чужом кэш-токене
+        // CONNECT. Прокси срезает заголовок до обращения к origin. На Chromium то же делает
+        // declarativeNetRequest; здесь blocking webRequest есть только у Firefox, так что путь Firefox-only.
+        const navRouteToken = isNavigationProxyRequestCandidate(details)
+            ? this.resolveNavigationProxyRouteToken(context)
+            : undefined;
+        if (navRouteToken !== undefined) {
+            const requestHeaders = toMutableHeaders(mutation?.requestHeaders ?? details.requestHeaders);
+            applyHeaderOverrides(requestHeaders, { [navigationProxyRouteHeaderName]: navRouteToken });
+            mutation = { ...mutation, requestHeaders };
+        }
 
         const requestDebugDetails = createMainFrameDeviceRequestDebugDetails(
             details,
@@ -286,6 +412,15 @@ export class BackgroundRuntimeHost {
         // маршрутизацией (пользовательский upstream proxy / direct).
         if (isNavigationProxyRequestCandidate(details)) {
             const navigationProxyRoute = this.resolveNavigationProxyRoutingResult(context);
+            // ДИАГ (временное): почему main_frame reused-вкладки уходит на upstream (bypass override).
+            emitBackgroundDebugEvent(this.config, 'proxy-route-diag', {
+                tabId: details.tabId,
+                type: details.type,
+                interceptionMode: context.navigationInterceptionMode,
+                hasRouteToken: this.resolveNavigationProxyRouteToken(context) !== undefined,
+                choseLocal: navigationProxyRoute !== undefined,
+                url: typeof details.url === 'string' ? details.url.slice(0, 60) : undefined,
+            });
             if (navigationProxyRoute !== undefined) {
                 return navigationProxyRoute;
             }
@@ -309,35 +444,43 @@ export class BackgroundRuntimeHost {
         const navigationProxyRouteToken = this.resolveNavigationProxyRouteToken(context);
         const localProxyChallenge = this.isLocalNavigationProxyChallenge(details);
 
-        // Вызов подтверждённо от локального навигационного прокси: отвечаем route token.
-        if (navigationProxyRouteToken !== undefined && localProxyChallenge === true) {
-            return {
-                authCredentials: {
-                    username: navigationProxyRouteToken,
-                    password: '',
-                },
-            };
-        }
+        const decide = (): { authCredentials?: { username: string; password: string } } => {
+            // Вызов подтверждённо от локального навигационного прокси: отвечаем route token.
+            if (navigationProxyRouteToken !== undefined && localProxyChallenge === true) {
+                return { authCredentials: { username: navigationProxyRouteToken, password: '' } };
+            }
 
-        // Вызов от внешнего (upstream) прокси: подставляются его собственные учётные данные,
-        // route token наружу не передаётся.
-        if (context?.proxy !== undefined && context.proxy !== null) {
-            const authCredentials = resolveProxyAuthCredentials(context.proxy);
-            return authCredentials === null ? {} : { authCredentials };
-        }
+            // Вызов от внешнего (upstream) прокси: подставляются его собственные учётные данные.
+            if (context?.proxy !== undefined && context.proxy !== null) {
+                const authCredentials = resolveProxyAuthCredentials(context.proxy);
+                return authCredentials === null ? {} : { authCredentials };
+            }
 
-        // Браузер не сообщил инициатора вызова, а upstream прокси у вкладки нет:
-        // единственный возможный источник 407 для неё — локальный навигационный прокси.
-        if (navigationProxyRouteToken !== undefined && localProxyChallenge !== false) {
-            return {
-                authCredentials: {
-                    username: navigationProxyRouteToken,
-                    password: '',
-                },
-            };
-        }
+            // Браузер не сообщил инициатора, upstream у вкладки нет: источник 407 — локальный прокси.
+            if (navigationProxyRouteToken !== undefined && localProxyChallenge !== false) {
+                return { authCredentials: { username: navigationProxyRouteToken, password: '' } };
+            }
 
-        return {};
+            return {};
+        };
+
+        const result = decide();
+        // ДИАГ (временное): почему 407 не отвечается на переиспользуемых вкладках.
+        emitBackgroundDebugEvent(this.config, 'proxy-auth-diag', {
+            tabId: details.tabId,
+            localChallenge: localProxyChallenge,
+            hasContext: context !== undefined,
+            interceptionMode: context?.navigationInterceptionMode,
+            hasRouteToken: navigationProxyRouteToken !== undefined,
+            hasUpstream: context?.proxy !== undefined && context.proxy !== null,
+            answered: result.authCredentials !== undefined,
+            piHost: details.proxyInfo?.host,
+            piPort: details.proxyInfo?.port,
+            piType: details.proxyInfo?.type,
+            cfgHost: this.config?.host,
+            cfgProxyPort: this.config?.proxyPort ?? this.config?.port,
+        });
+        return result;
     };
 
     private isLocalNavigationProxyChallenge(details: ProxyAuthRequiredDetails): boolean | undefined {
@@ -859,6 +1002,14 @@ export class BackgroundRuntimeHost {
                     // правило маршрутизации синхронизируется отдельно.
                     void this.syncNavigationProxyRouteRule(context.tabId, context);
 
+                    // Подчинённые фреймы. Контент-скрипт объявлен с `all_frames: false` и живёт
+                    // только в верхнем фрейме, поэтому во фреймах — в том числе в кросс-доменном,
+                    // где и работает проверка Cloudflare, — подмены не было вовсе. Заголовки при
+                    // этом переписываются по ВКЛАДКЕ и накрывают запрос такого фрейма: заголовок
+                    // заявлял подменённый профиль, а JavaScript того же фрейма выдавал настоящую
+                    // машину. Внутри одной вкладки получались две разные ОС.
+                    this.applyIdentityToAllFrames(context.tabId);
+
                     if (context.proxy !== undefined) {
                         this.ensureProxyRoutingListeners();
                     }
@@ -1072,10 +1223,21 @@ export class BackgroundRuntimeHost {
                     // ещё добивается на удалении из tab strip): повторяем создание ограниченное
                     // число раз с короткой паузой, чтобы транзиентный сбой не ронял открытие
                     // страницы у драйвера.
+                    // Целевое окно приходит в payload и раньше игнорировалось: без него
+                    // tabs.create полагается на «текущее» окно, поэтому при нескольких окнах
+                    // вкладка уходила не в то, которое запросил драйвер.
+                    const openTabWindowId = readOptionalPayloadString(message.payload, 'windowId');
+                    const openTabNumericWindowId = openTabWindowId === undefined
+                        ? undefined
+                        : Number.parseInt(openTabWindowId, 10);
+                    const openTabCreateProperties: JsonRecord = Number.isSafeInteger(openTabNumericWindowId)
+                        ? { url, active: true, windowId: openTabNumericWindowId as number }
+                        : { url, active: true };
+
                     const tab = await createTabWithRetry(
                         this.runtime,
                         this.browserHost.tabs,
-                        { url, active: true },
+                        openTabCreateProperties,
                         (attempt, error) => emitBackgroundDebugEvent(this.config, 'open-tab-create-failed', {
                             attempt,
                             error: toErrorMessage(error),
@@ -1111,8 +1273,29 @@ export class BackgroundRuntimeHost {
                 }
 
                 case 'ActivateTab': {
-                    const tabId = requireTabId(message);
-                    await updateTab(this.runtime, this.browserHost.tabs, tabId, { active: true });
+                    // Целевая вкладка приходит в ПОЛЕЗНОЙ НАГРУЗКЕ (payload.tabId), а message.tabId —
+                    // это лишь вкладка МАРШРУТИЗАЦИИ, через которую доставлена команда (страница
+                    // bridge-команд). Раньше здесь читался message.tabId, поэтому активировалась
+                    // вкладка-маршрутизатор, а НЕ запрошенная: команда всегда «успешна», но нужная
+                    // вкладка никогда не выходила на передний план — её кадры (rAF) не шли, Cloudflare
+                    // не монтировал challenge-iframe, координатный клик уходил в чужую вкладку, и
+                    // задача уходила в таймаут. Порядок чтения — как в остальных командах с целевой
+                    // вкладкой (см. GetWindowBounds ниже).
+                    const tabId = readMessageTabId(message.payload) ?? requireTabId(message);
+                    const activated = await updateTab(this.runtime, this.browserHost.tabs, tabId, { active: true });
+
+                    // ПОДТВЕРЖДАЕМ факт активации, а не верим коду возврата. Именно молчаливый «успех»
+                    // прятал баг: команда годами активировала не ту вкладку, отвечала Ok, и на стороне
+                    // драйвера всё выглядело исправным. Если вкладка не стала выбранной — это ошибка,
+                    // и вызывающий должен её увидеть (солвер залогирует activate-ex и повторит попытку),
+                    // а не считать, что передний план получен.
+                    if (activated?.active !== true) {
+                        const actual = await getTab(this.runtime, this.browserHost.tabs, tabId);
+                        if (actual?.active !== true) {
+                            throw new Error(`Вкладка ${tabId} не стала активной после запроса активации`);
+                        }
+                    }
+
                     await this.sendDirectResponse(message);
                     return true;
                 }
@@ -1290,6 +1473,152 @@ export class BackgroundRuntimeHost {
         };
     }
 
+    /**
+     * Ставит подмену личности во ВСЕ фреймы вкладки и запоминает скрипт для фреймов, которые
+     * появятся позже.
+     *
+     * Контент-скрипт объявлен с `all_frames: false`, поэтому подчинённые фреймы оставались с
+     * настоящим окружением машины, тогда как заголовки запросов переписываются по ВКЛАДКЕ и уже
+     * заявляли подменённый профиль. Для проверки вроде Cloudflare, которая исполняется внутри
+     * собственного кросс-доменного iframe, это означало прямое противоречие: заголовок говорит
+     * одну ОС, JavaScript того же фрейма — другую.
+     */
+    private applyIdentityToAllFrames(tabId: string): void {
+        this.ensureIdentityFrameListener();
+
+        const context = this.getTabContext(tabId);
+        if (context === undefined || !hasIdentityOverrides(context)) {
+            return;
+        }
+
+        // Проход по ВСЕМ фреймам нужен ровно один раз на вкладку — чтобы накрыть фреймы, которые
+        // уже существовали к моменту, когда слушатель начал работать. Дальше каждый новый документ
+        // приходит через onCommitted и обслуживается точечно. Без этой отсечки замер показал 624
+        // избыточных внедрения из ~870 (ответы «already»), и они стоили заметного времени: median
+        // 9.91с, p90 14.40с.
+        if (this.identityCoveredTabs.has(tabId)) {
+            return;
+        }
+
+        this.identityCoveredTabs.add(tabId);
+
+        const numericTabId = Number(tabId);
+        if (!Number.isFinite(numericTabId)) {
+            return;
+        }
+
+        // ВРЕМЕННАЯ ДИАГНОСТИКА: через несколько секунд вычитываем, к каким ОС-зависимым API
+        // проверка реально обращалась. Это заменяет перебор гипотез о том, что нас выдаёт.
+        setTimeout(() => {
+            void readProbeLogFromFrames(this.browserHost, this.runtime, numericTabId)
+                .then((entries) => {
+                    for (const entry of entries) {
+                        emitBackgroundDebugEvent(this.config, 'probe-log', { tabId, entry });
+                    }
+                })
+                .catch(() => {
+                    // Вкладка могла закрыться — для диагностики это не важно.
+                });
+        }, 2500);
+
+        void injectIdentityIntoFrames(this.browserHost, this.runtime, numericTabId, null, context)
+            .then((applied) => {
+                emitBackgroundDebugEvent(this.config, 'identity-all-frames-applied', {
+                    tabId,
+                    applied: applied.join(','),
+                });
+            })
+            .catch((error) => {
+                emitBackgroundDebugEvent(this.config, 'identity-all-frames-failed', {
+                    tabId,
+                    error: toErrorMessage(error),
+                });
+            });
+    }
+
+    /**
+     * Догоняет фреймы, создаваемые ПОСЛЕ применения контекста: виджет Cloudflare создаёт свой
+     * iframe уже по ходу работы страницы, поэтому разовой установки по всем фреймам мало.
+     * Слушатель поднимаем один раз и держим на весь срок жизни фона.
+     */
+    private ensureIdentityFrameListener(): void {
+        if (this.identityFrameListenerAttached) {
+            return;
+        }
+
+        const webNavigation = this.browserHost.webNavigation;
+        if (typeof webNavigation?.onCommitted?.addListener !== 'function') {
+            emitBackgroundDebugEvent(this.config, 'identity-frame-listener-unavailable', {
+                hasWebNavigation: webNavigation !== undefined,
+            });
+            return;
+        }
+
+        webNavigation.onCommitted.addListener((details: { tabId?: number; frameId?: number; url?: string }) => {
+            const frameId = details?.frameId;
+            // Главный фрейм (frameId 0) обслуживаем ТОЖЕ. Его контент-скрипт применяет контекст
+            // асинхронно, по приходу SetTabContext, и опаздывает: замер показал, что первый же
+            // встроенный скрипт документа успевает прочитать НАСТОЯЩУЮ платформу
+            // (platAtFirstScript=Linux при plat=Win32). Ранний читатель, видящий одну ОС, и поздний,
+            // видящий другую, — самостоятельный признак подделки. Здесь же внедрение идёт с
+            // injectImmediately на коммите навигации, то есть до скриптов документа.
+            if (typeof frameId !== 'number' || typeof details?.tabId !== 'number') {
+                return;
+            }
+
+            const context = this.getTabContext(String(details.tabId));
+            if (context === undefined || !hasIdentityOverrides(context)) {
+                emitBackgroundDebugEvent(this.config, 'identity-frame-skipped', {
+                    tabId: String(details.tabId),
+                    frameId,
+                    url: (details.url ?? '').slice(0, 60),
+                    reason: context === undefined ? 'нет контекста вкладки' : 'в контексте нечего подменять',
+                    knownTabs: Array.from(this.tabContexts.keys()).join(',').slice(0, 80),
+                });
+                return;
+            }
+
+            // ВРЕМЕННАЯ ДИАГНОСТИКА: счётчики вычитываем ПОСЛЕ появления подчинённого фрейма.
+            // Разовый проход по вкладке для этого не годится — он срабатывает в самом начале,
+            // задолго до создания фрейма проверки и его воркера, и читать тогда ещё нечего.
+            const probeTabId = details.tabId;
+            setTimeout(() => {
+                void readProbeLogFromFrames(this.browserHost, this.runtime, probeTabId)
+                    .then((entries) => {
+                        for (const entry of entries) {
+                            emitBackgroundDebugEvent(this.config, 'probe-log', { tabId: String(probeTabId), entry });
+                        }
+                    })
+                    .catch(() => {
+                        // Фрейм мог исчезнуть — для диагностики это не важно.
+                    });
+            }, 2200);
+
+            void injectIdentityIntoFrames(this.browserHost, this.runtime, details.tabId, frameId, context)
+                .then((applied) => {
+                    emitBackgroundDebugEvent(this.config, 'identity-frame-applied', {
+                        tabId: String(details.tabId),
+                        frameId,
+                        applied: applied.join(','),
+                    });
+                })
+                .catch((error) => {
+                    const message = toErrorMessage(error);
+                    // Turnstile создаёт и сносит служебные фреймы пачками: к моменту установки фрейм
+                    // может уже не существовать. Это ОЖИДАЕМО и не является сбоем подмены — шумим
+                    // отдельным видом события, чтобы не путать с настоящими отказами.
+                    const transient = message.includes('was removed') || message.includes('No frame with id');
+                    emitBackgroundDebugEvent(this.config, transient ? 'identity-frame-vanished' : 'identity-frame-failed', {
+                        tabId: String(details.tabId),
+                        frameId,
+                        error: message,
+                    });
+                });
+        });
+
+        this.identityFrameListenerAttached = true;
+    }
+
     private async executeInMainWorld(tabId: string, requestId: string, script: string, preferPageContextOnNull = false, forcePageContextExecution = false): Promise<MainWorldResultEnvelope> {
         try {
             const value = await evaluateMainWorldScript(
@@ -1369,6 +1698,14 @@ export class BackgroundRuntimeHost {
             return;
         }
 
+        if (webRequest.onBeforeRequest?.addListener !== undefined) {
+            addWebRequestListener(
+                webRequest.onBeforeRequest,
+                this.onBeforeRequestCaptureBody,
+                ['requestBody'],
+                (degradation) => this.reportWebRequestListenerDegradation('onBeforeRequest', degradation));
+        }
+
         addWebRequestListener(
             webRequest.onBeforeSendHeaders,
             this.onBeforeSendHeaders,
@@ -1439,6 +1776,7 @@ export class BackgroundRuntimeHost {
     private readonly onWebRequestSettled = (details: WebRequestDetails): undefined => {
         if (typeof details.requestId === 'string' && details.requestId.length > 0) {
             this.pendingResponseHeaderOverrides.delete(details.requestId);
+            this.pendingRequestBodies.delete(details.requestId);
         }
 
         // main_frame, завершившийся 204/205 No Content, — это stay-put abort навигации (перехода нет).
@@ -2062,6 +2400,27 @@ export class BackgroundRuntimeHost {
         windowId: number | undefined,
         active: boolean,
     ): Promise<BrowserTab> {
+        // Вкладка уже на целевом URL: tabs.update({url}) на тот же адрес — no-op (свежий документ
+        // не грузится). Делаем reload с обходом кэша, чтобы поднять свежий документ и виджет.
+        let alreadyAtTarget = false;
+        try {
+            const current = await getTab(this.runtime, this.browserHost.tabs, tabId);
+            alreadyAtTarget = areEquivalentUrls(readNonEmptyString(current?.url) ?? '', url);
+        } catch {
+        }
+
+        if (alreadyAtTarget) {
+            if (active) {
+                await this.focusNavigationWindowAsync(windowId);
+            }
+            await reloadTab(this.runtime, this.browserHost.tabs, tabId, true);
+            try {
+                return await getTab(this.runtime, this.browserHost.tabs, tabId);
+            } catch {
+                return { id: tabId } as BrowserTab;
+            }
+        }
+
         if (active) {
             await this.focusNavigationWindowAsync(windowId);
             return updateTab(this.runtime, this.browserHost.tabs, tabId, { url, active: true });
@@ -2221,7 +2580,16 @@ export class BackgroundRuntimeHost {
             };
         }
 
-        if (hasPendingNavigationReachedTarget(browserTab, pendingNavigation.expectedUrl)) {
+        // Same-URL reload: адрес вкладки совпадает с целевым ВСЁ ВРЕМЯ (и до, и во время reload),
+        // поэтому url-match короткого замыкания даёт canReapply=true преждевременно — контекст
+        // переприменяется к переходному/старому документу, и следующий EvaluateScript виснет на
+        // мёртвом realm. Для reload пропускаем url-match и требуем проверку готовности runtime ниже,
+        // чтобы дождаться СВЕЖЕГО документа.
+        const isSameUrlReload = pendingNavigation.previousUrl !== undefined
+            && pendingNavigation.expectedUrl !== undefined
+            && areEquivalentUrls(pendingNavigation.previousUrl, pendingNavigation.expectedUrl);
+
+        if (!isSameUrlReload && hasPendingNavigationReachedTarget(browserTab, pendingNavigation.expectedUrl)) {
             return {
                 canReapply: true,
                 runtimeCheckStatus: 'browser-target-reached',
@@ -2350,10 +2718,18 @@ export class BackgroundRuntimeHost {
         this.purgeTabInterceptionState(key);
     };
 
-    private readonly onMainFrameNavigationErrorOccurred = (details: { readonly tabId?: number; readonly frameId?: number }): void => {
+    private readonly onMainFrameNavigationErrorOccurred = (details: { readonly tabId?: number; readonly frameId?: number; readonly error?: string; readonly url?: string }): void => {
         if (details.frameId !== 0 || typeof details.tabId !== 'number' || !Number.isInteger(details.tabId)) {
             return;
         }
+
+        // ДИАГ (временное): точная причина срыва main_frame reused-вкладки (почему override не отдался).
+        emitBackgroundDebugEvent(this.config, 'main-frame-nav-error', {
+            tabId: details.tabId,
+            error: details.error,
+            url: typeof details.url === 'string' ? details.url.slice(0, 70) : undefined,
+            hasPending: this.pendingNavigations.has(details.tabId.toString()),
+        });
 
         this.settleAbortedNavigation(details.tabId.toString());
     };
@@ -2394,6 +2770,7 @@ export class BackgroundRuntimeHost {
         this.interceptEnabledTabs.delete(tabId);
         this.interceptPatterns.delete(tabId);
         this.pendingNavigations.delete(tabId);
+        this.identityCoveredTabs.delete(tabId);
         this.clearPendingNavigationGateDebugState(tabId);
 
         // Правило declarativeNetRequest живёт в сессии браузера, а не в нашем состоянии: без
@@ -2595,11 +2972,25 @@ export class BackgroundRuntimeHost {
                 type: details.type ?? 'other',
                 supportsNavigationFulfillment: this.resolveNavigationFulfillmentSupport(route.tabId, details),
                 headers: headersToObject(requestHeaders),
+                ...this.takeInterceptedRequestBody(details),
                 timestamp: normalizeEventTimestamp(details.timeStamp),
             },
             true,
             (reason) => this.reportBlockingInterceptionUnavailableOnce(reason),
         );
+    }
+
+    /// Отдаёт придержанное тело запроса и снимает запись: перехват для одного requestId
+    /// поднимается один раз, дальше держать её незачем.
+    private takeInterceptedRequestBody(details: WebRequestDetails): InterceptedRequestBody {
+        const requestId = typeof details.requestId === 'string' ? details.requestId : '';
+        if (requestId.length === 0) {
+            return {};
+        }
+
+        const body = this.pendingRequestBodies.get(requestId);
+        this.pendingRequestBodies.delete(requestId);
+        return body ?? {};
     }
 
     private tryPostInterceptedResponse(route: InterceptionRoute, details: WebRequestDetails, responseHeaders: HeaderLike[]): BlockingInterceptionDecision | null {
@@ -3145,6 +3536,7 @@ function resolveReadyTabContext(existing: TabContextEnvelope | undefined, next: 
         timezone: next.timezone ?? existing.timezone,
         languages: next.languages ?? existing.languages,
         clientHints: next.clientHints ?? existing.clientHints,
+        webGl: next.webGl ?? existing.webGl,
         viewport: next.viewport ?? existing.viewport,
         deviceScaleFactor: next.deviceScaleFactor ?? existing.deviceScaleFactor,
         hardwareConcurrency: next.hardwareConcurrency ?? existing.hardwareConcurrency,

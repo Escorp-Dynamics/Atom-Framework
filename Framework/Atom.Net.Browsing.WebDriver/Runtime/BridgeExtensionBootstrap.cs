@@ -174,16 +174,51 @@ internal static class BridgeExtensionBootstrap
                 Secret = GenerateSecret(),
                 Logger = settings.Logger,
                 UseRootlessChromiumBootstrap = settings.UseRootlessChromiumBootstrap,
+                ForwardProfile = CreateForwardProfile(settings.Device),
             },
             SourceExtensionPath: sourceExtensionPath,
             BrowserFamily: profile is FirefoxProfile ? "firefox" : "chromium",
             ExtensionVersion: extensionVersion);
     }
 
+    /// <summary>
+    /// Строит профиль, которым навигационный прокси будет переотправлять трафик наружу.
+    /// </summary>
+    /// <param name="device">Профиль устройства, заявляемый странице, либо <see langword="null"/>.</param>
+    /// <returns>Профиль переотправки или <see langword="null"/>, если подмена не задана.</returns>
+    /// <remarks>
+    /// Смысл — согласовать ДВА независимо наблюдаемых слоя. Страница видит операционную систему и
+    /// браузер через JavaScript, сервер видит их же через отпечаток рукопожатия TLS и настройки
+    /// HTTP/2. Пока прокси переотправлял запросы стеком платформы, эти два слоя противоречили друг
+    /// другу при любой подмене — и противоречие было тем заметнее, чем аккуратнее сделана подмена
+    /// в JavaScript.
+    ///
+    /// Семейство выбирается по строке агента: она же и заявляется странице, так что источник
+    /// истины остаётся один.
+    /// </remarks>
+    private static Atom.Net.Https.Profiles.BrowserProfile? CreateForwardProfile(Device? device)
+    {
+        if (device?.UserAgent is not { Length: > 0 } userAgent) return null;
+
+        if (userAgent.Contains("Firefox/", StringComparison.Ordinal))
+            return Atom.Net.Https.Profiles.BrowserProfileCatalog.CreateFirefoxDesktop();
+
+        // Safari определяется исключением: строка Chrome тоже содержит «Safari».
+        if (userAgent.Contains("Safari/", StringComparison.Ordinal)
+            && !userAgent.Contains("Chrome/", StringComparison.Ordinal)
+            && !userAgent.Contains("Chromium/", StringComparison.Ordinal))
+        {
+            return Atom.Net.Https.Profiles.BrowserProfileCatalog.CreateSafariDesktopMacOs();
+        }
+
+        return Atom.Net.Https.Profiles.BrowserProfileCatalog.CreateChromiumTls13Profile("Bridge Forward", userAgent);
+    }
+
     internal static async ValueTask<BridgeBootstrapPlan> MaterializeAsync(
         string profilePath,
         WebBrowserProfile profile,
         BridgeBootstrapPreparation preparation,
+        Device? device,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(profilePath);
@@ -192,10 +227,11 @@ internal static class BridgeExtensionBootstrap
         cancellationToken.ThrowIfCancellationRequested();
 
         if (profile is FirefoxProfile)
-            return await MaterializeFirefoxAsync(profilePath, profile, preparation, cancellationToken).ConfigureAwait(false);
+            return await MaterializeFirefoxAsync(profilePath, profile, preparation, device, cancellationToken).ConfigureAwait(false);
 
         var localExtensionPath = Path.Combine(profilePath, MaterializedChromiumExtensionDirectoryName);
         CopyDirectoryRecursive(preparation.SourceExtensionPath, localExtensionPath);
+        await WriteIdentityProfileAsync(localExtensionPath, device, cancellationToken).ConfigureAwait(false);
 
         var manifestPath = Path.Combine(localExtensionPath, "manifest.json");
         var manifest = await ReadMaterializedManifestAsync(manifestPath, cancellationToken).ConfigureAwait(false);
@@ -236,11 +272,13 @@ internal static class BridgeExtensionBootstrap
         string profilePath,
         WebBrowserProfile profile,
         BridgeBootstrapPreparation preparation,
+        Device? device,
         CancellationToken cancellationToken)
     {
         var (addonId, localExtensionPath) = await PrepareFirefoxProfileExtensionAsync(
             profilePath,
             preparation.SourceExtensionPath,
+            device,
             cancellationToken).ConfigureAwait(false);
 
         var strategy = ChromiumBootstrapStrategy.FirefoxProfileSeeded;
@@ -395,6 +433,7 @@ internal static class BridgeExtensionBootstrap
     private static async ValueTask<(string AddonId, string LocalExtensionPath)> PrepareFirefoxProfileExtensionAsync(
         string profilePath,
         string sourceExtensionPath,
+        Device? device,
         CancellationToken cancellationToken)
     {
         var sourceManifestPath = Path.Combine(sourceExtensionPath, "manifest.json");
@@ -403,6 +442,7 @@ internal static class BridgeExtensionBootstrap
         var localExtensionPath = Path.Combine(profilePath, "extensions", addonId);
 
         CopyDirectoryRecursive(sourceExtensionPath, localExtensionPath);
+        await WriteIdentityProfileAsync(localExtensionPath, device, cancellationToken).ConfigureAwait(false);
 
         var materializedManifestPath = Path.Combine(localExtensionPath, "manifest.json");
         var materializedManifest = await ReadMaterializedManifestAsync(materializedManifestPath, cancellationToken).ConfigureAwait(false);
@@ -410,6 +450,40 @@ internal static class BridgeExtensionBootstrap
         await File.WriteAllTextAsync(materializedManifestPath, materializedManifest.ToJsonString(), cancellationToken).ConfigureAwait(false);
 
         return (addonId, localExtensionPath);
+    }
+
+
+    /// <summary>
+    /// Пишет профиль для РАННЕЙ подмены личности в материализованное расширение.
+    /// </summary>
+    /// <remarks>
+    /// Файл объявлен в манифесте как контент-скрипт основного мира на `document_start` во всех
+    /// фреймах, поэтому существовать он обязан ВСЕГДА: отсутствие файла из `content_scripts`
+    /// браузер считает ошибкой и отказывается загружать расширение целиком. Без профиля пишем
+    /// null — ранний скрипт тогда просто ничего не делает.
+    ///
+    /// Зачем вообще запекать профиль в расширение. Динамическое внедрение из фона идёт по событию
+    /// навигации, то есть асинхронно, и замер показал, что оно опаздывает: в верхнем документе
+    /// к моменту установки уже разобран DOM и исполнены два скрипта, во фрейме проверки
+    /// Cloudflare — один скрипт в половине случаев. Опередивший нас код успевает прочитать
+    /// настоящее окружение машины. Контент-скрипт же браузер внедряет сам, до любого кода
+    /// документа и в каждый фрейм, включая ещё не созданные.
+    /// </remarks>
+    private static async ValueTask WriteIdentityProfileAsync(
+        string localExtensionPath,
+        Device? device,
+        CancellationToken cancellationToken)
+    {
+        var payload = new JsonObject();
+        WebBrowser.AppendDeviceContext(payload, device);
+
+        var serialized = payload.Count == 0 ? "null" : payload.ToJsonString();
+        var contents = $"globalThis.__ATOM_IDENTITY_PROFILE = {serialized};\n";
+
+        await File.WriteAllTextAsync(
+            Path.Combine(localExtensionPath, "identity.profile.js"),
+            contents,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static async ValueTask<JsonObject> ReadMaterializedManifestAsync(string manifestPath, CancellationToken cancellationToken)
@@ -421,8 +495,19 @@ internal static class BridgeExtensionBootstrap
         string profilePath,
         ChromiumBootstrapStrategy strategy)
     {
-        if (!OperatingSystem.IsLinux() || strategy.TransportMode is not ChromiumBootstrapTransportMode.SecureWebSocket)
+        // Доверие к собственному CA нужно не только защищённому транспорту: локальный
+        // навигационный прокси терминирует TLS вкладки и отвечает leaf-сертификатом того же
+        // издателя. Без импорта CA в NSS-базу профиля Firefox любой проксируемый https-переход
+        // упирается в «Warning: Security Risk» вместо страницы — поэтому при поднятом
+        // навигационном прокси CA ставится независимо от режима транспорта.
+        if (!OperatingSystem.IsLinux())
             return;
+
+        if (strategy.TransportMode is not ChromiumBootstrapTransportMode.SecureWebSocket
+            && preparation.Settings.NavigationProxyPort <= 0)
+        {
+            return;
+        }
 
         var certificate = BridgeManagedDeliveryCertificateManager.Instance.GetOrCreateAuthorityCertificate();
         var transportTrustDiagnostics = BridgeManagedDeliveryCertificateTrustInstaller.EnsureTrustedForFirefoxProfile(certificate, profilePath);
@@ -753,11 +838,33 @@ internal static class BridgeExtensionBootstrap
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        if (!useRootlessChromiumBootstrap && ResolveLinuxSystemManagedPolicyDirectory(profile) is not null)
+        var systemManagedPolicyDirectory = ResolveLinuxSystemManagedPolicyDirectory(profile);
+
+        // Branded-сборки (Google Chrome, Microsoft Edge) с недавних версий отклоняют
+        // --load-extension/--disable-extensions-except ("not allowed in Google Chrome, ignoring"),
+        // поэтому profile-seeded для них не грузит мост-расширение и bootstrap не поднимается.
+        // Такие браузеры ставим force-install'ом через managed policy (branded-сборки его чтут)
+        // даже в rootless-режиме — при условии, что системный policy-каталог доступен.
+        if (systemManagedPolicyDirectory is not null && RejectsCommandLineExtensionLoad(profile))
+            return ChromiumBootstrapStrategy.SystemManagedPolicy;
+
+        if (!useRootlessChromiumBootstrap && systemManagedPolicyDirectory is not null)
             return ChromiumBootstrapStrategy.SystemManagedPolicy;
 
         return ResolveChromiumProfileSeededStrategy(profile);
     }
+
+    /// <summary>
+    /// Отклоняет ли branded-сборка загрузку распакованного расширения через командную строку.
+    /// </summary>
+    /// <remarks>
+    /// Google Chrome и Microsoft Edge блокируют <c>--load-extension</c>/<c>--disable-extensions-except</c>
+    /// в стабильных сборках, поэтому их расширение нужно ставить только через managed policy
+    /// (force-install). Chromium/Brave/Opera/Vivaldi эти флаги по-прежнему принимают.
+    /// </remarks>
+    private static bool RejectsCommandLineExtensionLoad(WebBrowserProfile profile)
+        => profile is EdgeProfile
+            || (profile is ChromeProfile && profile.GetType() == typeof(ChromeProfile));
 
     private static ChromiumBootstrapStrategy ResolveChromiumProfileSeededStrategy(WebBrowserProfile profile)
     {
@@ -911,7 +1018,13 @@ internal static class BridgeExtensionBootstrap
                 ["enableNavigationEvents"] = true,
                 ["enableCallbackHooks"] = true,
                 ["enableInterception"] = true,
+                // Диагностические debug-события расширения (emitBackgroundDebugEvent) — только в Debug.
+                // В Release выключены: убирают лишний CPU/трафик на горячем пути (per-request events).
+#if DEBUG
                 ["enableDiagnostics"] = true,
+#else
+                ["enableDiagnostics"] = false,
+#endif
                 ["enableKeepAlive"] = true,
             },
         };
@@ -1286,7 +1399,7 @@ internal static class BridgeExtensionBootstrap
 
         await File.WriteAllTextAsync(policyPath, policyJson, cancellationToken).ConfigureAwait(false);
 
-        var (publishPath, diagnostics) = await PublishManagedPolicyAsync(profile, strategy, policyPath, policyJson, cancellationToken).ConfigureAwait(false);
+        var (publishPath, diagnostics) = await PublishManagedPolicyAsync(profile, strategy, policyPath, extensionId, policy, cancellationToken).ConfigureAwait(false);
 
         return new BridgeBootstrapManagedPolicyArtifacts(
             PolicyPath: policyPath,
@@ -1481,7 +1594,8 @@ internal static class BridgeExtensionBootstrap
         WebBrowserProfile profile,
         ChromiumBootstrapStrategy strategy,
         string localPolicyPath,
-        string policyJson,
+        string extensionId,
+        JsonObject policy,
         CancellationToken cancellationToken)
     {
         if (strategy.InstallMode is not ChromiumBootstrapInstallMode.SystemManagedPolicy)
@@ -1494,14 +1608,19 @@ internal static class BridgeExtensionBootstrap
         var primaryMethodName = ResolveLinuxSystemManagedPolicyMethodName(profile);
         var legacyMethodName = ResolveLinuxLegacySystemManagedPolicyMethodName(profile);
 
+        // Файл общий на машину: свою запись вливаем в него, чужие оставляем. Иначе параллельный
+        // запуск драйвера (другая программа, другой процесс) терял бы force-install своего
+        // расширения ровно в момент нашей публикации.
+        var mergedPolicyJson = BridgeManagedPolicyRegistry.BuildPolicyWithEntry(systemPolicyPath, extensionId, policy);
+
         var diagnostics = await PublishManagedPolicyFileAsync(
             localPolicyPath,
             systemPolicyPath,
-            policyJson,
+            mergedPolicyJson,
             primaryMethodName,
             cancellationToken).ConfigureAwait(false);
 
-        var legacyDiagnostics = await PublishLegacyManagedPolicyAliasIfPresentAsync(profile, strategy, localPolicyPath, policyJson, legacyMethodName, cancellationToken).ConfigureAwait(false);
+        var legacyDiagnostics = await PublishLegacyManagedPolicyAliasIfPresentAsync(profile, strategy, localPolicyPath, mergedPolicyJson, legacyMethodName, cancellationToken).ConfigureAwait(false);
         return (systemPolicyPath, MergeManagedPolicyDiagnostics(diagnostics, legacyDiagnostics));
     }
 

@@ -66,4 +66,11 @@ internal static partial class WebBrowserLogs
 
     [LoggerMessage(EventId = 1829, Level = LogLevel.Error, Message = "Браузер не смог ретранслировать мостовое событие {EventType} для вкладки {TabId}")]
     public static partial void LogWebBrowserBridgeEventRelayFailed(this ILogger logger, Exception exception, string eventType, string tabId);
+
+    [LoggerMessage(EventId = 1830, Level = LogLevel.Warning, Message = "Выметен осиротевший браузерный процесс {BrowserProcessId} мёртвого владельца {OwnerProcessId}")]
+    public static partial void LogWebBrowserOrphanSwept(this ILogger logger, int browserProcessId, int ownerProcessId);
+
+    // ДИАГ (временное): встало ли fulfill-решение (иначе NavigateAsync уходит в Transport-симулятор).
+    [LoggerMessage(EventId = 1831, Level = LogLevel.Information, Message = "ДИАГ enqueue: ctx={ContextId} token={RouteToken} enqueued={Enqueued}")]
+    public static partial void LogNavigationFulfillEnqueueDiag(this ILogger logger, string contextId, string? routeToken, bool enqueued);
 }

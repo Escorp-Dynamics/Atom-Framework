@@ -171,7 +171,8 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             HandleNavigationProxyDirectRequestAsync,
             settings.Logger,
             DispatchNavigationProxyInterceptionAsync,
-            DispatchNavigationProxyResponseInterceptionAsync);
+            DispatchNavigationProxyResponseInterceptionAsync,
+            settings.ForwardProfile);
 
         StartBridgeListener();
         await managedDeliveryServer.StartAsync().ConfigureAwait(false);
@@ -1642,6 +1643,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         string absoluteUrl,
         string resourceType,
         IReadOnlyDictionary<string, string>? headers,
+        byte[]? requestBody,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(route);
@@ -1654,6 +1656,10 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             Method = method,
             ResourceType = resourceType,
             Headers = headers,
+            // Прокси прочитал запрос целиком, поэтому тело доступно и обязано доехать до
+            // обработчика: без него перехват видит только метод, адрес и заголовки, а данные
+            // POST-обмена (например токен, который сайт отправляет в теле) теряются.
+            RequestBodyBase64 = requestBody is { Length: > 0 } body ? Convert.ToBase64String(body) : null,
             SupportsNavigationFulfillment = true,
             DecidedByNavigationProxy = true,
         };

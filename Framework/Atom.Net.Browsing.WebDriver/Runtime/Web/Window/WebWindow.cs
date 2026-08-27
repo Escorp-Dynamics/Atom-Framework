@@ -199,6 +199,26 @@ public sealed partial class WebWindow : IWebWindow
     internal RequestInterceptionState? GetEffectiveRequestInterceptionState()
         => requestInterceptionState ?? OwnerBrowser.GetEffectiveRequestInterceptionState();
 
+    /// <summary>
+    /// Помечает <paramref name="page"/> текущей (выбранной) вкладкой окна.
+    /// </summary>
+    /// <remarks>
+    /// Вызывается после фактической активации вкладки: иначе currentPage менялся бы только при
+    /// открытии/закрытии вкладок и переставал соответствовать тому, что реально на переднем плане.
+    /// </remarks>
+    internal void SetCurrentPage(WebPage page)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        lock (pageGate)
+        {
+            if (disposeState != 0 || page.IsDisposed)
+                return;
+
+            Volatile.Write(ref currentPage, page);
+        }
+    }
+
     internal void PublishOpenedPage(WebPage page)
     {
         ArgumentNullException.ThrowIfNull(page);

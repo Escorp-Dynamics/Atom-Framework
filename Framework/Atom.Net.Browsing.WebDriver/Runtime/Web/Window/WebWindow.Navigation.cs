@@ -1,4 +1,6 @@
 ﻿using System.Drawing;
+using System.Runtime.CompilerServices;
+using Atom.Hardware.Input;
 using Atom.Media.Audio;
 using Atom.Media.Video;
 using Atom.Net.Https;
@@ -7,19 +9,49 @@ namespace Atom.Net.Browsing.WebDriver;
 
 public sealed partial class WebWindow
 {
-    public async ValueTask ActivateAsync(CancellationToken cancellationToken)
+    public ValueTask ActivateAsync(CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
+        return ActivateAsync((WebPage)CurrentPage, cancellationToken);
+    }
+
+    /// <summary>
+    /// Выводит на передний план окно и КОНКРЕТНУЮ вкладку <paramref name="page"/>.
+    /// </summary>
+    /// <remarks>
+    /// Активировать нужно именно запрошенную страницу, а не <see cref="CurrentPage"/>: поле
+    /// currentPage обновляется только при ОТКРЫТИИ вкладки (PublishOpenedPage) и при её закрытии,
+    /// но НЕ при активации. Поэтому в окне с несколькими вкладками currentPage навсегда указывает на
+    /// последнюю ОТКРЫТУЮ, и активация «по currentPage» уводила на передний план ЧУЖУЮ вкладку:
+    /// запрошенная так и оставалась фоновой (её rAF заморожен → Cloudflare не монтирует
+    /// challenge-iframe), а координатный клик, летящий по абсолютным экранным координатам, попадал
+    /// в чужую вкладку. Внешне выглядело как «виджет отрисован, чекбокс на месте, но клика нет» и
+    /// уходило в таймаут. После активации синхронизируем currentPage с фактически выбранной вкладкой.
+    /// </remarks>
+    internal async ValueTask ActivateAsync(WebPage page, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
+
+        // Целевая вкладка адресуется РЕАЛЬНЫМ идентификатором вкладки браузера (BoundBridgeTabId).
+        // page.TabId — это внутренний GUID драйвера; расширение разбирает идентификатор как ЧИСЛО,
+        // поэтому GUID туда отправлять нельзя. Пока цель не привязана к мостовой вкладке, активировать
+        // адресно нечем — тогда ограничиваемся активацией окна и локальным учётом.
+        var targetTabId = page.BoundBridgeTabId;
 
         if (OwnerBrowser.GetBridgeCommandPage() is { } bridgePage
             && bridgePage.BridgeCommands is { } bridge)
         {
             await bridge.ActivateWindowAsync(EffectiveWindowId, cancellationToken).ConfigureAwait(false);
-            await bridge.ActivateTabAsync(((WebPage)CurrentPage).TabId, cancellationToken).ConfigureAwait(false);
+
+            if (!string.IsNullOrWhiteSpace(targetTabId))
+                await bridge.ActivateTabAsync(targetTabId, cancellationToken).ConfigureAwait(false);
+
             await Task.Delay(75, cancellationToken).ConfigureAwait(false);
         }
 
+        SetCurrentPage(page);
         OwnerBrowser.ActivateWindow(this);
     }
 
@@ -36,8 +68,103 @@ public sealed partial class WebWindow
     {
         ArgumentNullException.ThrowIfNull(page);
 
-        await ActivateAsync(cancellationToken).ConfigureAwait(false);
+        // Активируем ИМЕННО ту вкладку, в которую собираемся вводить (не CurrentPage — см. ActivateAsync):
+        // иначе на передний план выходила чужая вкладка, ожидание фокуса не подтверждалось, а клик по
+        // экранным координатам уходил в неё же.
+        await ActivateAsync(page, cancellationToken).ConfigureAwait(false);
         await WaitForDocumentFocusAsync(page, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Захватывает ЭКСКЛЮЗИВНЫЙ доступ к доверенному вводу дисплея и готовит к нему вкладку
+    /// (активация + подтверждение фокуса). Освобождается через <see cref="IAsyncDisposable"/>.
+    /// </summary>
+    /// <remarks>
+    /// ЗАЧЕМ. Доверенный ввод дисплея глобален: активна ровно одна вкладка, а XTEST-клик уходит по
+    /// АБСОЛЮТНЫМ экранным координатам — то есть в ту вкладку, что сейчас на переднем плане.
+    /// Без взаимного исключения последовательность «активировать свою вкладку → дождаться фокуса →
+    /// посчитать координаты → кликнуть» не атомарна: параллельный солв в СОСЕДНЕЙ вкладке того же
+    /// окна успевает вклиниться со своей активацией между подготовкой и кликом, забирает передний
+    /// план — и клик прилетает в ЧУЖУЮ вкладку. Своя вкладка при этом визуально в порядке (виджет
+    /// отрисован, чекбокс на месте), но нажатия не получает → уход в таймаут. Гонка узкая, поэтому
+    /// проявлялась редко и «случайно».
+    /// Ключ шлюза — <see cref="VirtualMouse"/>: он один на браузер/дисплей, т.е. ровно тот общий
+    /// ресурс, за который идёт борьба (у окон на разных дисплеях шлюзы разные и не мешают друг другу).
+    /// Секция короткая (активация + фокус + один клик), поэтому параллельность вкладок сохраняется:
+    /// ждущая вкладка всё равно не могла бы кликнуть, пока не на переднем плане.
+    /// </remarks>
+    /// <summary>
+    /// Выводит вкладку на передний план ЭКСКЛЮЗИВНО и удерживает его <paramref name="hold"/>,
+    /// после чего отпускает — давая соседним вкладкам того же дисплея честную очередь.
+    /// </summary>
+    /// <remarks>
+    /// ЗАЧЕМ. На дисплее передний план ровно один, и вкладки, работающие параллельно, отбирают его
+    /// друг у друга. Без координации одна вкладка может НИ РАЗУ не получить передний план за весь
+    /// свой бюджет: её кадры (rAF) не идут, поэтому Cloudflare не монтирует challenge-iframe, и
+    /// задача уходит в таймаут, хотя вторая вкладка в это время работает нормально.
+    /// Короткое ЭКСКЛЮЗИВНОЕ удержание решает это без потери параллельности: вкладке хватает
+    /// нескольких кадров, чтобы отрисовать виджет и смонтировать iframe, после чего очередь честно
+    /// переходит к соседке. Это НЕ «удержание на весь солв» (такое лишь морило бы соседку голодом) —
+    /// удержание ограничено и делит тот же шлюз, что и клик, поэтому активация и клик больше не
+    /// перебивают друг друга.
+    /// </remarks>
+    internal async ValueTask ActivateExclusiveAsync(WebPage page, TimeSpan hold, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        var mouse = await ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
+        var gate = TrustedInputGates.GetValue(mouse, static _ => new SemaphoreSlim(1, 1));
+
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await ActivateAsync(page, cancellationToken).ConfigureAwait(false);
+
+            if (hold > TimeSpan.Zero)
+                await Task.Delay(hold, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _ = gate.Release();
+        }
+    }
+
+    internal async ValueTask<TrustedInputScope> AcquireTrustedInputScopeAsync(WebPage page, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        var mouse = await ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
+        var gate = TrustedInputGates.GetValue(mouse, static _ => new SemaphoreSlim(1, 1));
+
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await PrepareForTrustedInputAsync(page, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            _ = gate.Release();
+            throw;
+        }
+
+        return new TrustedInputScope(gate);
+    }
+
+    /// <summary>
+    /// Шлюзы доверенного ввода по дисплеям: ключ — <see cref="VirtualMouse"/> (один на браузер/дисплей).
+    /// <see cref="ConditionalWeakTable{TKey,TValue}"/> — чтобы шлюз жил ровно столько же, сколько мышь,
+    /// и исчезал вместе с закрытым браузером (без утечки на долгоживущих пулах).
+    /// </summary>
+    private static readonly ConditionalWeakTable<VirtualMouse, SemaphoreSlim> TrustedInputGates = new();
+
+    /// <summary>
+    /// Область эксклюзивного доверенного ввода: освобождает шлюз дисплея при уничтожении.
+    /// </summary>
+    internal readonly struct TrustedInputScope(SemaphoreSlim gate) : IDisposable
+    {
+        private readonly SemaphoreSlim gate = gate;
+
+        public void Dispose() => _ = gate?.Release();
     }
 
     // Активация окна и вкладки доходит до содержимого асинхронно, и до её завершения браузер

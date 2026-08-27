@@ -58,7 +58,9 @@ public sealed class Element : IElement
         cancellationToken.ThrowIfCancellationRequested();
         OwnerPage.OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebElementClickStarting(handle, OwnerPage.TabId);
 
-        await OwnerPage.OwnerWindow.PrepareForTrustedInputAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
+        // Подготовка и клик — атомарно относительно других вкладок дисплея: XTEST бьёт по абсолютным
+        // экранным координатам, поэтому вклинившаяся активация соседней вкладки увела бы клик в неё.
+        using var trustedInput = await OwnerPage.OwnerWindow.AcquireTrustedInputScopeAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
         var mouse = await OwnerPage.ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         var interactionPoint = await ResolveInteractionPointAsync(cancellationToken).ConfigureAwait(false);
         interactionPoint = await CalibrateInteractionPointAsync(mouse, interactionPoint, cancellationToken).ConfigureAwait(false);
@@ -73,7 +75,7 @@ public sealed class Element : IElement
         cancellationToken.ThrowIfCancellationRequested();
         OwnerPage.OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebElementHoverStarting(handle, OwnerPage.TabId);
 
-        await OwnerPage.OwnerWindow.PrepareForTrustedInputAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
+        using var trustedInput = await OwnerPage.OwnerWindow.AcquireTrustedInputScopeAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
         var mouse = await OwnerPage.ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         await ApproachInteractionPointAsync(mouse, await ResolveInteractionPointAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }
@@ -154,7 +156,7 @@ public sealed class Element : IElement
             return;
         }
 
-        await OwnerPage.OwnerWindow.PrepareForTrustedInputAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
+        using var trustedInput = await OwnerPage.OwnerWindow.AcquireTrustedInputScopeAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
         var mouse = await OwnerPage.ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         var interactionPoint = await ResolveInteractionPointAsync(cancellationToken).ConfigureAwait(false);
         await ApproachInteractionPointAsync(mouse, interactionPoint, cancellationToken).ConfigureAwait(false);

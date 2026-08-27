@@ -67,6 +67,8 @@ public sealed partial class WebBrowser : IWebBrowser
         bridgeServer?.ConfigureNavigationProxyDecisions(ProxyNavigationDecisions);
         bridgeSessionId = bridgeBootstrap?.SessionId;
         bridgeOpenTimeout = bridgeBootstrap?.ConnectionTimeout;
+        publishedManagedPolicyPath = bridgeBootstrap?.ManagedPolicyPublishPath;
+        publishedExtensionId = bridgeBootstrap?.ExtensionId;
         ResolvedMouse = settings.Mouse;
         ResolvedKeyboard = settings.Keyboard;
         var initialWindow = new WebWindow(this);
@@ -255,6 +257,7 @@ public sealed partial class WebBrowser : IWebBrowser
         await DisposeOwnedInputDevicesAsync().ConfigureAwait(false);
         await DisposeOwnedDisplayAsync().ConfigureAwait(false);
         CleanupMaterializedProfile();
+        CleanupPublishedManagedPolicy();
         LaunchSettings.Logger?.LogWebBrowserDisposeCompleted();
     }
 
@@ -1003,7 +1006,16 @@ public sealed partial class WebBrowser : IWebBrowser
         return candidate == probeUri ? null : candidate;
     }
 
-    private static void AppendDeviceContext(JsonObject payload, Device? device)
+    /// <summary>
+    /// Собирает поля профиля для контекста вкладки.
+    /// </summary>
+    /// <remarks>
+    /// Метод сделан internal, чтобы РАННИЙ скрипт личности (`identity.profile.js`, пишется при
+    /// материализации расширения) получал ровно тот же состав полей, что и мостовой контекст.
+    /// Иначе профиль запуска и профиль, приходящий по `SetTabContext`, разъехались бы, а
+    /// расхождение личности внутри одного документа — самостоятельный признак подделки.
+    /// </remarks>
+    internal static void AppendDeviceContext(JsonObject payload, Device? device)
     {
         ArgumentNullException.ThrowIfNull(payload);
 
@@ -1027,6 +1039,13 @@ public sealed partial class WebBrowser : IWebBrowser
 
         if (BuildClientHintsPayload(device.ClientHints) is { } clientHints)
             payload["clientHints"] = clientHints;
+
+        // WebGL передаём вместе с остальным контекстом вкладки: заявленная платформа обязана
+        // подтверждаться и здесь. Настоящий десктопный браузер всегда отдаёт vendor/renderer, и
+        // расхождение с User-Agent (или пустые значения) выделяет клиента не хуже прямого признака
+        // автоматизации.
+        if (BuildWebGlPayload(device.WebGL) is { } webGl)
+            payload["webGl"] = webGl;
 
         if (!device.ViewportSize.IsEmpty)
         {
@@ -1085,6 +1104,30 @@ public sealed partial class WebBrowser : IWebBrowser
             payload["accuracy"] = accuracy;
 
         return payload;
+    }
+
+    /// <summary>
+    /// Готовит WebGL-часть контекста вкладки.
+    /// </summary>
+    /// <remarks>
+    /// Маскированные (<c>Vendor</c>/<c>Renderer</c>) и немаскированные значения передаются отдельно:
+    /// страница читает их разными путями — обычным <c>getParameter</c> и через расширение
+    /// <c>WEBGL_debug_renderer_info</c>, — и подменять нужно оба, иначе они разойдутся между собой.
+    /// </remarks>
+    private static JsonObject? BuildWebGlPayload(WebGLSettings? settings)
+    {
+        if (settings is null)
+            return null;
+
+        var payload = new JsonObject();
+        AppendOptionalString(payload, "vendor", settings.Vendor);
+        AppendOptionalString(payload, "renderer", settings.Renderer);
+        AppendOptionalString(payload, "unmaskedVendor", settings.UnmaskedVendor);
+        AppendOptionalString(payload, "unmaskedRenderer", settings.UnmaskedRenderer);
+        AppendOptionalString(payload, "version", settings.Version);
+        AppendOptionalString(payload, "shadingLanguageVersion", settings.ShadingLanguageVersion);
+
+        return payload.Count > 0 ? payload : null;
     }
 
     private static JsonObject? BuildClientHintsPayload(ClientHintsSettings? settings)

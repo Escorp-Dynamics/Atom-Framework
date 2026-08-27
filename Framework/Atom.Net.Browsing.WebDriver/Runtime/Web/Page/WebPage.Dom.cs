@@ -182,7 +182,9 @@ public sealed partial class WebPage
     {
         if (BridgeCommands is { } bridge)
         {
-            await OwnerWindow.ActivateAsync(cancellationToken).ConfigureAwait(false);
+            // Активируем ЭТУ вкладку, а не CurrentPage окна: иначе в многовкладочном окне на передний
+            // план выходила бы чужая вкладка и снимок получался бы ЧУЖОЙ.
+            await OwnerWindow.ActivateAsync(this, cancellationToken).ConfigureAwait(false);
             var bridgeScreenshot = await TryGetBridgeScreenshotAsync(bridge, cancellationToken).ConfigureAwait(false);
             if (!bridgeScreenshot.IsEmpty)
                 return bridgeScreenshot;
@@ -216,7 +218,7 @@ public sealed partial class WebPage
 
                 try
                 {
-                    await OwnerWindow.ActivateAsync(cancellationToken).ConfigureAwait(false);
+                    await OwnerWindow.ActivateAsync(this, cancellationToken).ConfigureAwait(false);
                 }
                 catch (InvalidOperationException retryError)
                 {
@@ -244,6 +246,34 @@ public sealed partial class WebPage
         return commaIndex >= 0 && commaIndex + 1 < trimmed.Length
             ? trimmed[(commaIndex + 1)..]
             : null;
+    }
+
+    public async ValueTask ClickViewportPointAsync(double viewportX, double viewportY, CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Готовим вкладку к доверенному вводу: активируем окно/вкладку и ЖДЁМ подтверждения фокуса
+        // документа. Без этого Firefox отбрасывает весь настоящий ввод во вкладке, пока активация
+        // (на виртуальном дисплее до ~2,7с) не дойдёт до содержимого — координатный клик уходил
+        // «в пустоту» на невыбранной/только-что-активированной вкладке. Тот же шаг делает Element.ClickAsync
+        // (OwnerWindow.PrepareForTrustedInputAsync) — раньше этот путь его пропускал. Активация ещё и
+        // делает docShell активным → CF монтирует challenge-iframe на фоновой вкладке.
+        //
+        // ВАЖНО: подготовка и сам клик должны быть АТОМАРНЫ относительно других вкладок этого дисплея.
+        // XTEST бьёт по абсолютным экранным координатам, т.е. в ту вкладку, что сейчас на переднем
+        // плане. Без шлюза параллельный солв в соседней вкладке вклинивался своей активацией между
+        // подготовкой и кликом и забирал передний план — клик уходил в ЧУЖУЮ вкладку, а своя, будучи
+        // визуально исправной (виджет и чекбокс на месте), нажатия не получала и уходила в таймаут.
+        // Шлюз держится только на время «активация + фокус + один клик» (см. AcquireTrustedInputScopeAsync).
+        using var trustedInput = await OwnerWindow.AcquireTrustedInputScopeAsync(this, cancellationToken).ConfigureAwait(false);
+
+        // Резолвим точку viewport→screen и бьём реальным виртуальным курсором НАПРЯМУЮ, минуя
+        // Element.ClickAsync/CalibrateInteractionPointAsync (та пере-центрирует по элементу и съела бы
+        // смещение до чекбокса). Для кросс-доменного iframe DOM-доступа нет — координата единственный путь.
+        var mouse = await ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
+        var screenPoint = await ResolveViewportToScreenAsync((float)viewportX, (float)viewportY, cancellationToken).ConfigureAwait(false);
+        await mouse.ClickAtAsync(screenPoint, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
     internal async ValueTask<Point> ResolveViewportToScreenAsync(float viewportX, float viewportY, CancellationToken cancellationToken)
@@ -435,6 +465,21 @@ public sealed partial class WebPage
         return new Point(
             (int)Math.Round(bounds.X + chromeLeft + viewportX),
             (int)Math.Round(bounds.Y + chromeTop + viewportY));
+    }
+
+    public ValueTask ActivateAsync(CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        return OwnerWindow.ActivateAsync(this, cancellationToken);
+    }
+
+    public ValueTask ActivateAsync()
+        => ActivateAsync(CancellationToken.None);
+
+    public ValueTask ActivateExclusiveAsync(TimeSpan hold, CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        return OwnerWindow.ActivateExclusiveAsync(this, hold, cancellationToken);
     }
 
     public ValueTask<bool> IsVisibleAsync(CancellationToken cancellationToken)

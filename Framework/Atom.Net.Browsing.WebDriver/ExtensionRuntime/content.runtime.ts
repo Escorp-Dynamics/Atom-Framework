@@ -1067,6 +1067,10 @@ class ContentRuntimeHost {
     private async applyContextInMainWorld(context: TabContextEnvelope): Promise<void> {
         const script = buildMainWorldContextScript(context);
 
+        // Подчинённые фреймы обслуживает ФОН (см. applyIdentityToAllFrames): контент-скрипт
+        // объявлен с `all_frames: false` и до кросс-доменного фрейма не дотягивается, а документ
+        // проверки Cloudflare вдобавок запрещает выполнять строку как код (Trusted Types) —
+        // туда проходит только внедрение готовой функции средствами браузера.
         try {
             await this.channel.executeInMain(script);
         } catch {
@@ -1716,7 +1720,22 @@ export function buildCacheIsolationScript(): string {
  * подделывать либо подавлять её решения. Дубликат удалён: изолированный мир выполняет тот же
  * запрос сам, а странице не остаётся ни учётных данных, ни повода узнать об автоматике.
  */
-export function buildMainWorldContextScript(context: TabContextEnvelope): string {
+export interface MainWorldContextScriptOptions {
+    /**
+     * Собрать скрипт ТОЛЬКО с подменой личности, без изоляции хранилищ (storage/cookie/indexedDB/
+     * cache). Такой вариант предназначен для ПОДЧИНЁННЫХ фреймов: подменять личность там
+     * обязательно (иначе кросс-доменный фрейм выдаёт настоящую ОС и противоречит и верхнему
+     * документу, и заголовкам запросов), а изоляция хранилищ верхнего фрейма туда переноситься
+     * не должна — у подчинённого фрейма своё происхождение и свой канал синхронизации кук.
+     */
+    readonly identityOnly?: boolean;
+}
+
+export function buildMainWorldContextScript(
+    context: TabContextEnvelope,
+    options?: MainWorldContextScriptOptions,
+): string {
+    const identityOnly = options?.identityOnly === true;
     const serializedContext = JSON.stringify(context);
 
     return `(() => {
@@ -1891,6 +1910,67 @@ const readContext = () => currentContext;
         };
     };
 
+    /**
+     * Подменяет вендора и renderer, которые WebGL сообщает странице.
+     *
+     * Значения читаются двумя разными путями: обычными VENDOR/RENDERER и немаскированными через
+     * расширение WEBGL_debug_renderer_info. Подменять нужно ОБА — расхождение между ними само по себе
+     * является признаком подделки. Перехват ставится на прототипах обоих контекстов (WebGL и WebGL2),
+     * поэтому работает независимо от того, какой из них запросит страница.
+     */
+    const installWebGlOverride = () => {
+        // Константы расширения WEBGL_debug_renderer_info: они фиксированы спецификацией, а само
+        // расширение в контексте может отсутствовать — тогда полагаться на его объект нельзя.
+        const UNMASKED_VENDOR = 0x9245;
+        const UNMASKED_RENDERER = 0x9246;
+        const VENDOR = 0x1f00;
+        const RENDERER = 0x1f01;
+        const VERSION = 0x1f02;
+        const SHADING_LANGUAGE_VERSION = 0x8b8c;
+
+        const resolveOverride = (parameter) => {
+            const webGl = readContext().webGl;
+            if (!webGl) {
+                return undefined;
+            }
+
+            switch (parameter) {
+                case UNMASKED_VENDOR:
+                    return webGl.unmaskedVendor ?? webGl.vendor;
+                case UNMASKED_RENDERER:
+                    return webGl.unmaskedRenderer ?? webGl.renderer;
+                case VENDOR:
+                    return webGl.vendor;
+                case RENDERER:
+                    return webGl.renderer;
+                case VERSION:
+                    return webGl.version;
+                case SHADING_LANGUAGE_VERSION:
+                    return webGl.shadingLanguageVersion;
+                default:
+                    return undefined;
+            }
+        };
+
+        for (const contextName of ['WebGLRenderingContext', 'WebGL2RenderingContext']) {
+            const contextConstructor = globalObject[contextName];
+            const prototype = contextConstructor?.prototype;
+            if (!prototype || typeof prototype.getParameter !== 'function') {
+                continue;
+            }
+
+            const originalGetParameter = prototype.getParameter;
+            prototype.getParameter = function patchedGetParameter(parameter) {
+                const override = resolveOverride(parameter);
+                if (override !== undefined) {
+                    return override;
+                }
+
+                return originalGetParameter.call(this, parameter);
+            };
+        }
+    };
+
     const installGeolocationOverride = () => {
         const navigatorObject = globalObject.navigator;
         if (!navigatorObject) {
@@ -1988,13 +2068,13 @@ const readContext = () => currentContext;
         defineGetter(globalObject.Navigator?.prototype, 'geolocation', () => readContext().geolocation ? fakeGeolocation : originalGeolocation);
     };
 
-${buildStorageIsolationScript()}
+${identityOnly ? '' : buildStorageIsolationScript()}
 
-${buildCookieIsolationScript()}
+${identityOnly ? '' : buildCookieIsolationScript()}
 
-${buildIndexedDbIsolationScript()}
+${identityOnly ? '' : buildIndexedDbIsolationScript()}
 
-${buildCacheIsolationScript()}
+${identityOnly ? '' : buildCacheIsolationScript()}
 
     if (typeof syncCookieHeaderImpl === 'function') {
         syncCookieHeaderImpl('');

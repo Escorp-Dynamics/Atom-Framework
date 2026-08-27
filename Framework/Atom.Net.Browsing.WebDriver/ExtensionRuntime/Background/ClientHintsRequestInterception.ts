@@ -16,25 +16,38 @@ export function handleClientHintsRequestInterception(
         return undefined;
     }
 
-    const clientHints = getTabContext(tabId)?.clientHints;
-    if (clientHints === undefined) {
+    const context = getTabContext(tabId);
+    const clientHints = context?.clientHints;
+
+    // User-Agent переписывается ЗДЕСЬ ЖЕ, из того же контекста вкладки. Иначе получается разрыв
+    // отпечатка: navigator.userAgent и Sec-CH-UA* подменены под заявленную платформу, а сам заголовок
+    // User-Agent продолжает нести настоящий браузер и ОС. Такое противоречие между заголовком и JS
+    // однозначно выдаёт подделку — на реальном таргете это давало 0 решений из 54 при явных
+    // error-callback от Cloudflare, тогда как без подмены вовсе — 151 из 151.
+    // Правка сознательно живёт в рантайме и per-tab: подмена должна применяться из кода в любой
+    // момент и для любого браузера, а не флагом запуска (--user-agent есть только у Chromium,
+    // действует на весь процесс и не меняется на лету).
+    const userAgent = normalizeHeaderValue(context?.userAgent);
+
+    if (clientHints === undefined && userAgent === undefined) {
         return undefined;
     }
 
-    const secChUa = formatSecChUa(clientHints.brands);
-    const secChUaFullVersionList = formatSecChUa(clientHints.fullVersionList ?? clientHints.brands);
-    const secChUaPlatform = formatQuotedClientHintValue(clientHints.platform);
-    const secChUaPlatformVersion = formatQuotedClientHintValue(clientHints.platformVersion);
-    const secChUaMobile = clientHints.mobile === undefined
+    const secChUa = formatSecChUa(clientHints?.brands);
+    const secChUaFullVersionList = formatSecChUa(clientHints?.fullVersionList ?? clientHints?.brands);
+    const secChUaPlatform = formatQuotedClientHintValue(clientHints?.platform);
+    const secChUaPlatformVersion = formatQuotedClientHintValue(clientHints?.platformVersion);
+    const secChUaMobile = clientHints?.mobile === undefined
         ? undefined
         : clientHints.mobile
             ? '?1'
             : '?0';
-    const secChUaArch = formatQuotedClientHintValue(clientHints.architecture);
-    const secChUaModel = formatQuotedClientHintValue(clientHints.model);
-    const secChUaBitness = formatQuotedClientHintValue(clientHints.bitness);
+    const secChUaArch = formatQuotedClientHintValue(clientHints?.architecture);
+    const secChUaModel = formatQuotedClientHintValue(clientHints?.model);
+    const secChUaBitness = formatQuotedClientHintValue(clientHints?.bitness);
 
-    if (secChUa === undefined
+    if (userAgent === undefined
+        && secChUa === undefined
         && secChUaFullVersionList === undefined
         && secChUaPlatform === undefined
         && secChUaPlatformVersion === undefined
@@ -46,6 +59,7 @@ export function handleClientHintsRequestInterception(
     }
 
     const requestHeaders = cloneHeaders(baseHeaders ?? details.requestHeaders);
+    setHeaderValue(requestHeaders, 'User-Agent', userAgent);
     setHeaderValue(requestHeaders, 'Sec-CH-UA', secChUa);
     setHeaderValue(requestHeaders, 'Sec-CH-UA-Full-Version-List', secChUaFullVersionList);
     setHeaderValue(requestHeaders, 'Sec-CH-UA-Platform', secChUaPlatform);
@@ -55,6 +69,14 @@ export function handleClientHintsRequestInterception(
     setHeaderValue(requestHeaders, 'Sec-CH-UA-Model', secChUaModel);
     setHeaderValue(requestHeaders, 'Sec-CH-UA-Bitness', secChUaBitness);
     return { requestHeaders };
+}
+
+/**
+ * Значение заголовка из контекста вкладки: пустое/непереданное значение подменять нельзя —
+ * иначе вместо настоящего заголовка ушёл бы пустой.
+ */
+function normalizeHeaderValue(value: string | undefined): string | undefined {
+    return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
 
 function formatSecChUa(brands: TabContextClientHintBrandEnvelope[] | undefined): string | undefined {

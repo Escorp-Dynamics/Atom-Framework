@@ -11,6 +11,78 @@ public sealed partial class WebBrowser
     // «протухнуть»), и должно покрывать медленный стек навигации, а не только таймаут ответа моста.
     private static readonly TimeSpan ProxyNavigationDecisionLifetime = TimeSpan.FromMinutes(2);
 
+    /// <summary>
+    /// Регистрирует POST-навигацию вкладки как самоотправляющуюся форму, отдаваемую прокси.
+    /// </summary>
+    /// <remarks>
+    /// См. <see cref="BridgePostNavigationForm"/>: браузер не умеет инициировать POST-навигацию
+    /// документа, поэтому первичный GET подменяется формой, которая тут же делает реальный POST
+    /// на целевой адрес. Возвращает <see langword="false"/>, если тело нельзя воспроизвести
+    /// формой (не form-urlencoded) — тогда вызывающий обязан не уходить на мостовой путь.
+    /// </remarks>
+    internal bool TryEnqueueNavigationPostForm(WebPage page, Uri url, ReadOnlyMemory<byte> body, string? contentType)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        ArgumentNullException.ThrowIfNull(url);
+
+        if (!BridgePostNavigationForm.TryBuild(url, body, contentType, out var formHtml))
+            return false;
+
+        return TryEnqueueNavigationFulfillment(page, url, formHtml);
+    }
+
+    /// <summary>
+    /// Регистрирует готовый ответ для предстоящей навигации вкладки: локальный навигационный
+    /// прокси отдаст его вместо ответа origin.
+    /// </summary>
+    /// <remarks>
+    /// Так <see cref="NavigationSettings.Html"/> доезжает до настоящего браузера. Подменять
+    /// документ на стороне драйвера нельзя: вкладка должна открыться именно на целевом адресе,
+    /// иначе у страницы будет чужой origin — а от него зависят cookie, storage и то, какой
+    /// origin увидит скрипт на странице. Прокси отвечает до обращения к origin, поэтому запрос
+    /// наружу не уходит вовсе.
+    /// <para>Возвращает <see langword="false"/>, если у вкладки нет маршрута навигационного прокси: тогда
+    /// подменять ответ нечем и вызывающий обязан остаться на прежнем поведении, а не открывать
+    /// вместо подготовленного документа настоящий сайт.</para>
+    /// </remarks>
+    internal bool TryEnqueueNavigationFulfillment(WebPage page, Uri url, string html)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        ArgumentNullException.ThrowIfNull(url);
+        ArgumentNullException.ThrowIfNull(html);
+
+        var issuedAtUtc = DateTimeOffset.UtcNow;
+        var enqueueContextId = page.GetOrCreateBridgeContextId();
+
+        var enqueued = ProxyNavigationDecisions.EnqueueDecision(
+            enqueueContextId,
+            new ProxyNavigationPendingDecision
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                Method = HttpMethod.Get.Method,
+                AbsoluteUrl = url.AbsoluteUri,
+                IssuedAtUtc = issuedAtUtc,
+                ExpiresAtUtc = issuedAtUtc + ProxyNavigationDecisionLifetime,
+                Action = ProxyNavigationDecisionAction.Fulfill,
+                StatusCode = (int)HttpStatusCode.OK,
+                ResponseHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Content-Type"] = "text/html; charset=utf-8",
+                    // no-store запрещает и HTTP-кэш, и bfcache: переиспользуемая вкладка при повторной
+                    // навигации/reload обязана заново загрузить документ и выполнить скрипты (иначе
+                    // восстановление из bfcache не перезапускает виджет — токен не появляется).
+                    ["Cache-Control"] = "no-store, no-cache, must-revalidate",
+                },
+                ResponseBody = System.Text.Encoding.UTF8.GetBytes(html),
+            },
+            issuedAtUtc);
+
+        ProxyNavigationDecisions.TryResolveToken(enqueueContextId, out var enqueueDiagToken);
+        LaunchSettings.Logger?.LogNavigationFulfillEnqueueDiag(enqueueContextId, enqueueDiagToken, enqueued);
+
+        return enqueued;
+    }
+
     public event MutableEventHandler<IWebBrowser, WebLifecycleEventArgs>? DomContentLoaded;
 
     public event MutableEventHandler<IWebBrowser, WebLifecycleEventArgs>? NavigationCompleted;

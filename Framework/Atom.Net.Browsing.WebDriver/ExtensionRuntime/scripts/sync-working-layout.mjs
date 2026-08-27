@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,6 +34,7 @@ const generatedDirectory = resolveOption('--generated-dir')
     : path.join(projectDirectory, 'obj', 'ExtensionRuntime', 'generated');
 const backgroundRuntimePath = path.join(generatedDirectory, 'background.runtime.js');
 const contentRuntimePath = path.join(generatedDirectory, 'content.js');
+const identityRuntimePath = path.join(generatedDirectory, 'identity.main.js');
 
 function ensureDirectory(directoryPath) {
     mkdirSync(directoryPath, { recursive: true });
@@ -69,6 +70,16 @@ function syncReferenceBaseline(workingDirectory) {
 function syncGeneratedRuntime(workingDirectory) {
     copyFileSync(backgroundRuntimePath, path.join(workingDirectory, 'background.runtime.js'));
     copyFileSync(contentRuntimePath, path.join(workingDirectory, 'content.js'));
+    copyFileSync(identityRuntimePath, path.join(workingDirectory, 'identity.main.js'));
+
+    // Заглушка профиля. Файл обязан существовать ВСЕГДА: он объявлен в манифесте, а отсутствие
+    // файла из content_scripts браузер считает ошибкой и отказывается загружать расширение
+    // целиком. Настоящий профиль пишется поверх при материализации расширения под запуск; без
+    // профиля здесь остаётся null, и ранний скрипт просто ничего не делает.
+    writeFileSync(
+        path.join(workingDirectory, 'identity.profile.js'),
+        'globalThis.__ATOM_IDENTITY_PROFILE = null;\n',
+    );
 }
 
 function syncWorkingDirectory(manifestPath, workingDirectory) {

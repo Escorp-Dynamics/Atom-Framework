@@ -57,6 +57,7 @@ export interface TabContextEnvelope {
     timezone?: string;
     languages?: string[];
     clientHints?: TabContextClientHintsEnvelope;
+    webGl?: TabContextWebGlEnvelope;
     viewport?: TabContextViewportEnvelope;
     deviceScaleFactor?: number;
     hardwareConcurrency?: number;
@@ -209,6 +210,25 @@ function readOptionalClientHintBrandArray(value: unknown, message: string): TabC
     });
 }
 
+function readOptionalWebGl(value: unknown, message: string): TabContextWebGlEnvelope | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    if (!isJsonRecord(value)) {
+        throw new Error(message);
+    }
+
+    return {
+        vendor: readOptionalString(value.vendor, message),
+        renderer: readOptionalString(value.renderer, message),
+        unmaskedVendor: readOptionalString(value.unmaskedVendor, message),
+        unmaskedRenderer: readOptionalString(value.unmaskedRenderer, message),
+        version: readOptionalString(value.version, message),
+        shadingLanguageVersion: readOptionalString(value.shadingLanguageVersion, message),
+    };
+}
+
 function readOptionalClientHints(value: unknown, message: string): TabContextClientHintsEnvelope | undefined {
     if (value === undefined) {
         return undefined;
@@ -250,6 +270,21 @@ function readOptionalVirtualMediaDevices(value: unknown, message: string): TabCo
         audioOutputLabel: readOptionalString(value.audioOutputLabel, message),
         groupId: readOptionalString(value.groupId, message),
     };
+}
+
+/**
+ * Значения WebGL, которыми страница должна подтверждать заявленную платформу.
+ *
+ * Маскированные и немаскированные читаются разными путями (обычный getParameter и расширение
+ * WEBGL_debug_renderer_info), поэтому передаются отдельно — иначе они разойдутся между собой.
+ */
+export interface TabContextWebGlEnvelope {
+    vendor?: string;
+    renderer?: string;
+    unmaskedVendor?: string;
+    unmaskedRenderer?: string;
+    version?: string;
+    shadingLanguageVersion?: string;
 }
 
 export function validateTabContextEnvelope(value: unknown): TabContextEnvelope {

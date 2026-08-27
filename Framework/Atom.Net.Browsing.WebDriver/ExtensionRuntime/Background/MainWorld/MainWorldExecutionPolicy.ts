@@ -2,6 +2,52 @@ import { type BrowserHost, invokeBrowserCall } from '../Browser/BrowserApi';
 
 type JsonRecord = Record<string, unknown>;
 
+// scripting.executeScript возвращает Promise, который на переиспользуемой/перезагружаемой вкладке
+// в Firefox может НЕ разрешиться (документ подменяется в момент инъекции): цепочка
+// invokeBrowserCall → evaluateMainWorldScript → executeInMainWorld → content.executeInMain нигде
+// не имеет таймаута, и единственным предохранителем оказывался driver RequestTimeout (5с) на КАЖДОЕ
+// чтение. Для поллинга токена (WaitForTurnstileTokenOrFrameAsync) это фатально: одно зависшее чтение
+// съедает 5с и роняет всё ожидание. Здоровое MAIN-world-чтение завершается за <100мс, поэтому мы
+// ограничиваем именно зависание: по таймауту возвращаем строковый sentinel 'null' («значения пока
+// нет») — тот же, что уже используется для null-результата, — и поллер просто пробует снова.
+const MAIN_WORLD_EXECUTION_TIMEOUT_MS = 1200;
+const MAIN_WORLD_TIMEOUT = Symbol('main-world-execution-timeout');
+
+function raceMainWorldTimeout<T>(operation: Promise<T>): Promise<T | typeof MAIN_WORLD_TIMEOUT> {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const timeoutId = globalThis.setTimeout(() => {
+            if (settled) {
+                return;
+            }
+
+            settled = true;
+            resolve(MAIN_WORLD_TIMEOUT);
+        }, MAIN_WORLD_EXECUTION_TIMEOUT_MS);
+
+        operation.then(
+            (value) => {
+                if (settled) {
+                    return;
+                }
+
+                settled = true;
+                globalThis.clearTimeout(timeoutId);
+                resolve(value);
+            },
+            (error) => {
+                if (settled) {
+                    return;
+                }
+
+                settled = true;
+                globalThis.clearTimeout(timeoutId);
+                reject(error);
+            },
+        );
+    });
+}
+
 export async function evaluateMainWorldScript(
     browserHost: BrowserHost,
     runtime: any,
@@ -38,7 +84,7 @@ export async function evaluateMainWorldScript(
         }
 
         try {
-            const results = await invokeBrowserCall<any[]>(
+            const racedResults = await raceMainWorldTimeout(invokeBrowserCall<any[]>(
                 runtime,
                 browserHost.scripting.executeScript,
                 browserHost.scripting,
@@ -73,8 +119,22 @@ export async function evaluateMainWorldScript(
                     },
                     args: [script],
                 },
-            );
+            ));
 
+            if (racedResults === MAIN_WORLD_TIMEOUT) {
+                // Инъекция зависла (подмена документа на reused-вкладке): не съедаем driver
+                // RequestTimeout и не рушим поллер — возвращаем 'null' быстро, следующая попытка
+                // прочитает значение, когда вкладка стабилизируется.
+                debug?.('execute-script-main-result', {
+                    stage: 'main',
+                    status: 'timeout',
+                    timeoutMs: MAIN_WORLD_EXECUTION_TIMEOUT_MS,
+                });
+
+                return 'null';
+            }
+
+            const results = racedResults;
             const payload = results[0]?.result;
             if (isRecord(payload) && payload.ok === true && typeof payload.value === 'string') {
                 debug?.('execute-script-main-result', {
@@ -153,7 +213,7 @@ async function tryEvaluateViaScriptingPageInjection(
     }
 
     try {
-        const results = await invokeBrowserCall<any[]>(
+        const racedResults = await raceMainWorldTimeout(invokeBrowserCall<any[]>(
             runtime,
             browserHost.scripting.executeScript,
             browserHost.scripting,
@@ -263,9 +323,13 @@ async function tryEvaluateViaScriptingPageInjection(
                 },
                 args: [script, 500],
             },
-        );
+        ));
 
-        const payload = results[0]?.result;
+        if (racedResults === MAIN_WORLD_TIMEOUT) {
+            return null;
+        }
+
+        const payload = racedResults[0]?.result;
         if (isRecord(payload) && payload.ok === true && typeof payload.value === 'string') {
             return payload.value;
         }

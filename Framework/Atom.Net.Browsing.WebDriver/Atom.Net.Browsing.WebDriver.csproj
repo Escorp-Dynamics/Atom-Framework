@@ -154,6 +154,10 @@
 		<Exec Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/build-content-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;"
 		      WorkingDirectory="$(ExtensionRuntimeDirectory)" />
 
+		<!-- ранний скрипт личности: document_start во всех фреймах, до кода документа -->
+		<Exec Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/build-identity-runtime.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;"
+		      WorkingDirectory="$(ExtensionRuntimeDirectory)" />
+
 		<!-- CRX packager: собираем самодостаточный бандл, чтобы node запускал упаковку без
 		     node_modules в output/NuGet (иначе import crx3 падает с ERR_MODULE_NOT_FOUND). -->
 		<Exec Command="node &quot;$(ExtensionRuntimeDirectory)/scripts/build-crx-packager.mjs&quot; --generated-dir &quot;$(ExtensionGeneratedDirectory)&quot;"

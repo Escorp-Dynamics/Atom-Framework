@@ -10,6 +10,8 @@ namespace Atom.Net.Browsing.WebDriver;
 public sealed partial class WebBrowser
 {
     private readonly string? materializedProfilePath;
+    private readonly string? publishedManagedPolicyPath;
+    private readonly string? publishedExtensionId;
     private readonly Process? browserProcess;
 
     private static async ValueTask<WebBrowser> LaunchCoreAsync(WebBrowserSettings settings, CancellationToken cancellationToken)
@@ -21,6 +23,10 @@ public sealed partial class WebBrowser
             settings.UseHeadlessMode,
             settings.UseIncognitoMode,
             settings.Display is not null);
+
+        // Перед запуском выметаем браузеры прошлых запусков, чьи владельцы уже мертвы: при жёстком
+        // завершении (SIGKILL/стоп отладчика) их DisposeAsync не отработал и они остались сиротами.
+        BridgeBrowserProcessRegistry.SweepAbandoned(settings.Logger);
 
         var launchSettings = settings.Clone();
         string? materializedProfilePath = null;
@@ -48,6 +54,18 @@ public sealed partial class WebBrowser
                 launchSettings.Logger?.LogWebBrowserProfileMaterialized(materializedProfilePath);
 
             var browserProcess = LaunchBrowserProcess(launchSettings, materialization.BridgeBootstrap);
+
+            // Регистрируем PID браузера за текущим владельцем, чтобы следующий запуск смог
+            // вымести его, если нас убьют жёстко и DisposeAsync не отработает.
+            if (browserProcess is not null)
+            {
+                BridgeBrowserProcessRegistry.Register(browserProcess.Id, materializedProfilePath);
+                // Плюс к startup-sweep — немедленная уборка: watchdog убьёт браузер, как только
+                // умрёт владелец, даже при SIGKILL (стоп в отладчике), не оставляя висеть до
+                // следующего запуска.
+                BridgeBrowserProcessRegistry.SpawnParentDeathWatchdog(browserProcess.Id, materializedProfilePath);
+            }
+
             return await CreateReadyBrowserAsync(
                 launchSettings,
                 materializedProfilePath,
@@ -238,6 +256,7 @@ public sealed partial class WebBrowser
                 UseRootlessChromiumBootstrap = preparation.Settings.UseRootlessChromiumBootstrap,
                 ManagedDeliveryRequiresCertificateBypass = managedDeliveryRequiresCertificateBypass,
                 ManagedDeliveryTrustDiagnostics = bridgeServerManagedTrustDiagnostics,
+                ForwardProfile = preparation.Settings.ForwardProfile,
             },
         };
     }
@@ -274,6 +293,7 @@ public sealed partial class WebBrowser
                 UseRootlessChromiumBootstrap = preparation.Settings.UseRootlessChromiumBootstrap,
                 ManagedDeliveryRequiresCertificateBypass = managedDeliveryRequiresCertificateBypass,
                 ManagedDeliveryTrustDiagnostics = bridgeServerManagedTrustDiagnostics,
+                ForwardProfile = preparation.Settings.ForwardProfile,
             },
         };
     }
@@ -423,6 +443,60 @@ public sealed partial class WebBrowser
     private void CleanupMaterializedProfile()
         => CleanupMaterializedProfile(LaunchSettings, materializedProfilePath);
 
+    /// <summary>
+    /// Снимает системную managed policy, опубликованную ради установки расширения.
+    /// </summary>
+    /// <remarks>
+    /// Политика форс-ставит расширение с update URL на локальный порт моста. Порт живёт ровно
+    /// столько же, сколько запуск, поэтому оставленный файл заставляет КАЖДЫЙ последующий старт
+    /// браузера — в том числе обычный, пользовательский — тянуть расширение с мёртвого адреса.
+    /// Профильные политики не трогаем: они лежат внутри материализованного профиля и уходят
+    /// вместе с ним.
+    /// </remarks>
+    private void CleanupPublishedManagedPolicy()
+        => CleanupPublishedManagedPolicy(LaunchSettings, publishedManagedPolicyPath, publishedExtensionId, materializedProfilePath);
+
+    private static void CleanupPublishedManagedPolicy(
+        WebBrowserSettings settings,
+        string? publishedManagedPolicyPath,
+        string? publishedExtensionId,
+        string? materializedProfilePath)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (string.IsNullOrWhiteSpace(publishedManagedPolicyPath) || string.IsNullOrWhiteSpace(publishedExtensionId))
+            return;
+
+        if (!string.IsNullOrWhiteSpace(materializedProfilePath)
+            && publishedManagedPolicyPath.StartsWith(materializedProfilePath, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            // Снимаем ТОЛЬКО свою запись: файл общий, и рядом может работать браузер другого
+            // процесса, которому его force-install ещё нужен. Удаляем файл лишь когда наша
+            // запись была последней.
+            var remainingPolicyJson = BridgeManagedPolicyRegistry.BuildPolicyWithoutEntry(publishedManagedPolicyPath, publishedExtensionId);
+            if (remainingPolicyJson is null)
+            {
+                if (File.Exists(publishedManagedPolicyPath))
+                    File.Delete(publishedManagedPolicyPath);
+
+                return;
+            }
+
+            File.WriteAllText(publishedManagedPolicyPath, remainingPolicyJson);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Прав на снятие политики может не быть (её кладут туда, куда пишет текущий
+            // пользователь, но каталог системный). Освобождение браузера из-за этого не рушим.
+            settings.Logger?.LogWebBrowserProfileCleanupFailed(publishedManagedPolicyPath, exception);
+        }
+    }
+
     private static void CleanupMaterializedProfile(WebBrowserSettings settings, string? materializedProfilePath)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -512,9 +586,32 @@ public sealed partial class WebBrowser
         };
 
         if (OperatingSystem.IsLinux())
+        {
             ConfigureLinuxBrowserDisplayEnvironment(startInfo, isFirefox, useBrowserHeadlessMode, settings.Display);
+            ConfigurePlatformFontEnvironment(startInfo, settings);
+        }
 
         return startInfo;
+    }
+
+    /// <summary>
+    /// Подключает браузеру набор шрифтов заявленной платформы.
+    /// </summary>
+    /// <remarks>
+    /// Переменная действует ТОЛЬКО на процесс браузера, поэтому системные настройки шрифтов
+    /// пользователя не затрагиваются. Файл готовится при материализации профиля; если платформа
+    /// своя и подменять нечего, файла нет и переменная не выставляется.
+    /// </remarks>
+    private static void ConfigurePlatformFontEnvironment(ProcessStartInfo startInfo, WebBrowserSettings settings)
+    {
+        if (settings.Profile?.Path is not { Length: > 0 } profilePath)
+            return;
+
+        var configurationPath = IOPath.Combine(profilePath, PlatformFontConfiguration.FileName);
+        if (!File.Exists(configurationPath))
+            return;
+
+        startInfo.Environment["FONTCONFIG_FILE"] = configurationPath;
     }
 
     private static string ResolveBrowserDisplayName(WebBrowserSettings settings)
@@ -660,6 +757,16 @@ public sealed partial class WebBrowser
     {
         if (process is null)
             return;
+
+        // Graceful-освобождение: снимаем запись реестра, чтобы следующий запуск её не выметал.
+        try
+        {
+            BridgeBrowserProcessRegistry.Unregister(process.Id);
+        }
+        catch (InvalidOperationException)
+        {
+            // Идентификатор процесса уже недоступен — записи и так не будет.
+        }
 
         try
         {

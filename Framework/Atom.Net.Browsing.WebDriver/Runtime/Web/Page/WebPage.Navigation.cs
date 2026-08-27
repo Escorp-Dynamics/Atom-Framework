@@ -313,6 +313,15 @@ public sealed partial class WebPage
         ResetFrameDetachmentState();
         OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebPageNavigationStarting(TabId, url.ToString(), settings.Kind.ToString());
 
+        if (BridgeCommands is { } navigateBridge
+            && settings.Kind == NavigationKind.Default
+            && TryPrepareBridgeNavigationDocument(url, settings))
+        {
+            await navigateBridge.NavigateAsync(url, cancellationToken).ConfigureAwait(false);
+            await SyncTransportEventsAsync().ConfigureAwait(false);
+            return CreateBridgeReloadAcknowledgementResponse(url);
+        }
+
         var response = BridgeCommands is null
             ? await NavigateSyntheticWithRequestInterceptionAsync(url, settings, cancellationToken).ConfigureAwait(false)
             : Transport.Navigate(url, settings);
@@ -323,6 +332,53 @@ public sealed partial class WebPage
 
     public ValueTask<HttpsResponseMessage> NavigateAsync(Uri url, NavigationSettings settings)
         => NavigateAsync(url, settings, CancellationToken.None);
+
+    /// <summary>
+    /// Готовит документ для мостовой навигации и сообщает, можно ли её выполнять.
+    /// </summary>
+    /// <remarks>
+    /// Без <see cref="NavigationSettings.Html"/> готовить нечего — навигация обычная. С ним
+    /// документ обязан прийти из локального навигационного прокси: только так вкладка окажется
+    /// на целевом адресе с подменённым содержимым. Если маршрут прокси для вкладки не заведён,
+    /// подменить ответ нечем — тогда мостовой путь отклоняется, и навигация уходит по прежней
+    /// синтетической ветке. Открыть в этом случае настоящий сайт было бы хуже молчаливого
+    /// расхождения: вызывающий получил бы чужую страницу вместо подготовленной.
+    /// </remarks>
+    private bool TryPrepareBridgeNavigationDocument(Uri url, NavigationSettings settings)
+    {
+        // POST-навигация (тело задано) не умеет ехать через tabs.update: браузер делает только
+        // GET. Отдаём прокси самоотправляющуюся форму, которая инициирует реальный POST на тот
+        // же адрес — тогда его видит перехват (на этом строится WaitRoom-реплей). Если тело не
+        // form-urlencoded, форма его не воспроизведёт — мостовой путь отклоняется, навигация
+        // уходит по прежней синтетической ветке, а не молча искажает POST.
+        if (!settings.Body.IsEmpty)
+        {
+            return OwnerWindow.OwnerBrowser.TryEnqueueNavigationPostForm(
+                this,
+                url,
+                settings.Body,
+                ResolveContentType(settings.Headers));
+        }
+
+        if (string.IsNullOrEmpty(settings.Html))
+            return true;
+
+        return OwnerWindow.OwnerBrowser.TryEnqueueNavigationFulfillment(this, url, settings.Html);
+    }
+
+    private static string? ResolveContentType(IReadOnlyDictionary<string, string>? headers)
+    {
+        if (headers is null)
+            return null;
+
+        foreach (var header in headers)
+        {
+            if (string.Equals(header.Key, "Content-Type", StringComparison.OrdinalIgnoreCase))
+                return header.Value;
+        }
+
+        return null;
+    }
 
     private async ValueTask<HttpsResponseMessage> NavigateSyntheticWithRequestInterceptionAsync(Uri url, NavigationSettings settings, CancellationToken cancellationToken)
     {

@@ -27,6 +27,18 @@
                 "<all_urls>"
             ],
             "js": [
+                "identity.profile.js",
+                "identity.main.js"
+            ],
+            "run_at": "document_start",
+            "all_frames": true,
+            "world": "MAIN"
+        },
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
                 "content.js"
             ],
             "run_at": "document_start",

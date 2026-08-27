@@ -42,11 +42,21 @@ internal static class ProfileMaterialization
         {
             var automationPreset = ProfileAutomationPresets.Create(profile, settings, profilePath, bridgeBootstrapPreparation is not null);
             await WriteAutomationFilesAsync(profilePath, automationPreset.Files, cancellationToken).ConfigureAwait(false);
+
+            // Шрифты заявленной платформы. Кладём рядом с профилем, а не в систему пользователя:
+            // конфигурация подключается только процессу браузера через FONTCONFIG_FILE.
+            if (PlatformFontConfiguration.Build(settings.Device) is { } fontConfiguration)
+            {
+                await File.WriteAllTextAsync(
+                    IOPath.Combine(profilePath, PlatformFontConfiguration.FileName),
+                    fontConfiguration,
+                    cancellationToken).ConfigureAwait(false);
+            }
             settings.Logger?.LogProfileAutomationFilesWritten(profilePath, automationPreset.Files.Count);
 
             BridgeBootstrapPlan? bridgeBootstrap = null;
             if (bridgeBootstrapPreparation is not null)
-                bridgeBootstrap = await BridgeExtensionBootstrap.MaterializeAsync(profilePath, profile, bridgeBootstrapPreparation, cancellationToken).ConfigureAwait(false);
+                bridgeBootstrap = await BridgeExtensionBootstrap.MaterializeAsync(profilePath, profile, bridgeBootstrapPreparation, settings.Device, cancellationToken).ConfigureAwait(false);
 
             LogBootstrapStrategyDiagnostics(settings.Logger, bridgeBootstrap);
             LogManagedPolicyDiagnostics(settings.Logger, bridgeBootstrap);

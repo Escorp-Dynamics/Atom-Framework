@@ -515,6 +515,54 @@ public sealed class WebDriverBridgeInterceptionRouteTests
         });
     }
 
+    /// <summary>
+    /// Тело перехваченного POST-запроса обязано доезжать до обработчика драйвера: на нём
+    /// строится захват WaitRoom-реплея (POST на целевой URL), без тела капчу не решить.
+    /// </summary>
+    [Test]
+    public async Task BridgeServerInterceptRouteExposesPostRequestBodyToWebBrowserRequestHandler()
+    {
+        await using var server = new BridgeServer(BridgeTestHelpers.CreateSettings());
+        await server.StartAsync().ConfigureAwait(false);
+        await using var browser = new WebBrowser(new WebBrowserSettings(), materializedProfilePath: null, browserProcess: null, display: null, ownsDisplay: false, bridgeServer: server, bridgeBootstrap: null);
+        var page = (WebPage)browser.CurrentPage;
+        byte[]? capturedBody = null;
+
+        page.Request += async (_, args) =>
+        {
+            capturedBody = args.Request.Content is null
+                ? null
+                : await args.Request.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            await args.ContinueAsync().ConfigureAwait(false);
+        };
+
+        var expectedBody = "waitroom-replay=1&token=abc"u8.ToArray();
+        using var client = new HttpClient();
+        using var response = await PostJsonAsync(client,
+            $"http://127.0.0.1:{server.Port}/intercept?secret=test-secret",
+            new JsonObject
+            {
+                ["requestId"] = "waitroom-post-1",
+                ["tabId"] = page.TabId,
+                ["url"] = "https://waitroom.test/challenge",
+                ["method"] = "POST",
+                ["type"] = "main_frame",
+                ["headers"] = new JsonObject
+                {
+                    ["Content-Type"] = "application/x-www-form-urlencoded",
+                },
+                ["requestBodyBase64"] = Convert.ToBase64String(expectedBody),
+                ["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            }).ConfigureAwait(false);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(capturedBody, Is.Not.Null);
+            Assert.That(capturedBody, Is.EqualTo(expectedBody));
+        });
+    }
+
     private static Task<HttpResponseMessage> PostJsonAsync(HttpClient client, string url, JsonObject payload)
         => client.PostAsync(url, new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json"));
 }

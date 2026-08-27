@@ -28,6 +28,22 @@ public interface IWebPage : IDomContext, IAsyncDisposable
     TimeSpan WaitingTimeout { get; set; }
 
     /// <summary>
+    /// Кликает реальным виртуальным курсором (OS-level, isTrusted) по точке в координатах viewport,
+    /// НЕ резолвя DOM-элемент. Нужно для кросс-доменных целей (например чекбокс Turnstile внутри
+    /// iframe challenges.cloudflare.com), в DOM которых доступа нет: точку вычисляют из bounding-box
+    /// host-элемента iframe в родительском документе. В отличие от <see cref="IElement.ClickAsync(CancellationToken)"/>
+    /// не выполняет калибровку по центру элемента — координата используется как есть.
+    /// </summary>
+    /// <param name="viewportX">X в координатах viewport (px).</param>
+    /// <param name="viewportY">Y в координатах viewport (px).</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    ValueTask ClickViewportPointAsync(double viewportX, double viewportY, CancellationToken cancellationToken);
+
+    /// <inheritdoc cref="ClickViewportPointAsync(double, double, CancellationToken)"/>
+    ValueTask ClickViewportPointAsync(double viewportX, double viewportY)
+        => ClickViewportPointAsync(viewportX, viewportY, CancellationToken.None);
+
+    /// <summary>
     /// Срабатывает при поступлении сообщения из консоли страницы.
     /// </summary>
     event MutableEventHandler<IWebPage, ConsoleMessageEventArgs>? Console;
@@ -177,6 +193,33 @@ public interface IWebPage : IDomContext, IAsyncDisposable
     /// <inheritdoc cref="GetScreenshotAsync(CancellationToken)"/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     ValueTask<Memory<byte>> GetScreenshotAsync() => GetScreenshotAsync(CancellationToken.None);
+
+    /// <summary>
+    /// Выводит на передний план окно и ЭТУ вкладку, делая её выбранной.
+    /// </summary>
+    /// <remarks>
+    /// В отличие от <see cref="IWebWindow.ActivateAsync(CancellationToken)"/>, который выбирает
+    /// текущую вкладку окна, здесь на передний план выходит именно эта страница. В окне с
+    /// несколькими вкладками активировать нужно адресно: иначе выбранной останется чужая вкладка,
+    /// а эта продолжит работать в фоне (в фоне браузер замораживает requestAnimationFrame).
+    /// </remarks>
+    ValueTask ActivateAsync(CancellationToken cancellationToken);
+
+    /// <inheritdoc cref="ActivateAsync(CancellationToken)"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    ValueTask ActivateAsync() => ActivateAsync(CancellationToken.None);
+
+    /// <summary>
+    /// Выводит эту вкладку на передний план ЭКСКЛЮЗИВНО и удерживает его <paramref name="hold"/>,
+    /// после чего отпускает, передавая очередь соседним вкладкам того же дисплея.
+    /// </summary>
+    /// <remarks>
+    /// Нужно, когда несколько вкладок работают параллельно: передний план на дисплее один, и без
+    /// координации вкладка может вообще не получить его за весь свой бюджет — а без кадров браузер
+    /// не отрисует содержимое. Короткого удержания хватает, чтобы вкладка успела отрисоваться, при
+    /// этом параллельность сохраняется.
+    /// </remarks>
+    ValueTask ActivateExclusiveAsync(TimeSpan hold, CancellationToken cancellationToken);
 
     /// <summary>
     /// Возвращает признак видимости страницы.

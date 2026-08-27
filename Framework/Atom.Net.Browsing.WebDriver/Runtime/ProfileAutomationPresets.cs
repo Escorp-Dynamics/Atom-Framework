@@ -233,6 +233,14 @@ internal static class ProfileAutomationPresets
             "--metrics-recording-only",
             "--no-pings",
             "--password-store=basic",
+            // Не «усыплять» невыбранные (фоновые) вкладки/окна: при нескольких вкладках в одном окне
+            // невыбранная вкладка иначе замораживает requestAnimationFrame, и её Turnstile-виджет не
+            // монтирует challenge-iframe (редкие no-frame-no-token при windows=1/tabs=N). Держим все
+            // рендереры «на переднем плане» по приоритету и таймерам.
+            "--disable-renderer-backgrounding",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-background-timer-throttling",
+
         ];
 
         if (!enableManagedChromiumBootstrap)
@@ -250,6 +258,10 @@ internal static class ProfileAutomationPresets
             "OptimizationHints",
             "PaintHolding",
             "Translate",
+            // Отключаем троттлинг/усыпление фоновых страниц и детект перекрытия окон — чтобы
+            // невыбранные вкладки продолжали рендерить (rAF) и Turnstile монтировался и на них.
+            "CalculateNativeWinOcclusion",
+            "IntensiveWakeUpThrottling",
         ]);
 
         if (profile is EdgeProfile)
@@ -296,6 +308,25 @@ internal static class ProfileAutomationPresets
 
         if (TryResolveChromiumUserAgentArgument(settings) is { } userAgentArgument)
             AddChromiumArgument(arguments, userAgentArgument, "--user-agent=");
+
+        // Программный WebGL — только когда вызывающий задал синтетический профиль устройства.
+        // На виртуальном дисплее GPU нет, и контекст WebGL не создаётся вовсе: getContext('webgl')
+        // возвращает null, а vendor/renderer пустые. Для профиля «как есть» это терпимо и проверено
+        // (КПД 100%), но заявляя чужую платформу, отсутствие контекста нечем объяснить: настоящий
+        // десктопный браузер всегда отдаёт рабочий WebGL. SwiftShader даёт контекст без GPU, причём
+        // сразу в формате ANGLE — том же, что у настоящего Windows-браузера.
+        // Условие — ИМЕННО подмена WebGL, а не наличие профиля вообще. Программный рендеринг нужен
+        // ровно затем, чтобы контекст существовал и было чему отдавать подменённые строки; профилю,
+        // который WebGL не трогает, он не даёт ничего.
+        // Цена измерена на реальном таргете и оказалась втрое выше прежней оценки: median
+        // 8.48→10.11с, p90 10.48→13.30с, mean 8.87→11.01с при одинаковом КПД 100%. Платить столько
+        // за неиспользуемую поверхность нельзя — при подмене браузера/устройства в пределах своей
+        // ОС отсутствие WebGL-контекста терпимо и проверено (КПД 100%).
+        if (settings.Device?.WebGL is not null)
+        {
+            AddChromiumArgument(arguments, "--enable-unsafe-swiftshader");
+            AddChromiumArgument(arguments, "--use-angle=swiftshader", "--use-angle=");
+        }
 
         foreach (var argument in NormalizeArguments(settings.Args))
             AddChromiumArgument(arguments, argument);
@@ -347,6 +378,19 @@ internal static class ProfileAutomationPresets
             ["startup.homepage_welcome_url"] = string.Empty,
             ["startup.homepage_welcome_url.additional"] = string.Empty,
             ["browser.aboutwelcome.enabled"] = false,
+            // Многовкладочный солвер: фоновые (неактивные) вкладки НЕ должны тормозиться/замораживаться,
+            // иначе таймеры и колбэки виджета в них не идут — Turnstile не решается (chromium-аналог
+            // уже стоит: --disable-background-timer-throttling). Отключаем throttling таймеров, бюджетное
+            // троттлинг и выгрузку/заморозку неактивных вкладок.
+            ["dom.min_background_timeout_value"] = 4,
+            ["dom.min_background_timeout_value_without_budget_throttling"] = 4,
+            ["dom.timeout.enable_budget_timer_throttling"] = false,
+            ["dom.timeout.background_throttling_max_budget"] = -1,
+            ["dom.timeout.throttling_delay"] = 0,
+            ["dom.suspend_inactive_tab.enabled"] = false,
+            ["browser.tabs.unloadOnLowMemory"] = false,
+            ["browser.tabs.min_inactive_duration_before_unload"] = 0,
+            ["page_load.deprioritization_period"] = 0,
         };
 
         if (ResolveAcceptLanguages(settings) is { } acceptLanguages)

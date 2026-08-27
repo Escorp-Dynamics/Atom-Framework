@@ -7,6 +7,7 @@ export * from './Cookies/VirtualCookies';
 export * from './Diagnostics/BackgroundDebugEvents';
 export * from './Diagnostics/ConsoleSessionHealthReporter';
 export * from './Frames/FrameWorldExecution';
+export * from './Identity/MainWorldIdentity';
 export * from './Ids/RuntimeIds';
 export * from './MainWorld/MainWorldExecutionPolicy';
 export * from './Messages/BackgroundBridgeMessages';

@@ -185,4 +185,18 @@ internal sealed class BridgeSettings
     /// Диагностика результата установки доверия для managed-delivery HTTPS.
     /// </summary>
     public BridgeManagedDeliveryTrustDiagnostics ManagedDeliveryTrustDiagnostics { get; init; } = BridgeManagedDeliveryTrustDiagnostics.BypassRequired("not-evaluated");
+
+    /// <summary>
+    /// Профиль, которым навигационный прокси переотправляет трафик наружу.
+    /// </summary>
+    /// <remarks>
+    /// Прокси ТЕРМИНИРУЕТ TLS браузера и переоткрывает соединение к целевому серверу сам. Значит,
+    /// сервер видит отпечаток рукопожатия НЕ браузера, а того стека, которым переотправлен запрос.
+    /// Пока это был стек платформы, заявленная в JavaScript операционная система и наблюдаемый
+    /// отпечаток TLS/HTTP2 не имели друг к другу никакого отношения — а именно их согласованность
+    /// и проверяют защиты уровня Cloudflare.
+    ///
+    /// Значение <see langword="null"/> сохраняет прежний путь переотправки.
+    /// </remarks>
+    public Atom.Net.Https.Profiles.BrowserProfile? ForwardProfile { get; init; }
 }

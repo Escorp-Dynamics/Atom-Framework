@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
@@ -31,9 +32,19 @@ internal sealed class BridgeNavigationProxyServer(
     Func<ProxyNavigationDecisionRegistry?> registryResolver,
     Func<BridgeNavigationProxyDirectRequest, CancellationToken, ValueTask<BridgeNavigationProxyDirectResponse?>>? directRequestHandler = null,
     ILogger? diagnosticsLogger = null,
-    Func<ProxyNavigationRoute, string, string, string, string, IReadOnlyDictionary<string, string>?, CancellationToken, ValueTask>? interceptionDispatcher = null,
-    Func<ProxyNavigationRoute, string, string, string, string, int, string?, IReadOnlyDictionary<string, string>?, byte[]?, CancellationToken, ValueTask<BridgeInterceptHttpResponse>>? responseInterceptionDispatcher = null) : IAsyncDisposable
+    Func<ProxyNavigationRoute, string, string, string, string, IReadOnlyDictionary<string, string>?, byte[]?, CancellationToken, ValueTask>? interceptionDispatcher = null,
+    Func<ProxyNavigationRoute, string, string, string, string, int, string?, IReadOnlyDictionary<string, string>?, byte[]?, CancellationToken, ValueTask<BridgeInterceptHttpResponse>>? responseInterceptionDispatcher = null,
+    Atom.Net.Https.Profiles.BrowserProfile? forwardProfile = null) : IAsyncDisposable
 {
+    /// <summary>
+    /// Профиль, которым переотправляется трафик наружу.
+    /// </summary>
+    /// <remarks>
+    /// Объявлено полем, а не обращением к параметру первичного конструктора: обращение из методов
+    /// мешает JIT кешировать ссылку, а путь переотправки — самый горячий в прокси.
+    /// </remarks>
+    private readonly Atom.Net.Https.Profiles.BrowserProfile? forwardProfile = forwardProfile;
+
     private const string ProxyAuthenticationRealm = "Basic realm=\"Atom Bridge Navigation Proxy\"";
     private const int MaxRequestHeaderBytes = 128 * 1024;
     private const int MaxRequestBodyBytes = 32 * 1024 * 1024;
@@ -47,6 +58,16 @@ internal sealed class BridgeNavigationProxyServer(
 
     /// <summary>Бюджет ожидания ответа upstream. Не связан с фазами обмена с клиентом.</summary>
     private static readonly TimeSpan ForwardTimeout = TimeSpan.FromSeconds(60);
+
+    // ПРОБОВАЛИ И ОТКАТИЛИ (23.08): один повтор GET/HEAD при ProxyTunnelError (503 на установку
+    // CONNECT-туннеля к апстрим-прокси). Замер на 150 задачах: медиана 8.68→9.03с, среднее
+    // 9.17→9.79с, максимум 15.8→24.4с — при НУЛЕВОМ выигрыше по КПД (он и так 100%).
+    // Причина неэффективности: апстрим-прокси фиксирован НА ЗАДАЧУ (ProxyNavigationRoute.UpstreamProxy
+    // создаётся один раз на contextId), поэтому повтор идёт через тот же самый плохой IP — вытянул
+    // лишь ~29% запросов (503: 300→257), а штраф платили на каждой задаче. Осмысленный повтор
+    // потребовал бы ДРУГОГО апстрима, а это протаскивание запасного прокси через
+    // ProxyNavigationRoute/WebPageSettings/резолвер солвера и риск сменить exit-IP посреди челленджа.
+    // Сами 503 (ресурсы challenge-platform Cloudflare) на решаемость не влияют: КПД 100% и без них.
 
     /// <summary>
     /// Заголовок, которым расширение помечает вкладку-источник запроса.
@@ -79,9 +100,35 @@ internal sealed class BridgeNavigationProxyServer(
     private readonly Func<ProxyNavigationDecisionRegistry?> registryResolver = registryResolver;
     private readonly Func<BridgeNavigationProxyDirectRequest, CancellationToken, ValueTask<BridgeNavigationProxyDirectResponse?>>? directRequestHandler = directRequestHandler;
     private readonly ILogger? logger = diagnosticsLogger;
-    private readonly Func<ProxyNavigationRoute, string, string, string, string, IReadOnlyDictionary<string, string>?, CancellationToken, ValueTask>? interceptionDispatcher = interceptionDispatcher;
+    private readonly Func<ProxyNavigationRoute, string, string, string, string, IReadOnlyDictionary<string, string>?, byte[]?, CancellationToken, ValueTask>? interceptionDispatcher = interceptionDispatcher;
     private readonly Func<ProxyNavigationRoute, string, string, string, string, int, string?, IReadOnlyDictionary<string, string>?, byte[]?, CancellationToken, ValueTask<BridgeInterceptHttpResponse>>? responseInterceptionDispatcher = responseInterceptionDispatcher;
-    private readonly ConcurrentDictionary<string, HttpClient> forwardClients = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Клиенты к апстрим-прокси, по одному на адрес апстрима.
+    /// </summary>
+    /// <remarks>
+    /// Раньше кэш только рос: записи удалялись исключительно при остановке сервера. Апстрим у нас
+    /// выбирается НА ЗАДАЧУ, поэтому за долгий прогон накапливался отдельный
+    /// <see cref="SocketsHttpHandler"/> с собственным пулом соединений на каждую задачу — и всё это
+    /// жило до конца работы браузера. Теперь простаивающие записи вытесняются (см.
+    /// <see cref="EvictIdleForwardClients"/>).
+    /// </remarks>
+    private readonly ConcurrentDictionary<string, ForwardClientEntry> forwardClients = new(StringComparer.Ordinal);
+
+    /// <summary>Простой, после которого клиент апстрима считается ненужным.</summary>
+    private static readonly TimeSpan ForwardClientIdleTtl = TimeSpan.FromMinutes(3);
+
+    /// <summary>
+    /// Отсрочка освобождения вытесненного клиента.
+    /// </summary>
+    /// <remarks>
+    /// Вытеснение и запрос могут совпасть по времени: клиента только что взяли из кэша, а мы его
+    /// удаляем. Немедленный Dispose оборвал бы такой запрос, поэтому освобождаем с запасом —
+    /// к этому моменту он заведомо не используется (простой уже превысил TTL).
+    /// </remarks>
+    private static readonly TimeSpan ForwardClientDisposeGrace = TimeSpan.FromSeconds(30);
+
+    /// <summary>Порог, после которого имеет смысл искать простаивающие записи.</summary>
+    private const int ForwardClientSweepThreshold = 16;
     private Task? acceptLoop;
     private bool isDisposed;
 
@@ -146,7 +193,7 @@ internal sealed class BridgeNavigationProxyServer(
         cts.Dispose();
 
         foreach (var forwardClient in forwardClients.Values)
-            forwardClient.Dispose();
+            forwardClient.Client.Dispose();
 
         forwardClients.Clear();
         logger?.LogBridgeServerNavigationProxyStopped(host, Port);
@@ -220,9 +267,6 @@ internal sealed class BridgeNavigationProxyServer(
 
                 if (request.IsConnect)
                 {
-                    // На самом CONNECT токена может не быть: declarativeNetRequest правит заголовки
-                    // запроса, а не установку туннеля. Поэтому туннель принимается безусловно, а
-                    // маршрут определяется по запросу внутри TLS, где заголовок уже есть.
                     await HandleConnectTunnelAsync(stream, request, routeToken, cancellationToken).ConfigureAwait(false);
                     return;
                 }
@@ -350,6 +394,19 @@ internal sealed class BridgeNavigationProxyServer(
             return;
         }
 
+        // Вызов route token обязан прозвучать здесь, на самом CONNECT. Firefox приносит токен
+        // только как ответ на 407, а внутрь TLS-туннеля Proxy-Authorization уже не кладёт — там
+        // он общается с origin, а не с прокси. Без вызова туннель принимался без токена, запрос
+        // внутри него отклонялся 407-м, и браузер видел это как мусорный ответ сайта: страница
+        // не грузилась. На Chromium вызов выключен (ChallengeForRouteToken=false) — там токен
+        // ставит declarativeNetRequest прямо на запросе внутри туннеля.
+        if (ChallengeForRouteToken && string.IsNullOrWhiteSpace(connectRouteToken))
+        {
+            logger?.LogBridgeServerNavigationProxyRejected(request.Method, request.Target, "connect-proxy-auth-missing");
+            await WriteProxyAuthenticationRequiredAsync(stream, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         using var sslStream = new SslStream(stream, leaveInnerStreamOpen: true);
 
         using (var handshakeBudget = CreatePhaseBudget(cancellationToken))
@@ -391,14 +448,7 @@ internal sealed class BridgeNavigationProxyServer(
         var routeToken = TryReadRouteToken(tunneledRequest.Headers) ?? connectRouteToken;
         if (!TryResolveRouteForRequest(routeToken, out var route))
         {
-            if (ChallengeForRouteToken && string.IsNullOrWhiteSpace(routeToken))
-            {
-                logger?.LogBridgeServerNavigationProxyRejected(tunneledRequest.Method, tunneledRequest.Target, "proxy-auth-missing");
-                await WriteProxyAuthenticationRequiredAsync(sslStream, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            await ForwardUnroutedRequestAsync(sslStream, tunneledRequest, cancellationToken, absoluteTargetUrl).ConfigureAwait(false);
+            await HandleUnresolvedRouteTunneledRequestAsync(sslStream, tunneledRequest, routeToken, absoluteTargetUrl, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -410,6 +460,48 @@ internal sealed class BridgeNavigationProxyServer(
         }
 
         await HandleNavigationRequestAsync(sslStream, tunneledRequest, absoluteTargetUrl, route.RouteToken, route, tunnelRegistry, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Обработка запроса внутри туннеля, для которого маршрут по token не разрешился.
+    private async Task HandleUnresolvedRouteTunneledRequestAsync(
+        SslStream sslStream,
+        ProxyRequest tunneledRequest,
+        string? routeToken,
+        string absoluteTargetUrl,
+        CancellationToken cancellationToken)
+    {
+        if (ChallengeForRouteToken && string.IsNullOrWhiteSpace(routeToken))
+        {
+            logger?.LogBridgeServerNavigationProxyRejected(tunneledRequest.Method, tunneledRequest.Target, "proxy-auth-missing");
+            await WriteProxyAuthenticationRequiredAsync(sslStream, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // Стрелый запрос с драйверным (nav-) токеном, чей маршрут уже снят: вкладку
+        // переконфигурировали/закрыли между задачами, а её прежняя (подменённая) страница ещё
+        // дослала запрос на целевой origin. Форвардить его нельзя — иначе подменённая вкладка
+        // «слетает» на живой сайт (баг: сперва подмена, потом реальная страница). Навигацию
+        // отменяем 204 (вкладка остаётся на месте до следующей команды), подзапрос — обрываем.
+        if (IsDriverRouteToken(routeToken))
+        {
+            logger?.LogBridgeServerNavigationProxyStaleRouteAborted(tunneledRequest.Method, absoluteTargetUrl, routeToken!);
+            if (IsNavigationRequest(tunneledRequest))
+            {
+                await WriteDecisionResponseAsync(
+                    sslStream,
+                    tunneledRequest.Method,
+                    (int)HttpStatusCode.NoContent,
+                    reasonPhrase: null,
+                    responseHeaders: null,
+                    responseBody: null,
+                    location: null,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            return;
+        }
+
+        await ForwardUnroutedRequestAsync(sslStream, tunneledRequest, cancellationToken, absoluteTargetUrl).ConfigureAwait(false);
     }
 
     private async Task HandleNavigationRequestAsync(
@@ -918,6 +1010,7 @@ internal sealed class BridgeNavigationProxyServer(
                 absoluteTargetUrl,
                 ResolveResourceType(clientRequest),
                 clientRequest.Headers,
+                clientRequest.Body,
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -1004,6 +1097,12 @@ internal sealed class BridgeNavigationProxyServer(
     private static bool IsNavigationRequest(ProxyRequest clientRequest)
         => string.Equals(ResolveResourceType(clientRequest), "main_frame", StringComparison.OrdinalIgnoreCase);
 
+    // Префикс токенов, которые драйвер сам выдаёт на маршрут навигационного прокси
+    // (см. WebBrowser.AutoNavigationProxyRouteTokenPrefix). Такой токен без живого маршрута —
+    // это заведомо стрелый запрос от уже разобранной драйвером вкладки, а не внешний трафик.
+    private static bool IsDriverRouteToken(string? routeToken)
+        => routeToken is not null && routeToken.StartsWith("nav-", StringComparison.Ordinal);
+
     private static string CreateProxyRequestId()
         => "proxy-" + Guid.NewGuid().ToString("n", CultureInfo.InvariantCulture);
 
@@ -1057,14 +1156,46 @@ internal sealed class BridgeNavigationProxyServer(
         using var forwardBudget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         forwardBudget.CancelAfter(ForwardTimeout);
 
-        try
+        // Один повтор при обрыве CONNECT-туннеля (апстрим-прокси ответил 5xx на установку туннеля).
+        // Без него такой сбой ТЕРМИНАЛЕН: ниже мы намеренно не пишем синтетический ответ, соединение
+        // просто закрывается, и страница получает жёсткую сетевую ошибку. Браузер её не переигрывает —
+        // каждый запрос идёт по своему одноразовому туннелю (Connection: close), поэтому эвристика
+        // «повторить идемпотентный запрос на переиспользованном сокете» не применяется. На практике это
+        // били ресурсы challenge-platform Cloudflare, нужные виджету, — то есть попадало прямо в solve.
+        // Повторяем ТОЛЬКО идемпотентные методы и только сам сбой туннеля: ответ сервера (любой статус)
+        // повтору не подлежит, тело запроса не переигрываем.
+        async Task<HttpResponseMessage> SendUpstreamAsync()
         {
             var client = GetForwardClient(route.UpstreamProxy);
             using var forwardRequest = CreateForwardRequest(clientRequest, decision, forwardTargetUrl);
-            using var forwardResponse = await client.SendAsync(
+            return await client.SendAsync(
                 forwardRequest,
                 HttpCompletionOption.ResponseHeadersRead,
                 forwardBudget.Token).ConfigureAwait(false);
+        }
+
+        try
+        {
+            using var forwardResponse = await SendUpstreamAsync().ConfigureAwait(false);
+
+            // ВРЕМЕННАЯ ДИАГНОСТИКА: служебные заголовки Cloudflare на ресурсах проверки. Мы видим
+            // её ответы, потому что сами терминируем TLS, и это единственный доступный нам источник
+            // ЕЁ вердикта — всё остальное мы можем только предполагать. Заголовки вида
+            // `cf-mitigated` называют причину прямо.
+            if (forwardTargetUrl.Contains("challenges.cloudflare.com", StringComparison.Ordinal))
+            {
+                var cloudflareHeaders = forwardResponse.Headers
+                    .Where(static header => header.Key.StartsWith("cf-", StringComparison.OrdinalIgnoreCase))
+                    .Select(static header => $"{header.Key}={string.Join(',', header.Value)}")
+                    .ToArray();
+
+                var status = ((int)forwardResponse.StatusCode).ToString(CultureInfo.InvariantCulture);
+                var version = forwardResponse.Version.ToString();
+                var target = forwardTargetUrl[..Math.Min(forwardTargetUrl.Length, 90)];
+                var headers = cloudflareHeaders.Length == 0 ? "нет cf-заголовков" : string.Join(' ', cloudflareHeaders);
+
+                Console.WriteLine($"[CF-ОТВЕТ] {status} http/{version} {target} {headers}");
+            }
 
             var body = await ReadForwardResponseBodyAsync(forwardResponse, forwardBudget.Token).ConfigureAwait(false);
             if (body is null)
@@ -1162,7 +1293,17 @@ internal sealed class BridgeNavigationProxyServer(
         ProxyNavigationPendingDecision decision,
         string forwardTargetUrl)
     {
-        var request = new HttpRequestMessage(new HttpMethod(clientRequest.Method), forwardTargetUrl);
+        // Версия протокола — наблюдаемый признак, который сайт видит ДО исполнения скриптов.
+        // Настоящий браузер по HTTPS всегда согласует HTTP/2, а мы уходили наверх на 1.1: связка
+        // «UA заявляет Chrome, транспорт отвечает 1.1» противоречива сама по себе. Просим 2.0 с
+        // откатом на 1.1, если сервер его не поддерживает, — так поведение не ломается там, где
+        // HTTP/2 недоступен.
+        var request = new HttpRequestMessage(new HttpMethod(clientRequest.Method), forwardTargetUrl)
+        {
+            Version = System.Net.HttpVersion.Version20,
+            VersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
+        };
+
         var body = decision.RequestBody is { Length: > 0 } ? decision.RequestBody : clientRequest.Body;
         if (body is { Length: > 0 })
             request.Content = new ByteArrayContent(body);
@@ -1224,7 +1365,118 @@ internal sealed class BridgeNavigationProxyServer(
     private HttpClient GetForwardClient(string? upstreamProxy)
     {
         var key = upstreamProxy ?? string.Empty;
-        return forwardClients.GetOrAdd(key, static upstream => CreateForwardClient(upstream));
+        var entry = forwardClients.GetOrAdd(
+            key,
+            static (upstream, profile) => new ForwardClientEntry(CreateForwardClient(upstream, profile)),
+            forwardProfile);
+        entry.MarkUsed();
+
+        // Подметаем только когда записей уже заметно много: на горячем пути лишний обход словаря
+        // не нужен, а до порога кэш и так невелик.
+        if (forwardClients.Count > ForwardClientSweepThreshold)
+            EvictIdleForwardClients();
+
+        return entry.Client;
+    }
+
+    /// <summary>
+    /// Убирает клиентов апстрима, которыми давно не пользовались.
+    /// </summary>
+    private void EvictIdleForwardClients()
+    {
+        foreach (var pair in forwardClients)
+        {
+            if (pair.Value.IdleFor < ForwardClientIdleTtl)
+                continue;
+
+            if (forwardClients.TryRemove(pair.Key, out var removed))
+                DisposeForwardClientDelayed(removed.Client);
+        }
+    }
+
+    /// <summary>Освобождает вытесненного клиента с отсрочкой — см. <see cref="ForwardClientDisposeGrace"/>.</summary>
+    private static void DisposeForwardClientDelayed(HttpClient client)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(ForwardClientDisposeGrace).ConfigureAwait(false);
+                client.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Уже освобождён при остановке сервера — ок.
+            }
+        });
+    }
+
+    /// <summary>
+    /// Создаёт клиента переотправки, соответствующего заявляемому браузеру.
+    /// </summary>
+    /// <param name="upstreamProxySpec">Апстрим-прокси или пустая строка для прямого подключения.</param>
+    /// <param name="profile">Профиль браузера либо <see langword="null"/> для стека платформы.</param>
+    /// <returns>Клиент переотправки.</returns>
+    /// <remarks>
+    /// Прокси терминирует TLS браузера, поэтому наружу запрос уходит НАШИМ рукопожатием — и именно
+    /// его отпечаток видит целевой сервер. Собственный стек позволяет сделать этот отпечаток
+    /// таким же, как у браузера, за который мы себя выдаём: набор шифров, расширения ClientHello,
+    /// ALPN, порядок SETTINGS в HTTP/2.
+    ///
+    /// Без профиля остаётся стек платформы — прежний рабочий путь.
+    /// </remarks>
+    private static HttpClient CreateForwardClient(string upstreamProxySpec, Atom.Net.Https.Profiles.BrowserProfile? profile)
+    {
+        if (profile is not { } browserProfile) return CreateForwardClient(upstreamProxySpec);
+
+        var handler = new Atom.Net.Https.HttpsClientHandler
+        {
+            BrowserProfile = browserProfile,
+            AllowAutoRedirect = false,
+            UseCookies = false,
+            ConnectTimeout = TimeSpan.FromSeconds(10),
+
+            // Соединения кешируются на всё время жизни прокси, поэтому их нужно периодически
+            // пересоздавать: иначе они держали бы устаревшие записи DNS.
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(45),
+
+            // Проверка отзыва отключена сознательно: браузер блокирующих запросов OCSP не делает,
+            // и наш такой запрос был бы наблюдаемой аномалией. Цепочка и подпись проверяются всегда.
+            CheckCertificateRevocationList = false,
+        };
+
+        ApplyUpstreamProxy(handler, upstreamProxySpec);
+
+        return new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+    }
+
+    /// <summary>
+    /// Настраивает апстрим-прокси у клиента переотправки на собственном стеке.
+    /// </summary>
+    private static void ApplyUpstreamProxy(Atom.Net.Https.HttpsClientHandler handler, string upstreamProxySpec)
+    {
+        if (string.IsNullOrWhiteSpace(upstreamProxySpec)
+            || !Uri.TryCreate(upstreamProxySpec, UriKind.Absolute, out var upstreamProxyUri))
+        {
+            handler.UseProxy = false;
+            return;
+        }
+
+        var proxy = new WebProxy(upstreamProxyUri.GetLeftPart(UriPartial.Authority));
+
+        if (!string.IsNullOrEmpty(upstreamProxyUri.UserInfo))
+        {
+            var separatorIndex = upstreamProxyUri.UserInfo.IndexOf(':', StringComparison.Ordinal);
+            proxy.Credentials = separatorIndex >= 0
+                ? new NetworkCredential(
+                    Uri.UnescapeDataString(upstreamProxyUri.UserInfo[..separatorIndex]),
+                    Uri.UnescapeDataString(upstreamProxyUri.UserInfo[(separatorIndex + 1)..]))
+                : new NetworkCredential(Uri.UnescapeDataString(upstreamProxyUri.UserInfo), string.Empty);
+        }
+
+        handler.Proxy = proxy;
+        handler.UseProxy = true;
     }
 
     private static HttpClient CreateForwardClient(string upstreamProxySpec)
@@ -1238,6 +1490,13 @@ internal sealed class BridgeNavigationProxyServer(
             // Клиенты кешируются на всё время жизни прокси, поэтому соединения нужно
             // периодически пересоздавать: иначе они держали бы устаревшие DNS-записи.
             PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+
+            // Простаивающие соединения не должны занимать сокеты до самого пересоздания.
+            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(45),
+
+            // Ограничиваем именно УСТАНОВКУ соединения. Без этого зависший апстрим молча съедал весь
+            // бюджет запроса (ForwardTimeout, 60с), хотя понять его недоступность можно за секунды.
+            ConnectTimeout = TimeSpan.FromSeconds(10),
         };
 
         if (!string.IsNullOrWhiteSpace(upstreamProxySpec)
@@ -1731,5 +1990,25 @@ internal sealed class BridgeNavigationProxyServer(
         byte[] Body)
     {
         internal bool IsConnect => string.Equals(Method, "CONNECT", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Кэшированный клиент к апстрим-прокси вместе с отметкой последнего использования.
+    /// </summary>
+    /// <remarks>
+    /// Отметка нужна для вытеснения простаивающих записей: без неё кэш рос бы неограниченно, храня
+    /// по пулу соединений на каждый когда-либо использованный апстрим.
+    /// </remarks>
+    private sealed class ForwardClientEntry(HttpClient client)
+    {
+        private long lastUsedTimestamp = Stopwatch.GetTimestamp();
+
+        internal HttpClient Client { get; } = client;
+
+        internal TimeSpan IdleFor => Stopwatch.GetElapsedTime(lastUsedTimestamp);
+
+        // Отметка носит совещательный характер (порог простоя в минутах), поэтому обычной записи
+        // 64-битного значения достаточно — межпоточная синхронизация здесь не нужна.
+        internal void MarkUsed() => lastUsedTimestamp = Stopwatch.GetTimestamp();
     }
 }

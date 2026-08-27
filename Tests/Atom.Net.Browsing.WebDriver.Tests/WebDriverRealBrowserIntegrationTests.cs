@@ -6825,6 +6825,88 @@ public sealed class WebDriverRealBrowserIntegrationTests
         return width > 0 && height > 0 ? new Size(width, height) : Size.Empty;
     }
 
+    /// <summary>
+    /// WaitRoom-механика на реальном браузере: challenge-страница подставляется перехватом как
+    /// ответ на первичный GET, браузер её автоматически POST-ит обратно, и перехват ловит тело
+    /// реплея. Именно на этом строится AtomWaitRoomTaskProcedure.
+    /// </summary>
+    [Test]
+    public async Task RealBrowserWaitRoomChallengeFulfillCapturesBrowserPostReplay()
+    {
+        if (!WebDriverTestEnvironment.IsRealBrowserRunConfigured())
+            Assert.Ignore("Real-browser integration test requires ATOM_TEST_WEBDRIVER_BROWSER.");
+
+        await using var browser = await WebDriverTestEnvironment.LaunchAsync();
+        IgnoreIfChromiumMv3BlockingWebRequestUnsupported(browser, "WaitRoom challenge fulfill + POST replay capture");
+        var page = (WebPage)browser.CurrentWindow.CurrentPage;
+        await AssertPageBootstrappedAsync(browser, page, "WaitRoom smoke requires a bootstrapped target page.").ConfigureAwait(false);
+
+        var target = new Uri("https://waitroom.smoke/queue");
+        var challenge = Encoding.UTF8.GetBytes(
+            "<!DOCTYPE html><html><body><form id=\"f\" method=\"post\" action=\"https://waitroom.smoke/queue\">"
+            + "<input type=\"hidden\" name=\"cf_answer\" value=\"passed\"></form>"
+            + "<script>document.getElementById('f').submit();</script></body></html>");
+
+        var postBody = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var challengeServed = 0;
+
+        page.Request += async (_, args) =>
+        {
+            try
+            {
+                var isPost = HttpMethod.Post.Method.Equals(args.Request.Method.Method, StringComparison.OrdinalIgnoreCase);
+                if (!isPost)
+                {
+                    if (Interlocked.CompareExchange(ref challengeServed, 1, 0) == 0)
+                    {
+                        var response = new HttpsResponseMessage(HttpStatusCode.Forbidden)
+                        {
+                            Content = new ByteArrayContent(challenge),
+                        };
+                        response.Content.Headers.Remove("Content-Type");
+                        response.Content.Headers.TryAddWithoutValidation("Content-Type", "text/html; charset=utf-8");
+                        await args.FulfillAsync(response).ConfigureAwait(false);
+                        return;
+                    }
+
+                    await args.ContinueAsync().ConfigureAwait(false);
+                    return;
+                }
+
+                var body = args.Request.Content is null
+                    ? string.Empty
+                    : await args.Request.Content.ReadAsStringAsync().ConfigureAwait(false);
+                postBody.TrySetResult(body);
+                await args.AbortAsync(HttpStatusCode.NoContent).ConfigureAwait(false);
+            }
+            catch
+            {
+                try
+                {
+                    await args.ContinueAsync().ConfigureAwait(false);
+                }
+                catch
+                {
+                }
+            }
+        };
+
+        await page.SetRequestInterceptionAsync(true, ["*waitroom.smoke/queue*"]).ConfigureAwait(false);
+
+        try
+        {
+            await page.NavigateAsync(target).ConfigureAwait(false);
+            var captured = await postBody.Task.WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+
+            Assert.That(captured, Does.Contain("cf_answer=passed"),
+                "Перехват должен поймать тело POST-реплея, который браузер отправил из challenge-страницы.");
+        }
+        finally
+        {
+            await page.SetRequestInterceptionAsync(false).ConfigureAwait(false);
+        }
+    }
+
     private static async Task AssertPageBootstrappedAsync(WebBrowser browser, WebPage page, string message)
     {
         const string readyStateScript = "return document.readyState;";

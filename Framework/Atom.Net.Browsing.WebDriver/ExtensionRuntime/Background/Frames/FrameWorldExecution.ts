@@ -30,6 +30,27 @@ export async function executeScriptInFrames(
         }));
 }
 
+/**
+ * Исполняет код в ОДНОМ конкретном фрейме вкладки.
+ *
+ * Нужно для до-установки подмены личности во фреймы, которые создаются уже ПОСЛЕ применения
+ * контекста (виджет Cloudflare — как раз такой случай: его кросс-доменный iframe появляется
+ * позже загрузки документа). Обход всех фреймов для этого не годится: он повторно исполнял бы
+ * скрипт в уже обслуженных фреймах.
+ */
+export async function executeScriptInSingleFrame(
+    browserHost: BrowserHost,
+    runtime: any,
+    tabId: number,
+    frameId: number,
+    code: string,
+    world: ExecutionWorld,
+): Promise<string> {
+    const results = await evalInWorld(browserHost, runtime, tabId, code, false, world, frameId);
+    const first = (results ?? [])[0];
+    return first?.v ?? '';
+}
+
 async function executeScriptInFramesWithMetadata(
     browserHost: BrowserHost,
     runtime: any,
@@ -117,6 +138,10 @@ async function evalInWorld(
             {
                 target,
                 world,
+                // Ставить подмену надо ДО того, как фрейм начнёт исполнять свои скрипты. Без этого
+                // браузер вправе отложить внедрение до загрузки документа, и фрейм успевает
+                // прочитать НАСТОЯЩЕЕ окружение машины раньше нас.
+                injectImmediately: true,
                 func: async (scriptSource: string) => {
                     try {
                         let result = (0, eval)(scriptSource);
