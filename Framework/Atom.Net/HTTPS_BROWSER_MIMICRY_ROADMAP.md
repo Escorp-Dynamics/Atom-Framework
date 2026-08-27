@@ -778,7 +778,7 @@ sec-fetch-* сейчас уже неплох, но все еще не покры
 - Started: 2026-03-19
 - Last Updated: 2026-08-27
 - Exit Gate: Accept family headers match browser-family-specific references for major request contexts
-- Open Risks: Accept-Language по-прежнему захардкожен en-US без locale-поверхности профиля
+- Open Risks: Accept-Language более не захардкожен — профиль несёт `AcceptLanguageLocale`, форма (вес 0.5/0.9) по-семейная; дальнейший шаг — locale-вариации самих capture-эталонов
 
 ### Why
 
@@ -925,7 +925,7 @@ Priority уже появился, но пока это coarse heuristic layer.
 - Firefox и Safari имеют собственные H1-порядки заголовков и псевдопорядки (m,p,a,s / m,s,a,p), снятые с реальных браузеров, — не наследники Chrome.
 - Семействные TLS-отпечатки (cipher suites, расширения, их порядок, перемешивание) для Chromium/Firefox/Safari, отдельный shaping для QUIC (`QuicTlsShaping`).
 - Parity-тесты отпечатков по трём семействам.
-- Remaining gaps: Edge policy, статичное `sec-ch-ua`, Accept-Language locale surface, расширенный список multi-label public suffixes для sec-fetch-site.
+- Remaining gaps: статичное `sec-ch-ua` (позиция GREASE-бренда), Accept-Language locale-вариации capture-эталонов. Edge policy — нарочито пустой наследник (H1-форматирование Edge совпадает с Chrome); multi-label public suffixes заменены на полный ICANN-набор PSL (до 4 меток, wildcard/exception/unicode не включены).
 
 ### Why
 

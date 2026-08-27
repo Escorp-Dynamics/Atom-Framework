@@ -54,4 +54,16 @@ public readonly record struct BrowserHeaderProfile
     /// Нужно ли автоматически эмитить Accept-Language.
     /// </summary>
     public bool EmitAcceptLanguage { get; init; } = true;
+
+    /// <summary>
+    /// Локаль, от которой строится автоматический Accept-Language, в формате BCP-47
+    /// (например <c>en-US</c>, <c>ru-RU</c>).
+    /// </summary>
+    /// <remarks>
+    /// Значение строится как <c>{локаль},{базовый подтег};q={вес}</c>, где вес задаёт семейство:
+    /// Firefox — 0.5, Chromium-семейство и Safari — 0.9 (по capture-эталонам Safari тоже
+    /// шлёт полную форму с весом). У локали без региона базовый подтег не добавляется.
+    /// Явный заголовок от вызывающего слоя всегда сильнее этого дефолта.
+    /// </remarks>
+    public string AcceptLanguageLocale { get; init; } = "en-US";
 }

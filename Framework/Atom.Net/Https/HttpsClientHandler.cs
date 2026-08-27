@@ -22,20 +22,10 @@ namespace Atom.Net.Https;
 /// </summary>
 public sealed partial class HttpsClientHandler : HttpMessageHandler
 {
-    private static readonly HashSet<string> commonMultiLabelPublicSuffixes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "co.uk",
-        "org.uk",
-        "gov.uk",
-        "ac.uk",
-        "com.au",
-        "net.au",
-        "org.au",
-        "co.nz",
-        "com.br",
-        "com.mx",
-        "co.jp",
-    };
+    // Multi-label публичные суффиксы — ICANN-секция официального Public Suffix List,
+    // выгрузка 2026-08-27 (MultiLabelPublicSuffixes.cs сгенерирован из public_suffix_list.dat).
+    // Влияет на sec-fetch-site: hosts под одним публичным суффиксом считаются одним сайтом.
+    private static readonly HashSet<string> commonMultiLabelPublicSuffixes = Headers.MultiLabelPublicSuffixes.Set;
 
     private int activeRequests;
     private int isDisposed;
@@ -1664,9 +1654,24 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             : "no-cors";
 
     private static string GetDefaultAcceptLanguageValue(in BrowserProfile profile)
-        => IsFirefoxProfile(profile)
-            ? "en-US,en;q=0.5"
-            : "en-US,en;q=0.9";
+    {
+        var locale = profile.Headers.AcceptLanguageLocale;
+        if (string.IsNullOrWhiteSpace(locale))
+        {
+            locale = "en-US";
+        }
+
+        // Формы сняты с capture-эталонов: Firefox объявляет запасной язык с весом 0.5,
+        // Chromium-семейство и Safari — полную форму с весом 0.9. Локаль без региона
+        // (например «ru») базового подтега не получает — добавлять нечего.
+        var separator = locale.IndexOf('-');
+        var fallback = separator > 0 ? locale[..(separator + 1)].TrimEnd('-') : null;
+
+        var weight = IsFirefoxProfile(profile) ? "0.5" : "0.9";
+        return fallback is null
+            ? string.Concat(locale, ";q=", weight)
+            : string.Concat(locale, ",", fallback, ";q=", weight);
+    }
 
     private static string GetDefaultAcceptEncodingValue(in BrowserProfile profile, in RequestContextSnapshot requestContext)
     {
@@ -1983,10 +1988,18 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             return host;
         }
 
-        var publicSuffix = string.Concat(parts[^2], ".", parts[^1]);
-        if (parts.Length >= 3 && commonMultiLabelPublicSuffixes.Contains(publicSuffix))
+        // Самый длинный известный публичный суффикс побеждает: pvt.k12.ma.us — четырёхметочный,
+        // большинство — двухметочные. Суффикс длиной во весь host не рассматривается: сам host
+        // не может быть публичным суффиксом для запроса, у сайта должен остаться регистрируемый
+        // ярлык.
+        var maxSuffixLabels = Math.Min(parts.Length - 1, 4);
+        for (var take = maxSuffixLabels; take >= 2; take--)
         {
-            return string.Concat(parts[^3], ".", publicSuffix);
+            var publicSuffix = string.Join('.', parts[^take..]);
+            if (commonMultiLabelPublicSuffixes.Contains(publicSuffix))
+            {
+                return string.Join('.', parts[^(take + 1)..]);
+            }
         }
 
         return string.Concat(parts[^2], ".", parts[^1]);

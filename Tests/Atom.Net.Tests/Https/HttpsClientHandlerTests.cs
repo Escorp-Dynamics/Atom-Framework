@@ -157,6 +157,67 @@ public sealed class HttpsClientHandlerTests
     }
 
     [Test]
+    public async Task HttpsClientHandlerBuildsAcceptLanguageFromProfileLocaleForChromium()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+
+        var serverTask = RunServerAsync(listener, async stream =>
+        {
+            var request = await ReadRequestAsync(stream).ConfigureAwait(false);
+
+            Assert.That(request.Head, Does.Contain("Accept-Language: ru-RU,ru;q=0.9\r\n"));
+
+            var response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"u8.ToArray();
+            await stream.WriteAsync(response).ConfigureAwait(false);
+        });
+
+        var profile = Atom.Net.Https.Profiles.BrowserProfileResolver.Resolve(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+        profile = profile with { Headers = profile.Headers with { AcceptLanguageLocale = "ru-RU" } };
+
+        using var handler = new HttpsClientHandler { BrowserProfile = profile };
+        using var client = new HttpClient(handler, disposeHandler: false);
+
+        var responseMessage = await client.GetAsync(new Uri($"http://127.0.0.1:{GetPort(listener)}/locale")).ConfigureAwait(false);
+        var body = await responseMessage.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+        Assert.That(body, Is.EqualTo("ok"));
+        await serverTask.ConfigureAwait(false);
+    }
+
+    [Test]
+    public async Task HttpsClientHandlerBuildsAcceptLanguageFromProfileLocaleForFirefox()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+
+        var serverTask = RunServerAsync(listener, async stream =>
+        {
+            var request = await ReadRequestAsync(stream).ConfigureAwait(false);
+
+            // Firefox объявляет запасной язык с весом 0.5, а не 0.9, как Chromium.
+            Assert.That(request.Head, Does.Contain("Accept-Language: de-DE,de;q=0.5\r\n"));
+
+            var response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"u8.ToArray();
+            await stream.WriteAsync(response).ConfigureAwait(false);
+        });
+
+        var profile = Atom.Net.Https.Profiles.BrowserProfileResolver.Resolve(
+            "Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0");
+        profile = profile with { Headers = profile.Headers with { AcceptLanguageLocale = "de-DE" } };
+
+        using var handler = new HttpsClientHandler { BrowserProfile = profile };
+        using var client = new HttpClient(handler, disposeHandler: false);
+
+        var responseMessage = await client.GetAsync(new Uri($"http://127.0.0.1:{GetPort(listener)}/locale")).ConfigureAwait(false);
+        var body = await responseMessage.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+        Assert.That(body, Is.EqualTo("ok"));
+        await serverTask.ConfigureAwait(false);
+    }
+
+    [Test]
     public async Task HttpsClientHandlerUsesChromiumFetchPriorityDefaults()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -3576,6 +3637,43 @@ public sealed class HttpsClientHandlerTests
         var site = InvokeGetSecFetchSite(requestUri, referrer, RequestKind.Fetch);
 
         Assert.That(site, Is.EqualTo("cross-site"));
+    }
+
+    [Test]
+    public void GetSecFetchSiteTreatsSubdomainsUnderThreeLabelSuffixAsCrossSite()
+    {
+        // Географические суффиксы вроде musashino.tokyo.jp сами являются границей сайта:
+        // a.musashino.tokyo.jp и b.musashino.tokyo.jp — разные регистрируемые домены.
+        var requestUri = new Uri("https://a.musashino.tokyo.jp/");
+        var referrer = new Uri("https://b.musashino.tokyo.jp/");
+
+        var site = InvokeGetSecFetchSite(requestUri, referrer, RequestKind.Fetch);
+
+        Assert.That(site, Is.EqualTo("cross-site"));
+    }
+
+    [Test]
+    public void GetSecFetchSiteTreatsSubdomainsUnderFourLabelSuffixAsSameSite()
+    {
+        // pvt.k12.ma.us — четырёхметочный публичный суффикс из PSL. Регистрируемый домен под ним
+        // — school.pvt.k12.ma.us целиком, поэтому его поддомен остаётся тем же сайтом.
+        var requestUri = new Uri("https://a.school.pvt.k12.ma.us/");
+        var referrer = new Uri("https://school.pvt.k12.ma.us/");
+
+        var site = InvokeGetSecFetchSite(requestUri, referrer, RequestKind.Fetch);
+
+        Assert.That(site, Is.EqualTo("same-site"));
+    }
+
+    [Test]
+    public void GetSecFetchSiteTreatsSubdomainsUnderOfficialSuffixComBrAsSameSite()
+    {
+        var requestUri = new Uri("https://api.example.com.br/");
+        var referrer = new Uri("https://www.example.com.br/");
+
+        var site = InvokeGetSecFetchSite(requestUri, referrer, RequestKind.Fetch);
+
+        Assert.That(site, Is.EqualTo("same-site"));
     }
 
     [Test]
