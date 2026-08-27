@@ -1073,7 +1073,10 @@ Priority уже появился, но пока это coarse heuristic layer.
   подтверждено против `openssl s_server -early_data`.
 - Клиентский KeyUpdate реализован (SendKeyUpdateAsync: request_update=0, ротация ключа записи);
   подтверждён против openssl s_server.
-- Remaining gap: post-handshake client auth (сервер требует клиентский сертификат после рукопожатия).
+- Клиентские сертификаты (mutual TLS) реализованы: TlsSettings/обработчик ClientCertificate,
+  ответ на CertificateRequest (сертификат + DER CertificateVerify), выбор алгоритма под
+  согласованный хэш, fallback на пустой Certificate; верифицировано против `openssl s_server -Verify`.
+- Remaining gap: post-handshake client auth (запрос сертификата ПОСЛЕ рукопожатия).
 
 #### Реализовано: автоматический 0-RTT на уровне handler'а (H2)
 
