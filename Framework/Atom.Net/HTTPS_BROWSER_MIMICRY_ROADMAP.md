@@ -27,10 +27,10 @@
 | H1 value serialization | partial |
 | fetch metadata | partial |
 | referrer policy | partial |
-| rich request context | planned |
-| browser family divergence | planned |
-| TLS fingerprint | partial |
-| H2/H3 parity | planned |
+| rich request context | partial |
+| browser family divergence | partial |
+| TLS fingerprint | partial (TLS 1.3 активен; без resumption/PSK/0-RTT) |
+| H2/H3 parity | partial (H2/H3 в активном пути; без differential captures) |
 | stateful browser model | planned |
 
 ## Tracking Fields
@@ -86,14 +86,14 @@
 | 1 | Referrer Policy Layer | P0 | partial | 0 | correct Referer / Origin policy |
 | 2 | Rich Request Context Model | P0 | partial | 1 | internal context surface |
 | 3 | Full Fetch Metadata Matrix | P1 | partial | 2 | sec-fetch parity |
-| 4 | Accept Family Tables | P1 | planned | 2, 3 | browser-like Accept surface |
-| 5 | Client Hints Surface | P1 | planned | 2, 7 | Chromium family hints parity |
+| 4 | Accept Family Tables | P1 | partial | 2, 3 | browser-like Accept surface |
+| 5 | Client Hints Surface | P1 | partial | 2, 7 | Chromium family hints parity |
 | 6 | Priority Model | P1 | in-progress | 2, 4 | destination-aware Priority surface |
-| 7 | Browser Family Divergence Layer | P1 | planned | 2, 4, 5, 6 | non-Chromium parity |
-| 8 | Redirect / Cookie / Conditional Chains | P2 | planned | 1, 2, 4 | chain parity |
-| 9 | Authentication / Proxy / Challenge Surface | P2 | planned | 8 | auth/proxy parity |
-| 10 | TLS 1.3 And ClientHello Parity | P0 | planned | 0 | transport fingerprint parity |
-| 11 | HTTP/2 And HTTP/3 Reality Layer | P0 | planned | 10 | protocol parity |
+| 7 | Browser Family Divergence Layer | P1 | partial | 2, 4, 5, 6 | non-Chromium parity |
+| 8 | Redirect / Cookie / Conditional Chains | P2 | partial | 1, 2, 4 | chain parity |
+| 9 | Authentication / Proxy / Challenge Surface | P2 | partial | 8 | auth/proxy parity |
+| 10 | TLS 1.3 And ClientHello Parity | P0 | partial | 0 | transport fingerprint parity |
+| 11 | HTTP/2 And HTTP/3 Reality Layer | P0 | partial | 10 | protocol parity |
 | 12 | Stateful Browser Network Model | P2 | planned | 1-11 | session-level parity |
 
 ## Phase Progress Overview
@@ -776,9 +776,9 @@ sec-fetch-* сейчас уже неплох, но все еще не покры
 - Status: partial
 - Owner: unassigned
 - Started: 2026-03-19
-- Last Updated: 2026-03-20
+- Last Updated: 2026-08-27
 - Exit Gate: Accept family headers match browser-family-specific references for major request contexts
-- Open Risks: Accept-Encoding and locale surfaces remain under-modeled outside the currently closed Chromium worker-class, media-element, and modulepreload branches; broader family coverage still needs dedicated follow-up before any cross-browser Accept-Encoding claims.
+- Open Risks: Accept-Language по-прежнему захардкожен en-US без locale-поверхности профиля
 
 ### Why
 
@@ -819,12 +819,17 @@ sec-fetch-* сейчас уже неплох, но все еще не покры
 
 ### Tracking
 
-- Status: planned
+- Status: partial
 - Owner: unassigned
-- Started: not started
-- Last Updated: 2026-03-20
+- Started: 2026-08
+- Last Updated: 2026-08-27
 - Exit Gate: Chromium-family client hints emitted by active path align with negotiated browser references
-- Open Risks: current implementation only models a minimal hint subset
+- Open Risks: значения статичны — `sec-ch-ua` собирается из UA с GREASE-брендом первым; критичности/порядка как у реального Chromium (ротация позиции GREASE-бренда) нет; Accept-CH negotiation не моделируется
+
+### Current Progress (2026-08-27)
+
+- Поверхность порядков расширена до ~15 hint-имён (full-version-list, arch, bitness, model, platform-version, wow64, form-factors, prefers-*, device-memory, dpr, viewport-*, rtt, downlink, ect) в `HeadersFormattingPolicy`.
+- Базовая тройка (sec-ch-ua / sec-ch-ua-mobile / sec-ch-ua-platform) эмитится активным путём; бренд Edge определяется с учётом мобильных маркеров (EdgA/, EdgiOS/).
 
 ### Why
 
@@ -908,12 +913,19 @@ Priority уже появился, но пока это coarse heuristic layer.
 
 ### Tracking
 
-- Status: planned
+- Status: partial
 - Owner: unassigned
-- Started: not started
-- Last Updated: 2026-03-20
+- Started: 2026-08
+- Last Updated: 2026-08-27
 - Exit Gate: same request context yields distinct but correct surfaces for Chrome, Edge, Firefox and Safari
-- Open Risks: non-Chromium references are not yet encoded into runtime tables
+- Open Risks: `EdgeHeadersFormattingPolicy` остаётся маркером-наследником Chrome; значение `sec-ch-ua` статично (GREASE-бренд первым); Accept-Language захардкожен en-US
+
+### Current Progress (2026-08-27)
+
+- Firefox и Safari имеют собственные H1-порядки заголовков и псевдопорядки (m,p,a,s / m,s,a,p), снятые с реальных браузеров, — не наследники Chrome.
+- Семействные TLS-отпечатки (cipher suites, расширения, их порядок, перемешивание) для Chromium/Firefox/Safari, отдельный shaping для QUIC (`QuicTlsShaping`).
+- Parity-тесты отпечатков по трём семействам.
+- Remaining gaps: Edge policy, статичное `sec-ch-ua`, Accept-Language locale surface, расширенный список multi-label public suffixes для sec-fetch-site.
 
 ### Why
 
@@ -952,12 +964,17 @@ Priority уже появился, но пока это coarse heuristic layer.
 
 ### Tracking
 
-- Status: planned
+- Status: partial
 - Owner: unassigned
-- Started: not started
-- Last Updated: 2026-03-20
+- Started: 2026-08
+- Last Updated: 2026-08-27
 - Exit Gate: redirect and cache-related chains behave like browser references end-to-end
-- Open Risks: chain behavior depends on policy and context layers not yet completed
+- Open Risks: conditional requests (If-Modified-Since/If-None-Match) и кэш по-прежнему отсутствуют; cookie-поведение — стандартный .NET CookieContainer без SameSite/Partitioned-семантики
+
+### Current Progress (2026-08-27)
+
+- Автоматические редиректы реализованы: `AllowAutoRedirect`, `MaxAutomaticRedirections`, цикл с пределом (`HttpsClientHandler`).
+- Cookie-джар на ответах/запросах (`CookieContainer`) в активном пути.
 
 ### Why
 
@@ -993,12 +1010,18 @@ Priority уже появился, но пока это coarse heuristic layer.
 
 ### Tracking
 
-- Status: planned
+- Status: partial
 - Owner: unassigned
-- Started: not started
-- Last Updated: 2026-03-20
+- Started: 2026-08
+- Last Updated: 2026-08-27
 - Exit Gate: auth/proxy behavior no longer exposes obvious non-browser request shaping on supported branches
-- Open Risks: parts of the proxy path are intentionally not connected in the minimal handler path
+- Open Risks: auth challenge flow (401/proxy-407 интерактив) по-прежнему не моделируется; прокси-путь ограничен CONNECT + Basic
+
+### Current Progress (2026-08-27)
+
+- Прокси в кастомном стеке работает: CONNECT-туннель (`HttpsTransportConnector`), Basic-credentials, bypass-list; H3 за прокси намеренно даунгрейдится до H2.
+- Мёртвые `ProxyValidator`/`Ja3`/`JitterSettings` удалены из модуля.
+- Remaining gaps: 401/407 challenge flows, Negotiate/NTLM-поверхности, прокси-специфичный request shaping.
 
 ### Why
 
@@ -1026,12 +1049,21 @@ Priority уже появился, но пока это coarse heuristic layer.
 
 ### Tracking
 
-- Status: planned
+- Status: partial
 - Owner: unassigned
-- Started: not started
-- Last Updated: 2026-03-20
+- Started: 2026-08
+- Last Updated: 2026-08-27
 - Exit Gate: active transport path reaches practical browser-family TLS fingerprint parity
-- Open Risks: current custom runtime is still TLS 1.2-only on the active path
+- Open Risks: session resumption/PSK/0-RTT отсутствуют (классы расширений есть, но не используются); повторные соединения выдают отсутствие ticket reuse
+
+### Current Progress (2026-08-27)
+
+- Активный TLS 1.3 путь реализован: HKDF key schedule (`Tls13KeySchedule.cs`), AEAD AES-GCM и ChaCha20-Poly1305 (`ChaCha20Poly1305Aead.cs`), key_share X25519 и гибрид X25519MLKem768, HelloRetryRequest (ровно один повтор), KeyUpdate (ротация ключа чтения), совместимостный CCS (RFC 8446 §D.4).
+- Выбор версии происходит до ClientHello по `MaxVersion` профиля (`HttpsTransportConnector`); downgrade на TLS 1.2 — повторным соединением с `forceTls12`.
+- ClientHello: GREASE (random/ciphers/extensions), key_share с GREASE, ECH grease, ALPS (application_settings), status_request, psk_key_exchange_modes, family-specific порядки расширений (Chromium с перемешиванием, Firefox stable, Safari).
+- Семействные профили переведены на `supported_versions [1.3, 1.2]`; TLS 1.2 путь покрывает AES-GCM, ChaCha20-Poly1305 (RFC 7905) и CBC-наборы через единую таблицу `Tls12CipherSuiteParameters` (отпечаточные наборы предлагаются только если реализованы либо честно отбиваются `IsAvailable`).
+- Есть parity-тесты отпечатков Chrome/Firefox/Safari, key schedule, HRR, X25519, GREASE placement.
+- Remaining gaps: session resumption/PSK, 0-RTT, клиентский KeyUpdate, post-handshake client auth.
 
 ### Why
 
@@ -1071,12 +1103,21 @@ Priority уже появился, но пока это coarse heuristic layer.
 
 ### Tracking
 
-- Status: planned
+- Status: partial
 - Owner: unassigned
-- Started: not started
-- Last Updated: 2026-03-20
+- Started: 2026-08
+- Last Updated: 2026-08-27
 - Exit Gate: protocol selection and active runtime behavior align with modern browser reality
-- Open Risks: H2/H3 code exists in the repository but is not the active parity path today
+- Open Risks: H2/H3 активны, но без differential captures против реальных браузеров; PRIORITY-кадры игнорируются (priority только заголовком); за прокси H3 намеренно даунгрейдится до H2
+
+### Current Progress (2026-08-27)
+
+- HTTP/2 в активном пути: `Http2Session` (preface, SETTINGS, flow control с CAS-окном, streams, GOAWAY, HPACK encoder/decoder), `Https2Connection` с ALPN-handshake через общий `HttpsTransportConnector`.
+- HTTP/3 в активном пути: QUIC-транспорт (TLS-in-QUIC, header protection RFC 9001, loss recovery, packet number spaces), `Https3Connection` + `Http3Session` с QPACK; выбор через Alt-Svc кэш с fallback на H2.
+- Выбор H2/H1 — по факту ALPN после одного рукопожатия; H3 за прокси даунгрейдится до H2 (намеренно).
+- QUIC TLS-шейпинг отдельным профилем (`QuicTlsShaping`) — 3 cipher suites, без GREASE.
+- Тесты: `Http2SessionTests`, `Http2FingerprintTests`, `HPackIndexingTests`, QPack stream tests, QUIC protocol/loss-recovery/parity suites.
+- Remaining gaps: browser differential captures на H2/H3, PRIORITY/priority evolution, H2 GOAWAY-политики переиспользования соединений как у браузеров.
 
 ### Why
 

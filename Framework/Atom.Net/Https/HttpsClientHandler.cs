@@ -16,8 +16,9 @@ using Atom.Net.Tls;
 namespace Atom.Net.Https;
 
 /// <summary>
-/// Минимальный обработчик запросов для текущего H1-среза.
-/// На этом этапе поддерживается HTTP/1.1 поверх cleartext и минимального custom TLS 1.2 path через <see cref="Https11Connection"/>.
+/// Обработчик запросов поверх собственного TLS/HTTP-стека с браузерными профилями.
+/// Поддерживаются HTTP/1.1 (<see cref="Https11Connection"/>), HTTP/2 по ALPN и HTTP/3 поверх QUIC;
+/// TLS-версия (1.2/1.3) выбирается до ClientHello по профилю браузера.
 /// </summary>
 public sealed partial class HttpsClientHandler : HttpMessageHandler
 {
