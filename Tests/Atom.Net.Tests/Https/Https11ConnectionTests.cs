@@ -226,7 +226,7 @@ public sealed class Https11ConnectionTests
             Assert.That(requestHead, Does.Contain("Host: localhost\r\n"));
             Assert.That(requestHead, Does.Contain("Referer: https://example.net/\r\n"));
             Assert.That(requestHead, Does.Contain("Origin: https://example.net\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-site: cross-site\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Site: cross-site\r\n"));
         });
     }
 
@@ -253,7 +253,7 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Contain("Referer: https://localhost/origin-page\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-site: same-origin\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Site: same-origin\r\n"));
         });
     }
 
@@ -281,9 +281,9 @@ public sealed class Https11ConnectionTests
             Assert.That(requestHead, Does.Contain("Host: api.example.co.uk\r\n"));
             Assert.That(requestHead, Does.Contain("Referer: https://www.example.co.uk/\r\n"));
             Assert.That(requestHead, Does.Contain("Origin: https://www.example.co.uk\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-site: same-site\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: empty\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Site: same-site\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: empty\r\n"));
         });
     }
 
@@ -312,9 +312,9 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Not.Contain("\r\nReferer:"));
             Assert.That(requestHead, Does.Contain("Origin: https://example.net\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-site: cross-site\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: empty\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Site: cross-site\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: empty\r\n"));
         });
     }
 
@@ -342,9 +342,9 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Not.Contain("\r\nReferer:"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-site: same-origin\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: empty\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Site: same-origin\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: empty\r\n"));
         });
     }
 
@@ -372,9 +372,9 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Not.Contain("\r\nReferer:"));
             Assert.That(requestHead, Does.Contain("Origin: https://localhost\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-site: cross-site\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: empty\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Site: cross-site\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: empty\r\n"));
         });
     }
 
@@ -404,8 +404,8 @@ public sealed class Https11ConnectionTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: navigate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: iframe\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: navigate\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: iframe\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nsec-fetch-user:"));
         });
     }
@@ -439,9 +439,9 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Contain("Referer: https://localhost/origin-page\r\n"));
             Assert.That(requestHead, Does.Contain("Origin: https://localhost\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: navigate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: iframe\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-user: ?1\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: navigate\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: iframe\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-User: ?1\r\n"));
         });
     }
 
@@ -475,9 +475,9 @@ public sealed class Https11ConnectionTests
             Assert.That(requestHead, Does.Contain("Origin: https://localhost\r\n"));
             Assert.That(requestHead, Does.Contain($"Content-Type: multipart/form-data; boundary=\"{boundary}\"\r\n"));
             Assert.That(requestHead, Does.Contain("Upgrade-Insecure-Requests: 1\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: navigate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: document\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-user: ?1\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: navigate\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: document\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-User: ?1\r\n"));
             Assert.That(requestHead, Does.Contain("Accept-Encoding: gzip, deflate\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\npriority:"));
         });
@@ -513,8 +513,8 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Contain("Referer: https://localhost/origin-page\r\n"));
             Assert.That(requestHead, Does.Contain("Origin: https://localhost\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: navigate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: iframe\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: navigate\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: iframe\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nsec-fetch-user:"));
         });
     }
@@ -546,8 +546,8 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Contain("Accept: */*\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\npriority:"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: manifest\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: manifest\r\n"));
         });
     }
 
@@ -576,8 +576,8 @@ public sealed class Https11ConnectionTests
             Assert.That(requestHead, Does.Contain("Accept-Encoding: gzip, deflate\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\npriority:"));
             Assert.That(requestHead, Does.Contain("Origin: https://localhost\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: script\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: script\r\n"));
         });
     }
 
@@ -610,8 +610,8 @@ public sealed class Https11ConnectionTests
             Assert.That(requestHead, Does.Contain("Accept: */*\r\n"));
             Assert.That(requestHead, Does.Contain("Accept-Encoding: gzip, deflate\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\npriority:"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: same-origin\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: worker\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: same-origin\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: worker\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
         });
     }
@@ -646,8 +646,8 @@ public sealed class Https11ConnectionTests
             Assert.That(requestHead, Does.Contain("Accept-Encoding: gzip, deflate\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\npriority:"));
             Assert.That(requestHead, Does.Contain("Origin: https://localhost\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: script\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: script\r\n"));
         });
     }
 
@@ -677,8 +677,8 @@ public sealed class Https11ConnectionTests
             Assert.That(requestHead, Does.Contain("sec-purpose: prefetch\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\npriority:"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: no-cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: empty\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: no-cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: empty\r\n"));
         });
     }
 
@@ -710,8 +710,8 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Contain("Accept: text/css,*/*;q=0.1\r\n"));
             Assert.That(requestHead, Does.Contain("Accept-Encoding: gzip, deflate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: no-cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: style\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: no-cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: style\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
             Assert.That(requestHead, Does.Not.Contain("\r\npriority:"));
         });
@@ -777,8 +777,8 @@ public sealed class Https11ConnectionTests
         Assert.Multiple(() =>
         {
             Assert.That(requestHead, Does.Contain("Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: no-cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: image\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: no-cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: image\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
         });
     }
@@ -876,8 +876,8 @@ public sealed class Https11ConnectionTests
         Assert.Multiple(() =>
         {
             Assert.That(requestHead, Does.Contain("Accept: */*\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: no-cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: script\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: no-cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: script\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
         });
     }
@@ -975,8 +975,8 @@ public sealed class Https11ConnectionTests
         Assert.Multiple(() =>
         {
             Assert.That(requestHead, Does.Contain("Accept: */*\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: font\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: font\r\n"));
             Assert.That(requestHead, Does.Contain("Origin: https://localhost\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\npriority:"));
         });
@@ -1011,8 +1011,8 @@ public sealed class Https11ConnectionTests
             Assert.That(requestHead, Does.Contain("Accept: */*\r\n"));
             Assert.That(requestHead, Does.Contain("Accept-Encoding: identity;q=1, *;q=0\r\n"));
             Assert.That(requestHead, Does.Contain("Range: bytes=0-\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: no-cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: audio\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: no-cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: audio\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
             Assert.That(requestHead, Does.Not.Contain("\r\npriority:"));
         });
@@ -1047,8 +1047,8 @@ public sealed class Https11ConnectionTests
             Assert.That(requestHead, Does.Contain("Accept: */*\r\n"));
             Assert.That(requestHead, Does.Contain("Accept-Encoding: identity;q=1, *;q=0\r\n"));
             Assert.That(requestHead, Does.Contain("Range: bytes=0-\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: no-cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: video\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: no-cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: video\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
             Assert.That(requestHead, Does.Not.Contain("\r\npriority:"));
         });
@@ -1083,8 +1083,8 @@ public sealed class Https11ConnectionTests
             Assert.That(requestHead, Does.Contain("Accept: */*\r\n"));
             Assert.That(requestHead, Does.Contain("Accept-Encoding: gzip, deflate\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\npriority:"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: same-origin\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: sharedworker\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: same-origin\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: sharedworker\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
         });
     }
@@ -1114,8 +1114,8 @@ public sealed class Https11ConnectionTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: navigate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: iframe\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: navigate\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: iframe\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nsec-fetch-user:"));
         });
     }
@@ -1144,9 +1144,9 @@ public sealed class Https11ConnectionTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(requestHead, Does.Contain("sec-fetch-site: same-origin\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: navigate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: iframe\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Site: same-origin\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: navigate\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: iframe\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nsec-fetch-user:"));
         });
     }
@@ -1177,8 +1177,8 @@ public sealed class Https11ConnectionTests
         Assert.Multiple(() =>
         {
             Assert.That(requestHead, Does.Contain("Accept-Encoding: gzip, deflate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: same-origin\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: worker\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: same-origin\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: worker\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
         });
     }
@@ -1209,9 +1209,9 @@ public sealed class Https11ConnectionTests
         Assert.Multiple(() =>
         {
             Assert.That(requestHead, Does.Contain("Accept-Encoding: gzip, deflate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-site: same-origin\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: same-origin\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: serviceworker\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Site: same-origin\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: same-origin\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: serviceworker\r\n"));
             Assert.That(requestHead, Does.Contain("Service-Worker: script\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
             Assert.That(requestHead, Does.Not.Contain("\r\npriority:"));
@@ -1246,9 +1246,9 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Contain("Accept: */*\r\n"));
             Assert.That(requestHead, Does.Contain("Accept-Encoding: gzip, deflate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-site: same-origin\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: serviceworker\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Site: same-origin\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: serviceworker\r\n"));
             Assert.That(requestHead, Does.Contain("Origin: https://localhost\r\n"));
             Assert.That(requestHead, Does.Contain("Referer: https://localhost/sw-module.js\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\npriority:"));
@@ -1278,9 +1278,9 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Contain("Referer: http://www.example.co.uk/\r\n"));
             Assert.That(requestHead, Does.Contain("Origin: http://www.example.co.uk\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-site: cross-site\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: empty\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Site: cross-site\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: empty\r\n"));
         });
     }
 
@@ -1311,8 +1311,8 @@ public sealed class Https11ConnectionTests
         Assert.Multiple(() =>
         {
             Assert.That(requestHead, Does.Contain("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: navigate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: iframe\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: navigate\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: iframe\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nsec-fetch-user:"));
         });
     }
@@ -1341,8 +1341,8 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Contain("Referer: https://localhost/origin-page\r\n"));
             Assert.That(requestHead, Does.Contain("Origin: https://localhost\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: navigate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: document\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: navigate\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: document\r\n"));
         });
     }
 
@@ -1374,9 +1374,9 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Contain("Referer: https://localhost/origin-page\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: navigate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: document\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-user: ?1\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: navigate\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: document\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-User: ?1\r\n"));
         });
     }
 
@@ -1409,10 +1409,10 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Not.Contain("\r\nReferer:"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-site: same-origin\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: navigate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: document\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-user: ?1\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Site: same-origin\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: navigate\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: document\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-User: ?1\r\n"));
         });
     }
 
@@ -1445,10 +1445,10 @@ public sealed class Https11ConnectionTests
         {
             Assert.That(requestHead, Does.Not.Contain("\r\nReferer:"));
             Assert.That(requestHead, Does.Contain("Origin: https://example.net\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-site: cross-site\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: navigate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: document\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-user: ?1\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Site: cross-site\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: navigate\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: document\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-User: ?1\r\n"));
         });
     }
 
@@ -1477,8 +1477,8 @@ public sealed class Https11ConnectionTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: navigate\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: document\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: navigate\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: document\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nsec-fetch-user:"));
             Assert.That(requestHead, Does.Contain("Upgrade-Insecure-Requests: 1\r\n"));
         });

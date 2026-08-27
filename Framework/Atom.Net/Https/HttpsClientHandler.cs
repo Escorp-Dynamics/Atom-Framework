@@ -1634,7 +1634,8 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             secFetchMode,
             isUserActivated,
             isReload,
-            isFormSubmission);
+            isFormSubmission,
+            request.Version.Major);
     }
 
     private static void ApplyRequestKindDefaults(HttpsRequestMessage request, in BrowserProfile profile, in RequestContextSnapshot requestContext)
@@ -1896,6 +1897,12 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         if (requestContext.Kind is RequestKind.Navigation)
         {
             if (requestContext.IsFormSubmission)
+            {
+                return null;
+            }
+
+            // Chromium шлёт Priority-заголовок только на h2/h3; на h1 его НЕТ (capture Chromium 151).
+            if (requestContext.RequestVersionMajor is 1)
             {
                 return null;
             }
@@ -2474,5 +2481,6 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         string SecFetchMode,
         bool IsUserActivated,
         bool IsReload,
-        bool IsFormSubmission);
+        bool IsFormSubmission,
+        int RequestVersionMajor);
 }
