@@ -176,6 +176,52 @@ public static class Tls13KeySchedule
         => ExpandLabel(hash, trafficSecret, "traffic upd", [], GetHashLength(hash));
 
     /// <summary>
+    /// Выводит resumption master secret (RFC 8446, §7.1).
+    /// </summary>
+    /// <param name="hash">Хэш-функция.</param>
+    /// <param name="masterSecret">Master secret.</param>
+    /// <param name="transcriptHash">Хэш транскрипта ПОСЛЕ Finished клиента.</param>
+    /// <returns>Секрет, из которого выводятся PSK билетов сессии.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static byte[] DeriveResumptionMasterSecret(HashAlgorithmName hash, ReadOnlySpan<byte> masterSecret, ReadOnlySpan<byte> transcriptHash)
+        => DeriveSecret(hash, masterSecret, "res master", transcriptHash);
+
+    /// <summary>
+    /// Выводит PSK конкретного билета сессии (RFC 8446, §4.6.1).
+    /// </summary>
+    /// <param name="hash">Хэш-функция согласованного набора.</param>
+    /// <param name="resumptionMasterSecret">Секрет из <see cref="DeriveResumptionMasterSecret"/>.</param>
+    /// <param name="ticketNonce">Значение ticket_nonce билета.</param>
+    /// <returns>PSK для возобновления сессии.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static byte[] DeriveResumptionPsk(HashAlgorithmName hash, ReadOnlySpan<byte> resumptionMasterSecret, ReadOnlySpan<byte> ticketNonce)
+        => ExpandLabel(hash, resumptionMasterSecret, "resumption", ticketNonce, GetHashLength(hash));
+
+    /// <summary>
+    /// Выводит binder key из early secret (RFC 8446, §4.2.11.2).
+    /// </summary>
+    /// <param name="hash">Хэш-функция набора, с которым выдавался билет.</param>
+    /// <param name="earlySecret">Early secret, выведенный из PSK билета.</param>
+    /// <param name="external">Внешний PSK («ext binder») либо билет сессии («res binder»).</param>
+    /// <returns>Ключ для вычисления binder'а.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static byte[] DeriveBinderKey(HashAlgorithmName hash, ReadOnlySpan<byte> earlySecret, bool external)
+        => DeriveSecret(hash, earlySecret, external ? "ext binder" : "res binder", EmptyHash(hash));
+
+    /// <summary>
+    /// Вычисляет значение binder'а — HMAC по хэшу усечённого ClientHello (RFC 8446, §4.2.11.2).
+    /// </summary>
+    /// <param name="hash">Хэш-функция набора, с которым выдавался билет.</param>
+    /// <param name="binderKey">Ключ из <see cref="DeriveBinderKey"/>.</param>
+    /// <param name="truncatedClientHelloHash">Хэш транскрипта с усечённым ClientHello.</param>
+    /// <returns>Значение binder'а длиной с хэш.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static byte[] ComputePskBinder(HashAlgorithmName hash, ReadOnlySpan<byte> binderKey, ReadOnlySpan<byte> truncatedClientHelloHash)
+        => hash == HashAlgorithmName.SHA384
+            ? HMACSHA384.HashData(binderKey, truncatedClientHelloHash)
+            : HMACSHA256.HashData(binderKey, truncatedClientHelloHash);
+
+    /// <summary>
     /// Возвращает длину вывода хэш-функции в байтах.
     /// </summary>
     /// <param name="hash">Хэш-функция.</param>

@@ -1054,7 +1054,7 @@ Priority уже появился, но пока это coarse heuristic layer.
 - Started: 2026-08
 - Last Updated: 2026-08-27
 - Exit Gate: active transport path reaches practical browser-family TLS fingerprint parity
-- Open Risks: session resumption/PSK/0-RTT отсутствуют (классы расширений есть, но не используются); повторные соединения выдают отсутствие ticket reuse
+- Open Risks: 0-RTT не реализован (только psk_dhe_ke-ресумпция); ticket-кэш — на уровень handler по имени узла, без partitioning
 
 ### Current Progress (2026-08-27)
 
@@ -1063,7 +1063,9 @@ Priority уже появился, но пока это coarse heuristic layer.
 - ClientHello: GREASE (random/ciphers/extensions), key_share с GREASE, ECH grease, ALPS (application_settings), status_request, psk_key_exchange_modes, family-specific порядки расширений (Chromium с перемешиванием, Firefox stable, Safari).
 - Семействные профили переведены на `supported_versions [1.3, 1.2]`; TLS 1.2 путь покрывает AES-GCM, ChaCha20-Poly1305 (RFC 7905) и CBC-наборы через единую таблицу `Tls12CipherSuiteParameters` (отпечаточные наборы предлагаются только если реализованы либо честно отбиваются `IsAvailable`).
 - Есть parity-тесты отпечатков Chrome/Firefox/Safari, key schedule, HRR, X25519, GREASE placement.
-- Remaining gaps: session resumption/PSK, 0-RTT, клиентский KeyUpdate, post-handshake client auth.
+- Session resumption/PSK реализована: NewSessionTicket парсится, PSK выводится через "res master"/"resumption", кэш тикетов на handler (по SNI), ClientHello с pre_shared_key (замыкающее) + binder'ом; выбор сервера виден по pre_shared_key в ServerHello; fallback на полное рукопожатие при отказе. Билеты не используются для 0-RTT.
+- Регрессия против `openssl s_server`: возобновление подтверждено принятием PSK сервером; внешний PSK (ext binder) покрыт отдельным тестом.
+- Remaining gaps: 0-RTT, клиентский KeyUpdate, post-handshake client auth.
 
 ### Why
 

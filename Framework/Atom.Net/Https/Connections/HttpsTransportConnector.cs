@@ -142,6 +142,11 @@ internal static class HttpsTransportConnector
                     throw;
                 }
 
+                // Билеты сессии приходят уже после рукопожатия, поэтому подписка ставится здесь:
+                // поток умирает вместе с соединением, отписываться не нужно.
+                if (tlsStream is Tls13Stream tls13 && options.SessionTicketSink is { } sink)
+                    tls13.SessionTicketReceived += ticket => sink(options.Host, ticket);
+
                 negotiated = tlsStream.NegotiatedProtocol;
                 applicationTransport = tlsStream;
             }
@@ -359,6 +364,30 @@ internal static class HttpsTransportConnector
 
         var extensions = MergeTlsExtensions(options.Host, alpnProtocols, defaultExtensions, profileSettings?.Extensions);
 
+        // Предложение возобновления ставится строго после всех расширений: pre_shared_key
+        // обязана замыкать приветствие (RFC 8446, §4.2.11), psk_key_exchange_modes идёт рядом.
+        if (options.PskOffer is { } pskOffer)
+        {
+            if (extensions.All(extension => extension.Id is not 0x002d))
+            {
+                // См. Tls13ClientHandshake.WithPskExtensions: Modes — только явным присваиванием.
+                extensions.Add(new PskKeyExchangeModesTlsExtension { Modes = [PskKeyExchangeMode.PskDheKe] });
+            }
+
+            extensions.Add(new PreSharedKeyTlsExtension
+            {
+                Identities = [new PskIdentity
+                {
+                    Identity = pskOffer.Identity,
+                    ObfuscatedTicketAge = pskOffer.ObfuscatedTicketAge,
+                }],
+
+                // Заполнитель нужной длины: значение binder'а считает Tls13ClientHandshake по
+                // собранному приветствию — до сборки его хэш неизвестен.
+                Binders = [new byte[pskOffer.BinderLength]],
+            });
+        }
+
         var handshakeTimeout = profileSettings?.HandshakeTimeout ?? options.ConnectTimeout;
         if (handshakeTimeout <= TimeSpan.Zero || handshakeTimeout == Timeout.InfiniteTimeSpan)
         {
@@ -394,6 +423,7 @@ internal static class HttpsTransportConnector
             // работала на живом пути, хотя в сборке сообщения была включена.
             PermuteExtensions = profileSettings?.PermuteExtensions ?? false,
             PermutationAnchors = profileSettings?.PermutationAnchors,
+            PskOffer = options.PskOffer,
         };
     }
 

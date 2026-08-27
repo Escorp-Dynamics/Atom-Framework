@@ -156,4 +156,14 @@ internal readonly record struct HttpsConnectionOptions
     /// разные точки сети и переиспользовать их вперемешку нельзя.
     /// </remarks>
     public Uri? UpstreamProxy { get; init; }
+
+    /// <summary>
+    /// Предложение возобновления сессии TLS 1.3 для этого соединения; <see langword="null"/> — полное рукопожатие.
+    /// </summary>
+    public Tls.Tls13PskOffer? PskOffer { get; init; }
+
+    /// <summary>
+    /// Куда передавать билеты сессии, выданные этим соединением; первый аргумент — имя узла.
+    /// </summary>
+    public Action<string, Tls.Tls13SessionTicket>? SessionTicketSink { get; init; }
 }

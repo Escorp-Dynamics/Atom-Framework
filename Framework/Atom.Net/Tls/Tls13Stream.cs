@@ -83,6 +83,9 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
     /// <inheritdoc cref="Tls13ClientHandshake.ServerCertificates"/>
     public IReadOnlyList<X509Certificate2> ServerCertificates => handshake.ServerCertificates;
 
+    /// <inheritdoc cref="Tls13ClientHandshake.ResumptionAccepted"/>
+    public bool ResumptionAccepted => handshake.ResumptionAccepted;
+
     /// <inheritdoc cref="Tls13ClientHandshake.NegotiatedGroup"/>
     public NamedGroup NegotiatedGroup => handshake.NegotiatedGroup;
 
@@ -164,6 +167,10 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
         // пустышка совместимости встаёт перед ним. Метод сам следит, чтобы запись ушла один раз.
         await SendCompatibilityCcsAsync(cancellationToken).ConfigureAwait(false);
         await SendClientFinishedAsync(cancellationToken).ConfigureAwait(false);
+
+        // Resumption master secret снимается ПОСЛЕ Finished клиента, пока транскрипт жив: билеты
+        // сервер пришлёт уже после рукопожатия, и без этого секрета PSK из них не вывести.
+        handshake.CaptureResumptionMasterSecret();
 
         // Рукопожатие завершено: транскрипт больше не нужен и освобождает свои буферы.
         handshake.ReleaseTranscript();
@@ -528,9 +535,66 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
                 readSequence = 0;
             }
 
+            // Билет сессии — предложение сервера возобновить соединение в следующий раз: PSK
+            // выводится сразу, пока жив resumption master secret рукопожатия, и уходит наверх
+            // подписчикам. Без билета ресумпции не бывает.
+            if (type is TlsHandshakeType.NewSessionTicket && handshake.ResumptionMasterSecret.Length > 0)
+            {
+                try
+                {
+                    var ticket = ParseSessionTicket(data.Slice(position, 4 + length));
+                    SessionTicketReceived?.Invoke(ticket);
+                }
+                catch (FormatException)
+                {
+                    // Чужой или обрезанный билет не повод рвать рабочее соединение: сервер,
+                    // шлющий сообщение по правилам 1.2, упадёт здесь разбором, а обмен идёт.
+                }
+            }
+
             position += 4 + length;
         }
     }
+
+    /// <summary>
+    /// Разбирает NewSessionTicket и выводит PSK билета (RFC 8446, §4.6.1).
+    /// </summary>
+    /// <param name="message">Сообщение целиком, включая четырёхбайтовый заголовок.</param>
+    /// <returns>Билет с готовым PSK.</returns>
+    private Tls13SessionTicket ParseSessionTicket(ReadOnlySpan<byte> message)
+    {
+        var body = message[4..];
+
+        var lifetime = BinaryPrimitives.ReadUInt32BigEndian(body);
+        var ticketAgeAdd = BinaryPrimitives.ReadUInt32BigEndian(body[4..]);
+
+        var position = 8;
+        var nonceLength = body[position++];
+        if (position + nonceLength + 2 > body.Length) throw new FormatException("Билет сессии обрезан");
+        var nonce = body.Slice(position, nonceLength);
+        position += nonceLength;
+
+        var ticketLength = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(position, 2));
+        position += 2;
+        if (position + ticketLength > body.Length) throw new FormatException("Билет сессии обрезан");
+        var ticket = body.Slice(position, ticketLength);
+
+        var preSharedKey = Tls13KeySchedule.DeriveResumptionPsk(handshake.HashAlgorithm, handshake.ResumptionMasterSecret.Span, nonce);
+
+        return new Tls13SessionTicket
+        {
+            Identity = ticket.ToArray(),
+            PreSharedKey = preSharedKey,
+            TicketAgeAdd = ticketAgeAdd,
+            Hash = handshake.HashAlgorithm,
+            Lifetime = TimeSpan.FromSeconds(lifetime),
+        };
+    }
+
+    /// <summary>
+    /// Получен билет возобновления сессии от сервера.
+    /// </summary>
+    public event Action<Tls13SessionTicket>? SessionTicketReceived;
 
     private async ValueTask<(TlsContentType ContentType, byte[] Plaintext, int Length)> ReadProtectedRecordAsync(CancellationToken cancellationToken)
     {
@@ -650,9 +714,27 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
         pendingOffset = 0;
     }
 
+    /// <summary>Тело warning close_notify для уведомления о закрытии (RFC 8446, §6).</summary>
+    private static ReadOnlySpan<byte> CloseNotifyAlert => [1, 0];
+
     /// <inheritdoc/>
-    public override ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
+        // ★ close_notify перед закрытием — браузерное поведение, а не вежливость: обрыв без него
+        // сервер видит как незавершённую запись и, в отличие от реакции на браузер, помечает
+        // соединение как ошибочное. Отправка best-effort: лучшее время — пока ключи живы.
+        if (handshakeComplete)
+        {
+            try
+            {
+                await SendProtectedRecordAsync(TlsContentType.Alert, CloseNotifyAlert.ToArray(), default).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is IOException or System.Net.Sockets.SocketException or OperationCanceledException or ObjectDisposedException)
+            {
+                // Соединение уже мертво — уведомлять нечем, и это не ошибка освобождения.
+            }
+        }
+
         ReleasePending();
 
         handshakeRead?.Dispose();
@@ -660,6 +742,6 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
 
         handshake.Dispose();
 
-        return base.DisposeAsync();
+        await base.DisposeAsync().ConfigureAwait(false);
     }
 }

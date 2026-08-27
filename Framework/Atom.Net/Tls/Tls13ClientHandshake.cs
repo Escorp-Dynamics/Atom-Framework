@@ -121,6 +121,28 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
     /// <summary>Прикладной секрет трафика сервера; появляется после <see cref="DeriveApplicationSecrets"/>.</summary>
     public ReadOnlyMemory<byte> ServerApplicationSecret { get; private set; }
 
+    /// <summary>Сервер принял предложенный PSK-идентификатор — рукопожатие идёт через возобновление.</summary>
+    /// <remarks>
+    /// Сигнал — расширение pre_shared_key в ServerHello (RFC 8446, §4.2.11): сервер не повторяет
+    /// его при полном рукопожатии. Без этого бита ранний секрет считался бы вслепую, а возобновление
+    /// с отвергнутым билетом обрывалось бы на первой расшифровке.
+    /// </remarks>
+    public bool ResumptionAccepted => resumptionAccepted;
+
+    /// <summary>
+    /// Resumption master secret; появляется после <see cref="CaptureResumptionMasterSecret"/>.
+    /// </summary>
+    public ReadOnlyMemory<byte> ResumptionMasterSecret { get; private set; }
+
+    /// <summary>Предложение возобновления; <see langword="null"/>, когда рукопожатие полное.</summary>
+    private readonly Tls13PskOffer? pskOffer = settings.PskOffer;
+
+    /// <summary>Master secret, живой до конца рукопожатия — из него выводится resumption secret.</summary>
+    private byte[]? masterSecret;
+
+    /// <summary>Выбрал ли сервер наш PSK-идентификатор.</summary>
+    private bool resumptionAccepted;
+
     /// <summary>
     /// Строит ClientHello и возвращает его как сообщение рукопожатия, без заголовка записи.
     /// </summary>
@@ -134,7 +156,7 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
         // Второе приветствие отличается от первого ровно двумя вещами: долей ключа для группы,
         // которую назвал сервер, и эхом его cookie. Всё прочее — состав, порядок, случайное
         // число сессии — обязано остаться прежним, иначе сервер сочтёт сообщение чужим.
-        var extensions = retryGroup is null ? OrderedExtensions : BuildRetryExtensions();
+        var extensions = retryGroup is null ? WithPskExtensions(OrderedExtensions) : BuildRetryExtensions();
 
         var builder = ClientHelloBuilder.Create()
             .WithCipherSuites(Settings.CipherSuites)
@@ -151,6 +173,10 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
             // Построитель отдаёт готовую запись; уровню сообщений нужен её пятибайтовый вычет.
             var recordLength = (record[3] << 8) | record[4];
             var message = record.Slice(5, recordLength).ToArray();
+
+            // Binder обязан попасть в транскрипт вместе с приветствием: он считается по
+            // усечённому ClientHello, но в транскрипте идёт ПОЛНОЕ сообщение.
+            if (pskOffer is not null && helloRandom is null) ApplyPskBinder(message);
 
             RememberHelloIdentity(message);
 
@@ -186,6 +212,91 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
 
         var sessionIdLength = message[38];
         if (message.Length >= 39 + sessionIdLength) helloSessionId = message.Slice(39, sessionIdLength).ToArray();
+    }
+
+    /// <summary>
+    /// Дополняет расширения первого приветствия предложением возобновления сессии.
+    /// </summary>
+    /// <param name="extensions">Расширения в порядке ухода на провод.</param>
+    /// <returns>Расширения с psk_key_exchange_modes и замыкающим pre_shared_key.</returns>
+    /// <remarks>
+    /// PSK строится заново из <see cref="TlsSettings.PskOffer"/>, а не берётся из списка:
+    /// obfuscated ticket age зависит от текущего времени, а binder подставляется позже, когда
+    /// сообщение собрано. Расширение pre_shared_key обязано замыкать ClientHello — перестановка
+    /// его не двигает, но и мы держим его последним на случай ручных настроек без перестановки.
+    /// </remarks>
+    private IEnumerable<Extensions.ITlsExtension> WithPskExtensions(IEnumerable<Extensions.ITlsExtension> extensions)
+    {
+        if (pskOffer is null) return extensions;
+
+        var hasPskKeyExchangeModes = false;
+        var result = new List<Extensions.ITlsExtension>();
+
+        foreach (var extension in extensions)
+        {
+            // Старое предложение выбрасывается: его возраст и binder заведомо устарели.
+            if (extension is Extensions.PreSharedKeyTlsExtension) continue;
+
+            if (extension is Extensions.PskKeyExchangeModesTlsExtension) hasPskKeyExchangeModes = true;
+            result.Add(extension);
+        }
+
+        if (!hasPskKeyExchangeModes)
+        {
+            // ★ Modes присваивается ЯВНО: длину поля расширение считает в сеттере, и полагаться
+            // на свойство-инициализатор по умолчанию здесь нельзя.
+            result.Add(new Extensions.PskKeyExchangeModesTlsExtension { Modes = [Extensions.PskKeyExchangeMode.PskDheKe] });
+        }
+
+        result.Add(new Extensions.PreSharedKeyTlsExtension
+        {
+            Identities = [new Extensions.PskIdentity
+            {
+                Identity = pskOffer.Identity,
+                ObfuscatedTicketAge = pskOffer.ObfuscatedTicketAge,
+            }],
+
+            // Placeholder нужной длины: значения binders подставит ApplyPskBinder по собранному
+            // сообщению — считать их до сборки нечем, хэш зависит от всего приветствия.
+            Binders = [new byte[pskOffer.BinderLength]],
+        });
+
+        return result;
+    }
+
+    /// <summary>
+    /// Вычисляет и подставляет binder в собранное первое приветствие с PSK.
+    /// </summary>
+    /// <param name="message">Сообщение ClientHello целиком, ещё не попавшее в транскрипт.</param>
+    /// <remarks>
+    /// Binder — HMAC по хэшу транскрипта с усечённым ClientHello (RFC 8446, §4.2.11.2). Усечённым
+    /// считается приветствие БЕЗ самих значений binder'ов: их однобайтовые длины и длина вектора
+    /// остаются в хэше. Транскрипт до первого приветствия пуст, поэтому хэш считается
+    /// по одному сообщению; при HelloRetryRequest предложение PSK снимается — пересчёт binder'а
+    /// по частично заменённому транскрипту здесь не поддерживается.
+    /// </remarks>
+    private void ApplyPskBinder(byte[] message)
+    {
+        var hashLength = pskOffer!.BinderLength;
+        var truncatedLength = message.Length - (2 + 1 + hashLength);
+
+        // Проверка макета: усечённое приветствие обязано кончаться вектором binders — двухбайтовая
+        // длина, затем однобайтовая длина записи, равная размеру хэша билета.
+        if (truncatedLength <= 4 || message[truncatedLength + 2] != hashLength)
+            throw new InvalidOperationException("Расширение pre_shared_key не замыкает ClientHello");
+
+        var early = Tls13KeySchedule.DeriveEarlySecret(pskOffer.Hash, pskOffer.PreSharedKey.Span);
+        var binderKey = Tls13KeySchedule.DeriveBinderKey(pskOffer.Hash, early, pskOffer.External);
+
+        // Binder = HMAC(finished_key, хэш усечённого приветствия), где finished_key выводится из
+        // binder_key меткой "finished" — ровно как verify_data в Finished (RFC 8446, §4.2.11.2).
+        var finishedKey = Tls13KeySchedule.DeriveFinishedKey(pskOffer.Hash, binderKey);
+        var truncatedHash = pskOffer.Hash == HashAlgorithmName.SHA384
+            ? SHA384.HashData(message.AsSpan(0, truncatedLength))
+            : SHA256.HashData(message.AsSpan(0, truncatedLength));
+        var binder = Tls13KeySchedule.ComputePskBinder(pskOffer.Hash, finishedKey, truncatedHash);
+
+        binder.CopyTo(message, truncatedLength + 3);
     }
 
     /// <summary>
@@ -362,6 +473,7 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
         if (handshakeSecret is null) throw new InvalidOperationException("Нет секрета рукопожатия");
 
         var master = Tls13KeySchedule.DeriveMasterSecret(HashAlgorithm, handshakeSecret);
+        masterSecret = master;
         var transcriptHash = serverFinishedTranscriptHash ?? throw new InvalidOperationException("Нет снимка транскрипта на момент Finished сервера");
 
         ClientApplicationSecret = Tls13KeySchedule.DeriveSecret(HashAlgorithm, master, "c ap traffic", transcriptHash);
@@ -369,14 +481,34 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
     }
 
     /// <summary>
+    /// Выводит resumption master secret — на его основе считаются PSK билетов сессии.
+    /// </summary>
+    /// <remarks>
+    /// Вызывается ПОСЛЕ отправки Finished клиента и ДО освобождения транскрипта: по RFC 8446
+    /// (§7.1) входной хэш снимается по транскрипту, включающему Finished клиента. Успеть надо
+    /// до <see cref="ReleaseTranscript"/> — позже транскрипт уже опустошён, и секрет уходит
+    /// недоступным навсегда вместе с возможностью возобновлять сессию.
+    /// </remarks>
+    public void CaptureResumptionMasterSecret()
+    {
+        if (masterSecret is null || !ResumptionMasterSecret.IsEmpty) return;
+
+        var transcriptHash = transcript.ComputeHash(HashAlgorithm);
+        ResumptionMasterSecret = Tls13KeySchedule.DeriveResumptionMasterSecret(HashAlgorithm, masterSecret, transcriptHash);
+    }
+
+    /// <summary>
     /// Выводит секреты рукопожатия из общего секрета и текущего транскрипта.
     /// </summary>
     private void DeriveHandshakeSecrets()
     {
-        if (sharedSecret is null) throw new InvalidOperationException("Общий секрет не вычислен");
+        if (sharedSecret is null) throw new InvalidOperationException("Общий секрет не выведен");
 
         var transcriptHash = transcript.ComputeHash(HashAlgorithm);
-        var early = Tls13KeySchedule.DeriveEarlySecret(HashAlgorithm, []);
+
+        // PSK входит в ранний секрет ТОЛЬКО когда сервер подтвердил выбор identity: иначе он
+        // выводил ключи без PSK, и любое расхождение здесь стало бы провалом расшифровки полёта.
+        var early = Tls13KeySchedule.DeriveEarlySecret(HashAlgorithm, resumptionAccepted ? pskOffer!.PreSharedKey.Span : []);
         handshakeSecret = Tls13KeySchedule.DeriveHandshakeSecret(HashAlgorithm, early, sharedSecret);
 
         ClientHandshakeSecret = Tls13KeySchedule.DeriveSecret(HashAlgorithm, handshakeSecret, "c hs traffic", transcriptHash);
@@ -421,10 +553,40 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
         if (!ServerChoseTls13(extensions)) throw new TlsVersionDowngradeException();
 
         ApplyCipherSuite(suite);
+
+        // ★ Принятие PSK видно УЖЕ в ServerHello: сервер отвечает расширением pre_shared_key
+        // с индексом выбранного идентификатора (RFC 8446, §4.2.11). Без него билет отвергнут,
+        // ранний секрет считается с нулевым PSK, и рукопожатие идёт как полное — предложенный
+        // билет на это не влияет.
+        resumptionAccepted = pskOffer is not null && ServerSelectedPskIdentity(extensions);
+
         var serverPublicKey = ReadServerKeyShare(extensions);
         if (serverPublicKey.IsEmpty) throw new InvalidOperationException("ServerHello без key_share");
 
         sharedSecret = ComputeSharedSecret(serverPublicKey);
+    }
+
+    /// <summary>
+    /// Проверяет, выбрал ли сервер наш PSK-идентификатор.
+    /// </summary>
+    /// <param name="extensions">Расширения ServerHello.</param>
+    /// <returns><see langword="true"/>, если в ServerHello есть pre_shared_key.</returns>
+    private static bool ServerSelectedPskIdentity(ReadOnlySpan<byte> extensions)
+    {
+        var position = 0;
+
+        while (position + 4 <= extensions.Length)
+        {
+            var id = BinaryPrimitives.ReadUInt16BigEndian(extensions.Slice(position, 2));
+            var length = BinaryPrimitives.ReadUInt16BigEndian(extensions.Slice(position + 2, 2));
+            position += 4;
+
+            if (id is 0x0029 && length >= 2) return true;
+
+            position += length;
+        }
+
+        return false;
     }
 
     private NamedGroup? retryGroup;
@@ -511,6 +673,11 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
 
         foreach (var extension in OrderedExtensions)
         {
+            // Предложение PSK снимается: binder обязан пересчитываться по частично заменённому
+            // транскрипту после HelloRetryRequest, что здесь не поддерживается. Соединение
+            // продолжится полным рукопожатием — ровно как у сервера, отвергшего билет.
+            if (extension is Extensions.PreSharedKeyTlsExtension) continue;
+
             result.Add(extension is Extensions.KeyShareTlsExtension keyShare
                 ? new Extensions.KeyShareTlsExtension { Id = keyShare.Id, Entries = [share] }
                 : extension);

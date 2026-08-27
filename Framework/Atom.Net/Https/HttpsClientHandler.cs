@@ -27,6 +27,39 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     // Влияет на sec-fetch-site: hosts под одним публичным суффиксом считаются одним сайтом.
     private static readonly HashSet<string> commonMultiLabelPublicSuffixes = Headers.MultiLabelPublicSuffixes.Set;
 
+    // Билеты возобновления сессии TLS 1.3 по имени узла: сервер выдаёт их после рукопожатия,
+    // следующий handshake к тому же узлу предлагает их как PSK. Браузер не делает иного —
+    // повторное соединение с полным рукопожатием само по себе заметный не-браузерный признак.
+    private readonly ConcurrentDictionary<string, Tls13SessionTicket> tls13SessionTickets = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Забирает предложение возобновления для узла, если живой билет ещё хранится.
+    /// </summary>
+    /// <param name="host">Имя узла (совпадает с SNI).</param>
+    /// <returns>Предложение PSK либо <see langword="null"/>, когда возобновление нечем предложить.</returns>
+    private Tls13PskOffer? TakeTls13TicketOffer(string host)
+    {
+        if (tls13SessionTickets.TryGetValue(host, out var ticket))
+        {
+            if (!ticket.IsExpired) return ticket.ToOffer();
+            tls13SessionTickets.TryRemove(host, out _);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Сохраняет билет, выданный соединением с узлом.
+    /// </summary>
+    /// <param name="host">Имя узла (совпадает с SNI).</param>
+    /// <param name="ticket">Билет из NewSessionTicket.</param>
+    private void StoreTls13Ticket(string host, Tls13SessionTicket ticket)
+    {
+        // Истёкшие билеты не храним; один узел может держать несколько действительных билетов —
+        // заменяем последний полученным.
+        if (!ticket.IsExpired) tls13SessionTickets[host] = ticket;
+    }
+
     private int activeRequests;
     private int isDisposed;
     private readonly ConcurrentDictionary<ConnectionPoolKey, ConnectionPoolState> connectionPool = new();
@@ -343,6 +376,8 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             ProfileHttp3Settings = profile?.Http3,
             ProfileQuicTransport = profile?.QuicTransport,
             UpstreamProxy = upstreamProxy,
+            PskOffer = isHttps && preferredVersion != HttpVersion.Version30 ? TakeTls13TicketOffer(uri.IdnHost) : null,
+            SessionTicketSink = StoreTls13Ticket,
         };
     }
 

@@ -53,6 +53,17 @@ public readonly struct TlsSettings() : IEquatable<TlsSettings>
     public SessionIdPolicy SessionIdPolicy { get; init; }
 
     /// <summary>
+    /// Предложение возобновления сессии TLS 1.3; <see langword="null"/> — полное рукопожатие.
+    /// </summary>
+    /// <remarks>
+    /// Наличие предложения добавляет в ClientHello расширения psk_key_exchange_modes и
+    /// замыкающее pre_shared_key. Сервер, отвергший билет, ответит без pre_shared_key в
+    /// ServerHello, и рукопожатие продолжится как полное. Предложение действует на одно
+    /// соединение: материал билета секретен, и в профиле ему делать нечего.
+    /// </remarks>
+    public Tls13PskOffer? PskOffer { get; init; }
+
+    /// <summary>
     /// Пауза после завершения TLS перед отправкой клиентского пролога (H2 preface / H1 запрос).
     /// </summary>
     public TimeSpan Delay { get; init; } = TimeSpan.Zero;
