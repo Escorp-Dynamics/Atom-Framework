@@ -144,6 +144,28 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
     private bool resumptionAccepted;
 
     /// <summary>
+    /// Принимает EndOfEarlyData в транскрипт.
+    /// </summary>
+    /// <remarks>
+    /// Сообщение не несёт содержимого, но сервер включает его в хэш транскрипта при проверке
+    /// Finished клиента, поэтому и мы обязаны его туда положить после отправки.
+    /// </remarks>
+    public void AppendEndOfEarlyData(ReadOnlySpan<byte> message) => transcript.Append(message);
+
+    /// <summary>Ранний секрет трафика клиента для 0-RTT; пусто, когда 0-RTT не предлагался.</summary>
+    public ReadOnlyMemory<byte> ClientEarlyTrafficSecret { get; private set; }
+
+    /// <summary>Предлагался ли 0-RTT в этом приветствии.</summary>
+    public bool EarlyDataOffered { get; private set; }
+
+    /// <summary>Сервер подтвердил приём 0-RTT (early_data в EncryptedExtensions).</summary>
+    /// <remarks>
+    /// Если подтверждения нет, отправленные ранние данные сервер проигнорировал, и вызывающая
+    /// сторона обязана переотправить запрос уже под согласованными ключами.
+    /// </remarks>
+    public bool EarlyDataAccepted { get; private set; }
+
+    /// <summary>
     /// Строит ClientHello и возвращает его как сообщение рукопожатия, без заголовка записи.
     /// </summary>
     /// <returns>Сообщение рукопожатия целиком, включая четырёхбайтовый заголовок.</returns>
@@ -178,9 +200,19 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
             // усечённому ClientHello, но в транскрипте идёт ПОЛНОЕ сообщение.
             if (pskOffer is not null && helloRandom is null) ApplyPskBinder(message);
 
+            EarlyDataOffered = pskOffer is not null && pskOffer.MaxEarlyData > 0 && helloRandom is null;
+
             RememberHelloIdentity(message);
 
             transcript.Append(message);
+
+            // Ранний секрет 0-RTT считается ровно по ClientHello: это ЕДИНСТВЕННОЕ сообщение
+            // транскрипта на момент отправки ранних данных (RFC 8446, §7.1).
+            if (EarlyDataOffered)
+            {
+                var earlySecret = Tls13KeySchedule.DeriveEarlySecret(pskOffer!.Hash, pskOffer.PreSharedKey.Span);
+                ClientEarlyTrafficSecret = Tls13KeySchedule.DeriveSecret(pskOffer.Hash, earlySecret, "c e traffic", transcript.ComputeHash(pskOffer.Hash));
+            }
             NeedsRetryPending = false;
             sniHost = ReadServerName(extensions);
             clientKeyShares = ReadClientKeyShares(extensions);
@@ -240,6 +272,8 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
             if (extension is Extensions.PskKeyExchangeModesTlsExtension) hasPskKeyExchangeModes = true;
             result.Add(extension);
         }
+
+        if (pskOffer.MaxEarlyData > 0) result.Add(new Extensions.EarlyDataTlsExtension());
 
         if (!hasPskKeyExchangeModes)
         {
@@ -1095,6 +1129,10 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
             // тем же номером. Подтвердив, он теперь ЖДЁТ от нас встречное EncryptedExtensions —
             // и это не формальность, см. BuildClientEncryptedExtensions.
             if (id is 0x4469 or 0x44CD) NegotiatedApplicationSettings = id;
+
+            // early_data (0x002A) в EncryptedExtensions — единственное подтверждение, что сервер
+            // ПРИНЯЛ наши ранние данные, а не молча выбросил их.
+            if (id is 0x002A) EarlyDataAccepted = true;
 
             position += length;
         }

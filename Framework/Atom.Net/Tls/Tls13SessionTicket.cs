@@ -30,6 +30,11 @@ public sealed class Tls13SessionTicket
     /// <summary>Момент получения билета.</summary>
     public DateTimeOffset IssuedAtUtc { get; init; } = DateTimeOffset.UtcNow;
 
+    /// <summary>
+    /// Сколько 0-RTT данных сервер готов принять по этому билету; ноль — early data не предлагать.
+    /// </summary>
+    public int MaxEarlyData { get; init; }
+
     /// <summary>Истёк ли билет по заявленному сервером сроку.</summary>
     public bool IsExpired => DateTimeOffset.UtcNow - IssuedAtUtc > Lifetime;
 
@@ -44,5 +49,6 @@ public sealed class Tls13SessionTicket
         TicketAgeAdd = TicketAgeAdd,
         Hash = Hash,
         IssuedAtUtc = IssuedAtUtc,
+        MaxEarlyData = MaxEarlyData,
     };
 }

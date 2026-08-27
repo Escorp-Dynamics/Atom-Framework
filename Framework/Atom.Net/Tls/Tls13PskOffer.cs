@@ -52,4 +52,10 @@ public sealed class Tls13PskOffer
 
     /// <summary>Длина binder'а — совпадает с длиной вывода хэш-функции билета.</summary>
     public int BinderLength => Tls13KeySchedule.GetHashLength(Hash);
+
+    /// <summary>
+    /// Сколько 0-RTT данных сервер объявил в билете (расширение early_data в NewSessionTicket);
+    /// ноль — early_data в ClientHello не ставится.
+    /// </summary>
+    public int MaxEarlyData { get; init; }
 }

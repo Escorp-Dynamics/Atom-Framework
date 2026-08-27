@@ -86,6 +86,19 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
     /// <inheritdoc cref="Tls13ClientHandshake.ResumptionAccepted"/>
     public bool ResumptionAccepted => handshake.ResumptionAccepted;
 
+    /// <summary>
+    /// 0-RTT данные для отправки сразу после ClientHello; задаётся до <see cref="HandshakeAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// Данные уйдут под ранними ключами только если сервер объявил в билете max_early_data.
+    /// Принял ли их сервер — смотрите <see cref="EarlyDataAccepted"/> после рукопожатия: без
+    /// подтверждения ранние данные сервером выброшены, и запрос обязан быть переотправлен.
+    /// </remarks>
+    public ReadOnlyMemory<byte>? EarlyData { get; set; }
+
+    /// <inheritdoc cref="Tls13ClientHandshake.EarlyDataAccepted"/>
+    public bool EarlyDataAccepted => handshake.EarlyDataAccepted;
+
     /// <inheritdoc cref="Tls13ClientHandshake.NegotiatedGroup"/>
     public NamedGroup NegotiatedGroup => handshake.NegotiatedGroup;
 
@@ -137,6 +150,7 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
         if (clientKeyShareMissing()) throw new InvalidOperationException("Для TLS 1.3 в настройках обязан быть key_share");
 
         await SendClientHelloAsync(cancellationToken).ConfigureAwait(false);
+        await SendEarlyDataAsync(cancellationToken).ConfigureAwait(false);
         await ReceiveServerHelloAsync(cancellationToken).ConfigureAwait(false);
 
         // ★ Сервер вправе попросить повторить приветствие с другой группой — это HelloRetryRequest
@@ -461,6 +475,14 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
     {
         // Порядок задан спецификацией и важен: сначала настройки ALPS, затем ответ на запрос
         // сертификата, и только потом Finished — verify_data считается по всему, что до него.
+        // EOED попадает в транскрипт ПОСЛЕ полёта сервера и ДО Finished клиента — в этой
+        // позиции его ожидает сервер при проверке verify_data.
+        if (pendingEndOfEarlyData is not null)
+        {
+            handshake.AppendEndOfEarlyData(pendingEndOfEarlyData);
+            pendingEndOfEarlyData = null;
+        }
+
         var applicationSettings = handshake.BuildClientEncryptedExtensions();
         var certificate = handshake.BuildClientCertificate();
         var finished = handshake.BuildClientFinished();
@@ -578,6 +600,29 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
         position += 2;
         if (position + ticketLength > body.Length) throw new FormatException("Билет сессии обрезан");
         var ticket = body.Slice(position, ticketLength);
+        position += ticketLength;
+
+        // В расширениях билета нас интересует только early_data (0x002A): сколько байт 0-RTT
+        // сервер готов принять по этому билету. Нет расширения — ранние данные не предлагать.
+        var maxEarlyData = 0;
+        if (position + 2 <= body.Length)
+        {
+            var extensionsLength = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(position, 2));
+            var extEnd = Math.Min(position + 2 + extensionsLength, body.Length);
+            var extPosition = position + 2;
+
+            while (extPosition + 4 <= extEnd)
+            {
+                var extId = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(extPosition, 2));
+                var extLength = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(extPosition + 2, 2));
+                extPosition += 4;
+
+                if (extId == 0x002A && extLength >= 4 && extPosition + 4 <= body.Length)
+                    maxEarlyData = (int)Math.Min((long)BinaryPrimitives.ReadUInt32BigEndian(body.Slice(extPosition, 4)), int.MaxValue);
+
+                extPosition += extLength;
+            }
+        }
 
         var preSharedKey = Tls13KeySchedule.DeriveResumptionPsk(handshake.HashAlgorithm, handshake.ResumptionMasterSecret.Span, nonce);
 
@@ -588,6 +633,7 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
             TicketAgeAdd = ticketAgeAdd,
             Hash = handshake.HashAlgorithm,
             Lifetime = TimeSpan.FromSeconds(lifetime),
+            MaxEarlyData = maxEarlyData,
         };
     }
 
@@ -716,6 +762,96 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
 
     /// <summary>Тело warning close_notify для уведомления о закрытии (RFC 8446, §6).</summary>
     private static ReadOnlySpan<byte> CloseNotifyAlert => [1, 0];
+
+    private IAeadCipher? earlyWrite;
+    private byte[]? earlyWriteIv;
+    private ulong earlySequence;
+    private byte[]? pendingEndOfEarlyData;
+
+    /// <summary>
+    /// Отправляет 0-RTT данные под ранними ключами сразу после ClientHello (RFC 8446, §2.3).
+    /// </summary>
+    /// <remarks>
+    /// Ключи выводятся из client_early_traffic_secret по транскрипту из ОДНОГО ClientHello.
+    /// Внешний тип записи — application_data, внутренний — тоже: других типов в 0-RTT не бывает.
+    /// Если сервер ранние данные отверг, он их выбросит — содержимое обязан переотправить тот,
+    /// кто его передал.
+    /// </remarks>
+    private async ValueTask SendEarlyDataAsync(CancellationToken cancellationToken)
+    {
+        if (handshake.ClientEarlyTrafficSecret.IsEmpty || EarlyData is not { Length: > 0 }) return;
+
+        var (key, iv) = Tls13KeySchedule.DeriveRecordKeys(handshake.HashAlgorithm, handshake.ClientEarlyTrafficSecret.Span, handshake.AeadKeyLength, RecordIvLength);
+        earlyWrite?.Dispose();
+        earlyWrite = CreateAead(key);
+        earlyWriteIv = iv;
+        earlySequence = 0;
+
+        var rest = EarlyData.Value;
+        while (!rest.IsEmpty)
+        {
+            var take = (int)Math.Min(rest.Length, MaxPlaintextLength);
+            await SendEarlyRecordAsync(rest[..take], TlsContentType.ApplicationData, cancellationToken).ConfigureAwait(false);
+            rest = rest[take..];
+        }
+
+        // EndOfEarlyData (RFC 8446, §4.5) замыкает ранние данные: шифруется РАННИМИ ключами,
+        // в транскрипт НЕ входит. Без него сервер пытается прочитать наши CCS/Finished как
+        // продолжение 0-RTT и рвёт соединение с bad_record_mac.
+        var endOfEarlyData = new byte[] { (byte)TlsHandshakeType.EndOfEarlyData, 0, 0, 0 };
+        await SendEarlyRecordAsync(endOfEarlyData, TlsContentType.Handshake, cancellationToken).ConfigureAwait(false);
+        pendingEndOfEarlyData = endOfEarlyData;
+
+        DisposeEarlyKeys();
+    }
+
+    private async ValueTask SendEarlyRecordAsync(ReadOnlyMemory<byte> data, TlsContentType innerType, CancellationToken cancellationToken)
+    {
+        if (earlyWrite is null || earlyWriteIv is null) throw new InvalidOperationException("Ранние ключи записи не установлены");
+
+        var innerLength = data.Length + 1;
+        var recordLength = innerLength + earlyWrite.TagSize;
+        var buffer = ArrayPool<byte>.Shared.Rent(5 + recordLength);
+
+        try
+        {
+            var header = new TlsRecordHeader(TlsContentType.ApplicationData, RecordLayerVersion, (ushort)recordLength);
+            header.Write(buffer.AsSpan(0, 5));
+
+            var inner = ArrayPool<byte>.Shared.Rent(innerLength);
+
+            try
+            {
+                data.Span.CopyTo(inner);
+                inner[data.Length] = (byte)innerType;
+
+                Span<byte> nonce = stackalloc byte[RecordIvLength];
+                BuildNonce(earlyWriteIv, earlySequence, nonce);
+                earlySequence++;
+
+                if (!earlyWrite.TryEncrypt(nonce, buffer.AsSpan(0, 5), inner.AsSpan(0, innerLength), buffer.AsSpan(5, recordLength), out _))
+                    throw new InvalidOperationException("Не удалось зашифровать 0-RTT запись TLS 1.3");
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(inner);
+            }
+
+            await WriteTransportAsync(buffer.AsMemory(0, 5 + recordLength), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private void DisposeEarlyKeys()
+    {
+        earlyWrite?.Dispose();
+        earlyWrite = null;
+        earlyWriteIv = null;
+        earlySequence = 0;
+    }
 
     /// <inheritdoc/>
     public override async ValueTask DisposeAsync()

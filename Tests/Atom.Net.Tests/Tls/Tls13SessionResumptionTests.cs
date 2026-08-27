@@ -54,6 +54,42 @@ public sealed class Tls13SessionResumptionTests
     }
 
     [Test]
+    public async Task EarlyDataIsSentAndAcceptedOnResumption()
+    {
+        using var server = await LocalTlsServer.StartAsync(withEarlyData: true);
+
+        Tls13SessionTicket? ticket = null;
+        await using (var stream = await ConnectAsync(server.Port, pskOffer: null))
+        {
+            stream.SessionTicketReceived += received => ticket = received;
+            await ExchangeAsync(stream, TestContext.CurrentContext.CancellationToken);
+            await WaitForTicketAsync(stream, TestContext.CurrentContext.CancellationToken);
+        }
+
+        Assert.That(ticket, Is.Not.Null);
+        Assert.That(ticket!.MaxEarlyData, Is.GreaterThan(0), "сервер с -early_data обязан объявить max_early_data в билете");
+
+        // Запрос уходит как 0-RTT сразу после ClientHello; ответ на НЕГО — доказательство, что
+        // сервер ранние данные принял и обработал.
+        var earlyRequest = "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"u8;
+        await using var stream2 = await ConnectAsync(server.Port, ticket.ToOffer(), earlyRequest.ToArray());
+
+        Assert.That(stream2.ResumptionAccepted, Is.True);
+        Assert.That(stream2.EarlyDataAccepted, Is.True, "сервер не подтвердил приём 0-RTT");
+
+        var buffer = new byte[512];
+        var total = 0;
+        while (total < 32)
+        {
+            var read = await stream2.ReadAsync(buffer, TestContext.CurrentContext.CancellationToken);
+            if (read is 0) break;
+            total += read;
+        }
+
+        Assert.That(total, Is.GreaterThan(0));
+    }
+
+    [Test]
     public async Task RejectedTicketFallsBackToFullHandshake()
     {
         // ★ Главная опасность PSK-пути: сервер, отвергший билет, продолжит ПОЛНОЕ рукопожатие,
@@ -75,7 +111,7 @@ public sealed class Tls13SessionResumptionTests
         await ExchangeAsync(stream, TestContext.CurrentContext.CancellationToken);
     }
 
-    private static async Task<Tls13Stream> ConnectAsync(int port, Tls13PskOffer? pskOffer)
+    private static async Task<Tls13Stream> ConnectAsync(int port, Tls13PskOffer? pskOffer, byte[]? earlyData = null)
     {
         var profile = BrowserProfileCatalog.CreateChromeDesktopWindowsTls13();
 
@@ -90,9 +126,9 @@ public sealed class Tls13SessionResumptionTests
         var tcp = new TcpStream(new TcpSettings());
         await tcp.ConnectAsync("127.0.0.1", port, TestContext.CurrentContext.CancellationToken);
 
-        var stream = new Tls13Stream(tcp, settings);
+        var stream = new Tls13Stream(tcp, settings) { EarlyData = earlyData };
+
         await stream.HandshakeAsync(TestContext.CurrentContext.CancellationToken);
-        System.IO.File.AppendAllText("/tmp/ch_dump.log", $"offer={(pskOffer is null ? "none" : "psk")} accepted={stream.ResumptionAccepted}\n");
 
         return stream;
     }
@@ -148,19 +184,23 @@ public sealed class Tls13SessionResumptionTests
 
         public int Port { get; private init; }
 
-        public static async Task<LocalTlsServer> StartAsync()
+        public static async Task<LocalTlsServer> StartAsync(bool withEarlyData = false)
         {
             var certificate = CreateCertificate();
             var port = FreePort();
 
+            var arguments = new List<string>
+            {
+                "s_server", "-accept", port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "-cert", certificate.Certificate, "-key", certificate.Key,
+                "-tls1_3", "-alpn", "h2", "-www",
+            };
+            if (withEarlyData) { arguments.Add("-early_data"); arguments.Add("-keylogfile"); arguments.Add("/tmp/kl.log"); }
+
             var start = new ProcessStartInfo("openssl")
             {
-                ArgumentList =
-                {
-                    "s_server", "-accept", port.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    "-cert", certificate.Certificate, "-key", certificate.Key,
-                    "-tls1_3", "-alpn", "h2", "-www", "-msg",
-                },
+                FileName = "openssl",
+                Arguments = string.Join(" ", arguments.Select(static a => a.Contains(' ') ? "\"" + a + "\"" : a)),
                 UseShellExecute = false,
                 RedirectStandardInput = true,
                 RedirectStandardOutput = false,
