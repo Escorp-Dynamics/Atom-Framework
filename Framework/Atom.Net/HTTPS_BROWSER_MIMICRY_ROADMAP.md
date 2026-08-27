@@ -1065,7 +1065,10 @@ Priority уже появился, но пока это coarse heuristic layer.
 - Есть parity-тесты отпечатков Chrome/Firefox/Safari, key schedule, HRR, X25519, GREASE placement.
 - Session resumption/PSK реализована: NewSessionTicket парсится, PSK выводится через "res master"/"resumption", кэш тикетов на handler (по SNI), ClientHello с pre_shared_key (замыкающее) + binder'ом; выбор сервера виден по pre_shared_key в ServerHello; fallback на полное рукопожатие при отказе. Билеты не используются для 0-RTT.
 - Регрессия против `openssl s_server`: возобновление подтверждено принятием PSK сервером; внешний PSK (ext binder) покрыт отдельным тестом.
-- Remaining gaps: 0-RTT, клиентский KeyUpdate, post-handshake client auth.
+- 0-RTT реализован: max_early_data из билета, early_data в ClientHello, ранние ключи из
+  "c e traffic", EndOfEarlyData (в транскрипте — после полёта сервера), EarlyDataAccepted по EE;
+  подтверждено против `openssl s_server -early_data`.
+- Remaining gaps: клиентский KeyUpdate, post-handshake client auth.
 
 ### Why
 
