@@ -148,6 +148,11 @@ public sealed class VirtualDisplay : IAsyncDisposable
             throw;
         }
 
+        // Привязываем жизнь дисплея к процессу-владельцу: при SIGKILL/краше владельца, когда
+        // DisposeAsync не вызывается, xpra/Xvfb этого дисплея иначе остаются висеть (репарентятся
+        // на init) и накапливаются, поднимая load и ломая запуск следующих дисплеев по таймауту сокета.
+        SpawnParentDeathWatchdog(process.Id, attachProcess?.Id ?? 0, displayNumber);
+
         return new VirtualDisplay(process, attachProcess, windowManager, settings, displayNumber);
     }
 
@@ -195,6 +200,84 @@ public sealed class VirtualDisplay : IAsyncDisposable
 
         GC.SuppressFinalize(this);
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Поднимает внешний watchdog, привязывающий жизнь виртуального дисплея к процессу-владельцу:
+    /// при смерти владельца (в т.ч. SIGKILL из отладчика или краш, когда <see cref="DisposeAsync"/>
+    /// не вызывается) он гасит xpra/Xvfb этого дисплея и удаляет X11-сокет, не дожидаясь sweep
+    /// следующего запуска. При штатном освобождении сервер умирает сам — watchdog это замечает и
+    /// молча выходит.
+    /// </summary>
+    private static void SpawnParentDeathWatchdog(int serverProcessId, int attachProcessId, int displayNumber)
+    {
+        if (serverProcessId <= 0 || !OperatingSystem.IsLinux())
+            return;
+
+        // setsid отвязывает watchdog в собственную сессию — иначе групповое убийство владельца
+        // (отладчик бьёт по группе процессов) снесло бы и сторожа. exec >/dev/null закрывает
+        // унаследованный stdout владельца. Сначала SIGTERM (xpra сам реапит вложенный Xvfb и свои
+        // /run/user-сокеты), затем эскалация до SIGKILL и добивание осиротевшего Xvfb-for-Xpra по
+        // номеру дисплея. X11-сокет/lock удаляются по точным путям (без glob — без сопутствующих жертв).
+        var setsidPath = ResolveExecutablePath("setsid");
+        if (setsidPath is null)
+            return; // без setsid остаётся stale-cleanup при резервации следующего запуска
+
+        const string script =
+            "exec >/dev/null 2>&1; " +
+            "while kill -0 \"$1\" 2>/dev/null; do " +
+            "kill -0 \"$2\" 2>/dev/null || exit 0; " + // сервер умер сам при живом владельце — штатный путь
+            "sleep 1; done; " +
+            "[ -n \"$3\" ] && kill -TERM \"$3\" 2>/dev/null; " + // attach
+            "kill -TERM \"$2\" 2>/dev/null; " + // xpra/Xvfb-сервер (реапит вложенный Xvfb и сокеты)
+            "for _ in 1 2 3 4 5; do kill -0 \"$2\" 2>/dev/null || break; sleep 1; done; " +
+            "kill -9 \"$2\" 2>/dev/null; " +
+            "[ -n \"$3\" ] && kill -9 \"$3\" 2>/dev/null; " +
+            "pkill -9 -f \"Xvfb-for-Xpra-$4 \" 2>/dev/null; " + // осиротевший вложенный Xvfb (после SIGKILL)
+            "rm -f \"/tmp/.X11-unix/X$4\" \"/tmp/.X$4-lock\" 2>/dev/null; " +
+            "exit 0";
+
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = setsidPath,
+                UseShellExecute = false,
+            };
+            startInfo.ArgumentList.Add("sh");
+            startInfo.ArgumentList.Add("-c");
+            startInfo.ArgumentList.Add(script);
+            startInfo.ArgumentList.Add("atom-vdisplay-watchdog"); // $0
+            startInfo.ArgumentList.Add(Environment.ProcessId.ToString(CultureInfo.InvariantCulture)); // $1 — владелец
+            startInfo.ArgumentList.Add(serverProcessId.ToString(CultureInfo.InvariantCulture)); // $2 — сервер
+            startInfo.ArgumentList.Add(attachProcessId > 0 ? attachProcessId.ToString(CultureInfo.InvariantCulture) : string.Empty); // $3 — attach
+            startInfo.ArgumentList.Add(displayNumber.ToString(CultureInfo.InvariantCulture)); // $4 — номер дисплея
+
+            using var watchdog = Process.Start(startInfo);
+        }
+        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        {
+            // Нет setsid/sh — не критично: остаётся stale-cleanup при резервации следующего запуска.
+        }
+    }
+
+    private static string? ResolveExecutablePath(string command)
+    {
+        // Абсолютный путь и ради безопасности (нет PATH-подмены), и чтобы удовлетворить анализатор.
+        string[] candidates =
+        [
+            "/usr/bin/" + command,
+            "/bin/" + command,
+            "/usr/local/bin/" + command,
+        ];
+
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
     }
 
     internal void ThrowIfUnavailable()
@@ -849,9 +932,13 @@ public sealed class VirtualDisplay : IAsyncDisposable
     {
         var socketPath = "/tmp/.X11-unix/X" + displayNumber.ToString(CultureInfo.InvariantCulture);
 
-        // Ожидаем появления Unix-сокета X-сервера (до 3 секунд), но не скрываем
+        // Ожидаем появления Unix-сокета X-сервера (до 15 секунд), но не скрываем
         // настоящую причину раннего падения xpra/Xvfb за общим timeout-сообщением.
-        for (var attempt = 0; attempt < 30; attempt++)
+        // 15с (а не 3): под высокой нагрузкой и при параллельном подъёме НЕСКОЛЬКИХ дисплеев
+        // (по одному на слот солвера) xpra нередко создаёт сокет за >3с — прежний порог ронял
+        // старт браузера на ровном месте. Цикл всё равно выходит сразу по факту (сокет появился
+        // или процесс упал), поэтому расширение окна не замедляет нормальный старт.
+        for (var attempt = 0; attempt < 150; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -869,7 +956,7 @@ public sealed class VirtualDisplay : IAsyncDisposable
         }
 
         throw new VirtualDisplayException(
-            serverName + " не создал сокет " + socketPath + " за 3 секунды. Stderr: "
+            serverName + " не создал сокет " + socketPath + " за 15 секунд. Stderr: "
             + logBuffer.GetBufferedStderr());
     }
 
