@@ -1,0 +1,44 @@
+name: Net Tests
+
+on:
+  push:
+    paths:
+      - 'Framework/Atom.Net/**'
+      - 'Framework/Atom.Testing/**'
+      - 'Tests/Atom.Net.Tests/**'
+      - '.github/workflows/net-tests.yml'
+      - 'global.json'
+      - 'Framework/Directory.Build.props'
+  pull_request:
+    paths:
+      - 'Framework/Atom.Net/**'
+      - 'Framework/Atom.Testing/**'
+      - 'Tests/Atom.Net.Tests/**'
+      - '.github/workflows/net-tests.yml'
+      - 'global.json'
+      - 'Framework/Directory.Build.props'
+  workflow_dispatch:
+
+jobs:
+  dedicated-net-suite:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dedicated Net suite
+        run: dotnet restore Tests/Atom.Net.Tests/Atom.Net.Tests.csproj
+
+      - name: Run dedicated Net suite
+        run: >-
+          dotnet test --project Tests/Atom.Net.Tests/Atom.Net.Tests.csproj
+          --verbosity minimal
+          -p:EnforceCodeStyleInBuild=false
+          -p:EnableNETAnalyzers=false
+          -p:AnalysisMode=None

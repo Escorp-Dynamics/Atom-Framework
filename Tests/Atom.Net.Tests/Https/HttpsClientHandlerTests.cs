@@ -4218,6 +4218,42 @@ public sealed class HttpsClientHandlerTests
         }
     }
 
+    [Test]
+    public void GetSecFetchSiteTreatsWildcardRuleAsSiteBoundary()
+    {
+        // *.ck: "foo.ck" — публичный суффикс, значит a.foo.ck и b.foo.ck — разные сайты.
+        var requestUri = new Uri("https://a.foo.ck/");
+        var referrer = new Uri("https://b.foo.ck/");
+
+        var site = InvokeGetSecFetchSite(requestUri, referrer, RequestKind.Fetch);
+
+        Assert.That(site, Is.EqualTo("cross-site"));
+    }
+
+    [Test]
+    public void GetSecFetchSiteTreatsExceptionRuleAsOrdinaryDomain()
+    {
+        // Исключение !www.ck: www.ck — обычный домен, его поддомен остаётся тем же сайтом.
+        var requestUri = new Uri("https://a.www.ck/");
+        var referrer = new Uri("https://www.ck/");
+
+        var site = InvokeGetSecFetchSite(requestUri, referrer, RequestKind.Fetch);
+
+        Assert.That(site, Is.EqualTo("same-site"));
+    }
+
+    [Test]
+    public void GetSecFetchSiteTreatsPunycodeIdnSuffixAsSiteBoundary()
+    {
+        // IDN-суффиксы хранятся в punycode: xn--p1ai (.рф) — публичный суффикс, как обычный ccTLD.
+        var requestUri = new Uri("https://a.xn--p1ai/");
+        var referrer = new Uri("https://b.xn--p1ai/");
+
+        var site = InvokeGetSecFetchSite(requestUri, referrer, RequestKind.Fetch);
+
+        Assert.That(site, Is.EqualTo("cross-site"));
+    }
+
     private static string InvokeGetSecFetchSite(Uri? requestUri, Uri? referrer, RequestKind requestKind, HttpsRequestDestination destination = HttpsRequestDestination.Empty)
     {
         var method = typeof(HttpsClientHandler).GetMethod("GetSecFetchSite", BindingFlags.Static | BindingFlags.NonPublic)

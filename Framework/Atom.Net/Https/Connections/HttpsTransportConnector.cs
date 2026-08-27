@@ -382,7 +382,7 @@ internal static class HttpsTransportConnector
         // обязана замыкать приветствие (RFC 8446, §4.2.11), psk_key_exchange_modes идёт рядом.
         if (options.PskOffer is { } pskOffer)
         {
-            if (extensions.All(extension => extension.Id is not 0x002d))
+            if (extensions.TrueForAll(extension => extension.Id is not 0x002d))
             {
                 // См. Tls13ClientHandshake.WithPskExtensions: Modes — только явным присваиванием.
                 extensions.Add(new PskKeyExchangeModesTlsExtension { Modes = [PskKeyExchangeMode.PskDheKe] });

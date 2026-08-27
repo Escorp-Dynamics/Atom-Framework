@@ -822,7 +822,7 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
         var rest = EarlyData.Value;
         while (!rest.IsEmpty)
         {
-            var take = (int)Math.Min(rest.Length, MaxPlaintextLength);
+            var take = Math.Min(rest.Length, MaxPlaintextLength);
             await SendEarlyRecordAsync(rest[..take], TlsContentType.ApplicationData, cancellationToken).ConfigureAwait(false);
             rest = rest[take..];
         }
@@ -893,6 +893,8 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
         // соединение как ошибочное. Отправка best-effort: лучшее время — пока ключи живы.
         if (handshakeComplete)
         {
+            DisposeEarlyKeys();
+
             try
             {
                 await SendProtectedRecordAsync(TlsContentType.Alert, CloseNotifyAlert.ToArray(), default).ConfigureAwait(false);

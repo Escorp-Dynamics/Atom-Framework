@@ -25,7 +25,9 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     // Multi-label публичные суффиксы — ICANN-секция официального Public Suffix List,
     // выгрузка 2026-08-27 (MultiLabelPublicSuffixes.cs сгенерирован из public_suffix_list.dat).
     // Влияет на sec-fetch-site: hosts под одним публичным суффиксом считаются одним сайтом.
-    private static readonly HashSet<string> commonMultiLabelPublicSuffixes = Headers.MultiLabelPublicSuffixes.Set;
+    private static readonly HashSet<string> commonMultiLabelPublicSuffixes = Headers.MultiLabelPublicSuffixes.Exact;
+    private static readonly HashSet<string> wildcardSuffixBases = Headers.MultiLabelPublicSuffixes.WildcardBases;
+    private static readonly HashSet<string> publicSuffixExceptions = Headers.MultiLabelPublicSuffixes.Exceptions;
 
     // Билеты возобновления сессии TLS 1.3 по имени узла: сервер выдаёт их после рукопожатия,
     // следующий handshake к тому же узлу предлагает их как PSK. Браузер не делает иного —
@@ -44,12 +46,15 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         {
             // 0-RTT предлагается только после h2: ранние байты, принятые h1.1-сервером, стали бы
             // мусором в его парсере запросов.
-            if (!entry.Ticket.IsExpired && (!requireHttp2 || entry.Protocol == "h2")) return entry.Ticket.ToOffer();
+            if (!entry.Ticket.IsExpired && (!requireHttp2 || string.Equals(entry.Protocol, "h2", StringComparison.Ordinal))) return entry.Ticket.ToOffer();
             tls13SessionTickets.TryRemove(host, out _);
         }
 
         return null;
     }
+
+    /// <summary>Предел числа узлов с хранимыми билетами: защита от неограниченного роста.</summary>
+    private const int MaxTls13TicketHosts = 256;
 
     /// <summary>
     /// Сохраняет билет, выданный соединением с узлом.
@@ -57,11 +62,21 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// <param name="host">Имя узла (совпадает с SNI).</param>
     /// <param name="ticket">Билет из NewSessionTicket.</param>
     /// <param name="negotiatedProtocol">Протокол, согласованный на соединении с этим билетом.</param>
+    /// <remarks>
+    /// Истёкшие билеты не храним; один узел может держать несколько действительных билетов —
+    /// заменяем последний полученным. При переполнении вытесняется произвольная запись:
+    /// потеря билета деградирует соединение до полного рукопожатия, но не ломает его.
+    /// </remarks>
     private void StoreTls13Ticket(string host, Tls13SessionTicket ticket, string? negotiatedProtocol)
     {
-        // Истёкшие билеты не храним; один узел может держать несколько действительных билетов —
-        // заменяем последний полученным.
-        if (!ticket.IsExpired) tls13SessionTickets[host] = (ticket, negotiatedProtocol);
+        if (ticket.IsExpired) return;
+
+        if (!tls13SessionTickets.ContainsKey(host) && tls13SessionTickets.Count >= MaxTls13TicketHosts)
+        {
+            tls13SessionTickets.TryRemove(tls13SessionTickets.Keys.First(), out _);
+        }
+
+        tls13SessionTickets[host] = (ticket, negotiatedProtocol);
     }
 
     private int activeRequests;
@@ -358,15 +373,17 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         byte[]? earlyDataPayload = null;
         HPackEncoder? earlyHeaderEncoder = null;
 
+        var http2Profile = profile?.Http2;
+
         if (isHttps && upstreamProxy is null && preferredVersion == HttpVersion.Version20
-            && profile is not null && profile.Value.Http2 is not null
+            && http2Profile is not null
             && (request.Method == HttpMethod.Get || request.Method == HttpMethod.Head)
             && request.Content is null
-            && TakeTls13TicketOffer(uri.IdnHost, requireHttp2: true) is { } earlyOffer)
+            && TakeTls13TicketOffer(uri.IdnHost, requireHttp2: true) is { } earlyOffer
+            && earlyOffer.MaxEarlyData > 0)
         {
-            var http2Settings = profile.Value.Http2 ?? throw new InvalidOperationException("Профиль без HTTP/2 не может предлагать 0-RTT");
-            var headers = Connections.Https2Connection.BuildHeaderList(request, 0, http2Settings);
-            (earlyDataPayload, earlyHeaderEncoder) = Connections.Https2Connection.BuildEarlyRequestPayload(headers, http2Settings, http2Settings.ConnectionWindowIncrement);
+            var headers = Connections.Https2Connection.BuildHeaderList(request, 0, http2Profile.Value);
+            (earlyDataPayload, earlyHeaderEncoder) = Connections.Https2Connection.BuildEarlyRequestPayload(headers, http2Profile.Value, http2Profile.Value.ConnectionWindowIncrement);
         }
 
         return new HttpsConnectionOptions
@@ -574,7 +591,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
                 if ((int)response.StatusCode == 407 && proxyAuthAttempts == 0
                     && Proxy?.Credentials is not null
                     && IsBasicChallenge(response.Headers.ProxyAuthenticate.ToString())
-                    && ResolveUpstreamProxy(current.RequestUri ?? new Uri("http://localhost/")) is { } proxyUri
+                    && ResolveUpstreamProxy(current.RequestUri ?? new Uri(Uri.UriSchemeHttp + Uri.SchemeDelimiter + "localhost")) is { } proxyUri
                     && Proxy.Credentials.GetCredential(proxyUri, "Basic") is { } proxyCredential)
                 {
                     proxyAuthAttempts++;
@@ -585,10 +602,11 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
                 }
 
                 // Учётные данные подтверждены удачным ответом — запоминаем для PreAuthenticate.
-                if (authAttempts > 0 && current.RequestUri is { } successUri && (int)response.StatusCode < 400)
+                if (authAttempts > 0 && (int)response.StatusCode < 400
+                    && current.RequestUri is { } successUri
+                    && current.Headers.TryGetValues("Authorization", out var confirmedValues))
                 {
-                    if (current.Headers.TryGetValues("Authorization", out var values))
-                        preAuthenticatedAuthorization[AuthorizationCacheKey(successUri)] = string.Join(" ", values);
+                    preAuthenticatedAuthorization[AuthorizationCacheKey(successUri)] = string.Join(' ', confirmedValues);
                 }
 
                 if (!AllowAutoRedirect) break;
@@ -2129,18 +2147,24 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             return host;
         }
 
-        // Самый длинный известный публичный суффикс побеждает: pvt.k12.ma.us — четырёхметочный,
-        // большинство — двухметочные. Суффикс длиной во весь host не рассматривается: сам host
-        // не может быть публичным суффиксом для запроса, у сайта должен остаться регистрируемый
-        // ярлык.
+        // Правила PSL применяются по приоритету спецификации: exception → wildcard → exact,
+        // и всегда выигрывает САМЫЙ ДЛИННЫЙ совпавший кандидат — перебор от длинных к коротким.
+        // Суффикс длиной во весь host не рассматривается: у сайта должен остаться ярлык.
         var maxSuffixLabels = Math.Min(parts.Length - 1, 4);
-        for (var take = maxSuffixLabels; take >= 2; take--)
+        for (var take = maxSuffixLabels; take >= 1; take--)
         {
-            var publicSuffix = string.Join('.', parts[^take..]);
-            if (commonMultiLabelPublicSuffixes.Contains(publicSuffix))
-            {
+            var candidate = string.Join('.', parts[^take..]);
+
+            // Исключение (!www.ck): кандидат — ОБЫЧНЫЙ домен, и он же является сайтом.
+            if (publicSuffixExceptions.Contains(candidate))
+                return candidate;
+
+            // Wildcard (*.ck): кандидат "foo.ck" — публичный суффикс, если база "ck" объявлена.
+            if (take >= 2 && wildcardSuffixBases.Contains(string.Join('.', parts[^(take - 1)..])))
                 return string.Join('.', parts[^(take + 1)..]);
-            }
+
+            if (commonMultiLabelPublicSuffixes.Contains(candidate))
+                return string.Join('.', parts[^(take + 1)..]);
         }
 
         return string.Concat(parts[^2], ".", parts[^1]);

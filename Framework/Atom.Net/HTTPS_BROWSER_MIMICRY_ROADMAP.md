@@ -1023,7 +1023,8 @@ Priority уже появился, но пока это coarse heuristic layer.
 - Мёртвые `ProxyValidator`/`Ja3`/`JitterSettings` удалены из модуля.
 - Basic-задачи 401/407 отвечаются автоматически из Credentials/Proxy.Credentials;
   PreAuthenticate кэширует подтверждённый Authorization на узел (по семантике SocketsHttpHandler).
-- Remaining gaps: Negotiate/Digest-поверхности, прокси-специфичный request shaping.
+- Классификация сайтов: полный ICANN PSL (6949 правил: exact/wildcard/exception/punycode-IDN),
+  приоритет правил — от самых длинных; Negotiate/Digest — осознанно вне модуля (браузер решает их через UI/SSO).
 
 ### Why
 

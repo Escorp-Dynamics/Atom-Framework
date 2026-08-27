@@ -127,7 +127,6 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
     /// его при полном рукопожатии. Без этого бита ранний секрет считался бы вслепую, а возобновление
     /// с отвергнутым билетом обрывалось бы на первой расшифровке.
     /// </remarks>
-    public bool ResumptionAccepted => resumptionAccepted;
 
     /// <summary>
     /// Resumption master secret; появляется после <see cref="CaptureResumptionMasterSecret"/>.
@@ -141,7 +140,7 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
     private byte[]? masterSecret;
 
     /// <summary>Выбрал ли сервер наш PSK-идентификатор.</summary>
-    private bool resumptionAccepted;
+    public bool ResumptionAccepted { get; private set; }
 
     /// <summary>
     /// Принимает EndOfEarlyData в транскрипт.
@@ -542,7 +541,7 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
 
         // PSK входит в ранний секрет ТОЛЬКО когда сервер подтвердил выбор identity: иначе он
         // выводил ключи без PSK, и любое расхождение здесь стало бы провалом расшифровки полёта.
-        var early = Tls13KeySchedule.DeriveEarlySecret(HashAlgorithm, resumptionAccepted ? pskOffer!.PreSharedKey.Span : []);
+        var early = Tls13KeySchedule.DeriveEarlySecret(HashAlgorithm, ResumptionAccepted ? pskOffer!.PreSharedKey.Span : []);
         handshakeSecret = Tls13KeySchedule.DeriveHandshakeSecret(HashAlgorithm, early, sharedSecret);
 
         ClientHandshakeSecret = Tls13KeySchedule.DeriveSecret(HashAlgorithm, handshakeSecret, "c hs traffic", transcriptHash);
@@ -592,7 +591,7 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
         // с индексом выбранного идентификатора (RFC 8446, §4.2.11). Без него билет отвергнут,
         // ранний секрет считается с нулевым PSK, и рукопожатие идёт как полное — предложенный
         // билет на это не влияет.
-        resumptionAccepted = pskOffer is not null && ServerSelectedPskIdentity(extensions);
+        ResumptionAccepted = pskOffer is not null && ServerSelectedPskIdentity(extensions);
 
         var serverPublicKey = ReadServerKeyShare(extensions);
         if (serverPublicKey.IsEmpty) throw new InvalidOperationException("ServerHello без key_share");
