@@ -26,9 +26,13 @@ namespace Atom.Net.Https.Http2;
 /// </remarks>
 /// <param name="transport">Установленный транспорт (обычно TLS-поток).</param>
 /// <param name="settings">Профиль HTTP/2.</param>
+/// <param name="connectionPrefaceAlreadySent">Преамбула и SETTINGS уже ушли в составе 0-RTT.</param>
+/// <param name="encoderSeed">Кодировщик, закодировавший ранние заголовки; его таблица продолжает сеанс.</param>
 [SuppressMessage("Design", "MA0182:Internal type is apparently never used", Justification = "Используется соединением HTTP/2 и тестами мультиплексирования.")]
-public sealed class Http2Session(Stream transport, Http2Settings settings) : IAsyncDisposable
+public sealed class Http2Session(Stream transport, Http2Settings settings, bool connectionPrefaceAlreadySent = false, HPackEncoder? encoderSeed = null) : IAsyncDisposable
 {
+    // Параметры connectionPrefaceAlreadySent и encoderSeed описаны в комментариях у полей,
+    // которые из них инициализируются (skipConnectionPreface / encoder).
     // Поле объявлено явно: обращение к параметру первичного конструктора из методов делает их
     // «статическими» с точки зрения анализаторов и мешает JIT кешировать ссылку.
     // Транспортом сеанс НЕ владеет: его создаёт и закрывает соединение, поэтому здесь он не
@@ -71,7 +75,9 @@ public sealed class Http2Session(Stream transport, Http2Settings settings) : IAs
     /// Расти таблице разрешает <see cref="HPackEncoder.UpdateDynamicTableSize"/> в начале
     /// следующего блока заголовков — там, где сигнал об изменении и обязан стоять.
     /// </remarks>
-    private readonly HPackEncoder encoder = new(DefaultPeerHeaderTableSize);
+    // Seed передаётся при 0-RTT: ранние заголовки кодировались ДО создания сеанса, и его
+    // динамическая таблица обязана продолжиться именно с состояния того кодировщика.
+    private readonly HPackEncoder encoder = encoderSeed ?? new(DefaultPeerHeaderTableSize);
 
     /// <summary>Размер таблицы заголовков по умолчанию до прихода SETTINGS партнёра.</summary>
     private const int DefaultPeerHeaderTableSize = 4096;
@@ -145,20 +151,41 @@ public sealed class Http2Session(Stream transport, Http2Settings settings) : IAs
     /// <param name="cancellationToken">Токен отмены.</param>
     public async ValueTask StartAsync(uint connectionWindowIncrement, CancellationToken cancellationToken)
     {
-        var size = Http2Preface.GetRequiredSize(settings);
-        var buffer = ArrayPool<byte>.Shared.Rent(size);
+        // Преамбула и SETTINGS могут быть уже отправлены в составе 0-RTT (RFC 8446, §2.3):
+        // тогда повторная отправка — ошибка кадрирования, а не безобидный дубль.
+        if (!connectionPrefaceAlreadySent)
+        {
+            var size = Http2Preface.GetRequiredSize(settings);
+            var buffer = ArrayPool<byte>.Shared.Rent(size);
 
-        try
-        {
-            var written = Http2Preface.Write(buffer.AsSpan(0, size), settings, connectionWindowIncrement);
-            await transport.WriteAsync(buffer.AsMemory(0, written), cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
+            try
+            {
+                var written = Http2Preface.Write(buffer.AsSpan(0, size), settings, connectionWindowIncrement);
+                await transport.WriteAsync(buffer.AsMemory(0, written), cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
         }
 
         readerLoop = Task.Run(() => ReadLoopAsync(lifetime.Token), CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Регистрирует поток 1, запрос по которому уже ушёл в составе 0-RTT.
+    /// </summary>
+    /// <returns>Состояние потока для ожидания ответа.</returns>
+    /// <remarks>
+    /// Запрос отправлен до запуска цикла чтения, поэтому поток обязан появиться в реестре ДО
+    /// первого кадра сервера — иначе ответу негде было бы осесть.
+    /// </remarks>
+    public Http2StreamState RegisterPreSentRequest()
+    {
+        var state = new Http2StreamState(1, Volatile.Read(ref peerInitialWindowSize));
+        streams[1] = state;
+        nextStreamId = 3;
+        return state;
     }
 
     /// <summary>

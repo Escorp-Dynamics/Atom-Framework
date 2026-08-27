@@ -34,6 +34,9 @@ internal readonly struct HttpsTransport
 
     /// <summary>Согласован ли HTTP/2.</summary>
     public bool IsHttp2 => string.Equals(NegotiatedProtocol, "h2", StringComparison.Ordinal);
+
+    /// <summary>Сервер подтвердил приём 0-RTT данных, отправленных при рукопожатии.</summary>
+    public bool EarlyDataAccepted { get; init; }
 }
 
 /// <summary>
@@ -99,6 +102,7 @@ internal static class HttpsTransportConnector
         var tcpStream = new TcpStream(CreateTcpSettings(options));
         Stream applicationTransport = tcpStream;
         string? negotiated = null;
+        var earlyDataAccepted = false;
 
         var openToken = CreateOpenToken(options.ConnectTimeout, cancellationToken, out var openTimeoutCts);
 
@@ -132,6 +136,9 @@ internal static class HttpsTransportConnector
                     ? new Tls13Stream(tcpStream, tlsSettings)
                     : new Tls12Stream(tcpStream, tlsSettings);
 
+                if (tlsStream is Tls13Stream earlyStream && options.EarlyDataPayload is { } earlyPayload)
+                    earlyStream.EarlyData = earlyPayload;
+
                 try
                 {
                     await tlsStream.HandshakeAsync(openToken).ConfigureAwait(false);
@@ -144,10 +151,16 @@ internal static class HttpsTransportConnector
 
                 // Билеты сессии приходят уже после рукопожатия, поэтому подписка ставится здесь:
                 // поток умирает вместе с соединением, отписываться не нужно.
-                if (tlsStream is Tls13Stream tls13 && options.SessionTicketSink is { } sink)
-                    tls13.SessionTicketReceived += ticket => sink(options.Host, ticket);
+                var tls13 = tlsStream as Tls13Stream;
+                var earlyAccepted = tls13 is not null && tls13.EarlyDataAccepted;
+
+                // Билеты сессии приходят уже после рукопожатия, поэтому подписка ставится здесь:
+                // поток умирает вместе с соединением, отписываться не нужно.
+                if (tls13 is not null && options.SessionTicketSink is { } sink)
+                    tls13.SessionTicketReceived += ticket => sink(options.Host, ticket, tlsStream.NegotiatedProtocol);
 
                 negotiated = tlsStream.NegotiatedProtocol;
+                earlyDataAccepted = earlyAccepted;
                 applicationTransport = tlsStream;
             }
         }
@@ -172,6 +185,7 @@ internal static class HttpsTransportConnector
             Transport = applicationTransport,
             NegotiatedProtocol = negotiated,
             IsSecure = options.IsHttps,
+            EarlyDataAccepted = earlyDataAccepted,
         };
     }
 

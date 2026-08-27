@@ -137,6 +137,7 @@ internal sealed class Https2Connection : HttpsConnection
         if (!options.IsHttps) throw new NotSupportedException("HTTP/2 без TLS не поддерживается: браузеры используют только защищённый транспорт");
 
         var established = await HttpsTransportConnector.ConnectAsync(options, HttpsTransportConnector.Http2AndHttp11, cancellationToken).ConfigureAwait(false);
+        earlyDataAccepted = established.EarlyDataAccepted;
 
         // Если сервер не выбрал h2, продолжать нельзя: говорить кадрами HTTP/2 по согласованному
         // http/1.1 значит получить немедленный разрыв вместо ответа.
@@ -177,7 +178,11 @@ internal sealed class Https2Connection : HttpsConnection
         this.options = options;
         profile = options.ProfileHttp2Settings ?? Http2ProfileCatalog.CreateChrome();
 
-        var created = new Http2Session(established.Transport, profile);
+        // При принятом 0-RTT преамбула и SETTINGS ушли в составе ранних данных, а поток 1
+        // уже открытым: реестр обязан знать о нём до первого кадра сервера.
+        var created = earlyDataAccepted && options.EarlyHeaderEncoder is { } seed
+            ? new Http2Session(established.Transport, profile, connectionPrefaceAlreadySent: true, encoderSeed: seed)
+            : new Http2Session(established.Transport, profile);
 
         try
         {
@@ -193,10 +198,65 @@ internal sealed class Https2Connection : HttpsConnection
         socketTransport = established.Socket;
         session = created;
 
+        if (earlyDataAccepted) preSentStream = created.RegisterPreSentRequest();
+
         Volatile.Write(ref createdTimestamp, Stopwatch.GetTimestamp());
         Volatile.Write(ref isDraining, 0);
         Volatile.Write(ref isConnected, 1);
         Touch();
+    }
+
+    private bool earlyDataAccepted;
+    private Http2StreamState? preSentStream;
+
+    /// <summary>
+    /// Собирает 0-RTT payload: преамбула h2 с SETTINGS профиля и HEADERS(END_STREAM)
+    /// для безопасного запроса (RFC 8446, §2.3; RFC 9113 — ранние кадры нумеруются с потока 1).
+    /// </summary>
+    /// <param name="headers">Список заголовков запроса (уже браузерного вида).</param>
+    /// <param name="settings">Настройки HTTP/2 профиля.</param>
+    /// <param name="connectionWindowIncrement">Приращение окна соединения профиля.</param>
+    /// <returns>Payload и кодировщик, которым он закодирован: его состояние обязано стать
+    /// состоянием сеанса, иначе динамическая таблица разойдётся с сервером.</returns>
+    internal static (byte[] Payload, HPackEncoder Encoder) BuildEarlyRequestPayload(
+        IReadOnlyList<KeyValuePair<string, string>> headers,
+        Http.Http2Settings settings,
+        uint connectionWindowIncrement)
+    {
+        var encoder = new HPackEncoder(4096);
+        var block = new ArrayBufferWriter<byte>(512);
+        encoder.Encode(block, headers);
+        var headerBlock = block.WrittenMemory.ToArray();
+
+        const byte HeadersEndStreamEndHeaders = 0x05;
+        var frame = new Http2FrameHeader(headerBlock.Length, Http2FrameType.Headers, HeadersEndStreamEndHeaders, streamId: 1);
+        var frameBytes = new byte[Http2FrameHeader.Size + headerBlock.Length];
+        frame.Write(frameBytes);
+        headerBlock.CopyTo(frameBytes, Http2FrameHeader.Size);
+
+        var size = Http2Preface.GetRequiredSize(settings) + frameBytes.Length;
+        var payload = new byte[size];
+        var written = Http2Preface.Write(payload, settings, connectionWindowIncrement);
+        frameBytes.CopyTo(payload, written);
+
+        return (payload, encoder);
+    }
+
+    internal static IReadOnlyList<KeyValuePair<string, string>> BuildHeaderList(
+        HttpsRequestMessage request,
+        int bodyLength,
+        Http.Http2Settings settings)
+    {
+        var uri = request.RequestUri ?? throw new InvalidOperationException("В запросе не задан адрес");
+        var authority = uri.IsDefaultPort ? uri.Host : $"{uri.Host}:{uri.Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        var path = uri.PathAndQuery;
+
+        var headers = OrderHeaders(request);
+
+        if (bodyLength > 0 && !headers.Exists(static header => string.Equals(header.Key, "content-length", StringComparison.OrdinalIgnoreCase)))
+            headers.Add(new KeyValuePair<string, string>("content-length", bodyLength.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
+        return Http2RequestHeaders.Build(request.Method.Method, authority, path, headers, settings);
     }
 
     private static async ValueTask DisposeTransportAsync(HttpsTransport established)
@@ -223,12 +283,25 @@ internal sealed class Https2Connection : HttpsConnection
 
         try
         {
-            var body = request.Content is null
-                ? ReadOnlyMemory<byte>.Empty
-                : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+            // Запрос уже улетел в составе 0-RTT: поток зарегистрирован, ожидаем только ответ.
+            // Тело при этом не учитывается в трафике: оно уехало в составе ранних данных.
+            var preSent = preSentStream is not null;
+            var body = ReadOnlyMemory<byte>.Empty;
 
-            var headers = BuildHeaders(request, body.Length);
-            stream = await session.SendRequestAsync(headers, body, cancellationToken).ConfigureAwait(false);
+            if (!preSent)
+            {
+                body = request.Content is null
+                    ? ReadOnlyMemory<byte>.Empty
+                    : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+
+                var headers = BuildHeaders(request, body.Length);
+                stream = await session.SendRequestAsync(headers, body, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                stream = preSentStream ?? throw new InvalidOperationException("0-RTT поток не зарегистрирован");
+                preSentStream = null;
+            }
 
             // ★ Этапные сроки применяются и здесь. Прежде они действовали ТОЛЬКО в HTTP/1.1, а
             // мультиплексируемые пути жили под одним лишь общим сроком запроса. Между тем именно

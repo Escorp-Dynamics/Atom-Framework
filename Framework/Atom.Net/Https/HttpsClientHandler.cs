@@ -30,18 +30,21 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     // Билеты возобновления сессии TLS 1.3 по имени узла: сервер выдаёт их после рукопожатия,
     // следующий handshake к тому же узлу предлагает их как PSK. Браузер не делает иного —
     // повторное соединение с полным рукопожатием само по себе заметный не-браузерный признак.
-    private readonly ConcurrentDictionary<string, Tls13SessionTicket> tls13SessionTickets = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, (Tls13SessionTicket Ticket, string? Protocol)> tls13SessionTickets = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Забирает предложение возобновления для узла, если живой билет ещё хранится.
     /// </summary>
     /// <param name="host">Имя узла (совпадает с SNI).</param>
+    /// <param name="requireHttp2">Требовать, чтобы прошлый протокол узла был HTTP/2.</param>
     /// <returns>Предложение PSK либо <see langword="null"/>, когда возобновление нечем предложить.</returns>
-    private Tls13PskOffer? TakeTls13TicketOffer(string host)
+    private Tls13PskOffer? TakeTls13TicketOffer(string host, bool requireHttp2)
     {
-        if (tls13SessionTickets.TryGetValue(host, out var ticket))
+        if (tls13SessionTickets.TryGetValue(host, out var entry))
         {
-            if (!ticket.IsExpired) return ticket.ToOffer();
+            // 0-RTT предлагается только после h2: ранние байты, принятые h1.1-сервером, стали бы
+            // мусором в его парсере запросов.
+            if (!entry.Ticket.IsExpired && (!requireHttp2 || entry.Protocol == "h2")) return entry.Ticket.ToOffer();
             tls13SessionTickets.TryRemove(host, out _);
         }
 
@@ -53,11 +56,12 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// </summary>
     /// <param name="host">Имя узла (совпадает с SNI).</param>
     /// <param name="ticket">Билет из NewSessionTicket.</param>
-    private void StoreTls13Ticket(string host, Tls13SessionTicket ticket)
+    /// <param name="negotiatedProtocol">Протокол, согласованный на соединении с этим билетом.</param>
+    private void StoreTls13Ticket(string host, Tls13SessionTicket ticket, string? negotiatedProtocol)
     {
         // Истёкшие билеты не храним; один узел может держать несколько действительных билетов —
         // заменяем последний полученным.
-        if (!ticket.IsExpired) tls13SessionTickets[host] = ticket;
+        if (!ticket.IsExpired) tls13SessionTickets[host] = (ticket, negotiatedProtocol);
     }
 
     private int activeRequests;
@@ -348,6 +352,23 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         var tcpSettings = BuildTcpSettings(profile);
         var tlsSettings = BuildTlsSettings(profile, request);
 
+        // Автоматический 0-RTT — только безопасные запросы без тела по h2 и БЕЗ прокси:
+        // ранние байты за туннелем CONNECT не работают. Профиль обязан описывать HTTP/2,
+        // а прошлый визит обязан был договориться именно о нём.
+        byte[]? earlyDataPayload = null;
+        HPackEncoder? earlyHeaderEncoder = null;
+
+        if (isHttps && upstreamProxy is null && preferredVersion == HttpVersion.Version20
+            && profile is not null && profile.Value.Http2 is not null
+            && (request.Method == HttpMethod.Get || request.Method == HttpMethod.Head)
+            && request.Content is null
+            && TakeTls13TicketOffer(uri.IdnHost, requireHttp2: true) is { } earlyOffer)
+        {
+            var http2Settings = profile.Value.Http2 ?? throw new InvalidOperationException("Профиль без HTTP/2 не может предлагать 0-RTT");
+            var headers = Connections.Https2Connection.BuildHeaderList(request, 0, http2Settings);
+            (earlyDataPayload, earlyHeaderEncoder) = Connections.Https2Connection.BuildEarlyRequestPayload(headers, http2Settings, http2Settings.ConnectionWindowIncrement);
+        }
+
         return new HttpsConnectionOptions
         {
             Host = uri.IdnHost,
@@ -376,7 +397,9 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             ProfileHttp3Settings = profile?.Http3,
             ProfileQuicTransport = profile?.QuicTransport,
             UpstreamProxy = upstreamProxy,
-            PskOffer = isHttps && preferredVersion != HttpVersion.Version30 ? TakeTls13TicketOffer(uri.IdnHost) : null,
+            PskOffer = isHttps && preferredVersion != HttpVersion.Version30 ? TakeTls13TicketOffer(uri.IdnHost, requireHttp2: false) : null,
+            EarlyDataPayload = earlyDataPayload,
+            EarlyHeaderEncoder = earlyHeaderEncoder,
             SessionTicketSink = StoreTls13Ticket,
         };
     }

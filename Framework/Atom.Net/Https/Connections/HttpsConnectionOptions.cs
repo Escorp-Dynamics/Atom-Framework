@@ -163,7 +163,18 @@ internal readonly record struct HttpsConnectionOptions
     public Tls.Tls13PskOffer? PskOffer { get; init; }
 
     /// <summary>
-    /// Куда передавать билеты сессии, выданные этим соединением; первый аргумент — имя узла.
+    /// 0-RTT данные для отправки сразу после ClientHello; <see langword="null"/> — не отправлять.
     /// </summary>
-    public Action<string, Tls.Tls13SessionTicket>? SessionTicketSink { get; init; }
+    public byte[]? EarlyDataPayload { get; init; }
+
+    /// <summary>
+    /// Кодировщик, которым закодированы ранние h2-заголовки: его таблица обязана стать таблицей сеанса.
+    /// </summary>
+    public Headers.HPackEncoder? EarlyHeaderEncoder { get; init; }
+
+    /// <summary>
+    /// Куда передавать билеты сессии, выданные этим соединением; аргументы — имя узла, билет
+    /// и согласованный протокол (нужен, чтобы 0-RTT предлагался только после h2).
+    /// </summary>
+    public Action<string, Tls.Tls13SessionTicket, string?>? SessionTicketSink { get; init; }
 }
