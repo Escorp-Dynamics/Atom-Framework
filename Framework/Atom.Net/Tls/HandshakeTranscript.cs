@@ -68,6 +68,25 @@ internal sealed class HandshakeTranscript : IDisposable
     }
 
     /// <summary>
+    /// Возвращает копию всех записанных байт транскрипта (диагностика).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public byte[] CopyRaw()
+    {
+        var total = 0;
+        for (var i = 0; i < chunks.Count; i++) total += (i == chunks.Count - 1) ? lastLen : chunks[i].Length;
+        var result = new byte[total];
+        var offset = 0;
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            var len = (i == chunks.Count - 1) ? lastLen : chunks[i].Length;
+            chunks[i].AsSpan(0, len).CopyTo(result.AsSpan(offset));
+            offset += len;
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Вычисляет хэш всех записанных байт под указанный алгоритм, не меняя состояния.
     /// </summary>
     /// <param name="alg">Хэш-функция.</param>

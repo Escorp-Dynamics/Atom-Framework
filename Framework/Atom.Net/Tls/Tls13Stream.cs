@@ -485,12 +485,13 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
 
         var applicationSettings = handshake.BuildClientEncryptedExtensions();
         var certificate = handshake.BuildClientCertificate();
+        var certificateVerify = handshake.BuildClientCertificateVerify();
         var finished = handshake.BuildClientFinished();
 
-        if (applicationSettings is null && certificate is null)
+        if (applicationSettings is null && certificate is null && certificateVerify is null)
             return SendProtectedRecordAsync(TlsContentType.Handshake, finished, cancellationToken);
 
-        var length = (applicationSettings?.Length ?? 0) + (certificate?.Length ?? 0) + finished.Length;
+        var length = (applicationSettings?.Length ?? 0) + (certificate?.Length ?? 0) + (certificateVerify?.Length ?? 0) + finished.Length;
         var flight = new byte[length];
         var offset = 0;
 
@@ -504,6 +505,12 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
         {
             certificate.CopyTo(flight, offset);
             offset += certificate.Length;
+        }
+
+        if (certificateVerify is not null)
+        {
+            certificateVerify.CopyTo(flight, offset);
+            offset += certificateVerify.Length;
         }
 
         finished.CopyTo(flight, offset);

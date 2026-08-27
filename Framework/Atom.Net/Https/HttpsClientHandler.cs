@@ -138,6 +138,12 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     public ICredentials? Credentials { get; set; }
 
     /// <summary>
+    /// Клиентский сертификат для взаимной аутентификации TLS (mTLS); приватный ключ обязателен.
+    /// Отправляется только когда сервер запросит клиентский сертификат.
+    /// </summary>
+    public System.Security.Cryptography.X509Certificates.X509Certificate2? ClientCertificate { get; set; }
+
+    /// <summary>
     /// Если используется прокси-сервер по умолчанию (системный), возвращает или задает учетные данные,
     /// отправляемые на прокси-сервер по умолчанию для проверки подлинности.
     /// Прокси-сервер по умолчанию используется только если <see cref="UseProxy"/> задано значение <see langword="true"/> и <see cref="Proxy"/> задано значение <see langword="null"/>.

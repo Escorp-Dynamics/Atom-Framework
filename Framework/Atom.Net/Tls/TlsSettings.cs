@@ -53,6 +53,12 @@ public readonly struct TlsSettings() : IEquatable<TlsSettings>
     public SessionIdPolicy SessionIdPolicy { get; init; }
 
     /// <summary>
+    /// Клиентский сертификат для взаимной аутентификации (RFC 8446 §4.4.2); приватный ключ
+    /// обязан присутствовать. Отправляется ТОЛЬКО когда сервер запросил клиентский сертификат.
+    /// </summary>
+    public System.Security.Cryptography.X509Certificates.X509Certificate2? ClientCertificate { get; init; }
+
+    /// <summary>
     /// Предложение возобновления сессии TLS 1.3; <see langword="null"/> — полное рукопожатие.
     /// </summary>
     /// <remarks>

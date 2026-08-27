@@ -142,6 +142,24 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
     /// <summary>Выбрал ли сервер наш PSK-идентификатор.</summary>
     public bool ResumptionAccepted { get; private set; }
 
+    /// <summary>Контекстная строка CertificateVerify клиента (RFC 8446, §4.4.3).</summary>
+    public const string ClientCertificateVerifyContext = "TLS 1.3, client CertificateVerify";
+
+    /// <summary>Был ли отправлен клиентский сертификат (не пустой список).</summary>
+    private bool clientCertificateSent;
+
+    /// <summary>Сертификат, отправленный серверу; приватный ключ нужен для CertificateVerify.</summary>
+    private System.Security.Cryptography.X509Certificates.X509Certificate2? clientCertificateSentCertificate;
+
+    /// <summary>Алгоритм подписи, выбранный для клиентского сертификата.</summary>
+    private ushort clientSignatureAlgorithm;
+
+    /// <summary>Хэш подписи, согласованный с набором шифров билета/сессии.</summary>
+    private System.Security.Cryptography.HashAlgorithmName clientSignatureHash;
+
+    /// <summary>Алгоритмы подписи, которые сервер объявил в CertificateRequest.</summary>
+    private ushort[]? clientAuthSignatureAlgorithms;
+
     /// <summary>
     /// Принимает EndOfEarlyData в транскрипт.
     /// </summary>
@@ -439,21 +457,166 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
         if (certificateRequestContext is null) return null;
 
         var context = certificateRequestContext;
-        var body = 1 + context.Length + 3;
+        var certificate = Settings.ClientCertificate;
+
+        // Алгоритм подписи выбирается под СОГЛАСОВАННЫЙ хэш набора: RSA совместим с любым,
+        // ECDSA-ключи привязаны к конкретному хэшу (P-256 → SHA-256, P-384 → SHA-384).
+        // Сертификата нет или его подпись несовместима — уходит ПУСТОЙ список, а
+        // CertificateVerify пропускается: решение о допуске принимает сервер.
+        var signatureAlgorithm = certificate is null ? null : SelectClientSignatureAlgorithm(certificate);
+
+        if (signatureAlgorithm is null)
+        {
+            var emptyBody = 1 + context.Length + 3;
+            var empty = new byte[4 + emptyBody];
+            empty[0] = (byte)TlsHandshakeType.Certificate;
+            empty[1] = (byte)(emptyBody >> 16);
+            empty[2] = (byte)(emptyBody >> 8);
+            empty[3] = (byte)emptyBody;
+            empty[4] = (byte)context.Length;
+            context.CopyTo(empty.AsSpan(5));
+            transcript.Append(empty);
+            return empty;
+        }
+
+        var certData = certificate!.RawData;
+        var listLength = 3 + certData.Length + 2;
+        var body = 1 + context.Length + 3 + listLength;
         var message = new byte[4 + body];
 
         message[0] = (byte)TlsHandshakeType.Certificate;
         message[1] = (byte)(body >> 16);
         message[2] = (byte)(body >> 8);
-        message[3] = (byte)body;
+        message[3] = (byte)(body & 0xFF);
 
         message[4] = (byte)context.Length;
         context.CopyTo(message.AsSpan(5));
 
-        // Длина списка сертификатов — три нулевых байта: список пуст.
+        var position = 5 + context.Length;
+        message[position] = (byte)(listLength >> 16);
+        message[position + 1] = (byte)(listLength >> 8);
+        message[position + 2] = (byte)(listLength & 0xFF);
+        position += 3;
+
+        message[position] = (byte)(certData.Length >> 16);
+        message[position + 1] = (byte)(certData.Length >> 8);
+        message[position + 2] = (byte)(certData.Length & 0xFF);
+        position += 3;
+        certData.CopyTo(message, position);
+        position += certData.Length;
+
+        // Расширения CertificateEntry — пустые.
+        message[position] = 0;
+        message[position + 1] = 0;
 
         transcript.Append(message);
+        clientCertificateSent = true;
+        clientCertificateSentCertificate = certificate;
+        clientSignatureAlgorithm = signatureAlgorithm.Value;
+        clientSignatureHash = HashAlgorithm;
 
+        return message;
+    }
+
+    private ushort? SelectClientSignatureAlgorithm(System.Security.Cryptography.X509Certificates.X509Certificate2 certificate)
+    {
+        // ★ Хэш подписи обязан совпадать с хэшем СОГЛАСОВАННОГО набора (RFC 8446, §4.4.3:
+        // сервер проверяет CV хэшем рукопожатия). P-256-ключ при наборе с SHA-384 несовместим —
+        // такой сертификат не предлагается вовсе.
+        if (HashAlgorithm == System.Security.Cryptography.HashAlgorithmName.SHA384)
+        {
+            if (certificate.GetRSAPrivateKey() is not null) return (ushort)Extensions.SignatureAlgorithm.RsaPssRsaeSha384;
+
+            var ecdsa384 = certificate.GetECDsaPrivateKey();
+            if (ecdsa384 is not null && ecdsa384.KeySize is 384) return (ushort)Extensions.SignatureAlgorithm.EcdsaSecp384r1Sha384;
+
+            return null;
+        }
+
+        if (certificate.GetRSAPrivateKey() is not null) return (ushort)Extensions.SignatureAlgorithm.RsaPssRsaeSha256;
+
+        var ecdsa = certificate.GetECDsaPrivateKey();
+        if (ecdsa is not null && ecdsa.KeySize is 256) return (ushort)Extensions.SignatureAlgorithm.EcdsaSecp256r1Sha256;
+
+        return null;
+    }
+
+    /// <summary>
+    /// Строит CertificateVerify клиента — подпись транскрипта ключом клиентского сертификата.
+    /// </summary>
+    /// <returns>Сообщение рукопожатия либо <see langword="null"/>, когда клиентский сертификат не отправлялся.</returns>
+    /// <remarks>
+    /// Подпись накрывает 64 пробела, контекстную строку, нулевой байт и хэш транскрипта
+    /// ВКЛЮЧАЯ сообщение Certificate клиента (RFC 8446, §4.4.3). В транскрипт идёт сообщение
+    /// как есть; сам ContentVerify в хэш для собственной подписи НЕ включается.
+    /// </remarks>
+    private static byte[] EncodeEcdsaDerSignature(byte[] raw)
+    {
+        var half = raw.Length / 2;
+        var r = DerInteger(raw.AsSpan(0, half));
+        var s = DerInteger(raw.AsSpan(half));
+        var body = new byte[2 + r.Length + s.Length];
+        body[0] = 0x30;
+        body[1] = (byte)(r.Length + s.Length);
+        r.CopyTo(body, 2);
+        s.CopyTo(body, 2 + r.Length);
+        return body;
+    }
+
+    private static byte[] DerInteger(ReadOnlySpan<byte> value)
+    {
+        var start = 0;
+        while (start < value.Length - 1 && value[start] is 0) start++;
+        var content = value[start..];
+        var needsPadding = (content[0] & 0x80) is not 0;
+        var length = content.Length + (needsPadding ? 1 : 0);
+        var result = new byte[2 + length];
+        result[0] = 0x02;
+        result[1] = (byte)length;
+        if (needsPadding) result[2] = 0;
+        content.CopyTo(result.AsSpan(2 + (needsPadding ? 1 : 0)));
+        return result;
+    }
+
+    public byte[]? BuildClientCertificateVerify()
+    {
+        if (!clientCertificateSent || clientCertificateSentCertificate is null) return null;
+
+        var hash = transcript.ComputeHash(HashAlgorithm);
+        System.IO.File.WriteAllBytes("/tmp/our_transcript.bin", transcript.CopyRaw());
+        var content = new byte[64 + ClientCertificateVerifyContext.Length + 1 + hash.Length];
+        content.AsSpan(0, 64).Fill(0x20);
+        System.Text.Encoding.ASCII.GetBytes(ClientCertificateVerifyContext, content.AsSpan(64));
+        content[64 + ClientCertificateVerifyContext.Length] = 0;
+        hash.CopyTo(content, 64 + ClientCertificateVerifyContext.Length + 1);
+
+        byte[] signature;
+        var certificate = clientCertificateSentCertificate;
+        var rsa = certificate!.GetRSAPrivateKey();
+        if (rsa is not null)
+        {
+            signature = rsa.SignData(content, clientSignatureHash, System.Security.Cryptography.RSASignaturePadding.Pss);
+        }
+        else
+        {
+            var ecdsa = certificate.GetECDsaPrivateKey() ?? throw new InvalidOperationException("Ключ клиентского сертификата недоступен");
+            // ECDSA-подпись в TLS 1.3 передаётся в DER (ECDSA-Sig-Value), а платформа отдаёт raw r||s.
+            signature = EncodeEcdsaDerSignature(ecdsa.SignData(content, clientSignatureHash));
+        }
+
+        var signatureLength = signature.Length;
+        var body = 2 + 2 + signatureLength;
+        var message = new byte[4 + body];
+
+        message[0] = (byte)TlsHandshakeType.CertificateVerify;
+        message[1] = (byte)(body >> 16);
+        message[2] = (byte)(body >> 8);
+        message[3] = (byte)body;
+        BinaryPrimitives.WriteUInt16BigEndian(message.AsSpan(4), clientSignatureAlgorithm);
+        BinaryPrimitives.WriteUInt16BigEndian(message.AsSpan(6), (ushort)signatureLength);
+        signature.CopyTo(message, 8);
+
+        transcript.Append(message);
         return message;
     }
 
@@ -469,6 +632,37 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
         if (1 + length > body.Length) throw new InvalidOperationException("Испорченный CertificateRequest");
 
         certificateRequestContext = body.Slice(1, length).ToArray();
+
+        // Расширения запроса: для выбора подписи CertificateVerify нужна signature_algorithms
+        // (0x000D) — подписывать алгоритмом вне списка сервер не обязан принимать.
+        var position = 1 + length;
+        if (position + 2 > body.Length) return;
+
+        var extensionsLength = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(position, 2));
+        var extensionsEnd = Math.Min(position + 2 + extensionsLength, body.Length);
+        position += 2;
+
+        while (position + 4 <= extensionsEnd)
+        {
+            var id = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(position, 2));
+            var extLength = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(position + 2, 2));
+            position += 4;
+
+            if (id is 0x000D && extLength >= 2 && position + extLength <= body.Length)
+                clientAuthSignatureAlgorithms = ReadSignatureAlgorithms(body.Slice(position, extLength));
+
+            position += extLength;
+        }
+    }
+
+    private static ushort[] ReadSignatureAlgorithms(ReadOnlySpan<byte> body)
+    {
+        var count = BinaryPrimitives.ReadUInt16BigEndian(body) / 2;
+        var algorithms = new ushort[count];
+        for (var index = 0; index < count; index++)
+            algorithms[index] = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(2 + index * 2, 2));
+
+        return algorithms;
     }
 
     /// <summary>

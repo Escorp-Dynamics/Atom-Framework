@@ -438,6 +438,7 @@ internal static class HttpsTransportConnector
             PermuteExtensions = profileSettings?.PermuteExtensions ?? false,
             PermutationAnchors = profileSettings?.PermutationAnchors,
             PskOffer = options.PskOffer,
+            ClientCertificate = options.ClientCertificate,
         };
     }
 

@@ -168,6 +168,11 @@ internal readonly record struct HttpsConnectionOptions
     public byte[]? EarlyDataPayload { get; init; }
 
     /// <summary>
+    /// Клиентский сертификат для mutual TLS; отправляется только по запросу сервера.
+    /// </summary>
+    public System.Security.Cryptography.X509Certificates.X509Certificate2? ClientCertificate { get; init; }
+
+    /// <summary>
     /// Кодировщик, которым закодированы ранние h2-заголовки: его таблица обязана стать таблицей сеанса.
     /// </summary>
     public Headers.HPackEncoder? EarlyHeaderEncoder { get; init; }
