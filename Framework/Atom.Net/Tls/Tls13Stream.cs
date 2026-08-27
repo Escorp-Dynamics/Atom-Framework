@@ -532,8 +532,40 @@ public sealed class Tls13Stream([NotNull] NetworkStream stream, in TlsSettings s
             throw new InvalidOperationException("Прикладные секреты не выведены");
 
         serverTrafficSecret = handshake.ServerApplicationSecret.ToArray();
-        ApplyTrafficSecrets(serverTrafficSecret, handshake.ClientApplicationSecret.Span);
+        clientTrafficSecret = handshake.ClientApplicationSecret.ToArray();
+        ApplyTrafficSecrets(serverTrafficSecret, clientTrafficSecret);
     }
+
+    /// <summary>
+    /// Отправляет клиентский KeyUpdate с request_update = 0 и ротует ключ записи.
+    /// </summary>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <remarks>
+    /// Само по себе обновление ключей — браузерное поведение на долгоживущих соединениях, а не
+    /// необходимость: KeyUpdate уходит под ТЕКУЩИМИ ключами записи, следующая запись шифруется
+    /// уже новыми (RFC 8446, §7.2). Сервер в ответ не обязан ничего присылать — request_update
+    /// нулевой, поэтому цикла обмена ключами не возникает.
+    /// </remarks>
+    public async ValueTask SendKeyUpdateAsync(CancellationToken cancellationToken = default)
+    {
+        if (!handshakeComplete || clientTrafficSecret is null)
+            throw new InvalidOperationException("KeyUpdate доступен только после завершения рукопожатия");
+
+        // request_update = 0: сервер обновляет только ключи чтения и ничего не присылает.
+        var message = new byte[] { (byte)TlsHandshakeType.KeyUpdate, 0, 0, 1, 0 };
+        await SendProtectedRecordAsync(TlsContentType.Handshake, message, cancellationToken).ConfigureAwait(false);
+
+        clientTrafficSecret = Tls13KeySchedule.DeriveNextTrafficSecret(handshake.HashAlgorithm, clientTrafficSecret);
+        var (key, iv) = Tls13KeySchedule.DeriveRecordKeys(handshake.HashAlgorithm, clientTrafficSecret, handshake.AeadKeyLength, RecordIvLength);
+
+        handshakeWrite?.Dispose();
+        handshakeWrite = CreateAead(key);
+        handshakeIvWrite = iv;
+        writeSequence = 0;
+    }
+
+    /// <summary>Текущий секрет трафика записи клиента; ротируется при отправке KeyUpdate.</summary>
+    private byte[]? clientTrafficSecret;
 
     private void HandlePostHandshake(ReadOnlySpan<byte> data)
     {

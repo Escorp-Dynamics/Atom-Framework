@@ -90,6 +90,18 @@ public sealed class Tls13SessionResumptionTests
     }
 
     [Test]
+    public async Task ClientKeyUpdateKeepsConnectionUsable()
+    {
+        // Долгоживущие соединения браузер обновляет KeyUpdate'ом; сервер обязан продолжить обмен
+        // под новыми ключами записи клиента. Запрос ПОСЛЕ KeyUpdate — доказательство ротации.
+        using var server = await LocalTlsServer.StartAsync();
+
+        await using var stream = await ConnectAsync(server.Port, pskOffer: null);
+        await stream.SendKeyUpdateAsync(TestContext.CurrentContext.CancellationToken);
+        await ExchangeAsync(stream, TestContext.CurrentContext.CancellationToken);
+    }
+
+    [Test]
     public async Task RejectedTicketFallsBackToFullHandshake()
     {
         // ★ Главная опасность PSK-пути: сервер, отвергший билет, продолжит ПОЛНОЕ рукопожатие,

@@ -1070,7 +1070,9 @@ Priority уже появился, но пока это coarse heuristic layer.
 - 0-RTT реализован: max_early_data из билета, early_data в ClientHello, ранние ключи из
   "c e traffic", EndOfEarlyData (в транскрипте — после полёта сервера), EarlyDataAccepted по EE;
   подтверждено против `openssl s_server -early_data`.
-- Remaining gaps: клиентский KeyUpdate, post-handshake client auth.
+- Клиентский KeyUpdate реализован (SendKeyUpdateAsync: request_update=0, ротация ключа записи);
+  подтверждён против openssl s_server.
+- Remaining gap: post-handshake client auth (сервер требует клиентский сертификат после рукопожатия).
 
 ### Why
 
