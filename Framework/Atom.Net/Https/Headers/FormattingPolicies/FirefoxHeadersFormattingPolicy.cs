@@ -29,6 +29,10 @@ public class FirefoxHeadersFormattingPolicy : HeadersFormattingPolicy
     /// Три отличия от Chromium существенны: язык идёт РАНЬШЕ кодировок, признак навигации стоит
     /// не в начале, а после них, и порядок <c>sec-fetch-*</c> обратный хромиумовскому.
     ///
+    /// Живой capture h1 (Chromium/Firefox 154 на loopback) уточняет позицию <c>Referer</c>:
+    /// он стоит сразу после <c>Connection</c> (iframe-навигация), а на h2, где соединный
+    /// заголовок не пишется, журнал показывает его сразу после кодировок — одно и то же место.
+    ///
     /// Подсказок клиента (<c>sec-ch-ua*</c>) Firefox не отправляет вовсе, поэтому их в списке нет.
     /// </remarks>
     private static readonly string[] FirefoxOrderCommon =
@@ -39,10 +43,10 @@ public class FirefoxHeadersFormattingPolicy : HeadersFormattingPolicy
         "accept-language",
         "accept-encoding",
         "connection",
-        "upgrade-insecure-requests",
         "referer",
         "origin",
         "cookie",
+        "upgrade-insecure-requests",
         "sec-fetch-dest",
         "sec-fetch-mode",
         "sec-fetch-site",
@@ -54,8 +58,108 @@ public class FirefoxHeadersFormattingPolicy : HeadersFormattingPolicy
         "te",
     ];
 
+    /// <summary>
+    /// CORS-mode fetch: реферер уходит до соединного заголовка, тело запроса — между ним и Origin.
+    /// </summary>
+    /// <remarks>
+    /// Живой capture Firefox 154 (fetch POST text/plain на loopback):
+    /// <c>... Accept-Encoding, Referer, Content-Type, Content-Length, Origin, Connection, ...</c>
+    /// </remarks>
+    private static readonly string[] FirefoxFetchCorsOrder =
+    [
+        "host",
+        "user-agent",
+        "accept",
+        "accept-language",
+        "accept-encoding",
+        "referer",
+        "content-type",
+        "content-length",
+        "origin",
+        "connection",
+        "sec-fetch-dest",
+        "sec-fetch-mode",
+        "sec-fetch-site",
+        "priority",
+    ];
+
+    /// <summary>
+    /// CORS-mode fetch без тела: Content-Length: 0 Firefox дописывает В САМЫЙ КОНЕЦ, после
+    /// Priority (живой capture: bodyless PUT). Content-Type при этом отсутствует.
+    /// </summary>
+    private static readonly string[] FirefoxFetchCorsWithoutBodyOrder =
+    [
+        "host",
+        "user-agent",
+        "accept",
+        "accept-language",
+        "accept-encoding",
+        "referer",
+        "origin",
+        "connection",
+        "sec-fetch-dest",
+        "sec-fetch-mode",
+        "sec-fetch-site",
+        "priority",
+        "content-length",
+    ];
+
+    /// <summary>
+    /// CORS-preflight: ACR-заголовки уходят сразу после кодировок, до реферера и Origin.
+    /// </summary>
+    /// <remarks>
+    /// Живой capture Firefox 154 (preflight OPTIONS): <c>... Accept-Encoding,
+    /// Access-Control-Request-Method, Access-Control-Request-Headers, Referer, Origin,
+    /// Connection, Sec-Fetch-Dest, ...</c>
+    /// </remarks>
+    private static readonly string[] FirefoxPreflightOrder =
+    [
+        "host",
+        "user-agent",
+        "accept",
+        "accept-language",
+        "accept-encoding",
+        "access-control-request-method",
+        "access-control-request-headers",
+        "referer",
+        "origin",
+        "connection",
+        "sec-fetch-dest",
+        "sec-fetch-mode",
+        "sec-fetch-site",
+        "priority",
+    ];
+
     /// <inheritdoc/>
     protected override IEnumerable<string> OrderCommon => FirefoxOrderCommon;
+
+    /// <inheritdoc/>
+    protected override (IEnumerable<string>? Order, string? RemainderAfterKnown) SelectH1Presentation(IDictionary<string, string> input, RequestKind requestKind)
+    {
+        if (requestKind is not RequestKind.Fetch)
+        {
+            return (null, null);
+        }
+
+        if (TryGetIgnoreCase(input, "access-control-request-method", out _))
+        {
+            return (FirefoxPreflightOrder, null);
+        }
+
+        // no-cors subresources (img/script/style) ходят общим навигационным порядком —
+        // живой capture совпадает с ним построчно.
+        if (!TryGetIgnoreCase(input, "sec-fetch-mode", out var mode)
+            || !string.Equals(mode, "cors", StringComparison.OrdinalIgnoreCase))
+        {
+            return (null, null);
+        }
+
+        // Нестандартные fetch-заголовки живой Firefox встраивает сразу после Referer
+        // (capture: X-Probe между Referer и Origin).
+        return TryGetIgnoreCase(input, "content-type", out _)
+            ? (FirefoxFetchCorsOrder, "referer")
+            : (FirefoxFetchCorsWithoutBodyOrder, "referer");
+    }
 
     /// <inheritdoc/>
     public override IReadOnlyDictionary<RequestKind, IEnumerable<char>> PseudoHeadersOrder { get; set; } = new Dictionary<RequestKind, IEnumerable<char>>

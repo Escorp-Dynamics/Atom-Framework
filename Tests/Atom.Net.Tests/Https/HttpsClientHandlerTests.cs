@@ -129,7 +129,8 @@ public sealed class HttpsClientHandlerTests
             {
                 Assert.That(request.Head, Does.Contain("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0\r\n"));
                 Assert.That(request.Head, Does.Contain("Accept: */*\r\n"));
-                Assert.That(request.Head, Does.Contain("priority: u=1, i\r\n"));
+                // Живой Chromium 151 на h1 не отправляет Priority на fetch-запросах — заголовок для него h2/h3-изм.
+                Assert.That(request.Head, Does.Not.Contain("riority:"));
                 Assert.That(request.Head, Does.Contain("Accept-Encoding: gzip, deflate, br, zstd\r\n"));
                 Assert.That(request.Head, Does.Contain("Accept-Language: en-US,en;q=0.9\r\n"));
                 Assert.That(request.Head, Does.Contain("Connection: keep-alive\r\n"));
@@ -231,7 +232,8 @@ public sealed class HttpsClientHandlerTests
             Assert.Multiple(() =>
             {
                 Assert.That(request.Head, Does.Contain("Accept: */*\r\n"));
-                Assert.That(request.Head, Does.Contain("priority: u=1, i\r\n"));
+                // Живой Chromium 151 на h1 не отправляет Priority на fetch-запросах — заголовок для него h2/h3-изм.
+                Assert.That(request.Head, Does.Not.Contain("riority:"));
                 Assert.That(request.Head, Does.Contain("Sec-Fetch-Site: same-origin\r\n"));
                 Assert.That(request.Head, Does.Contain("Sec-Fetch-Mode: cors\r\n"));
                 Assert.That(request.Head, Does.Contain("Sec-Fetch-Dest: empty\r\n"));
@@ -1893,9 +1895,8 @@ public sealed class HttpsClientHandlerTests
 
             Assert.Multiple(() =>
             {
-                Assert.That(request.Head, Does.Contain("Accept: image/avif,image/webp,image/*,*/*;q=0.8\r\n"));
+                Assert.That(request.Head, Does.Contain("Accept: image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5\r\n"));
                 Assert.That(request.Head, Does.Not.Contain("image/apng"));
-                Assert.That(request.Head, Does.Not.Contain("image/svg+xml"));
                 Assert.That(request.Head, Does.Contain("Sec-Fetch-Dest: image\r\n"));
             });
 
@@ -2248,7 +2249,7 @@ public sealed class HttpsClientHandlerTests
             Assert.Multiple(() =>
             {
                 Assert.That(request.Head, Does.Contain("Accept: text/css,*/*;q=0.1\r\n"));
-                Assert.That(request.Head, Does.Contain("Accept-Encoding: gzip, deflate\r\n"));
+                Assert.That(request.Head, Does.Contain("Accept-Encoding: gzip, deflate, br, zstd\r\n"));
                 Assert.That(request.Head, Does.Contain("Sec-Fetch-Site: same-origin\r\n"));
                 Assert.That(request.Head, Does.Contain("Sec-Fetch-Mode: no-cors\r\n"));
                 Assert.That(request.Head, Does.Contain("Sec-Fetch-Dest: style\r\n"));
@@ -2297,7 +2298,7 @@ public sealed class HttpsClientHandlerTests
 
             Assert.Multiple(() =>
             {
-                Assert.That(request.Head, Does.Contain("Accept: image/avif,image/webp,image/*,*/*;q=0.8\r\n"));
+                Assert.That(request.Head, Does.Contain("Accept: image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5\r\n"));
                 Assert.That(request.Head, Does.Contain("Sec-Fetch-Site: same-origin\r\n"));
                 Assert.That(request.Head, Does.Contain("Sec-Fetch-Mode: no-cors\r\n"));
                 Assert.That(request.Head, Does.Contain("Sec-Fetch-Dest: image\r\n"));

@@ -25,6 +25,38 @@
 Дифференциальный тест: ChromiumDifferentialCaptureTests (порядок/регистр/значения против
 живого браузера; Skip без Chromium) — НЕ зависит от WebBrowser.LaunchAsync.
 
+## Scenario Capture — все типы запросов h1 (2026-08-28)
+
+Сценарный дифференциальный тест `BrowserCaptureScenarioTests` + многозапросный
+`BrowserCaptureServer`: одна страница порождает навигацию, iframe, style/script/img,
+fetch GET/POST, redirect-цепочку (оба хопа) и cross-origin CORS preflight+PUT; каждый запрос
+живого Chromium 151 и Firefox 154 сравнивается с ответом нашего клиента попарно.
+
+Wire-truth, опровергшая прежние догадки (все внесены в модуль):
+
+- **Редирект-цепочка не работала вовсе**: цикл перенаправлений не пересылал follow-up запрос
+  (20 «хопов» без единого байта на провод). Исправлено; Referer теперь переносится по цепочке
+  (он описывает инициатора, а не адрес), Sec-Fetch-*/Origin/Cookie пересчитываются на каждом хопе.
+- **Порядок заголовков h1 зависит от рода запроса**. Chromium fetch/subresource:
+  `sec-ch-ua-platform, User-Agent, sec-ch-ua, sec-ch-ua-mobile` (платформа ПЕРЕД агентом);
+  preflight — вообще без client hints, Accept первым, ACR-заголовки до Origin. Firefox cors-fetch:
+  Referer ДО Connection, тело (Content-Type, Content-Length, Origin) между Referer и Connection;
+  preflight — ACR-заголовки сразу после кодировок. Введены per-kind таблицы
+  (SelectH1Presentation) + встраивание нестандартных заголовков в браузерную позицию
+  (Chromium: после User-Agent; Firefox: после Referer).
+- **Priority**: Chromium h1 — НЕ шлёт его ни на одном fetch/subresource; Firefox — per-destination:
+  style/script u=2, image `u=5, i`, fetch u=4, iframe-навигация u=4 (не u=0).
+- **Accept для image у Firefox 154**: `image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5`
+  (у Chromium — прежний apng-состав). Accept-Encoding у style-загрузки — полный, не «gzip, deflate».
+- **Content-Length** подаётся в карту заголовков: Chromium ставит его сразу после Connection,
+  Firefox cors-fetch — после Content-Type, Firefox bodyless PUT — в самый конец после Priority.
+- Нестандартные преплоады: у Chromium preload-Accept совпадает с subresource (проверено
+  отдельной пробой); Firefox preload через CLI не воспроизводится — паритет держится на
+  совпадении со subresource.
+
+Дальше по capture-линии: h2/h3 capture (нужен доверенный delivery-CA — root), form-POST
+навигация (dump-dom не переживает JS-сабмит), Safari.
+
 Отдельная незакрытая задача (WebBrowser-модуль, не Net): локальный real-browser запуск
 падает на bridge-bootstrap при chromium-бинарнике — расширение не устанавливается из
 managed-policy, т.к. delivery-CA не доверен сетевому стеку Chromium (nssdb-траст не

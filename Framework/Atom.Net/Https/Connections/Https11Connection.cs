@@ -347,21 +347,23 @@ internal sealed partial class Https11Connection : HttpsConnection
             if (formattingPolicy is null)
             {
                 AppendHostHeader(ref builder, request.Headers, hostHeader);
-                AppendFormattedHeaders(ref builder, request, hasBody);
+                AppendFormattedHeaders(ref builder, request, hasBody, bodyLength);
 
                 if (IsDraining && !ContainsHeader(request.Headers, nameof(HttpRequestHeader.Connection)))
                     builder.Append("Connection: close\r\n");
+
+                // ★ Нулевую длину объявлять ОБЯЗАТЕЛЬНО, если метод подразумевает тело. Запрос
+                // POST без Content-Length и без Transfer-Encoding сервер вправе отвергнуть, и
+                // отвергает: nginx, Apache и IIS отвечают на такой «411 Length Required».
+                if (hasBody || MethodImpliesBody(request.Method))
+                    builder.Append("Content-Length: ").Append((hasBody ? bodyLength : 0).ToString(CultureInfo.InvariantCulture)).Append("\r\n");
             }
             else
             {
-                AppendFormattedHeaders(ref builder, request, hasBody, hostHeader);
+                // Путь с политикой сам отвечает за Content-Length: таблица порядка ставит его
+                // на браузерное место, а AppendFormattedHeaders страхует фолбэком в конец.
+                AppendFormattedHeaders(ref builder, request, hasBody, bodyLength, hostHeader);
             }
-
-            // ★ Нулевую длину объявлять ОБЯЗАТЕЛЬНО, если метод подразумевает тело. Запрос
-            // POST без Content-Length и без Transfer-Encoding сервер вправе отвергнуть, и
-            // отвергает: nginx, Apache и IIS отвечают на такой «411 Length Required».
-            if (hasBody || MethodImpliesBody(request.Method))
-                builder.Append("Content-Length: ").Append((hasBody ? bodyLength : 0).ToString(CultureInfo.InvariantCulture)).Append("\r\n");
 
             builder.Append("\r\n");
             // Latin1, а не ASCII: она переносит байты 1:1. ASCII молча заменяла всё старше
@@ -375,7 +377,7 @@ internal sealed partial class Https11Connection : HttpsConnection
         }
     }
 
-    private void AppendFormattedHeaders(ref ValueStringBuilder builder, HttpsRequestMessage request, bool hasBody, string? hostHeader = null)
+    private void AppendFormattedHeaders(ref ValueStringBuilder builder, HttpsRequestMessage request, bool hasBody, int bodyLength, string? hostHeader = null)
     {
         var formattingPolicy = request.HeadersFormattingPolicy;
         if (formattingPolicy is null)
@@ -385,14 +387,28 @@ internal sealed partial class Https11Connection : HttpsConnection
             return;
         }
 
-        var headers = BuildHeaderMap(headerMap, request, hasBody, hostHeader, IsDraining);
+        var headers = BuildHeaderMap(headerMap, request, hasBody, bodyLength, hostHeader, IsDraining);
+        var contentLengthWritten = false;
+
         foreach (var header in formattingPolicy.Format(headers, HttpVersion.Version11, request.EffectiveKind, request.UseCookieCrumbling))
         {
+            if (!contentLengthWritten && string.Equals(header.Key, "Content-Length", StringComparison.OrdinalIgnoreCase))
+            {
+                contentLengthWritten = true;
+            }
+
             builder.Append(header.Key).Append(": ").Append(header.Value).Append("\r\n");
+        }
+
+        // Фолбэк для таблиц порядка без content-length (навигационные): длина уходит в конец,
+        // как и прежде, пока живой capture не скажет иное.
+        if (!contentLengthWritten && (hasBody || MethodImpliesBody(request.Method)))
+        {
+            builder.Append("Content-Length: ").Append((hasBody ? bodyLength : 0).ToString(CultureInfo.InvariantCulture)).Append("\r\n");
         }
     }
 
-    private static Dictionary<string, string> BuildHeaderMap(Dictionary<string, string> headers, HttpsRequestMessage request, bool hasBody, string? hostHeader, bool isDraining)
+    private static Dictionary<string, string> BuildHeaderMap(Dictionary<string, string> headers, HttpsRequestMessage request, bool hasBody, int bodyLength, string? hostHeader, bool isDraining)
     {
         headers.Clear();
 
@@ -416,13 +432,22 @@ internal sealed partial class Https11Connection : HttpsConnection
 
         if (request.Content is null)
         {
+            if (MethodImpliesBody(request.Method))
+            {
+                headers["Content-Length"] = "0";
+            }
+
             return headers;
         }
 
         foreach (var header in request.Content.Headers.NonValidated)
         {
-            if (string.Equals(header.Key, "Content-Length", StringComparison.OrdinalIgnoreCase) && hasBody)
+            if (string.Equals(header.Key, "Content-Length", StringComparison.OrdinalIgnoreCase))
             {
+                // Длина тела подаётся в карту, чтобы таблицы порядка ставили её на место,
+                // которое выбрал браузер (Chromium: сразу после Connection; Firefox: после
+                // Content-Type), а не на то, куда её дописывает соединение.
+                headers["Content-Length"] = (hasBody ? bodyLength : 0).ToString(CultureInfo.InvariantCulture);
                 continue;
             }
 

@@ -118,23 +118,72 @@ public abstract class HeadersFormattingPolicy : IHeadersFormattingPolicy
         ArgumentNullException.ThrowIfNull(requestVersion);
         ArgumentNullException.ThrowIfNull(orderCommon);
 
-        return FormatIterator(input, requestVersion, requestKind, orderCommon, useCookieCrumbling);
+        // На h1 живые браузеры ведут себя по-разному для разных родов запроса: порядок
+        // subresource/fetch у Chromium и Firefox расходится с навигационным, а CORS-preflight —
+        // с обоими (capture Chromium 151 / Firefox 154). На h2+ живой правды по fetch-порядкам
+        // нет, поэтому там остаётся общий список.
+        if (requestVersion.Major is 1)
+        {
+            var (h1Order, remainderAfter) = SelectH1Presentation(input, requestKind);
+            if (h1Order is not null)
+            {
+                return FormatIterator(input, requestVersion, requestKind, h1Order, useCookieCrumbling, remainderAfter);
+            }
+        }
+
+        return FormatIterator(input, requestVersion, requestKind, orderCommon, useCookieCrumbling, remainderAfterKnown: null);
     }
+
+    /// <summary>
+    /// Выбирает h1-порядок заголовков под род запроса по содержимому запроса.
+    /// </summary>
+    /// <param name="input">Заголовки запроса (регистр имён произвольный).</param>
+    /// <param name="requestKind">Род запроса.</param>
+    /// <returns>Порядок для h1 либо <see langword="null"/>, когда годится общий список, и имя
+    /// известного заголовка, сразу после которого уходят нестандартные (для Chromium это
+    /// <c>user-agent</c>, для Firefox — <c>referer</c>); <see langword="null"/> — в конце.</returns>
+    /// <remarks>
+    /// Живые браузеры встраивают нестандартные fetch-заголовки ВНУТРЬ известного блока
+    /// (Chromium 151: X-Probe сразу после User-Agent; Firefox 154: сразу после Referer) —
+    /// ставить их в конец значит отличаться от браузера в каждом таком запросе.
+    /// </remarks>
+    protected virtual (IEnumerable<string>? Order, string? RemainderAfterKnown) SelectH1Presentation(IDictionary<string, string> input, RequestKind requestKind)
+        => (null, null);
 
     private IEnumerable<KeyValuePair<string, string>> FormatIterator(
         IDictionary<string, string> input,
         Version requestVersion,
         RequestKind requestKind,
         IEnumerable<string> orderCommon,
-        bool useCookieCrumbling)
+        bool useCookieCrumbling,
+        string? remainderAfterKnown)
     {
         var isH2Plus = requestVersion.Major >= 2;
 
+        // Нестандартные заголовки уходят сразу после маркерного заголовка, если он задан и
+        // встретился; иначе — в конце, как прежде.
+        var remainderFlushed = false;
+
         foreach (var kv in FormatKnownHeaders(input, requestKind, orderCommon, useCookieCrumbling, isH2Plus))
+        {
             yield return kv;
 
-        foreach (var kv in FormatRemainderHeaders(input, requestKind, orderCommon, useCookieCrumbling, isH2Plus))
-            yield return kv;
+            if (!remainderFlushed
+                && remainderAfterKnown is not null
+                && string.Equals(kv.Key, remainderAfterKnown, StringComparison.OrdinalIgnoreCase))
+            {
+                remainderFlushed = true;
+
+                foreach (var rest in FormatRemainderHeaders(input, requestKind, orderCommon, useCookieCrumbling, isH2Plus))
+                    yield return rest;
+            }
+        }
+
+        if (!remainderFlushed)
+        {
+            foreach (var rest in FormatRemainderHeaders(input, requestKind, orderCommon, useCookieCrumbling, isH2Plus))
+                yield return rest;
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

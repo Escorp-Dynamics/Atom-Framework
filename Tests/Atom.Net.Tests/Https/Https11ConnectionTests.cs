@@ -709,7 +709,7 @@ public sealed class Https11ConnectionTests
         Assert.Multiple(() =>
         {
             Assert.That(requestHead, Does.Contain("Accept: text/css,*/*;q=0.1\r\n"));
-            Assert.That(requestHead, Does.Contain("Accept-Encoding: gzip, deflate\r\n"));
+            Assert.That(requestHead, Does.Contain("Accept-Encoding: gzip, deflate, br, zstd\r\n"));
             Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: no-cors\r\n"));
             Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: style\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
@@ -743,7 +743,7 @@ public sealed class Https11ConnectionTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(requestHead, Does.Contain("Accept: image/avif,image/webp,image/*,*/*;q=0.8\r\n"));
+            Assert.That(requestHead, Does.Contain("Accept: image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5\r\n"));
             Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: no-cors\r\n"));
             Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: image\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));

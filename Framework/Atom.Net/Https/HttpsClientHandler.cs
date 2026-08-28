@@ -628,6 +628,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
                 response.Dispose();
                 DisposeRedirect(redirected);
                 redirected = next;
+                response = await SendWithRetryAsync(redirected, cancellationToken).ConfigureAwait(false);
             }
 #pragma warning restore CA2000
 
@@ -1053,13 +1054,14 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// <remarks>
     /// Эти заголовки описывают ОТНОШЕНИЕ запроса к адресу: узел, происхождение, назначение
     /// выборки, набор cookie. Перенесённые как есть, они описывали бы прошлый адрес — и это
-    /// заметно снаружи ровно так же, как их отсутствие.
+    /// заметно снаружи ровно так же, как их отсутствие. Referer среди них НЕТ: он описывает
+    /// инициатора цепочки, а не очередной адрес, — браузер несёт его через все перенаправления,
+    /// а политика реферера каждый раз применяется уже к цели очередного хопа.
     /// </remarks>
     private static bool IsRecomputedOnRedirect(string name)
         => string.Equals(name, "Host", StringComparison.OrdinalIgnoreCase)
         || string.Equals(name, "Cookie", StringComparison.OrdinalIgnoreCase)
         || string.Equals(name, "Origin", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(name, "Referer", StringComparison.OrdinalIgnoreCase)
         || name.StartsWith("Sec-Fetch-", StringComparison.OrdinalIgnoreCase);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1553,6 +1555,13 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
 
     private static void ApplyClientHintsDefaults(HttpsRequestMessage request, BrowserProfile profile)
     {
+        // CORS-preflight живой Chromium шлёт БЕЗ подсказок клиента вообще (capture: OPTIONS
+        // с Access-Control-Request-Method) — добавлять их значит выдать себя мгновенно.
+        if (request.Method == System.Net.Http.HttpMethod.Options && request.Headers.Contains("Access-Control-Request-Method"))
+        {
+            return;
+        }
+
         if (!TryCreateSecChUaValue(profile.UserAgent, out var secChUa))
         {
             return;
@@ -1799,7 +1808,9 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         return destination switch
         {
             RequestDestination.Style => "text/css,*/*;q=0.1",
-            RequestDestination.Image when IsFirefoxProfile(profile) => "image/avif,image/webp,image/*,*/*;q=0.8",
+            // Состав снят с живого Firefox 154 (capture subresource img): png упомянут явно,
+            // хвосты получили веса 0.8/0.5 — у Chromium состав другой, со старым apng-хвостом.
+            RequestDestination.Image when IsFirefoxProfile(profile) => "image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5",
             RequestDestination.Image => "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
             _ => "*/*",
         };
@@ -1851,9 +1862,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             && ((requestContext.Kind is RequestKind.Navigation && requestContext.IsFormSubmission)
                 || requestContext.Kind is RequestKind.ModulePreload or RequestKind.Prefetch
                 || (requestContext.Destination is RequestDestination.Script
-                    && string.Equals(requestContext.SecFetchMode, "cors", StringComparison.OrdinalIgnoreCase))
-                || (requestContext.Destination is RequestDestination.Style
-                    && string.Equals(requestContext.SecFetchMode, "no-cors", StringComparison.OrdinalIgnoreCase))))
+                    && string.Equals(requestContext.SecFetchMode, "cors", StringComparison.OrdinalIgnoreCase))))
         {
             return "gzip, deflate";
         }
@@ -1886,12 +1895,26 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
 
         if (IsFirefoxProfile(profile))
         {
-            return requestContext.Kind switch
+            if (requestContext.Kind is RequestKind.Navigation)
             {
-                RequestKind.Navigation => "u=0, i",
-                RequestKind.Fetch => "u=4",
-                _ => null,
-            };
+                // iframe-навигация несёт приоритет обычного среднего запроса (u=4), а не
+                // навигационный u=0 — живой capture Firefox 154.
+                return requestContext.Destination is RequestDestination.Iframe ? "u=4" : "u=0, i";
+            }
+
+            if (requestContext.Kind is RequestKind.Fetch)
+            {
+                // Приоритеты subresource сняты с живого Firefox 154 на h1 (capture):
+                // картинки — самые дешёвые (u=5, i), стили и скрипты — u=2, остальной fetch — u=4.
+                return requestContext.Destination switch
+                {
+                    RequestDestination.Image => "u=5, i",
+                    RequestDestination.Style or RequestDestination.Script => "u=2",
+                    _ => "u=4",
+                };
+            }
+
+            return null;
         }
 
         if (requestContext.Kind is RequestKind.Navigation)
@@ -1920,15 +1943,16 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             return null;
         }
 
-        if (requestContext.Kind is RequestKind.Fetch
-            && requestContext.Destination is not RequestDestination.Empty)
+        if (requestContext.Kind is RequestKind.Fetch)
         {
-            return null;
-        }
+            // Живой Chromium 151 на h1 не отправляет Priority ни на одном fetch/subresource-запросе
+            // (capture: fetch GET/POST, img/script/style, preflight) — он для него h2/h3-изм.
+            if (requestContext.RequestVersionMajor is 1)
+            {
+                return null;
+            }
 
-        if (requestContext.Kind is not RequestKind.Preload and not RequestKind.ModulePreload)
-        {
-            return "u=1, i";
+            return requestContext.Destination is not RequestDestination.Empty ? null : "u=1, i";
         }
 
         return null;
