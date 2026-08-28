@@ -744,8 +744,8 @@ public sealed class Https11ConnectionTests
         Assert.Multiple(() =>
         {
             Assert.That(requestHead, Does.Contain("Accept: image/avif,image/webp,image/*,*/*;q=0.8\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: no-cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: image\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: no-cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: image\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
         });
     }
@@ -942,8 +942,8 @@ public sealed class Https11ConnectionTests
         Assert.Multiple(() =>
         {
             Assert.That(requestHead, Does.Contain("Accept: */*\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-mode: no-cors\r\n"));
-            Assert.That(requestHead, Does.Contain("sec-fetch-dest: script\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Mode: no-cors\r\n"));
+            Assert.That(requestHead, Does.Contain("Sec-Fetch-Dest: script\r\n"));
             Assert.That(requestHead, Does.Not.Contain("\r\nOrigin:"));
         });
     }

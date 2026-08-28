@@ -33,14 +33,16 @@ public class FirefoxHeadersFormattingPolicy : HeadersFormattingPolicy
     /// </remarks>
     private static readonly string[] FirefoxOrderCommon =
     [
+        "host",
         "user-agent",
         "accept",
         "accept-language",
         "accept-encoding",
+        "connection",
+        "upgrade-insecure-requests",
         "referer",
         "origin",
         "cookie",
-        "upgrade-insecure-requests",
         "sec-fetch-dest",
         "sec-fetch-mode",
         "sec-fetch-site",
@@ -66,4 +68,15 @@ public class FirefoxHeadersFormattingPolicy : HeadersFormattingPolicy
         { RequestKind.ServiceWorker, defaultPseudoHeadersOrder },
         { RequestKind.Unknown, defaultPseudoHeadersOrder },
     };
+
+    /// <summary>
+    /// Живой Firefox 154 на h1 отправляет ВСЕ заголовки в Title-Case, включая Sec-Fetch-*
+    /// и Priority (capture: навигация на loopback) — принудительный lowercase не применяется.
+    /// </summary>
+    protected override bool IsForcedLowercaseH1Core(string nameLower)
+    {
+        ArgumentNullException.ThrowIfNull(nameLower);
+
+        return false;
+    }
 }
