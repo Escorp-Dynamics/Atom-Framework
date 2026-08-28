@@ -1621,6 +1621,13 @@ internal static class BridgeExtensionBootstrap
             cancellationToken).ConfigureAwait(false);
 
         var legacyDiagnostics = await PublishLegacyManagedPolicyAliasIfPresentAsync(profile, strategy, localPolicyPath, mergedPolicyJson, legacyMethodName, cancellationToken).ConfigureAwait(false);
+
+        // ★ Бинарник может быть Chromium при Chrome-профиле (тестовые окружения через
+        // ATOM_TEST_WEBDRIVER_BROWSER_PATH): системная политика Chrome таким бинарником
+        // не читается. Дублируем политику в пользовательский каталог ~/.config/chromium —
+        // он читается Chromium без root и безвреден для branded-сборок.
+        await PublishChromiumUserManagedPolicyAsync(mergedPolicyJson, cancellationToken).ConfigureAwait(false);
+
         return (systemPolicyPath, MergeManagedPolicyDiagnostics(diagnostics, legacyDiagnostics));
     }
 
@@ -1686,6 +1693,22 @@ internal static class BridgeExtensionBootstrap
             legacyDiagnostics.Method,
             legacyDiagnostics.TargetPath,
             detail);
+    }
+
+    private static async ValueTask PublishChromiumUserManagedPolicyAsync(string policyJson, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var userDirectoryPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".config", "chromium", "policies", "managed");
+            Directory.CreateDirectory(userDirectoryPath);
+            await File.WriteAllTextAsync(Path.Combine(userDirectoryPath, LinuxChromeManagedPolicyFileName), policyJson, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            Observe(ex);
+        }
     }
 
     private static async ValueTask<BridgeManagedPolicyPublishDiagnostics> PublishManagedPolicyFileAsync(
