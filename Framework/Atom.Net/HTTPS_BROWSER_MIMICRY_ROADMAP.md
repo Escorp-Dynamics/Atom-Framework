@@ -23,7 +23,14 @@
   locale-поверхность профиля это уже поддерживает.
 
 Дифференциальный тест: ChromiumDifferentialCaptureTests (порядок/регистр/значения против
-живого браузера; Skip без Chromium).
+живого браузера; Skip без Chromium) — НЕ зависит от WebBrowser.LaunchAsync.
+
+Отдельная незакрытая задача (WebBrowser-модуль, не Net): локальный real-browser запуск
+падает на bridge-bootstrap при chromium-бинарнике — расширение не устанавливается из
+managed-policy, т.к. delivery-CA не доверен сетевому стеку Chromium (nssdb-траст не
+применяется современным верификатором; config-dir и user-policy сиды добавлены).
+Требуется: доверить delivery-CA в системном хранилище (root) либо
+--ignore-certificate-errors-spki-list для расширения/обновлений.
 
 ## Status Legend
 
