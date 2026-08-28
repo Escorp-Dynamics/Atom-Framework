@@ -1399,7 +1399,7 @@ internal static class BridgeExtensionBootstrap
 
         await File.WriteAllTextAsync(policyPath, policyJson, cancellationToken).ConfigureAwait(false);
 
-        var (publishPath, diagnostics) = await PublishManagedPolicyAsync(profile, strategy, policyPath, extensionId, policy, cancellationToken).ConfigureAwait(false);
+        var (publishPath, diagnostics) = await PublishManagedPolicyAsync(profile, profilePath, strategy, policyPath, extensionId, policy, cancellationToken).ConfigureAwait(false);
 
         return new BridgeBootstrapManagedPolicyArtifacts(
             PolicyPath: policyPath,
@@ -1592,6 +1592,7 @@ internal static class BridgeExtensionBootstrap
 
     private static async ValueTask<(string PublishPath, BridgeManagedPolicyPublishDiagnostics Diagnostics)> PublishManagedPolicyAsync(
         WebBrowserProfile profile,
+        string profilePath,
         ChromiumBootstrapStrategy strategy,
         string localPolicyPath,
         string extensionId,
@@ -1624,9 +1625,13 @@ internal static class BridgeExtensionBootstrap
 
         // ★ Бинарник может быть Chromium при Chrome-профиле (тестовые окружения через
         // ATOM_TEST_WEBDRIVER_BROWSER_PATH): системная политика Chrome таким бинарником
-        // не читается. Дублируем политику в пользовательский каталог ~/.config/chromium —
-        // он читается Chromium без root и безвреден для branded-сборок.
+        // не читается. Дублируем политику в config-dir запускаемого профиля
+        // (<user-data-dir>/policies/managed — ConfigDirPolicyProvider читает её всегда)
+        // и в ~/.config/chromium/policies/managed — без root и безвредно для branded-сборок.
         await PublishChromiumUserManagedPolicyAsync(mergedPolicyJson, cancellationToken).ConfigureAwait(false);
+        var configDirPolicyDirectory = Path.Combine(profilePath, "policies", "managed");
+        Directory.CreateDirectory(configDirPolicyDirectory);
+        await File.WriteAllTextAsync(Path.Combine(configDirPolicyDirectory, LinuxChromeManagedPolicyFileName), mergedPolicyJson, cancellationToken).ConfigureAwait(false);
 
         return (systemPolicyPath, MergeManagedPolicyDiagnostics(diagnostics, legacyDiagnostics));
     }
