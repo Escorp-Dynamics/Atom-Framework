@@ -428,13 +428,15 @@ public class WebDriverBrowserProfileTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(stableChromeStrategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.ProfileSeeded));
+            // Branded-сборки отклоняют --load-extension, поэтому rootless opt-in НЕ возвращает их
+            // к profile-seeded: единственный работающий канал — managed policy (контракт e5c0d4a).
+            Assert.That(stableChromeStrategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.SystemManagedPolicy));
             Assert.That(stableChromeStrategy.TransportMode, Is.EqualTo(ChromiumBootstrapTransportMode.SecureWebSocket));
-            Assert.That(stableChromeStrategy.UseCommandLineExtensionLoad, Is.True);
+            Assert.That(stableChromeStrategy.UseCommandLineExtensionLoad, Is.False);
 
-            Assert.That(stableEdgeStrategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.ProfileSeeded));
+            Assert.That(stableEdgeStrategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.SystemManagedPolicy));
             Assert.That(stableEdgeStrategy.TransportMode, Is.EqualTo(ChromiumBootstrapTransportMode.SecureWebSocket));
-            Assert.That(stableEdgeStrategy.UseCommandLineExtensionLoad, Is.True);
+            Assert.That(stableEdgeStrategy.UseCommandLineExtensionLoad, Is.False);
         });
     }
 
@@ -492,8 +494,10 @@ public class WebDriverBrowserProfileTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableChrome, useRootlessChromiumBootstrap: true), Is.Null);
-            Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableEdge, useRootlessChromiumBootstrap: true), Is.Null);
+            // Branded-сборки отклоняют --load-extension, поэтому системный policy-путь для них
+            // остаётся единственным каналом установки и под rootless opt-in: контракт e5c0d4a.
+            Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableChrome, useRootlessChromiumBootstrap: true), Is.EqualTo("/etc/opt/chrome/policies/managed/atom-webdriver-extension.json"));
+            Assert.That(BridgeExtensionBootstrap.ResolveLinuxSystemManagedPolicyPath(stableEdge, useRootlessChromiumBootstrap: true), Is.EqualTo("/etc/opt/edge/policies/managed/atom-webdriver-extension.json"));
         });
     }
 
@@ -534,8 +538,10 @@ public class WebDriverBrowserProfileTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(BridgeExtensionBootstrap.ShouldSeedChromiumProfileExtensionSettings(stableChrome, useRootlessChromiumBootstrap: true), Is.True);
-            Assert.That(BridgeExtensionBootstrap.ShouldSeedChromiumProfileExtensionSettings(stableEdge, useRootlessChromiumBootstrap: true), Is.True);
+            // Branded-сборки под rootless opt-in идут через managed policy, а не profile-seeded:
+            // сидирование настроек расширения для них не выбирается (контракт e5c0d4a).
+            Assert.That(BridgeExtensionBootstrap.ShouldSeedChromiumProfileExtensionSettings(stableChrome, useRootlessChromiumBootstrap: true), Is.False);
+            Assert.That(BridgeExtensionBootstrap.ShouldSeedChromiumProfileExtensionSettings(stableEdge, useRootlessChromiumBootstrap: true), Is.False);
         });
     }
 
@@ -711,10 +717,12 @@ public class WebDriverBrowserProfileTests
 
             Assert.Multiple(() =>
             {
-                Assert.That(materialization.BridgeBootstrap!.Strategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.ProfileSeeded));
-                Assert.That(materialization.BridgeBootstrap.ManagedPolicyDiagnostics.Status, Is.EqualTo("profile-local"));
-                Assert.That(materialization.BridgeBootstrap.ManagedPolicyPublishPath, Is.EqualTo(IOPath.Combine(profilePath, "chromium.managed-policy.json")));
-                Assert.That(materialization.BridgeBootstrap.ManagedPolicyDiagnostics.RequiresSystemPath, Is.False);
+                // Branded Chrome отклоняет --load-extension: даже под rootless opt-in установка
+                // идёт через системную managed policy (контракт e5c0d4a), а не profile-local.
+                Assert.That(materialization.BridgeBootstrap!.Strategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.SystemManagedPolicy));
+                Assert.That(materialization.BridgeBootstrap.Strategy.UseCommandLineExtensionLoad, Is.False);
+                Assert.That(materialization.BridgeBootstrap.ManagedPolicyDiagnostics.RequiresSystemPath, Is.True);
+                Assert.That(materialization.BridgeBootstrap.ManagedPolicyPublishPath, Is.EqualTo("/etc/opt/chrome/policies/managed/atom-webdriver-extension.json"));
             });
         }
         finally
@@ -770,11 +778,17 @@ public class WebDriverBrowserProfileTests
             Assert.That(materialization.BridgeBootstrap, Is.Not.Null);
             Assert.That(Uri.TryCreate(materialization.BridgeBootstrap!.TransportUrl, UriKind.Absolute, out var transportUri), Is.True);
 
+            // Branded Edge отклоняет --load-extension и под rootless opt-in ставит расширение
+            // через системную managed policy; Brave/Opera/Vivaldi командную строку принимают
+            // и остаются profile-seeded (контракт e5c0d4a). Транспорт у всех — защищённый wss.
+            var expectedInstallMode = browserKind is "edge"
+                ? ChromiumBootstrapInstallMode.SystemManagedPolicy
+                : ChromiumBootstrapInstallMode.ProfileSeeded;
+
             Assert.Multiple(() =>
             {
-                Assert.That(materialization.BridgeBootstrap.Strategy.InstallMode, Is.EqualTo(ChromiumBootstrapInstallMode.ProfileSeeded));
+                Assert.That(materialization.BridgeBootstrap.Strategy.InstallMode, Is.EqualTo(expectedInstallMode));
                 Assert.That(materialization.BridgeBootstrap.Strategy.TransportMode, Is.EqualTo(ChromiumBootstrapTransportMode.SecureWebSocket));
-                Assert.That(materialization.BridgeBootstrap.ManagedPolicyDiagnostics.Status, Is.EqualTo("profile-local"));
                 Assert.That(transportUri!.Scheme, Is.EqualTo("wss"));
             });
         }

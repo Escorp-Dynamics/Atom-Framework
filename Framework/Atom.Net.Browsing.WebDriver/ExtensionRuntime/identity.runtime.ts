@@ -29,6 +29,13 @@ const identityHost = globalThis as typeof globalThis & {
 };
 
 const profile = identityHost.__ATOM_IDENTITY_PROFILE;
+
+// Переносчик профиля немедленно снимается с window: свойство с именем `__ATOM_*` — тот же след
+// автоматики, что и любой другой, и страница находит его тем же getOwnPropertyNames, каким
+// его находит наш собственный footprint-тест. Конверт уже захвачен локальной переменной;
+// динамическая смена профиля брокером приходит аргументом в executeScript и этот канал не читает.
+delete (identityHost as { __ATOM_IDENTITY_PROFILE?: unknown }).__ATOM_IDENTITY_PROFILE;
+
 if (profile !== undefined && profile !== null) {
     installIdentityInMainWorld(profile, installIdentityInWorker.toString());
 }

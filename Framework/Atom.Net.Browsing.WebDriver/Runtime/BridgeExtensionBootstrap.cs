@@ -127,6 +127,8 @@ internal static class BridgeExtensionBootstrap
     private const string MaterializedChromiumExtensionDirectoryName = "Atom.WebDriver.Extension";
     private const string FirefoxExtensionDirectoryName = "Extension.Firefox";
     private const string LinuxChromeManagedPolicyDirectory = "/etc/opt/chrome/policies/managed";
+    // Дистрибутивный Chromium читает платформенные политики только отсюда (не из пути Chrome).
+    private const string LinuxChromiumManagedPolicyDirectory = "/etc/chromium/policies/managed";
     private const string LinuxEdgeManagedPolicyDirectory = "/etc/opt/edge/policies/managed";
     // Brave на Linux читает системные policy из /etc/brave/policies/managed, а не из
     // /etc/opt/<vendor>/... по аналогии с Chrome/Edge: путь подтверждён самим браузером
@@ -200,18 +202,16 @@ internal static class BridgeExtensionBootstrap
     {
         if (device?.UserAgent is not { Length: > 0 } userAgent) return null;
 
-        if (userAgent.Contains("Firefox/", StringComparison.Ordinal))
-            return Atom.Net.Https.Profiles.BrowserProfileCatalog.CreateFirefoxDesktop();
-
-        // Safari определяется исключением: строка Chrome тоже содержит «Safari».
-        if (userAgent.Contains("Safari/", StringComparison.Ordinal)
-            && !userAgent.Contains("Chrome/", StringComparison.Ordinal)
-            && !userAgent.Contains("Chromium/", StringComparison.Ordinal))
-        {
-            return Atom.Net.Https.Profiles.BrowserProfileCatalog.CreateSafariDesktopMacOs();
-        }
-
-        return Atom.Net.Https.Profiles.BrowserProfileCatalog.CreateChromiumTls13Profile("Bridge Forward", userAgent);
+        // ★ Профиль подбирается ОБЩИМ резолвером, а не собственной веткой.
+        //
+        // Здесь была ошибка ровно того рода, что ищут по ja3/ja4: строка агента iPhone попадала под
+        // условие «Safari без Chrome» и получала отпечаток НАСТОЛЬНОГО Safari для macOS, хотя в
+        // каталоге есть отдельные профили Safari iOS и Chrome iOS. Мобильное рукопожатие отличается
+        // от настольного, и такое расхождение видно ещё до первого байта запроса.
+        //
+        // Резолвер уже различает iOS (включая CriOS/FxiOS), Android, Edge, Firefox и Safari на
+        // macOS, поэтому дублировать разбор строки агента здесь незачем: источник истины один.
+        return Atom.Net.Https.Profiles.BrowserProfileResolver.Resolve(userAgent);
     }
 
     internal static async ValueTask<BridgeBootstrapPlan> MaterializeAsync(
@@ -1625,15 +1625,74 @@ internal static class BridgeExtensionBootstrap
 
         // ★ Бинарник может быть Chromium при Chrome-профиле (тестовые окружения через
         // ATOM_TEST_WEBDRIVER_BROWSER_PATH): системная политика Chrome таким бинарником
-        // не читается. Дублируем политику в config-dir запускаемого профиля
-        // (<user-data-dir>/policies/managed — ConfigDirPolicyProvider читает её всегда)
-        // и в ~/.config/chromium/policies/managed — без root и безвредно для branded-сборок.
+        // не читается. Chromium на Linux берёт платформенные политики ТОЛЬКО из
+        // /etc/chromium/policies/managed (config_dir_policy_loader; проверено его
+        // собственным логом), поэтому дублируем политику и в системный путь Chromium.
+        var chromiumDiagnostics = await PublishChromiumSystemManagedPolicyIfChromiumBinaryAsync(profile, strategy, localPolicyPath, extensionId, policy, cancellationToken).ConfigureAwait(false);
+
+        // Пользовательские дубль-пути остаются как безвредный fallback для сборок, которые
+        // их читают: config-dir запускаемого профиля и ~/.config/chromium/policies/managed.
         await PublishChromiumUserManagedPolicyAsync(mergedPolicyJson, cancellationToken).ConfigureAwait(false);
         var configDirPolicyDirectory = Path.Combine(profilePath, "policies", "managed");
         Directory.CreateDirectory(configDirPolicyDirectory);
         await File.WriteAllTextAsync(Path.Combine(configDirPolicyDirectory, LinuxChromeManagedPolicyFileName), mergedPolicyJson, cancellationToken).ConfigureAwait(false);
 
-        return (systemPolicyPath, MergeManagedPolicyDiagnostics(diagnostics, legacyDiagnostics));
+        return (systemPolicyPath, MergeManagedPolicyDiagnostics(MergeManagedPolicyDiagnostics(diagnostics, legacyDiagnostics), chromiumDiagnostics));
+    }
+
+    /// <summary>
+    /// Публикует managed policy в системный каталог Chromium, если запускаемый бинарник —
+    /// именно Chromium (при Chrome-профиле с переопределённым <see cref="WebBrowserProfile.BinaryPath"/>).
+    /// </summary>
+    private static async ValueTask<BridgeManagedPolicyPublishDiagnostics?> PublishChromiumSystemManagedPolicyIfChromiumBinaryAsync(
+        WebBrowserProfile profile,
+        ChromiumBootstrapStrategy strategy,
+        string localPolicyPath,
+        string extensionId,
+        JsonObject policy,
+        CancellationToken cancellationToken)
+    {
+        if (strategy.InstallMode is not ChromiumBootstrapInstallMode.SystemManagedPolicy
+            || !IsChromiumLaunchBinary(profile))
+        {
+            return null;
+        }
+
+        var chromiumPolicyPath = Path.Combine(LinuxChromiumManagedPolicyDirectory, LinuxChromeManagedPolicyFileName);
+        var chromiumMergedPolicyJson = BridgeManagedPolicyRegistry.BuildPolicyWithEntry(chromiumPolicyPath, extensionId, policy);
+
+        var diagnostics = await PublishManagedPolicyFileAsync(
+            localPolicyPath,
+            chromiumPolicyPath,
+            chromiumMergedPolicyJson,
+            "linux-chromium-system-policy",
+            cancellationToken).ConfigureAwait(false);
+
+        if (string.Equals(diagnostics.Status, "system-publish-required", StringComparison.Ordinal))
+            Observe(new InvalidOperationException($"Не удалось опубликовать managed policy для chromium-бинарника '{chromiumPolicyPath}': {diagnostics.Detail}"));
+
+        return diagnostics;
+    }
+
+    /// <summary>
+    /// Указывает, что запускаемым бинарником является Chromium, а не branded-сборка Google Chrome.
+    /// </summary>
+    /// <remarks>
+    /// Профиль остаётся <see cref="ChromeProfile"/>, но бинарник переопределён (тестовые
+    /// окружения, дистрибутивные сборки): отличаем по имени файла — branded-сборки называются
+    /// «chrome»/«google-chrome*», дистрибутивный Chromium — «chromium»/«chromium-browser».
+    /// </remarks>
+    private static bool IsChromiumLaunchBinary(WebBrowserProfile profile)
+    {
+        if (profile is not ChromeProfile || profile.GetType() != typeof(ChromeProfile))
+            return false;
+
+        var binaryPath = profile.BinaryPath;
+        if (string.IsNullOrWhiteSpace(binaryPath))
+            return false;
+
+        var binaryName = Path.GetFileName(binaryPath.TrimEnd(Path.DirectorySeparatorChar));
+        return binaryName.StartsWith("chromium", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? ResolveTransportUrl(ChromiumBootstrapStrategy strategy, BridgeSettings settings)

@@ -812,6 +812,7 @@ public sealed partial class WebBrowser : IWebBrowser
 
         AppendDeviceContext(payload, page.ResolvedDevice);
 
+
         return payload;
     }
 
@@ -1037,15 +1038,24 @@ public sealed partial class WebBrowser : IWebBrowser
                 payload["languages"] = new JsonArray(languages.Select(static language => (JsonNode?)JsonValue.Create(language)).ToArray());
         }
 
-        if (BuildClientHintsPayload(device.ClientHints) is { } clientHints)
-            payload["clientHints"] = clientHints;
+        // ★ Клиентские подсказки — расширение Chromium; у WebKit их нет ВОВСЕ. Профиль iPhone,
+        // отдающий 'Sec-CH-UA-Platform: "iOS"' и 'navigator.userAgentData', противоречит
+        // собственной строке агента ещё до исполнения любого скрипта — это видно прямо в
+        // заголовках запроса. Поэтому для профиля на WebKit подсказки в контекст не кладутся.
+        if (!DeclaresWebKitEngine(device.UserAgent))
+            AppendOptionalObject(payload, "clientHints", BuildClientHintsPayload(device.ClientHints));
 
         // WebGL передаём вместе с остальным контекстом вкладки: заявленная платформа обязана
         // подтверждаться и здесь. Настоящий десктопный браузер всегда отдаёт vendor/renderer, и
         // расхождение с User-Agent (или пустые значения) выделяет клиента не хуже прямого признака
         // автоматизации.
-        if (BuildWebGlPayload(device.WebGL) is { } webGl)
-            payload["webGl"] = webGl;
+        AppendOptionalObject(payload, "webGl", BuildWebGlPayload(device.WebGL));
+
+        // ★ Числовые пределы идут ВМЕСТЕ с именем видеокарты. Подменять одно без другого хуже,
+        // чем не подменять вовсе: пара «карта — её пределы» известна и сверяется таблицей, а
+        // замер показывал Apple M1 Pro с максимальным размером текстуры 8192 вместо 16384 —
+        // то есть карту, которой не бывает.
+        AppendOptionalObject(payload, "webGlParameters", BuildWebGlParametersPayload(device.WebGLParams));
 
         if (!device.ViewportSize.IsEmpty)
         {
@@ -1055,6 +1065,11 @@ public sealed partial class WebBrowser : IWebBrowser
                 ["height"] = device.ViewportSize.Height,
             };
         }
+
+        // Экран передаётся ОТДЕЛЬНО от области просмотра. Прежде страница получала экран, выведенный
+        // из размеров окна, и доступная область совпадала с полной — почерк среды без оболочки
+        // рабочего стола, где нет ни строки меню, ни панели задач.
+        AppendOptionalObject(payload, "screen", BuildScreenPayload(device.Screen));
 
         if (device.DeviceScaleFactor > 0)
             payload["deviceScaleFactor"] = device.DeviceScaleFactor;
@@ -1077,6 +1092,17 @@ public sealed partial class WebBrowser : IWebBrowser
         payload["maxTouchPoints"] = device.MaxTouchPoints;
         payload["isMobile"] = device.IsMobile;
         payload["hasTouch"] = device.HasTouch;
+
+        // Предпочтения оформления читаются медиа-запросами, а не свойствами навигатора, поэтому
+        // передаются отдельно: заявленная светлая тема при тёмной теме окружения — расхождение,
+        // которое сайт видит одной строкой matchMedia.
+        AppendOptionalString(payload, "colorScheme", device.ColorScheme);
+        payload["reducedMotion"] = device.ReducedMotion;
+
+        // Сеть: заявленный профиль и наблюдаемое соединение расходились полностью — замер видел
+        // 3g/rtt 400/downlink 1.35 при заявленном 4g. Соединение читается тем же скриптом, что и
+        // остальная личность, и расхождение здесь ничем не отличается от расхождения платформы.
+        AppendOptionalObject(payload, "network", BuildNetworkPayload(device.NetworkInfo));
 
         if (device.VirtualMediaDevices is { } virtualMediaDevices)
             payload["virtualMediaDevices"] = BuildVirtualMediaDevicesPayload(virtualMediaDevices);
@@ -1114,6 +1140,114 @@ public sealed partial class WebBrowser : IWebBrowser
     /// страница читает их разными путями — обычным <c>getParameter</c> и через расширение
     /// <c>WEBGL_debug_renderer_info</c>, — и подменять нужно оба, иначе они разойдутся между собой.
     /// </remarks>
+    /// <summary>
+    /// Собирает числовые пределы WebGL для контекста вкладки.
+    /// </summary>
+    /// <param name="parameters">Пределы заявленной видеокарты.</param>
+    /// <returns>Полезная нагрузка либо <see langword="null"/>, если пределы не заданы.</returns>
+    private static JsonObject? BuildWebGlParametersPayload(WebGLParamsSettings? parameters)
+    {
+        if (parameters is null) return null;
+
+        var payload = new JsonObject();
+
+        if (parameters.MaxTextureSize > 0) payload["maxTextureSize"] = parameters.MaxTextureSize;
+        if (parameters.MaxRenderbufferSize > 0) payload["maxRenderbufferSize"] = parameters.MaxRenderbufferSize;
+        if (parameters.MaxVaryingVectors > 0) payload["maxVaryingVectors"] = parameters.MaxVaryingVectors;
+        if (parameters.MaxVertexUniformVectors > 0) payload["maxVertexUniformVectors"] = parameters.MaxVertexUniformVectors;
+        if (parameters.MaxFragmentUniformVectors > 0) payload["maxFragmentUniformVectors"] = parameters.MaxFragmentUniformVectors;
+
+        if (parameters.MaxViewportDims is { } viewportDims)
+        {
+            var dims = viewportDims.ToArray();
+
+            if (dims.Length is 2)
+                payload["maxViewportDims"] = new JsonArray(JsonValue.Create(dims[0]), JsonValue.Create(dims[1]));
+        }
+
+        return payload.Count > 0 ? payload : null;
+    }
+
+    /// <summary>
+    /// Кладёт в нагрузку вложенный объект, если он собран.
+    /// </summary>
+    /// <param name="payload">Нагрузка контекста вкладки.</param>
+    /// <param name="name">Имя поля.</param>
+    /// <param name="value">Собранный объект либо <see langword="null"/>.</param>
+    private static void AppendOptionalObject(JsonObject payload, string name, JsonObject? value)
+    {
+        if (value is not null)
+            payload[name] = value;
+    }
+
+    /// <summary>
+    /// Собирает параметры соединения заявленного устройства.
+    /// </summary>
+    /// <param name="network">Сеть профиля.</param>
+    /// <returns>Полезная нагрузка либо <see langword="null"/>, если сеть не заявлена.</returns>
+    private static JsonObject? BuildNetworkPayload(NetworkInfoSettings? network)
+    {
+        if (network is null)
+            return null;
+
+        var payload = new JsonObject();
+
+        AppendOptionalString(payload, "effectiveType", network.EffectiveType);
+        AppendOptionalString(payload, "type", network.Type);
+
+        if (network.Downlink is { } downlink && downlink > 0) payload["downlink"] = downlink;
+        if (network.Rtt is { } rtt && rtt >= 0) payload["rtt"] = rtt;
+
+        return payload.Count > 0 ? payload : null;
+    }
+
+    /// <summary>
+    /// Собирает метрики экрана заявленного устройства.
+    /// </summary>
+    /// <param name="screen">Экран профиля.</param>
+    /// <returns>Полезная нагрузка либо <see langword="null"/>, если экран не заявлен.</returns>
+    /// <summary>
+    /// Заявляет ли строка агента движок WebKit.
+    /// </summary>
+    /// <param name="userAgent">Строка агента профиля.</param>
+    /// <returns><see langword="true"/>, если профиль объявляет iOS/iPadOS либо Safari.</returns>
+    /// <remarks>
+    /// На iOS и iPadOS других движков не бывает: Chrome и Firefox там — оболочки над системным
+    /// WebKit. Поэтому признак движка выводится из ОС, а не только из имени браузера.
+    /// </remarks>
+    internal static bool DeclaresWebKitEngine(string? userAgent)
+    {
+        if (string.IsNullOrEmpty(userAgent))
+            return false;
+
+        return userAgent.Contains("iPhone", StringComparison.Ordinal)
+            || userAgent.Contains("iPad", StringComparison.Ordinal)
+            || userAgent.Contains("iPod", StringComparison.Ordinal)
+            || (userAgent.Contains("Safari/", StringComparison.Ordinal)
+                && userAgent.Contains("Version/", StringComparison.Ordinal)
+                && !userAgent.Contains("Chrome/", StringComparison.Ordinal)
+                && !userAgent.Contains("Chromium/", StringComparison.Ordinal));
+    }
+
+    private static JsonObject? BuildScreenPayload(ScreenSettings? screen)
+    {
+        if (screen is null || screen.Width <= 0 || screen.Height <= 0)
+            return null;
+
+        var payload = new JsonObject
+        {
+            ["width"] = screen.Width,
+            ["height"] = screen.Height,
+        };
+
+        if (screen.AvailWidth > 0) payload["availWidth"] = screen.AvailWidth;
+        if (screen.AvailHeight > 0) payload["availHeight"] = screen.AvailHeight;
+        if (screen.ColorDepth > 0) payload["colorDepth"] = screen.ColorDepth;
+        if (screen.PixelDepth > 0) payload["pixelDepth"] = screen.PixelDepth;
+
+        return payload;
+    }
+
     private static JsonObject? BuildWebGlPayload(WebGLSettings? settings)
     {
         if (settings is null)

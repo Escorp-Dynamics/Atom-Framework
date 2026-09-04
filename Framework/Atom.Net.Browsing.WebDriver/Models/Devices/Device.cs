@@ -137,10 +137,10 @@ public class Device
         },
         NetworkInfo = new NetworkInfoSettings
         {
-            EffectiveType = "5g",
+            EffectiveType = "4g",
             Type = "cellular",
-            Downlink = 25,
-            Rtt = 40,
+            Downlink = 10,
+            Rtt = 50,
         },
         WebGL = new WebGLSettings
         {
@@ -213,7 +213,7 @@ public class Device
             EffectiveType = "4g",
             Type = "cellular",
             Downlink = 8,
-            Rtt = 85,
+            Rtt = 75,
         },
         WebGL = new WebGLSettings
         {
@@ -282,10 +282,10 @@ public class Device
         },
         NetworkInfo = new NetworkInfoSettings
         {
-            EffectiveType = "5g",
+            EffectiveType = "4g",
             Type = "cellular",
-            Downlink = 20,
-            Rtt = 45,
+            Downlink = 10,
+            Rtt = 50,
         },
         WebGL = new WebGLSettings
         {
@@ -354,10 +354,10 @@ public class Device
         },
         NetworkInfo = new NetworkInfoSettings
         {
-            EffectiveType = "wifi",
+            EffectiveType = "4g",
             Type = "wifi",
-            Downlink = 30,
-            Rtt = 20,
+            Downlink = 10,
+            Rtt = 25,
         },
         WebGL = new WebGLSettings
         {
@@ -429,10 +429,10 @@ public class Device
         },
         NetworkInfo = new NetworkInfoSettings
         {
-            EffectiveType = "wifi",
+            EffectiveType = "4g",
             Type = "wifi",
-            Downlink = 100,
-            Rtt = 10,
+            Downlink = 10,
+            Rtt = 50,
         },
         WebGL = new WebGLSettings
         {
@@ -513,10 +513,10 @@ public class Device
         },
         NetworkInfo = new NetworkInfoSettings
         {
-            EffectiveType = "ethernet",
+            EffectiveType = "4g",
             Type = "ethernet",
-            Downlink = 100,
-            Rtt = 8,
+            Downlink = 10,
+            Rtt = 25,
         },
         WebGL = new WebGLSettings
         {

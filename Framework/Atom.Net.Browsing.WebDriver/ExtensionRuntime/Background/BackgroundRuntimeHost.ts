@@ -37,7 +37,6 @@ import {
     evaluateMainWorldScript,
     hasIdentityOverrides,
     injectIdentityIntoFrames,
-    readProbeLogFromFrames,
     findFirstWindowTab,
     getAllWindows,
     getBrowserHost,
@@ -1507,20 +1506,6 @@ export class BackgroundRuntimeHost {
             return;
         }
 
-        // ВРЕМЕННАЯ ДИАГНОСТИКА: через несколько секунд вычитываем, к каким ОС-зависимым API
-        // проверка реально обращалась. Это заменяет перебор гипотез о том, что нас выдаёт.
-        setTimeout(() => {
-            void readProbeLogFromFrames(this.browserHost, this.runtime, numericTabId)
-                .then((entries) => {
-                    for (const entry of entries) {
-                        emitBackgroundDebugEvent(this.config, 'probe-log', { tabId, entry });
-                    }
-                })
-                .catch(() => {
-                    // Вкладка могла закрыться — для диагностики это не важно.
-                });
-        }, 2500);
-
         void injectIdentityIntoFrames(this.browserHost, this.runtime, numericTabId, null, context)
             .then((applied) => {
                 emitBackgroundDebugEvent(this.config, 'identity-all-frames-applied', {
@@ -1577,22 +1562,6 @@ export class BackgroundRuntimeHost {
                 });
                 return;
             }
-
-            // ВРЕМЕННАЯ ДИАГНОСТИКА: счётчики вычитываем ПОСЛЕ появления подчинённого фрейма.
-            // Разовый проход по вкладке для этого не годится — он срабатывает в самом начале,
-            // задолго до создания фрейма проверки и его воркера, и читать тогда ещё нечего.
-            const probeTabId = details.tabId;
-            setTimeout(() => {
-                void readProbeLogFromFrames(this.browserHost, this.runtime, probeTabId)
-                    .then((entries) => {
-                        for (const entry of entries) {
-                            emitBackgroundDebugEvent(this.config, 'probe-log', { tabId: String(probeTabId), entry });
-                        }
-                    })
-                    .catch(() => {
-                        // Фрейм мог исчезнуть — для диагностики это не важно.
-                    });
-            }, 2200);
 
             void injectIdentityIntoFrames(this.browserHost, this.runtime, details.tabId, frameId, context)
                 .then((applied) => {
@@ -3537,6 +3506,11 @@ function resolveReadyTabContext(existing: TabContextEnvelope | undefined, next: 
         languages: next.languages ?? existing.languages,
         clientHints: next.clientHints ?? existing.clientHints,
         webGl: next.webGl ?? existing.webGl,
+        webGlParameters: next.webGlParameters ?? existing.webGlParameters,
+        screen: next.screen ?? existing.screen,
+        colorScheme: next.colorScheme ?? existing.colorScheme,
+        network: next.network ?? existing.network,
+        reducedMotion: next.reducedMotion ?? existing.reducedMotion,
         viewport: next.viewport ?? existing.viewport,
         deviceScaleFactor: next.deviceScaleFactor ?? existing.deviceScaleFactor,
         hardwareConcurrency: next.hardwareConcurrency ?? existing.hardwareConcurrency,

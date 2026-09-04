@@ -24,4 +24,7 @@ internal static partial class ProfileAutomationPresetLogs
 
     [LoggerMessage(EventId = 1906, Level = LogLevel.Warning, Message = "Прокси для Firefox-пресета не удалось преобразовать в абсолютный адрес")]
     public static partial void LogProfileAutomationFirefoxProxyInvalid(this ILogger logger);
+
+    [LoggerMessage(EventId = 1907, Level = LogLevel.Warning, Message = "Профиль устройства заявляет движок WebKit (агент: {UserAgent}), а запускается {Family}. На iOS и iPadOS других движков не бывает, поэтому отпечаток противоречив на уровне самого движка (формат стека ошибок, тексты исключений, состав глобальных объектов) — подмена свойств этого не закрывает. Замер на живом Cloudflare Turnstile: 0 из 10, error-callback 600010")]
+    public static partial void LogProfileAutomationWebKitEngineMismatch(this ILogger logger, string userAgent, string family);
 }

@@ -932,7 +932,11 @@ internal sealed class BridgeNavigationProxyServer(
             return false;
 
         var registry = registryResolver();
-        return registry is not null && registry.TryResolveRoute(routeToken, out route);
+        if (registry is null || !registry.TryResolveRoute(routeToken, out route))
+            return false;
+
+        RememberUpstreamProxy(route);
+        return true;
     }
 
     /// <summary>
@@ -964,6 +968,10 @@ internal sealed class BridgeNavigationProxyServer(
             TabId = string.Empty,
             ContextId = string.Empty,
             RouteToken = string.Empty,
+
+            // Апстрим наследуется у последнего живого маршрута: прямой выход в сеть для запроса
+            // задачи недопустим — см. lastResolvedUpstreamProxy.
+            UpstreamProxy = lastResolvedUpstreamProxy,
         };
 
         await ForwardContinueDecisionAsync(
@@ -1178,25 +1186,6 @@ internal sealed class BridgeNavigationProxyServer(
         {
             using var forwardResponse = await SendUpstreamAsync().ConfigureAwait(false);
 
-            // ВРЕМЕННАЯ ДИАГНОСТИКА: служебные заголовки Cloudflare на ресурсах проверки. Мы видим
-            // её ответы, потому что сами терминируем TLS, и это единственный доступный нам источник
-            // ЕЁ вердикта — всё остальное мы можем только предполагать. Заголовки вида
-            // `cf-mitigated` называют причину прямо.
-            if (forwardTargetUrl.Contains("challenges.cloudflare.com", StringComparison.Ordinal))
-            {
-                var cloudflareHeaders = forwardResponse.Headers
-                    .Where(static header => header.Key.StartsWith("cf-", StringComparison.OrdinalIgnoreCase))
-                    .Select(static header => $"{header.Key}={string.Join(',', header.Value)}")
-                    .ToArray();
-
-                var status = ((int)forwardResponse.StatusCode).ToString(CultureInfo.InvariantCulture);
-                var version = forwardResponse.Version.ToString();
-                var target = forwardTargetUrl[..Math.Min(forwardTargetUrl.Length, 90)];
-                var headers = cloudflareHeaders.Length == 0 ? "нет cf-заголовков" : string.Join(' ', cloudflareHeaders);
-
-                Console.WriteLine($"[CF-ОТВЕТ] {status} http/{version} {target} {headers}");
-            }
-
             var body = await ReadForwardResponseBodyAsync(forwardResponse, forwardBudget.Token).ConfigureAwait(false);
             if (body is null)
             {
@@ -1243,7 +1232,12 @@ internal sealed class BridgeNavigationProxyServer(
             // страница и service worker считали бы запрос состоявшимся, и offline-fallback не
             // срабатывал бы. К тому же настоящий сетевой сбой выглядит иначе, чем ответ прокси,
             // а расхождение наблюдаемо со стороны страницы.
-            logger?.LogBridgeServerNavigationProxyForwardFailed(clientRequest.Method, absoluteTargetUrl, exception);
+            logger?.LogBridgeServerNavigationProxyForwardFailed(
+                clientRequest.Method,
+                absoluteTargetUrl,
+                string.IsNullOrEmpty(route.RouteToken) ? "без-маршрута" : route.RouteToken,
+                !string.IsNullOrWhiteSpace(route.UpstreamProxy),
+                exception);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -1361,6 +1355,27 @@ internal sealed class BridgeNavigationProxyServer(
 
     private static bool IsSafeHeaderValue(string? value)
         => value is not null && !value.Contains('\r') && !value.Contains('\n');
+
+    /// <summary>
+    /// Апстрим-прокси последнего разрешённого маршрута.
+    /// </summary>
+    /// <remarks>
+    /// ★ Запрос БЕЗ маршрутного токена прежде форвардился напрямую, мимо прокси задачи. Это разом
+    /// и утечка настоящего адреса, и функциональный отказ: замер на живом Cloudflare показал, что
+    /// проверка тянет ресурс с <c>brunhild.challenges.cloudflare.com</c>, у которого есть ТОЛЬКО
+    /// адрес IPv6. Машина без IPv6 отвечала «Network is unreachable», запрос проверки не доходил,
+    /// и Cloudflare закрывал задачу error-callback 600010 — 0 успехов из 4 при работе через прокси.
+    ///
+    /// Слот-пул выдаёт браузер под КОНКРЕТНЫЙ прокси, поэтому у экземпляра прокси-сервера апстрим
+    /// один на всё время задачи, и подстановка последнего известного здесь однозначна.
+    /// </remarks>
+    private volatile string? lastResolvedUpstreamProxy;
+
+    private void RememberUpstreamProxy(ProxyNavigationRoute? route)
+    {
+        if (route?.UpstreamProxy is { Length: > 0 } upstreamProxy)
+            lastResolvedUpstreamProxy = upstreamProxy;
+    }
 
     private HttpClient GetForwardClient(string? upstreamProxy)
     {

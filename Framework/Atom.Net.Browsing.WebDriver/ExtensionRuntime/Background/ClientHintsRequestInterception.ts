@@ -33,6 +33,67 @@ export function handleClientHintsRequestInterception(
         return undefined;
     }
 
+    // ★ Заявленный WebKit НЕ ШЛЁТ клиентских подсказок вовсе.
+    //
+    // Client Hints — расширение Chromium; Safari его не реализует. Замер на живом Cloudflare
+    // показывал ровно это противоречие: строка агента объявляла iPhone/Safari, а запрос нёс
+    // 'Sec-CH-UA-Mobile: ?1', 'Sec-CH-UA-Platform: "iOS"' и 'Sec-CH-UA-Model'. Такое расхождение
+    // видно ДО исполнения любого JavaScript, прямо в заголовках. Поэтому для профиля на WebKit
+    // подсказки не подменяются, а УДАЛЯЮТСЯ — как их и не бывает у настоящего Safari.
+    const declaresWebKit = userAgent !== undefined
+        && (userAgent.indexOf('iPhone') >= 0
+            || userAgent.indexOf('iPad') >= 0
+            || userAgent.indexOf('iPod') >= 0
+            || (userAgent.indexOf('Safari/') >= 0
+                && userAgent.indexOf('Version/') >= 0
+                && userAgent.indexOf('Chrome/') < 0
+                && userAgent.indexOf('Chromium/') < 0));
+
+    if (declaresWebKit) {
+        const webKitHeaders = cloneHeaders(baseHeaders ?? details.requestHeaders);
+        setHeaderValue(webKitHeaders, 'User-Agent', userAgent);
+
+        for (const hint of [
+            'Sec-CH-UA',
+            'Sec-CH-UA-Full-Version-List',
+            'Sec-CH-UA-Platform',
+            'Sec-CH-UA-Platform-Version',
+            'Sec-CH-UA-Mobile',
+            'Sec-CH-UA-Arch',
+            'Sec-CH-UA-Model',
+            'Sec-CH-UA-Bitness',
+            'Sec-CH-UA-Full-Version',
+            'Sec-CH-UA-WoW64',
+            'Sec-CH-Prefers-Color-Scheme',
+            'Sec-CH-Prefers-Reduced-Motion',
+            'Sec-CH-Viewport-Width',
+            'Sec-CH-DPR',
+            'Device-Memory',
+            'Downlink',
+            'RTT',
+            'ECT',
+        ]) {
+            setHeaderValue(webKitHeaders, hint, undefined);
+        }
+
+        // Кодировки: Chromium предлагает zstd, Safari — нет. Заголовок читается тем же запросом,
+        // что и строка агента, и расходится с ней так же явно, как подсказки.
+        const acceptEncoding = readHeaderValue(webKitHeaders, 'Accept-Encoding');
+        if (acceptEncoding !== undefined && acceptEncoding.indexOf('zstd') >= 0) {
+            setHeaderValue(webKitHeaders, 'Accept-Encoding', 'gzip, deflate, br');
+        }
+
+        // Список принимаемых типов у Chromium заметно длиннее: он перечисляет свои форматы
+        // изображений (avif/apng) и подписанный обмен. Safari таких значений не шлёт, а тип
+        // запроса виден из 'Sec-Fetch-Dest' — по нему и подставляется значение того же ресурса.
+        const acceptForDestination = resolveWebKitAccept(readHeaderValue(webKitHeaders, 'Sec-Fetch-Dest'));
+        if (acceptForDestination !== undefined && readHeaderValue(webKitHeaders, 'Accept') !== undefined) {
+            setHeaderValue(webKitHeaders, 'Accept', acceptForDestination);
+        }
+
+        return { requestHeaders: webKitHeaders };
+    }
+
     const secChUa = formatSecChUa(clientHints?.brands);
     const secChUaFullVersionList = formatSecChUa(clientHints?.fullVersionList ?? clientHints?.brands);
     const secChUaPlatform = formatQuotedClientHintValue(clientHints?.platform);
@@ -69,6 +130,43 @@ export function handleClientHintsRequestInterception(
     setHeaderValue(requestHeaders, 'Sec-CH-UA-Model', secChUaModel);
     setHeaderValue(requestHeaders, 'Sec-CH-UA-Bitness', secChUaBitness);
     return { requestHeaders };
+}
+
+/**
+ * Значение заголовка Accept, как его шлёт Safari для запроса такого типа.
+ */
+function resolveWebKitAccept(destination: string | undefined): string | undefined {
+    switch (destination) {
+        case 'document':
+        case 'iframe':
+        case 'frame':
+            return 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
+        case 'image':
+            return 'image/webp,image/avif,video/*;q=0.8,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5';
+        case 'style':
+            return 'text/css,*/*;q=0.1';
+        case 'script':
+        case 'worker':
+        case 'empty':
+            return '*/*';
+        default:
+            return undefined;
+    }
+}
+
+/**
+ * Текущее значение заголовка запроса.
+ */
+function readHeaderValue(headers: readonly HeaderLike[], name: string): string | undefined {
+    const lowered = name.toLowerCase();
+
+    for (const header of headers) {
+        if (typeof header?.name === 'string' && header.name.toLowerCase() === lowered) {
+            return typeof header.value === 'string' ? header.value : undefined;
+        }
+    }
+
+    return undefined;
 }
 
 /**

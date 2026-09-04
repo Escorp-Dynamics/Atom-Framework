@@ -1806,27 +1806,185 @@ const readContext = () => currentContext;
         originalOuterHeight: globalObject.outerHeight ?? null,
     };
 
+    // ★ Обёртка обязана выглядеть родной функцией. Замер показал, что она не выглядела:
+    // 'WebGLRenderingContext.prototype.getParameter.toString()' печатал НАШ исходник, у геттера
+    // 'platform' имя было пустым вместо 'get platform', а у подменённых методов присутствовал
+    // собственный 'prototype', которого у нативных функций не бывает. Любой из этих признаков
+    // читается страницей одной строкой и не требует ни таблиц, ни статистики.
+    const nativeOrigins = new WeakMap();
+
+    // Подставная функция получает имя и арность оригинала и запоминает сам оригинал: его исходник
+    // и отдаётся при чтении 'toString'. Собственного 'prototype' у неё нет по построению — обёртки
+    // создаются сокращённой записью метода, у которой прототипа не бывает, ровно как у нативных.
+    const markNative = (patched, original, name, length) => {
+        ensureToStringMasked();
+
+        try {
+            Object.defineProperty(patched, 'name', { configurable: true, value: name });
+
+            if (typeof length === 'number') {
+                Object.defineProperty(patched, 'length', { configurable: true, value: length });
+            }
+        } catch {
+        }
+
+        if (typeof original === 'function') {
+            try {
+                nativeOrigins.set(patched, original);
+            } catch {
+            }
+        }
+
+        return patched;
+    };
+
+    // Единственный путь прочитать исходник функции — 'Function.prototype.toString'. Подменяем его
+    // ОДИН раз: нашим обёрткам он отдаёт исходник оригинала, всему остальному — обычный результат.
+    // Сам он тоже зарегистрирован, поэтому чтение собственного текста его не выдаёт.
+    //
+    // ★ И ставим его ЛЕНИВО — только когда появилась первая обёртка. Штатный режим без подмены
+    // профиля (именно так работает солвер) не должен платить ни одной подменённой функцией:
+    // подменять нечего, а лишний перехват — лишняя поверхность.
+    let toStringMasked = false;
+    const ensureToStringMasked = () => {
+        if (toStringMasked) {
+            return;
+        }
+
+        toStringMasked = true;
+
+        const originalFunctionToString = Function.prototype.toString;
+        const toStringHolder = {
+            toString() {
+                const origin = nativeOrigins.get(this);
+                return originalFunctionToString.call(origin === undefined ? this : origin);
+            },
+        };
+
+        try {
+            Object.defineProperty(toStringHolder.toString, 'name', { configurable: true, value: 'toString' });
+            Object.defineProperty(toStringHolder.toString, 'length', { configurable: true, value: 0 });
+            nativeOrigins.set(toStringHolder.toString, originalFunctionToString);
+        } catch {
+        }
+
+        try {
+            Object.defineProperty(Function.prototype, 'toString', {
+                configurable: true,
+                writable: true,
+                value: toStringHolder.toString,
+            });
+        } catch {
+        }
+    };
+
+    // Метод без собственного 'prototype': сокращённая запись в литерале объекта даёт ровно такую
+    // функцию, а обычное 'function ...' — нет.
+    const asNativeMethod = (name, original, implementation) => {
+        const holder = {
+            [name](...args) {
+                return implementation.apply(this, args);
+            },
+        };
+
+        return markNative(holder[name], original, name, typeof original === 'function' ? original.length : implementation.length);
+    };
+
+    // Геттер аксессора: имя 'get <свойство>' проставляется движком само, исходник берётся у
+    // родного геттера того же свойства — тогда и текст, и имя совпадают с настоящими.
+    const asNativeGetter = (property, original, getter) => {
+        const holder = {
+            get [property]() {
+                return getter.call(this);
+            },
+        };
+
+        return markNative(Object.getOwnPropertyDescriptor(holder, property).get, original, 'get ' + property, 0);
+    };
+
     const defineGetter = (target, property, getter) => {
         if (!target) {
             return;
         }
 
         try {
+            const existing = Object.getOwnPropertyDescriptor(target, property);
+
             Object.defineProperty(target, property, {
                 configurable: true,
-                get: getter,
+                // Атрибуты WebIDL перечислимы; неперечислимое свойство на месте перечислимого
+                // отличается от настоящего одним вызовом getOwnPropertyDescriptor.
+                enumerable: existing ? existing.enumerable : true,
+                get: asNativeGetter(property, existing?.get, getter),
             });
         } catch {
         }
     };
 
+    // Уже ли живое окружение отдаёт ровно то, что мы собирались подставить.
+    //
+    // Часть профиля браузер применяет САМ: строку агента задаёт '--user-agent', часовой пояс и
+    // локаль — переменные окружения процесса. Ставить обёртку поверх уже верного значения — чистый
+    // проигрыш: поведение не меняется, а подменённое свойство появляется там, где его можно найти.
+    const alreadyMatches = (target, property, getter) => {
+        try {
+            const desired = getter();
+
+            // Профиль ничего не заявляет — подменять нечего, и обёртка была бы чистым проигрышем:
+            // поведение прежнее, а подменённое свойство находится обычным описателем.
+            if (desired === undefined || desired === null) {
+                return true;
+            }
+
+            const current = target[property];
+
+            if (Array.isArray(desired)) {
+                return Array.isArray(current)
+                    && current.length === desired.length
+                    && desired.every((value, index) => value === current[index]);
+            }
+
+            return current === desired;
+        } catch {
+            return false;
+        }
+    };
+
+    // Атрибуты навигатора в настоящем браузере объявлены НА ПРОТОТИПЕ, а не на самом объекте:
+    // 'Object.getOwnPropertyNames(navigator)' у Chrome пуст. Замер показывал там пятнадцать
+    // собственных свойств — след, видимый без единой проверки значения. Поэтому подменяем ровно
+    // там, где свойство объявлено, и НИКОГДА не добавляем несуществующее: лишний атрибут выдаёт
+    // и подмену, и чужой браузер (так на Chrome появлялся firefox-овый 'mozGetUserMedia').
     const defineNavigatorGetter = (property, getter) => {
-        defineGetter(globalObject.navigator, property, getter);
-        defineGetter(globalObject.Navigator?.prototype, property, getter);
+        const navigatorObject = globalObject.navigator;
+        if (navigatorObject && alreadyMatches(navigatorObject, property, getter)) {
+            return;
+        }
+
+        const prototype = globalObject.Navigator?.prototype ?? globalObject.WorkerNavigator?.prototype;
+
+        if (prototype && Object.getOwnPropertyDescriptor(prototype, property) !== undefined) {
+            defineGetter(prototype, property, getter);
+            return;
+        }
+
+        if (navigatorObject && Object.getOwnPropertyDescriptor(navigatorObject, property) !== undefined) {
+            defineGetter(navigatorObject, property, getter);
+        }
     };
 
     const defineWindowGetter = (property, getter) => {
-        defineGetter(globalObject, property, getter);
+        if (alreadyMatches(globalObject, property, getter)) {
+            return;
+        }
+
+        // Глобальный объект — исключение из правила о прототипе: по WebIDL у интерфейса с [Global]
+        // атрибуты объявляются на самом объекте, и в настоящем браузере они там собственные.
+        if (Object.getOwnPropertyDescriptor(globalObject, property) !== undefined) {
+            defineGetter(globalObject, property, getter);
+            return;
+        }
+
         defineGetter(globalObject.Window?.prototype, property, getter);
     };
 
@@ -1928,7 +2086,50 @@ const readContext = () => currentContext;
         const VERSION = 0x1f02;
         const SHADING_LANGUAGE_VERSION = 0x8b8c;
 
+        // Числовые пределы: пара «имя видеокарты — её пределы» известна и проверяется таблицей,
+        // поэтому подменять одно без другого хуже, чем не подменять вовсе. Заявляя Apple M1 Pro,
+        // мы обязаны отдавать и его размеры, а не размеры настоящего графического стека машины.
+        const MAX_TEXTURE_SIZE = 0x0d33;
+        const MAX_RENDERBUFFER_SIZE = 0x84e8;
+        const MAX_VIEWPORT_DIMS = 0x0d3a;
+        const MAX_VARYING_VECTORS = 0x8dfc;
+        const MAX_VERTEX_UNIFORM_VECTORS = 0x8dfb;
+        const MAX_FRAGMENT_UNIFORM_VECTORS = 0x8dfd;
+
+        const resolveParameterOverride = (parameter) => {
+            const limits = readContext().webGlParameters;
+            if (!limits) {
+                return undefined;
+            }
+
+            switch (parameter) {
+                case MAX_TEXTURE_SIZE:
+                    return limits.maxTextureSize;
+                case MAX_RENDERBUFFER_SIZE:
+                    return limits.maxRenderbufferSize;
+                case MAX_VARYING_VECTORS:
+                    return limits.maxVaryingVectors;
+                case MAX_VERTEX_UNIFORM_VECTORS:
+                    return limits.maxVertexUniformVectors;
+                case MAX_FRAGMENT_UNIFORM_VECTORS:
+                    return limits.maxFragmentUniformVectors;
+                case MAX_VIEWPORT_DIMS:
+                    // Настоящий WebGL отдаёт здесь типизированный массив; обычный выдал бы себя
+                    // и типом, и поведением при чтении по индексу.
+                    return Array.isArray(limits.maxViewportDims) && limits.maxViewportDims.length === 2
+                        ? new Int32Array(limits.maxViewportDims)
+                        : undefined;
+                default:
+                    return undefined;
+            }
+        };
+
         const resolveOverride = (parameter) => {
+            const numeric = resolveParameterOverride(parameter);
+            if (numeric !== undefined) {
+                return numeric;
+            }
+
             const webGl = readContext().webGl;
             if (!webGl) {
                 return undefined;
@@ -1960,14 +2161,14 @@ const readContext = () => currentContext;
             }
 
             const originalGetParameter = prototype.getParameter;
-            prototype.getParameter = function patchedGetParameter(parameter) {
+            prototype.getParameter = asNativeMethod('getParameter', originalGetParameter, function (parameter) {
                 const override = resolveOverride(parameter);
                 if (override !== undefined) {
                     return override;
                 }
 
                 return originalGetParameter.call(this, parameter);
-            };
+            });
         }
     };
 
@@ -2064,8 +2265,7 @@ const readContext = () => currentContext;
             },
         };
 
-        defineGetter(navigatorObject, 'geolocation', () => readContext().geolocation ? fakeGeolocation : originalGeolocation);
-        defineGetter(globalObject.Navigator?.prototype, 'geolocation', () => readContext().geolocation ? fakeGeolocation : originalGeolocation);
+        defineNavigatorGetter('geolocation', () => readContext().geolocation ? fakeGeolocation : originalGeolocation);
     };
 
 ${identityOnly ? '' : buildStorageIsolationScript()}
@@ -2100,10 +2300,42 @@ ${identityOnly ? '' : buildCacheIsolationScript()}
     defineNavigatorGetter('maxTouchPoints', () => readContext().maxTouchPoints ?? state.originalMaxTouchPoints);
 
     defineWindowGetter('devicePixelRatio', () => readContext().deviceScaleFactor ?? state.originalDevicePixelRatio);
-    defineWindowGetter('innerWidth', () => readContext().viewport?.width ?? state.originalInnerWidth);
-    defineWindowGetter('innerHeight', () => readContext().viewport?.height ?? state.originalInnerHeight);
-    defineWindowGetter('outerWidth', () => readContext().viewport?.width ?? state.originalOuterWidth);
-    defineWindowGetter('outerHeight', () => readContext().viewport?.height ?? state.originalOuterHeight);
+    // ★ Метрики окна НЕ подменяются: окно физически получает заявленный размер при запуске
+    // браузера. Подмена дотягивалась только до inner*, а 'documentElement.clientHeight' и
+    // 'visualViewport' оставались настоящими — замер показывал 1512x982 против 780x493.
+    // ★ Подмена WebGL ставится ЗДЕСЬ, а не только ранним скриптом личности. Ранний скрипт несёт
+    // профиль БРАУЗЕРА, запечённый при его запуске, и для вкладки со своим профилем отдавал чужую
+    // видеокарту: замер показывал 'NVIDIA GeForce RTX 3070' во вкладке, заявляющей Apple M1 Pro.
+    // Этот же перехват читает контекст ВКЛАДКИ и потому верен и при своём профиле на вкладку, и
+    // при смене профиля на лету. Раньше функция была объявлена, но не вызывалась ни разу.
+    installWebGlOverride();
+
+    // Мобильный браузер не имеет плагинов вовсе — ни Chrome на Android, ни Safari на iOS. Для
+    // вкладки со своим мобильным профилем это должно решаться здесь: ранний скрипт знает только
+    // профиль браузера и на настольном профиле оставлял пять записей PDF-просмотрщика.
+    if (readContext().isMobile === true) {
+        const emptyList = (name) => {
+            const listConstructor = globalObject[name];
+            const list = listConstructor?.prototype ? Object.create(listConstructor.prototype) : [];
+
+            try {
+                Object.defineProperty(list, 'length', { configurable: true, get: () => 0 });
+                list.item = asNativeMethod('item', listConstructor?.prototype?.item, () => null);
+                list.namedItem = asNativeMethod('namedItem', listConstructor?.prototype?.namedItem, () => null);
+                list.refresh = asNativeMethod('refresh', listConstructor?.prototype?.refresh, () => undefined);
+            } catch {
+            }
+
+            return list;
+        };
+
+        const emptyPlugins = emptyList('PluginArray');
+        const emptyMimeTypes = emptyList('MimeTypeArray');
+
+        defineNavigatorGetter('plugins', () => emptyPlugins);
+        defineNavigatorGetter('mimeTypes', () => emptyMimeTypes);
+    }
+
     installGeolocationOverride();
 
     const mediaDevicesObject = globalObject.navigator?.mediaDevices;
@@ -2624,87 +2856,121 @@ ${identityOnly ? '' : buildCacheIsolationScript()}
                     });
             };
 
-            try {
-                globalObject.navigator.getUserMedia = bridgeLegacyGetUserMedia;
-            } catch {
-            }
+            // Только СУЩЕСТВУЮЩИЕ псевдонимы. Прежний код добавлял все три подряд, и на Chrome
+            // появлялся firefox-овый 'mozGetUserMedia': свойство, которого у этого браузера нет,
+            // выдаёт подмену вернее любого расхождения в значениях.
+            for (const alias of ['getUserMedia', 'webkitGetUserMedia', 'mozGetUserMedia']) {
+                const prototype = globalObject.Navigator?.prototype;
+                const target = prototype && alias in prototype
+                    ? prototype
+                    : (alias in globalObject.navigator ? globalObject.navigator : null);
 
-            try {
-                globalObject.navigator.webkitGetUserMedia = bridgeLegacyGetUserMedia;
-            } catch {
-            }
-
-            try {
-                globalObject.navigator.mozGetUserMedia = bridgeLegacyGetUserMedia;
-            } catch {
-            }
-        }
-    }
-
-    const originalResolvedOptions = state.originalDateTimeFormat.prototype.resolvedOptions;
-    try {
-        Object.defineProperty(state.originalDateTimeFormat.prototype, 'resolvedOptions', {
-            configurable: true,
-            value: function(...args) {
-                const result = originalResolvedOptions.apply(this, args);
-                const timezone = readContext().timezone;
-                if (!timezone || typeof result !== 'object' || result === null) {
-                    return result;
+                if (!target) {
+                    continue;
                 }
 
-                return {
-                    ...result,
-                    timeZone: timezone,
-                };
-            },
-        });
+                try {
+                    const original = target[alias];
+                    Object.defineProperty(target, alias, {
+                        configurable: true,
+                        writable: true,
+                        enumerable: Object.getOwnPropertyDescriptor(target, alias)?.enumerable ?? true,
+                        value: asNativeMethod(alias, original, function (...args) {
+                            return bridgeLegacyGetUserMedia.apply(this, args);
+                        }),
+                    });
+                } catch {
+                }
+            }
+        }
+    }
+
+    // ★ Пояс процессу задаётся переменной окружения TZ при запуске браузера, и в штатном случае
+    // 'Intl' отдаёт заявленный пояс САМ — нативно и согласованно во всех путях, включая 'Date',
+    // форматирование и воркеры. Тогда обёртка не даёт ничего, а стоит подменённого
+    // 'resolvedOptions' и подменённого конструктора 'Intl.DateTimeFormat' — двух заметных
+    // поверхностей сразу.
+    //
+    // Поэтому ставим её ТОЛЬКО при реальном расхождении: пояс сменили на лету уже после запуска.
+    const declaredTimezone = readContext().timezone;
+    let nativeTimezone = null;
+
+    try {
+        nativeTimezone = new state.originalDateTimeFormat().resolvedOptions().timeZone;
     } catch {
     }
 
-    const createDateTimeFormatOptions = (options) => {
-        const current = readContext();
-        const nextOptions = Object.assign({}, options ?? {});
-        if (current.timezone && nextOptions.timeZone === undefined) {
-            nextOptions.timeZone = current.timezone;
+    if (typeof declaredTimezone === 'string' && declaredTimezone.length > 0 && declaredTimezone !== nativeTimezone) {
+        const originalResolvedOptions = state.originalDateTimeFormat.prototype.resolvedOptions;
+        try {
+            Object.defineProperty(state.originalDateTimeFormat.prototype, 'resolvedOptions', {
+                configurable: true,
+                writable: true,
+                value: asNativeMethod('resolvedOptions', originalResolvedOptions, function (...args) {
+                    const result = originalResolvedOptions.apply(this, args);
+                    const timezone = readContext().timezone;
+                    if (!timezone || typeof result !== 'object' || result === null) {
+                        return result;
+                    }
+
+                    return {
+                        ...result,
+                        timeZone: timezone,
+                    };
+                }),
+            });
+        } catch {
         }
 
-        return nextOptions;
-    };
+        const createDateTimeFormatOptions = (options) => {
+            const current = readContext();
+            const nextOptions = Object.assign({}, options ?? {});
+            if (current.timezone && nextOptions.timeZone === undefined) {
+                nextOptions.timeZone = current.timezone;
+            }
 
-    const AtomDateTimeFormat = function(locales, options) {
-        const nextOptions = createDateTimeFormatOptions(options);
-        if (new.target) {
-            return Reflect.construct(state.originalDateTimeFormat, [locales, nextOptions], new.target);
+            return nextOptions;
+        };
+
+        const AtomDateTimeFormat = function(locales, options) {
+            const nextOptions = createDateTimeFormatOptions(options);
+            if (new.target) {
+                return Reflect.construct(state.originalDateTimeFormat, [locales, nextOptions], new.target);
+            }
+
+            return new state.originalDateTimeFormat(locales, nextOptions);
+        };
+
+        try {
+            Object.setPrototypeOf(AtomDateTimeFormat, state.originalDateTimeFormat);
+        } catch {
         }
 
-        return new state.originalDateTimeFormat(locales, nextOptions);
-    };
+        try {
+            AtomDateTimeFormat.prototype = state.originalDateTimeFormat.prototype;
+        } catch {
+        }
 
-    try {
-        Object.setPrototypeOf(AtomDateTimeFormat, state.originalDateTimeFormat);
-    } catch {
-    }
+        try {
+            Object.defineProperty(AtomDateTimeFormat, 'supportedLocalesOf', {
+                configurable: true,
+                writable: true,
+                value: asNativeMethod(
+                    'supportedLocalesOf',
+                    state.originalDateTimeFormat.supportedLocalesOf,
+                    (...args) => state.originalDateTimeFormat.supportedLocalesOf(...args)),
+            });
+        } catch {
+        }
 
-    try {
-        AtomDateTimeFormat.prototype = state.originalDateTimeFormat.prototype;
-    } catch {
-    }
-
-    try {
-        Object.defineProperty(AtomDateTimeFormat, 'supportedLocalesOf', {
-            configurable: true,
-            value: (...args) => state.originalDateTimeFormat.supportedLocalesOf(...args),
-        });
-    } catch {
-    }
-
-    try {
-        Object.defineProperty(Intl, 'DateTimeFormat', {
-            configurable: true,
-            writable: true,
-            value: AtomDateTimeFormat,
-        });
-    } catch {
+        try {
+            Object.defineProperty(Intl, 'DateTimeFormat', {
+                configurable: true,
+                writable: true,
+                value: markNative(AtomDateTimeFormat, state.originalDateTimeFormat, 'DateTimeFormat', state.originalDateTimeFormat.length),
+            });
+        } catch {
+        }
     }
 
 }

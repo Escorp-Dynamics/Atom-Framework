@@ -45,7 +45,7 @@ internal static class ProfileMaterialization
 
             // Шрифты заявленной платформы. Кладём рядом с профилем, а не в систему пользователя:
             // конфигурация подключается только процессу браузера через FONTCONFIG_FILE.
-            if (PlatformFontConfiguration.Build(settings.Device) is { } fontConfiguration)
+            if (PlatformFontConfiguration.Build(settings.Device, profilePath) is { } fontConfiguration)
             {
                 await File.WriteAllTextAsync(
                     IOPath.Combine(profilePath, PlatformFontConfiguration.FileName),

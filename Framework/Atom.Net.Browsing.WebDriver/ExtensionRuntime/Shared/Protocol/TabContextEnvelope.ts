@@ -5,6 +5,32 @@ export interface TabContextViewportEnvelope {
     height: number;
 }
 
+/**
+ * Метрики ЭКРАНА заявленного устройства.
+ *
+ * Отдельно от области просмотра: окно и экран — разные величины, и настоящий браузер это
+ * подтверждает соотношением между ними. Раньше экран выводился из размеров окна, из-за чего
+ * доступная область совпадала с полной — почерк среды без оболочки рабочего стола.
+ */
+export interface TabContextScreenEnvelope {
+    width: number;
+    height: number;
+    availWidth?: number;
+    availHeight?: number;
+    colorDepth?: number;
+    pixelDepth?: number;
+}
+
+/**
+ * Параметры соединения заявленного устройства.
+ */
+export interface TabContextNetworkEnvelope {
+    effectiveType?: string;
+    type?: string;
+    downlink?: number;
+    rtt?: number;
+}
+
 export interface TabContextVirtualMediaDevicesEnvelope {
     audioInputEnabled?: boolean;
     audioInputLabel?: string;
@@ -58,7 +84,9 @@ export interface TabContextEnvelope {
     languages?: string[];
     clientHints?: TabContextClientHintsEnvelope;
     webGl?: TabContextWebGlEnvelope;
+    webGlParameters?: TabContextWebGlParametersEnvelope;
     viewport?: TabContextViewportEnvelope;
+    screen?: TabContextScreenEnvelope;
     deviceScaleFactor?: number;
     hardwareConcurrency?: number;
     deviceMemory?: number;
@@ -68,6 +96,9 @@ export interface TabContextEnvelope {
     maxTouchPoints?: number;
     isMobile?: boolean;
     hasTouch?: boolean;
+    colorScheme?: string;
+    reducedMotion?: boolean;
+    network?: TabContextNetworkEnvelope;
     virtualMediaDevices?: TabContextVirtualMediaDevicesEnvelope;
 }
 
@@ -229,6 +260,63 @@ function readOptionalWebGl(value: unknown, message: string): TabContextWebGlEnve
     };
 }
 
+function readOptionalWebGlParameters(value: unknown, message: string): TabContextWebGlParametersEnvelope | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    if (!isJsonRecord(value)) {
+        throw new Error(message);
+    }
+
+    const dims = value.maxViewportDims;
+
+    return {
+        maxTextureSize: readOptionalNumber(value.maxTextureSize, message),
+        maxRenderbufferSize: readOptionalNumber(value.maxRenderbufferSize, message),
+        maxViewportDims: Array.isArray(dims) ? dims.map((item) => Number(item)) : undefined,
+        maxVaryingVectors: readOptionalNumber(value.maxVaryingVectors, message),
+        maxVertexUniformVectors: readOptionalNumber(value.maxVertexUniformVectors, message),
+        maxFragmentUniformVectors: readOptionalNumber(value.maxFragmentUniformVectors, message),
+    };
+}
+
+function readOptionalScreen(value: unknown, message: string): TabContextScreenEnvelope | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    if (!isJsonRecord(value)) {
+        throw new Error(message);
+    }
+
+    return {
+        width: requireNumber(value.width, message),
+        height: requireNumber(value.height, message),
+        availWidth: readOptionalNumber(value.availWidth, message),
+        availHeight: readOptionalNumber(value.availHeight, message),
+        colorDepth: readOptionalNumber(value.colorDepth, message),
+        pixelDepth: readOptionalNumber(value.pixelDepth, message),
+    };
+}
+
+function readOptionalNetwork(value: unknown, message: string): TabContextNetworkEnvelope | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    if (!isJsonRecord(value)) {
+        throw new Error(message);
+    }
+
+    return {
+        effectiveType: readOptionalString(value.effectiveType, message),
+        type: readOptionalString(value.type, message),
+        downlink: readOptionalNumber(value.downlink, message),
+        rtt: readOptionalNumber(value.rtt, message),
+    };
+}
+
 function readOptionalClientHints(value: unknown, message: string): TabContextClientHintsEnvelope | undefined {
     if (value === undefined) {
         return undefined;
@@ -287,6 +375,23 @@ export interface TabContextWebGlEnvelope {
     shadingLanguageVersion?: string;
 }
 
+/**
+ * Числовые пределы WebGL, которыми страница подтверждает заявленную видеокарту.
+ *
+ * ★ Строковые значения (вендор, рендерер) подменялись, а пределы — нет, и получалось
+ * противоречие: карта заявлена как Apple M1 Pro, а максимальный размер текстуры выдавал
+ * настоящий графический стек машины (8192 против 16384 у M1 Pro). Пара «имя карты — её пределы»
+ * известна и проверяется таблицей, так что расхождение видно сразу.
+ */
+export interface TabContextWebGlParametersEnvelope {
+    maxTextureSize?: number;
+    maxRenderbufferSize?: number;
+    maxViewportDims?: number[];
+    maxVaryingVectors?: number;
+    maxVertexUniformVectors?: number;
+    maxFragmentUniformVectors?: number;
+}
+
 export function validateTabContextEnvelope(value: unknown): TabContextEnvelope {
     if (!isJsonRecord(value)) {
         throw new Error('Контекст вкладки имеет неверную форму');
@@ -330,6 +435,21 @@ export function validateTabContextEnvelope(value: unknown): TabContextEnvelope {
     context.timezone = readOptionalString(value.timezone, 'Контекст вкладки содержит неверный timezone');
     context.languages = readOptionalStringArray(value.languages, 'Контекст вкладки содержит неверный languages');
     context.clientHints = readOptionalClientHints(value.clientHints, 'Контекст вкладки содержит неверный clientHints');
+
+    // ★ Эти поля разбор ТЕРЯЛ, и вместе с ними пропадала половина профиля вкладки.
+    //
+    // Конверт пересобирается полем за полем, а не копируется целиком: всё, чего здесь нет, молча
+    // исчезает. 'webGl' в интерфейсе был, а в разборе — нет, поэтому вкладка со своим профилем
+    // получала видеокарту БРАУЗЕРА: замер по вкладкам показывал 'NVIDIA GeForce RTX 3070' там,
+    // где заявлен 'Apple M1 Pro'. По той же причине не доезжали числовые пределы WebGL, экран,
+    // тема оформления и параметры соединения.
+    context.webGl = readOptionalWebGl(value.webGl, 'Контекст вкладки содержит неверный webGl');
+    context.webGlParameters = readOptionalWebGlParameters(value.webGlParameters, 'Контекст вкладки содержит неверный webGlParameters');
+    context.screen = readOptionalScreen(value.screen, 'Контекст вкладки содержит неверный screen');
+    context.network = readOptionalNetwork(value.network, 'Контекст вкладки содержит неверный network');
+    context.colorScheme = readOptionalString(value.colorScheme, 'Контекст вкладки содержит неверный colorScheme');
+    context.reducedMotion = readOptionalBoolean(value.reducedMotion, 'Контекст вкладки содержит неверный reducedMotion');
+
     context.viewport = readOptionalViewport(value.viewport, 'Контекст вкладки содержит неверный viewport');
     context.deviceScaleFactor = readOptionalNumber(value.deviceScaleFactor, 'Контекст вкладки содержит неверный deviceScaleFactor');
     context.hardwareConcurrency = readOptionalNumber(value.hardwareConcurrency, 'Контекст вкладки содержит неверный hardwareConcurrency');

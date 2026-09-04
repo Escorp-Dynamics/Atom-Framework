@@ -29,6 +29,11 @@ public sealed class WebDriverRealBrowserIntegrationTests
     private static readonly string[] StandardLifecycleSequence = ["DomContentLoaded", "NavigationCompleted", "PageLoaded"];
     private const string LocalCookieDomain = "127.0.0.1";
 
+    /// <summary>
+    /// Нижняя граница ширины окна, ниже которой Chromium окно не делает.
+    /// </summary>
+    private const int MinimumChromiumWindowWidth = 500;
+
     [Test]
     public async Task RealBrowserLaunchBootstrapsExtensionBackedDiscoverySurface()
     {
@@ -483,7 +488,7 @@ public sealed class WebDriverRealBrowserIntegrationTests
         await mobileWindow.ActivateAsync().ConfigureAwait(false);
         await NavigateToDeviceFingerprintPageAsync(browser, mobilePage, server.CreatePageUrl("window-device-mobile-current")).ConfigureAwait(false);
         using var mobileCurrentSnapshot = await CaptureDeviceFingerprintSnapshotAsync(mobilePage).ConfigureAwait(false);
-        AssertDeviceFingerprintSnapshot(mobileCurrentSnapshot.RootElement, Device.Pixel2);
+        AssertDeviceFingerprintSnapshot(mobileCurrentSnapshot.RootElement, Device.Pixel2, windowSizedForDevice: false);
 
         var mobileSiblingPage = (WebPage)await mobileWindow.OpenPageAsync().ConfigureAwait(false);
         AssertResolvedDevice(mobileSiblingPage, Device.Pixel2, "window sibling page resolved device mismatch");
@@ -492,7 +497,7 @@ public sealed class WebDriverRealBrowserIntegrationTests
         await mobileWindow.ActivateAsync().ConfigureAwait(false);
         await NavigateToDeviceFingerprintPageAsync(browser, mobileSiblingPage, server.CreatePageUrl("window-device-mobile-sibling")).ConfigureAwait(false);
         using var mobileSiblingSnapshot = await CaptureDeviceFingerprintSnapshotAsync(mobileSiblingPage).ConfigureAwait(false);
-        AssertDeviceFingerprintSnapshot(mobileSiblingSnapshot.RootElement, Device.Pixel2);
+        AssertDeviceFingerprintSnapshot(mobileSiblingSnapshot.RootElement, Device.Pixel2, windowSizedForDevice: false);
 
         await NavigateToDeviceFingerprintPageAsync(browser, baselinePage, baselineUrl).ConfigureAwait(false);
         using var reloadedBaselineSnapshot = await CaptureDeviceFingerprintSnapshotAsync(baselinePage).ConfigureAwait(false);
@@ -531,16 +536,16 @@ public sealed class WebDriverRealBrowserIntegrationTests
         await ((WebWindow)browser.CurrentWindow).ActivateAsync().ConfigureAwait(false);
         await NavigateToDeviceFingerprintPageAsync(browser, targetPage, server.CreatePageUrl("page-device-target")).ConfigureAwait(false);
         using var targetSnapshot = await CaptureDeviceFingerprintSnapshotAsync(targetPage).ConfigureAwait(false);
-        AssertDeviceFingerprintSnapshot(targetSnapshot.RootElement, Device.iPhone14Pro);
+        AssertDeviceFingerprintSnapshot(targetSnapshot.RootElement, Device.iPhone14Pro, windowSizedForDevice: false);
 
         var targetNavigationUrl = server.CreatePageUrl("page-device-navigation");
         await NavigateToDeviceFingerprintPageAsync(browser, targetPage, targetNavigationUrl).ConfigureAwait(false);
         using var navigatedTargetSnapshot = await CaptureDeviceFingerprintSnapshotAsync(targetPage).ConfigureAwait(false);
-        AssertDeviceFingerprintSnapshot(navigatedTargetSnapshot.RootElement, Device.iPhone14Pro);
+        AssertDeviceFingerprintSnapshot(navigatedTargetSnapshot.RootElement, Device.iPhone14Pro, windowSizedForDevice: false);
 
         await NavigateToDeviceFingerprintPageAsync(browser, targetPage, targetNavigationUrl).ConfigureAwait(false);
         using var reloadedTargetSnapshot = await CaptureDeviceFingerprintSnapshotAsync(targetPage).ConfigureAwait(false);
-        AssertDeviceFingerprintSnapshot(reloadedTargetSnapshot.RootElement, Device.iPhone14Pro);
+        AssertDeviceFingerprintSnapshot(reloadedTargetSnapshot.RootElement, Device.iPhone14Pro, windowSizedForDevice: false);
 
         await NavigateToDeviceFingerprintPageAsync(browser, siblingPage, siblingUrl).ConfigureAwait(false);
         using var reloadedSiblingSnapshot = await CaptureDeviceFingerprintSnapshotAsync(siblingPage).ConfigureAwait(false);
@@ -4804,6 +4809,12 @@ public sealed class WebDriverRealBrowserIntegrationTests
             Html = "<html><head><title>Real Browser Events NonCurrent</title></head><body>events</body></html>",
         }).ConfigureAwait(false);
 
+        // NavigateAsync вправе вернуться вызывающему в режиме navigate-in-flight-grace (вкладка
+        // ещё «loading», новый документ не переподключился) — это контракт моста. Снимок URL
+        // не-текущей вкладки обновляется событием моста, поэтому даём переходу осесть.
+        var settledUrl = await WaitForCurrentUrlAsync(targetPage, targetUrl).ConfigureAwait(false);
+        Assert.That(settledUrl, Is.EqualTo(targetUrl), "не-текущая вкладка не осела на целевой URL после навигации");
+
         Assert.Multiple(() =>
         {
             Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
@@ -6941,6 +6952,28 @@ public sealed class WebDriverRealBrowserIntegrationTests
         Assert.Fail($"{message} {diagnostics}");
     }
 
+    /// <summary>
+    /// Ждёт, пока снимок URL страницы совпадёт с ожидаемым, и возвращает последний наблюдаемый.
+    /// </summary>
+    /// <remarks>
+    /// URL не-текущей вкладки обновляется событиями моста после коммита навигации; во время
+    /// navigate-in-flight-grace команда навигации уже вернулась, а событие ещё не дошло.
+    /// </remarks>
+    private static async Task<Uri?> WaitForCurrentUrlAsync(WebPage page, Uri expectedUrl)
+    {
+        var deadline = DateTime.UtcNow + BridgeBootstrapTimeout;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            if (page.CurrentUrl == expectedUrl)
+                return page.CurrentUrl;
+
+            await Task.Delay(50).ConfigureAwait(false);
+        }
+
+        return page.CurrentUrl;
+    }
+
     private static async Task NavigateToLookupTargetAsync(WebPage page, LookupTarget target)
         => await page.NavigateAsync(target.Url, new NavigationSettings
         {
@@ -7150,6 +7183,14 @@ public sealed class WebDriverRealBrowserIntegrationTests
                     devicePixelRatio: targetWindow.devicePixelRatio ?? null,
                     innerWidth: targetWindow.innerWidth ?? null,
                     innerHeight: targetWindow.innerHeight ?? null,
+                    clientWidth: targetWindow.document?.documentElement?.clientWidth ?? null,
+                    clientHeight: targetWindow.document?.documentElement?.clientHeight ?? null,
+                    outerWidth: targetWindow.outerWidth ?? null,
+                    outerHeight: targetWindow.outerHeight ?? null,
+                    screenWidth: targetWindow.screen?.width ?? null,
+                    screenHeight: targetWindow.screen?.height ?? null,
+                    screenAvailWidth: targetWindow.screen?.availWidth ?? null,
+                    screenAvailHeight: targetWindow.screen?.availHeight ?? null,
                 };
             })());
         """;
@@ -7297,6 +7338,7 @@ public sealed class WebDriverRealBrowserIntegrationTests
                 globalPrivacyControl: typeof navigator.globalPrivacyControl === 'boolean'
                     ? navigator.globalPrivacyControl
                     : null,
+                supportsGlobalPrivacyControl: Object.getOwnPropertyDescriptor(Navigator.prototype, 'globalPrivacyControl') !== undefined,
             });
         """;
 
@@ -7307,7 +7349,8 @@ public sealed class WebDriverRealBrowserIntegrationTests
         var root = document.RootElement;
         return new PrivacySignalSnapshot(
             ReadOptionalStringProperty(root, "doNotTrack"),
-            ReadOptionalBooleanProperty(root, "globalPrivacyControl"));
+            ReadOptionalBooleanProperty(root, "globalPrivacyControl"),
+            ReadOptionalBooleanProperty(root, "supportsGlobalPrivacyControl") ?? false);
     }
 
     private static async Task<MediaDevicesSurfaceSnapshot> CaptureMediaDevicesSurfaceSnapshotAsync(WebPage page, bool requestVideo)
@@ -7511,8 +7554,28 @@ public sealed class WebDriverRealBrowserIntegrationTests
             ReadMediaVideoRequest(root));
     }
 
-    private static void AssertDeviceFingerprintSnapshot(JsonElement snapshot, Device device)
-        => AssertFingerprintMatches(snapshot, device, "page");
+    /// <param name="windowSizedForDevice">
+    /// Окно поднято ПОД ЭТО устройство (профиль задан при запуске браузера). Профиль, назначенный
+    /// вкладке или окну уже после запуска, размер окна изменить не может: окно одно на все вкладки,
+    /// а команды его перестройки в мосте нет. Тогда проверяется только внутренняя согласованность
+    /// метрик, но не соответствие размеру устройства.
+    /// </param>
+    /// <summary>
+    /// Читает числовое поле снимка, терпя отсутствие значения.
+    /// </summary>
+    /// <remarks>
+    /// Метрики окна у вкладки, которую ни разу не показывали, приходят пустыми (браузер их не
+    /// считает). Жёсткое чтение падало исключением разбора вместо понятной проверки.
+    /// </remarks>
+    private static int ReadSnapshotInt(JsonElement snapshot, string propertyName)
+        => snapshot.TryGetProperty(propertyName, out var value)
+            && value.ValueKind == JsonValueKind.Number
+            && value.TryGetInt32(out var number)
+                ? number
+                : 0;
+
+    private static void AssertDeviceFingerprintSnapshot(JsonElement snapshot, Device device, bool windowSizedForDevice = true)
+        => AssertFingerprintMatches(snapshot, device, "page", windowSizedForDevice);
 
     private static async Task<StorageSurfaceSnapshot> CaptureStorageSurfaceSnapshotAsync(WebPage page, string? localValue = null, string? sessionValue = null)
     {
@@ -7862,9 +7925,18 @@ public sealed class WebDriverRealBrowserIntegrationTests
                 Assert.That(snapshot.DoNotTrack, Is.EqualTo(expected.DoNotTrack.Value ? "1" : "0"), $"{scope} doNotTrack mismatch. snapshot={snapshot}");
             }
 
-            if (expected.GlobalPrivacyControl.HasValue)
+            // ★ Свойство подменяется ТОЛЬКО там, где оно у браузера есть. Chromium
+            // `navigator.globalPrivacyControl` не реализует вовсе, и добавленное поле выдавало бы
+            // подмену вернее любого расхождения значений: у настоящего Chrome его нет ни на
+            // объекте, ни на прототипе. Поэтому сверяется значение там, где сигнал поддержан, и
+            // ОТСУТСТВИЕ поля там, где не поддержан.
+            if (expected.GlobalPrivacyControl.HasValue && snapshot.SupportsGlobalPrivacyControl)
             {
                 Assert.That(snapshot.GlobalPrivacyControl, Is.EqualTo(expected.GlobalPrivacyControl.Value), $"{scope} globalPrivacyControl mismatch. snapshot={snapshot}");
+            }
+            else
+            {
+                Assert.That(snapshot.GlobalPrivacyControl, Is.Null, $"{scope} браузер не поддерживает globalPrivacyControl — свойство не должно появляться. snapshot={snapshot}");
             }
         });
     }
@@ -8095,7 +8167,7 @@ public sealed class WebDriverRealBrowserIntegrationTests
             .ToArray();
     }
 
-    private static void AssertFingerprintMatches(JsonElement snapshot, Device device, string scope)
+    private static void AssertFingerprintMatches(JsonElement snapshot, Device device, string scope, bool windowSizedForDevice = true)
     {
         if (!snapshot.TryGetProperty("languages", out var languagesElement)
             || !snapshot.TryGetProperty("userAgent", out _)
@@ -8131,18 +8203,102 @@ public sealed class WebDriverRealBrowserIntegrationTests
             if (device.HardwareConcurrency.HasValue)
                 Assert.That(snapshot.GetProperty("hardwareConcurrency").GetInt32(), Is.EqualTo(device.HardwareConcurrency.Value), $"{scope} hardwareConcurrency mismatch");
 
-            if (device.DeviceMemory.HasValue)
-                Assert.That(snapshot.GetProperty("deviceMemory").GetDouble(), Is.EqualTo(device.DeviceMemory.Value).Within(0.001d), $"{scope} deviceMemory mismatch");
+            // ★ У профиля, заявляющего iOS, свойства 'deviceMemory' не бывает: его нет ни в одном
+            // браузере на WebKit, а на iOS других движков не существует. Значение оттуда убрано
+            // намеренно — присутствие противоречило бы строке агента.
+            var declaresWebKit = device.UserAgent is { Length: > 0 } deviceUserAgent
+                && (deviceUserAgent.Contains("iPhone", StringComparison.Ordinal)
+                    || deviceUserAgent.Contains("iPad", StringComparison.Ordinal)
+                    || deviceUserAgent.Contains("iPod", StringComparison.Ordinal)
+                    || (deviceUserAgent.Contains("Safari/", StringComparison.Ordinal)
+                        && deviceUserAgent.Contains("Version/", StringComparison.Ordinal)
+                        && !deviceUserAgent.Contains("Chrome/", StringComparison.Ordinal)));
+
+            if (declaresWebKit)
+            {
+                Assert.That(
+                    snapshot.GetProperty("deviceMemory").ValueKind,
+                    Is.EqualTo(JsonValueKind.Null),
+                    $"{scope} у профиля на WebKit не должно быть deviceMemory");
+            }
+            else if (device.DeviceMemory.HasValue)
+            {
+                var deviceMemoryValue = snapshot.GetProperty("deviceMemory");
+                Assert.That(
+                    deviceMemoryValue.ValueKind,
+                    Is.EqualTo(JsonValueKind.Number),
+                    $"{scope} deviceMemory отсутствует у страницы; снимок={snapshot.GetRawText()}");
+
+                if (deviceMemoryValue.ValueKind == JsonValueKind.Number)
+                    Assert.That(deviceMemoryValue.GetDouble(), Is.EqualTo(device.DeviceMemory.Value).Within(0.001d), $"{scope} deviceMemory mismatch");
+            }
 
             Assert.That(snapshot.GetProperty("maxTouchPoints").GetInt32(), Is.EqualTo(device.MaxTouchPoints), $"{scope} maxTouchPoints mismatch");
 
             if (device.DeviceScaleFactor > 0)
                 Assert.That(snapshot.GetProperty("devicePixelRatio").GetDouble(), Is.EqualTo(device.DeviceScaleFactor).Within(0.001d), $"{scope} devicePixelRatio mismatch");
 
+            // ★ Метрики окна больше НЕ подменяются: окно физически получает заявленный размер при
+            // запуске. Равенство innerWidth заявленной области просмотра было недостижимой
+            // проверкой — подмена не дотягивается до `documentElement.clientWidth` и
+            // `visualViewport`, и замер показывал подменённые 1512×982 против настоящих 780×493.
+            // Поэтому проверяется то, что должно быть верно у НАСТОЯЩЕГО браузера: страница видит
+            // ту же область, что и её раскладка, окно не больше заявленного и не выходит за экран.
             if (!device.ViewportSize.IsEmpty)
             {
-                Assert.That(snapshot.GetProperty("innerWidth").GetInt32(), Is.EqualTo(device.ViewportSize.Width), $"{scope} innerWidth mismatch");
-                Assert.That(snapshot.GetProperty("innerHeight").GetInt32(), Is.EqualTo(device.ViewportSize.Height), $"{scope} innerHeight mismatch");
+                var innerWidth = ReadSnapshotInt(snapshot, "innerWidth");
+                var innerHeight = ReadSnapshotInt(snapshot, "innerHeight");
+                var outerWidth = ReadSnapshotInt(snapshot, "outerWidth");
+                var outerHeight = ReadSnapshotInt(snapshot, "outerHeight");
+
+                Assert.That(innerWidth, Is.EqualTo(ReadSnapshotInt(snapshot, "clientWidth")), $"{scope} innerWidth расходится с clientWidth");
+                Assert.That(innerHeight, Is.EqualTo(ReadSnapshotInt(snapshot, "clientHeight")), $"{scope} innerHeight расходится с clientHeight");
+                Assert.That(innerWidth, Is.GreaterThan(0), $"{scope} нулевая ширина области просмотра");
+                Assert.That(innerHeight, Is.GreaterThan(0), $"{scope} нулевая высота области просмотра");
+
+                // Внешние метрики окна у вкладки, которую ни разу не показывали, равны нулю —
+                // это поведение самого браузера, а не подмены, и сравнивать с ним нечего.
+                var hasWindowMetrics = outerWidth > 0 && outerHeight > 0;
+
+                if (hasWindowMetrics)
+                {
+                    Assert.That(innerWidth, Is.LessThanOrEqualTo(outerWidth), $"{scope} область просмотра шире окна");
+                    Assert.That(innerHeight, Is.LessThanOrEqualTo(outerHeight), $"{scope} область просмотра выше окна");
+                }
+
+                if (windowSizedForDevice && hasWindowMetrics)
+                {
+                    // Chromium держит нижнюю границу ширины окна около 500 px и уже её не делает.
+                    Assert.That(outerWidth, Is.LessThanOrEqualTo(Math.Max(device.ViewportSize.Width, MinimumChromiumWindowWidth)), $"{scope} окно шире заявленного");
+                    Assert.That(outerHeight, Is.LessThanOrEqualTo(device.ViewportSize.Height), $"{scope} окно выше заявленного");
+                }
+
+                var screenWidth = ReadSnapshotInt(snapshot, "screenWidth");
+                var screenHeight = ReadSnapshotInt(snapshot, "screenHeight");
+                var availWidth = ReadSnapshotInt(snapshot, "screenAvailWidth");
+                var availHeight = ReadSnapshotInt(snapshot, "screenAvailHeight");
+
+                var hasScreenMetrics = screenWidth > 0 && screenHeight > 0 && availWidth > 0 && availHeight > 0;
+
+                if (!hasScreenMetrics)
+                    return;
+
+                Assert.That(availWidth, Is.LessThanOrEqualTo(screenWidth), $"{scope} доступная ширина больше экрана");
+                Assert.That(availHeight, Is.LessThanOrEqualTo(screenHeight), $"{scope} доступная высота больше экрана");
+
+                if (hasWindowMetrics)
+                {
+                    Assert.That(outerWidth, Is.LessThanOrEqualTo(availWidth), $"{scope} окно шире доступной области");
+                    Assert.That(outerHeight, Is.LessThanOrEqualTo(availHeight), $"{scope} окно выше доступной области");
+                }
+
+                if (device.Screen is { Width: > 0 and var declaredScreenWidth, Height: > 0 and var declaredScreenHeight })
+                {
+                    // Экран не бывает меньше окна, поэтому заявленный размер при необходимости
+                    // приподнимается до размера окна — но никогда не занижается.
+                    Assert.That(screenWidth, Is.EqualTo(Math.Max(declaredScreenWidth, outerWidth)), $"{scope} screen.width mismatch");
+                    Assert.That(screenHeight, Is.GreaterThanOrEqualTo(Math.Max(declaredScreenHeight, outerHeight)), $"{scope} screen.height mismatch");
+                }
             }
         });
     }
@@ -8334,7 +8490,8 @@ public sealed class WebDriverRealBrowserIntegrationTests
 
     private sealed record PrivacySignalSnapshot(
         string? DoNotTrack,
-        bool? GlobalPrivacyControl);
+        bool? GlobalPrivacyControl,
+        bool SupportsGlobalPrivacyControl);
 
     private sealed record MediaDeviceEntry(
         string? Kind,
@@ -8486,6 +8643,14 @@ public sealed class WebDriverRealBrowserIntegrationTests
                                                 devicePixelRatio: targetWindow.devicePixelRatio ?? null,
                                                 innerWidth: targetWindow.innerWidth ?? null,
                                                 innerHeight: targetWindow.innerHeight ?? null,
+                                                clientWidth: targetWindow.document?.documentElement?.clientWidth ?? null,
+                                                clientHeight: targetWindow.document?.documentElement?.clientHeight ?? null,
+                                                outerWidth: targetWindow.outerWidth ?? null,
+                                                outerHeight: targetWindow.outerHeight ?? null,
+                                                screenWidth: targetWindow.screen?.width ?? null,
+                                                screenHeight: targetWindow.screen?.height ?? null,
+                                                screenAvailWidth: targetWindow.screen?.availWidth ?? null,
+                                                screenAvailHeight: targetWindow.screen?.availHeight ?? null,
                                             };
 
                                             document.getElementById('fingerprint-snapshot').textContent = JSON.stringify(payload);

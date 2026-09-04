@@ -115,8 +115,8 @@ internal static partial class BridgeServerLogs
     [LoggerMessage(EventId = 1850, Level = LogLevel.Warning, Message = "Navigation proxy обработчик соединения завершился непредвиденной ошибкой")]
     public static partial void LogBridgeServerNavigationProxyConnectionFailed(this ILogger logger, Exception exception);
 
-    [LoggerMessage(EventId = 1851, Level = LogLevel.Warning, Message = "Navigation proxy не смог перенаправить upstream-запрос {Method} {Url}")]
-    public static partial void LogBridgeServerNavigationProxyForwardFailed(this ILogger logger, string method, string url, Exception exception);
+    [LoggerMessage(EventId = 1851, Level = LogLevel.Warning, Message = "Navigation proxy не смог перенаправить upstream-запрос {Method} {Url}, маршрут: {RouteToken}, апстрим-прокси задан: {HasUpstreamProxy}")]
+    public static partial void LogBridgeServerNavigationProxyForwardFailed(this ILogger logger, string method, string url, string routeToken, bool hasUpstreamProxy, Exception exception);
 
     [LoggerMessage(EventId = 1852, Level = LogLevel.Debug, Message = "Navigation proxy отменил стрелый запрос {Method} {Url} со снятым драйверным маршрутом (token={RouteToken}) вместо форварда на origin")]
     public static partial void LogBridgeServerNavigationProxyStaleRouteAborted(this ILogger logger, string method, string url, string routeToken);

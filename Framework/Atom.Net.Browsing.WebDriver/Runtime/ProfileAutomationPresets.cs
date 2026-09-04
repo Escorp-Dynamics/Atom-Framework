@@ -1,4 +1,6 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using System.Drawing;
+using System.Globalization;
 using System.Net;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
@@ -7,6 +9,15 @@ namespace Atom.Net.Browsing.WebDriver;
 
 internal static class ProfileAutomationPresets
 {
+    /// <summary>
+    /// Нижняя граница ширины окна Chromium: уже этого браузер окно не делает.
+    /// </summary>
+    /// <remarks>
+    /// Мобильный профиль просит 412 px, браузер отдаёт 500 — и окно оказывается шире и экрана
+    /// профиля, и виртуального дисплея. Дисплей поэтому поднимается не уже этой границы.
+    /// </remarks>
+    internal const int MinimumChromiumWindowWidth = 500;
+
     internal static BrowserAutomationPreset Create(WebBrowserProfile profile, WebBrowserSettings settings, string profilePath, bool enableManagedChromiumBootstrap = false)
     {
         ArgumentNullException.ThrowIfNull(profile);
@@ -15,6 +26,8 @@ internal static class ProfileAutomationPresets
 
         var useBrowserHeadlessMode = ShouldUseBrowserHeadlessMode(settings);
         var family = profile is FirefoxProfile ? "firefox" : "chromium";
+
+        WarnOnWebKitEngineMismatch(settings, family);
 
         settings.Logger?.LogProfileAutomationPresetCreating(profile.Channel.ToString(), family, profilePath);
         settings.Logger?.LogProfileAutomationHeadlessModeResolved(settings.UseHeadlessMode, settings.Display is not null, useBrowserHeadlessMode);
@@ -309,6 +322,25 @@ internal static class ProfileAutomationPresets
         if (TryResolveChromiumUserAgentArgument(settings) is { } userAgentArgument)
             AddChromiumArgument(arguments, userAgentArgument, "--user-agent=");
 
+        // Геометрию окна ЗАДАЁМ, а не подменяем: см. TryResolveChromiumWindowArguments.
+        foreach (var windowArgument in TryResolveChromiumWindowArguments(settings))
+            AddChromiumArgument(arguments, windowArgument, windowArgument[..(windowArgument.IndexOf('=', StringComparison.Ordinal) + 1)]);
+
+        // Сенсорный ввод включаем НАСТОЯЩИЙ, когда устройство его заявляет: подменённый
+        // 'maxTouchPoints' без событий касания противоречит сам себе — страница проверяет наличие
+        // 'ontouchstart' и конструктора TouchEvent, а их подмена значения не создаёт.
+        if (settings.Device is { HasTouch: true })
+        {
+            AddChromiumArgument(arguments, "--touch-events=enabled", "--touch-events");
+
+            // ★ Мало объявить сенсорный ввод — им надо ПОЛЬЗОВАТЬСЯ. Доверенный клик шлёт события
+            // мыши, а на телефоне страница видит касания: touchstart/touchend и pointerType
+            // 'touch'. Виджет проверки, отрисованный для мобильного профиля, ждёт именно их, и
+            // мышиный клик по нему остаётся без ответа. Ключ переводит ввод указателя в касания,
+            // поэтому клик доходит до страницы тем же способом, что и палец.
+            AddChromiumArgument(arguments, "--simulate-touch-screen-with-mouse");
+        }
+
         // Программный WebGL — только когда вызывающий задал синтетический профиль устройства.
         // На виртуальном дисплее GPU нет, и контекст WebGL не создаётся вовсе: getContext('webgl')
         // возвращает null, а vendor/renderer пустые. Для профиля «как есть» это терпимо и проверено
@@ -424,6 +456,19 @@ internal static class ProfileAutomationPresets
         if (useBrowserHeadlessMode)
             AddArgumentIfMissing(arguments, "-headless");
 
+        // Тот же довод, что и у Chromium: размер окна задаём по-настоящему, иначе метрики
+        // раскладки расходятся с заявленным профилем, а подмена до них не дотягивается.
+        //
+        // Значения кладутся напрямую, а не через AddArgumentIfMissing: тот отбрасывает повтор
+        // одинаковых аргументов, и у квадратного окна вторая величина потерялась бы.
+        if (ResolveDeclaredWindowBounds(settings.Device) is { } bounds && !arguments.Contains("-width", StringComparer.Ordinal))
+        {
+            arguments.Add("-width");
+            arguments.Add(bounds.Size.Width.ToString(CultureInfo.InvariantCulture));
+            arguments.Add("-height");
+            arguments.Add(bounds.Size.Height.ToString(CultureInfo.InvariantCulture));
+        }
+
         foreach (var argument in NormalizeArguments(settings.Args))
             AddArgumentIfMissing(arguments, argument);
 
@@ -486,12 +531,99 @@ internal static class ProfileAutomationPresets
             _ when argument.StartsWith("--user-data-dir=", StringComparison.Ordinal) => "--user-data-dir=",
             _ when argument.StartsWith("--proxy-server=", StringComparison.Ordinal) => "--proxy-server=",
             _ when argument.StartsWith("--lang=", StringComparison.Ordinal) => "--lang=",
+            _ when argument.StartsWith("--touch-events", StringComparison.Ordinal) => "--touch-events",
+            _ when argument.StartsWith("--window-size=", StringComparison.Ordinal) => "--window-size=",
+            _ when argument.StartsWith("--window-position=", StringComparison.Ordinal) => "--window-position=",
             _ when argument.StartsWith("--user-agent=", StringComparison.Ordinal) => "--user-agent=",
             _ when argument.StartsWith("--headless", StringComparison.Ordinal) => "--headless",
             _ => argument,
         };
 
         AddArgumentIfMissing(arguments, argument, resolvedUniquenessPrefix);
+    }
+
+    /// <summary>
+    /// Предупреждает о профиле, который не может быть достоверным на этом браузере.
+    /// </summary>
+    /// <remarks>
+    /// ★ На iOS и iPadOS ЛЮБОЙ браузер работает на WebKit — там нет ни Blink, ни Gecko: Chrome
+    /// (CriOS) и Firefox (FxiOS) там лишь оболочки над системным движком. Поэтому профиль iPhone
+    /// или iPad, запущенный на Chromium, противоречив не в свойствах, а в самом движке: формат
+    /// <c>Error.stack</c>, тексты исключений, состав глобальных объектов и поведение встроенных
+    /// типов принадлежат V8 и подменой свойств не закрываются.
+    ///
+    /// Замер это подтвердил напрямую: живой Cloudflare Turnstile отдаёт такому профилю
+    /// error-callback 600010 — 0 успехов из 10 и с агентом Safari, и с агентом Chrome for iOS,
+    /// тогда как профили Windows, macOS и Android (то есть заявляющие Blink) проходят 10 из 10.
+    /// Молчать об этом нельзя: вызывающий получил бы стабильные отказы без объяснения причины.
+    /// </remarks>
+    private static void WarnOnWebKitEngineMismatch(WebBrowserSettings settings, string family)
+    {
+        if (settings.Device?.UserAgent is not { Length: > 0 } userAgent)
+            return;
+
+        var declaresWebKit = userAgent.Contains("iPhone", StringComparison.Ordinal)
+            || userAgent.Contains("iPad", StringComparison.Ordinal)
+            || userAgent.Contains("iPod", StringComparison.Ordinal)
+            || (userAgent.Contains("Safari/", StringComparison.Ordinal)
+                && userAgent.Contains("Version/", StringComparison.Ordinal)
+                && !userAgent.Contains("Chrome/", StringComparison.Ordinal)
+                && !userAgent.Contains("Chromium/", StringComparison.Ordinal));
+
+        if (declaresWebKit)
+            settings.Logger?.LogProfileAutomationWebKitEngineMismatch(userAgent, family);
+    }
+
+    /// <summary>
+    /// Аргументы размера и положения окна под заявленную область просмотра.
+    /// </summary>
+    /// <remarks>
+    /// ★ Замер эмуляции показал разрыв: подменённые <c>innerWidth/innerHeight</c> отдавали размер
+    /// профиля (1512×982), а настоящая область документа была 780×493 — и её же отдавали
+    /// <c>documentElement.clientHeight</c> и <c>visualViewport</c>, до которых подмена не
+    /// дотягивается: за ними стоит настоящая раскладка страницы. Расхождение вдвое видно одной
+    /// строкой.
+    ///
+    /// Поэтому окно получает заявленный размер по-настоящему. Тогда согласованы сразу все метрики,
+    /// включая недоступные подмене, а разница <c>outerHeight − innerHeight</c> становится
+    /// настоящей высотой рамки браузера вместо нуля — который сам по себе выдавал среду без окна.
+    /// </remarks>
+    private static IEnumerable<string> TryResolveChromiumWindowArguments(WebBrowserSettings settings)
+    {
+        if (ResolveDeclaredWindowBounds(settings.Device) is not { } bounds)
+            yield break;
+
+        yield return string.Create(CultureInfo.InvariantCulture, $"--window-size={bounds.Size.Width},{bounds.Size.Height}");
+        yield return string.Create(CultureInfo.InvariantCulture, $"--window-position=0,{bounds.Location.Y}");
+    }
+
+    /// <summary>
+    /// Размер и положение окна, вытекающие из заявленного устройства.
+    /// </summary>
+    /// <param name="device">Профиль устройства либо <see langword="null"/>.</param>
+    /// <returns>Границы окна либо <see langword="null"/>, если область просмотра не заявлена.</returns>
+    private static Rectangle? ResolveDeclaredWindowBounds(Device? device)
+    {
+        var viewport = device?.ViewportSize ?? Size.Empty;
+
+        if (viewport.IsEmpty || viewport.Width <= 0 || viewport.Height <= 0)
+            return null;
+
+        // Окно не может выходить за ДОСТУПНУЮ область экрана: строку меню macOS и панель задач
+        // Windows оно не перекрывает. Размер во весь экран делал availHeight равной полной высоте
+        // и стирал признак оболочки рабочего стола, ради которого доступная область и заявляется.
+        var screen = device?.Screen;
+        var availableWidth = screen?.AvailWidth is > 0 and var declaredWidth ? declaredWidth : viewport.Width;
+        var availableHeight = screen?.AvailHeight is > 0 and var declaredHeight ? declaredHeight : viewport.Height;
+
+        // Верх доступной области: на macOS её занимает строка меню, поэтому окно начинается ниже;
+        // панель задач Windows по умолчанию снизу, и начало остаётся нулевым.
+        var top = device?.Platform?.StartsWith("Mac", StringComparison.OrdinalIgnoreCase) == true
+            && screen is { Height: > 0 and var screenHeight, AvailHeight: > 0 and var screenAvailHeight }
+                ? Math.Max(0, screenHeight - screenAvailHeight)
+                : 0;
+
+        return new Rectangle(0, top, Math.Min(viewport.Width, availableWidth), Math.Min(viewport.Height, availableHeight));
     }
 
     private static string? TryResolveChromiumLanguageArgument(WebBrowserSettings settings)

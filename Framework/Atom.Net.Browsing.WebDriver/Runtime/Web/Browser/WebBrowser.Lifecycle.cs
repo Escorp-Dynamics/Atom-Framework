@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Drawing;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Versioning;
 using Atom.Hardware.Display;
@@ -437,7 +438,44 @@ public sealed partial class WebBrowser
             {
                 IsVisible = !launchSettings.UseHeadlessMode,
                 Logger = launchSettings.Logger,
+                Resolution = ResolveDisplayResolution(launchSettings.Device),
             }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Разрешение виртуального дисплея под заявленный экран профиля.
+    /// </summary>
+    /// <remarks>
+    /// ★ Замер эмуляции показал разрыв в геометрии: страница получала подменённые
+    /// <c>innerWidth/innerHeight</c> размером с экран профиля (1512×982), а настоящая область
+    /// документа была 780×493 — и <c>documentElement.clientHeight</c> вместе с
+    /// <c>visualViewport</c> отдавали именно её. Расхождение вдвое читается одной строкой и не
+    /// лечится подменой: за <c>clientHeight</c> стоит настоящая раскладка страницы.
+    ///
+    /// Поэтому геометрию не подменяют, а ЗАДАЮТ: дисплей поднимается размером с заявленный экран,
+    /// окно получает размер заявленной области просмотра, и тогда все метрики согласованы сами —
+    /// включая те, до которых подмена не дотягивается.
+    ///
+    /// Дисплей меньше окна означал бы окно, обрезанное экраном, поэтому берётся именно экран
+    /// профиля; когда профиль экрана не заявляет, остаётся разрешение по умолчанию.
+    /// </remarks>
+    private static Size ResolveDisplayResolution(Device? device)
+    {
+        var declared = device?.Screen switch
+        {
+            { Width: > 0 and var width, Height: > 0 and var height } => new Size(width, height),
+            _ when device?.ViewportSize is { IsEmpty: false } viewport => viewport,
+            _ => Size.Empty,
+        };
+
+        if (declared.IsEmpty)
+            return new Size(1920, 1080);
+
+        // Дисплей не должен быть уже окна: Chromium не делает окно уже своей нижней границы, и
+        // мобильный профиль с экраном 412 px получал окно 500 px, торчащее за край дисплея.
+        return declared.Width >= ProfileAutomationPresets.MinimumChromiumWindowWidth
+            ? declared
+            : new Size(ProfileAutomationPresets.MinimumChromiumWindowWidth, declared.Height);
     }
 
     private void CleanupMaterializedProfile()
@@ -591,7 +629,64 @@ public sealed partial class WebBrowser
             ConfigurePlatformFontEnvironment(startInfo, settings);
         }
 
+        ConfigureTimezoneEnvironment(startInfo, settings);
+        ConfigureLocaleEnvironment(startInfo, settings);
+
         return startInfo;
+    }
+
+    /// <summary>
+    /// Переводит процесс браузера в заявленную языковую среду.
+    /// </summary>
+    /// <remarks>
+    /// ★ Замер эмуляции показал расхождение того же рода, что и с часовым поясом: заявлен профиль
+    /// en-US, страница видела <c>navigator.languages = ['en-US','en']</c> (подмена расширением), а
+    /// <c>Intl.DateTimeFormat().resolvedOptions().locale</c> отдавал <c>ru</c>, и название пояса в
+    /// <c>Date.prototype.toString()</c> печаталось по-русски: «Восточная Америка, стандартное
+    /// время» вместо «Eastern Standard Time». Одного чтения любого из этих путей хватало, чтобы
+    /// увидеть настоящую машину сквозь профиль.
+    ///
+    /// Аргумент <c>--lang</c> здесь не помогает: он задаёт язык интерфейса и Accept-Language, а
+    /// локаль ICU (её и читает <c>Intl</c>) Chromium на Linux берёт из окружения. Поэтому лечится
+    /// это тем же способом, что и пояс, — переменными процесса, а не обёрткой в странице:
+    /// согласованными становятся сразу все пути, включая воркеры и чужой код.
+    ///
+    /// Значение приводится к виду <c>en_US.UTF-8</c>: ICU ждёт разделитель подчёркиванием, а
+    /// кодировку — явной; профильная же локаль записана в дефисной форме BCP-47.
+    /// </remarks>
+    private static void ConfigureLocaleEnvironment(ProcessStartInfo startInfo, WebBrowserSettings settings)
+    {
+        if (settings.Device?.Locale is not { Length: > 0 } locale) return;
+
+        var posixLocale = locale.Replace('-', '_') + ".UTF-8";
+
+        startInfo.Environment["LANG"] = posixLocale;
+        startInfo.Environment["LC_ALL"] = posixLocale;
+        startInfo.Environment["LANGUAGE"] = locale.Replace('-', '_');
+    }
+
+    /// <summary>
+    /// Переводит процесс браузера в заявленный часовой пояс.
+    /// </summary>
+    /// <remarks>
+    /// ★ Замер эмуляции показал грубое расхождение: <c>Intl.DateTimeFormat().resolvedOptions()</c>
+    /// сообщал заявленный пояс (America/New_York), а <c>Date.prototype.getTimezoneOffset()</c> —
+    /// НАСТОЯЩИЙ пояс машины (−180, то есть UTC+3). Подменялся только Intl, и одного вычитания
+    /// хватало, чтобы поймать подмену.
+    ///
+    /// Лечится не обёрткой над Date, а переменной окружения: пояс задаётся ВСЕМУ процессу, и
+    /// согласованными становятся сразу все пути — Intl, Date, форматирование, воркеры, чужой код
+    /// на странице. Обёртка же ловится тривиально: подменённая функция отличается от родной и
+    /// строковым представлением, и поведением при наследовании.
+    ///
+    /// Переменная действует только на процесс браузера — системное время пользователя не
+    /// затрагивается. Если пояс не заявлен, ничего не выставляется и остаётся свой.
+    /// </remarks>
+    private static void ConfigureTimezoneEnvironment(ProcessStartInfo startInfo, WebBrowserSettings settings)
+    {
+        if (settings.Device?.Timezone is not { Length: > 0 } timezone) return;
+
+        startInfo.Environment["TZ"] = timezone;
     }
 
     /// <summary>
