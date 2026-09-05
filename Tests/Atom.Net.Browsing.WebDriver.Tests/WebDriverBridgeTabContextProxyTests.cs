@@ -6,6 +6,47 @@ namespace Atom.Net.Browsing.WebDriver.Tests;
 [TestFixture]
 public sealed class WebDriverBridgeTabContextProxyTests
 {
+    /// <summary>
+    /// Незаданное предпочтение анимации не должно попадать в контекст вкладки вовсе.
+    /// </summary>
+    /// <remarks>
+    /// Присвоение JsonObject значения null пишет JSON-null, а расширение принимает либо отсутствие
+    /// поля, либо логическое значение: на null оно отвергало ВЕСЬ контекст вкладки
+    /// («Контекст вкладки содержит неверный reducedMotion»), и боевой солвер падал ещё на
+    /// инициализации браузера. Пресеты устройств это поле задают всегда, поэтому промах был виден
+    /// только там, где устройство собирается из конфигурации.
+    /// </remarks>
+    [Test]
+    public void AppendDeviceContextOmitsUnsetReducedMotion()
+    {
+        var payload = new System.Text.Json.Nodes.JsonObject();
+
+        WebBrowser.AppendDeviceContext(payload, new Device
+        {
+            UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            ReducedMotion = null,
+        });
+
+        Assert.That(payload.ContainsKey("reducedMotion"), Is.False);
+    }
+
+    /// <summary>
+    /// Заданное предпочтение анимации передаётся логическим значением.
+    /// </summary>
+    [Test]
+    public void AppendDeviceContextKeepsDeclaredReducedMotion()
+    {
+        var payload = new System.Text.Json.Nodes.JsonObject();
+
+        WebBrowser.AppendDeviceContext(payload, new Device
+        {
+            UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            ReducedMotion = true,
+        });
+
+        Assert.That(payload["reducedMotion"]?.GetValue<bool>(), Is.True);
+    }
+
     [Test]
     public async Task BuildSetTabContextPayloadSerializesPageProxyCredentials()
     {
