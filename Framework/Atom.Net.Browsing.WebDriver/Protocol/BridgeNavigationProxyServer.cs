@@ -1,3 +1,4 @@
+using System.Buffers;
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -649,23 +650,31 @@ internal sealed class BridgeNavigationProxyServer(
     private static async Task<ProxyRequestReadResult> ReadProxyRequestAsync(Stream stream, CancellationToken cancellationToken)
     {
         var envelopeResult = await ReadRequestEnvelopeAsync(stream, cancellationToken).ConfigureAwait(false);
-        if (envelopeResult.Envelope is not { } requestEnvelope)
+        if (envelopeResult.Buffer is not { } envelopeBuffer)
             return ProxyRequestReadResult.Failure(envelopeResult.Outcome);
 
-        var (headerBytes, bufferedBodyBytes) = requestEnvelope;
-        var headerText = Encoding.ASCII.GetString(headerBytes);
-        var headerLines = headerText.Split("\r\n", StringSplitOptions.None);
-        if (headerLines.Length == 0 || string.IsNullOrWhiteSpace(headerLines[0]))
-            return ProxyRequestReadResult.Failure(ProxyRequestReadOutcome.Malformed);
+        string? method;
+        string? target;
+        Dictionary<string, string>? headers;
+        byte[] bufferedBodyBytes;
 
-        var parts = headerLines[0].Split(' ', 3, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length < 2)
-            return ProxyRequestReadResult.Failure(ProxyRequestReadOutcome.Malformed);
+        try
+        {
+            if (!TryParseRequestHead(envelopeBuffer.AsSpan(0, envelopeResult.HeaderEnd), out method, out target, out headers))
+                return ProxyRequestReadResult.Failure(ProxyRequestReadOutcome.Malformed);
 
-        var headers = ParseHeaders(headerLines);
+            // Хвост после разделителя — это уже начало тела: его нужно сохранить, потому что
+            // арендованный буфер сразу уходит обратно в пул.
+            var bodyStart = envelopeResult.HeaderEnd + 4;
+            bufferedBodyBytes = envelopeResult.TotalCount > bodyStart
+                ? envelopeBuffer.AsSpan(bodyStart, envelopeResult.TotalCount - bodyStart).ToArray()
+                : [];
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(envelopeBuffer);
+        }
 
-        var method = parts[0];
-        var target = parts[1];
         byte[]? bodyBytes;
         if (IsChunkedTransferEncoding(headers))
         {
@@ -694,10 +703,20 @@ internal sealed class BridgeNavigationProxyServer(
             : ProxyRequestReadResult.Success(CreateProxyRequest(method, target, headers, bodyBytes));
     }
 
+    // Разбор списка через Split давал массив строк на каждый запрос ради одного сравнения.
     private static bool IsChunkedTransferEncoding(Dictionary<string, string> headers)
-        => headers.TryGetValue("Transfer-Encoding", out var transferEncoding)
-            && transferEncoding.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Any(static token => string.Equals(token, "chunked", StringComparison.OrdinalIgnoreCase));
+    {
+        if (!headers.TryGetValue("Transfer-Encoding", out var transferEncoding))
+            return false;
+
+        foreach (var range in transferEncoding.AsSpan().Split(','))
+        {
+            if (transferEncoding.AsSpan(range).Trim().Equals("chunked", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Возвращает <see langword="null"/>, если тело не удалось прочитать целиком (обрыв,
@@ -816,27 +835,90 @@ internal sealed class BridgeNavigationProxyServer(
         }
     }
 
-    private static Dictionary<string, string> ParseHeaders(string[] headerLines)
+    /// <summary>
+    /// Разбирает стартовую строку и заголовки прямо по байтам конверта.
+    /// </summary>
+    /// <remarks>
+    /// ★ Раньше блок заголовков сначала превращался в строку целиком
+    /// (<c>Encoding.ASCII.GetString</c>, то есть удвоение в UTF-16), затем резался
+    /// <c>Split("\r\n")</c> на массив строк, а стартовая строка — ещё одним <c>Split</c>. На
+    /// запрос приходилось два массива и строка на КАЖДУЮ строку заголовка, тогда как наружу нужны
+    /// только имена и значения. Страница делает десятки запросов, и этот мусор шёл на каждый.
+    ///
+    /// Здесь создаются ровно те строки, которые уезжают в словарь: метод, цель, имя и значение.
+    /// </remarks>
+    private static bool TryParseRequestHead(
+        ReadOnlySpan<byte> headerBytes,
+        [NotNullWhen(true)] out string? method,
+        [NotNullWhen(true)] out string? target,
+        [NotNullWhen(true)] out Dictionary<string, string>? headers)
     {
-        Dictionary<string, string> headers = new(StringComparer.OrdinalIgnoreCase);
-        for (var lineIndex = 1; lineIndex < headerLines.Length; lineIndex++)
+        method = null;
+        target = null;
+        headers = null;
+
+        var startLineEnd = headerBytes.IndexOf("\r\n"u8);
+        var startLine = startLineEnd < 0 ? headerBytes : headerBytes[..startLineEnd];
+
+        var methodEnd = startLine.IndexOf((byte)' ');
+        if (methodEnd <= 0)
+            return false;
+
+        // Повторные пробелы между полями стартовой строки прежний Split проглатывал
+        // (RemoveEmptyEntries), поэтому пропускаем их и здесь.
+        var afterMethod = startLine[(methodEnd + 1)..];
+        while (!afterMethod.IsEmpty && afterMethod[0] == (byte)' ')
+            afterMethod = afterMethod[1..];
+
+        var targetEnd = afterMethod.IndexOf((byte)' ');
+        var targetSpan = targetEnd < 0 ? afterMethod : afterMethod[..targetEnd];
+        if (targetSpan.IsEmpty)
+            return false;
+
+        method = Encoding.ASCII.GetString(startLine[..methodEnd]);
+        target = Encoding.ASCII.GetString(targetSpan);
+        headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        var rest = startLineEnd < 0 ? ReadOnlySpan<byte>.Empty : headerBytes[(startLineEnd + 2)..];
+        while (!rest.IsEmpty)
         {
-            var headerLine = headerLines[lineIndex];
-            if (string.IsNullOrEmpty(headerLine))
+            var lineEnd = rest.IndexOf("\r\n"u8);
+            var line = lineEnd < 0 ? rest : rest[..lineEnd];
+            rest = lineEnd < 0 ? ReadOnlySpan<byte>.Empty : rest[(lineEnd + 2)..];
+
+            if (line.IsEmpty)
                 break;
 
-            var separatorIndex = headerLine.IndexOf(':');
+            var separatorIndex = line.IndexOf((byte)':');
             if (separatorIndex <= 0)
                 continue;
 
-            var name = headerLine[..separatorIndex].Trim();
-            if (name.Length == 0)
+            var name = TrimAsciiSpace(line[..separatorIndex]);
+            if (name.IsEmpty)
                 continue;
 
-            headers[name] = headerLine[(separatorIndex + 1)..].Trim();
+            headers[Encoding.ASCII.GetString(name)] = Encoding.ASCII.GetString(TrimAsciiSpace(line[(separatorIndex + 1)..]));
         }
 
-        return headers;
+        return true;
+    }
+
+    /// <summary>
+    /// Отрезает ведущие и хвостовые пробелы и табуляции — то же, что делал <c>string.Trim</c>
+    /// для разобранных заголовков, но без промежуточной строки.
+    /// </summary>
+    private static ReadOnlySpan<byte> TrimAsciiSpace(ReadOnlySpan<byte> value)
+    {
+        var start = 0;
+        var end = value.Length;
+
+        while (start < end && (value[start] is (byte)' ' or (byte)'\t'))
+            start++;
+
+        while (end > start && (value[end - 1] is (byte)' ' or (byte)'\t'))
+            end--;
+
+        return value[start..end];
     }
 
     private static ProxyRequest CreateProxyRequest(string method, string target, Dictionary<string, string> headers, byte[] bodyBytes)
@@ -865,59 +947,68 @@ internal sealed class BridgeNavigationProxyServer(
             Body: bodyBytes);
     }
 
+    /// <summary>
+    /// Результат чтения конверта: арендованный буфер и границы разделителя внутри него.
+    /// Возвращать буфер в пул обязан вызывающий.
+    /// </summary>
     private readonly record struct RequestEnvelopeReadResult(
         ProxyRequestReadOutcome Outcome,
-        (byte[] HeaderBytes, byte[] BufferedBodyBytes)? Envelope);
+        byte[]? Buffer,
+        int HeaderEnd,
+        int TotalCount);
 
+    /// <remarks>
+    /// ★ Буфер берётся из пула, а заголовки наружу КОПИЕЙ не отдаются: вызывающий разбирает их
+    /// прямо в арендованной памяти и возвращает буфер. Прежде на каждый запрос страницы выделялся
+    /// свежий массив на 4 КБ (плюс удвоения через <c>Array.Resize</c>) и ещё одна копия блока
+    /// заголовков.
+    /// </remarks>
     private static async Task<RequestEnvelopeReadResult> ReadRequestEnvelopeAsync(Stream stream, CancellationToken cancellationToken)
     {
-        // Буфер растёт удвоением вместо поэлементного List<byte>.Add: заголовки до 128 КБ
-        // копировались по одному байту на каждый прочитанный октет.
-        var buffer = new byte[4096];
+        var buffer = ArrayPool<byte>.Shared.Rent(4096);
         var count = 0;
 
-        while (true)
+        try
         {
-            if (count == buffer.Length)
+            while (true)
             {
-                if (buffer.Length >= MaxRequestHeaderBytes)
-                    return new(ProxyRequestReadOutcome.HeadersTooLarge, Envelope: null);
+                if (count == buffer.Length)
+                {
+                    if (buffer.Length >= MaxRequestHeaderBytes)
+                    {
+                        ArrayPool<byte>.Shared.Return(buffer);
+                        return new(ProxyRequestReadOutcome.HeadersTooLarge, Buffer: null, HeaderEnd: 0, TotalCount: 0);
+                    }
 
-                Array.Resize(ref buffer, Math.Min(buffer.Length * 2, MaxRequestHeaderBytes));
+                    var grown = ArrayPool<byte>.Shared.Rent(Math.Min(buffer.Length * 2, MaxRequestHeaderBytes));
+                    Array.Copy(buffer, grown, count);
+                    ArrayPool<byte>.Shared.Return(buffer);
+                    buffer = grown;
+                }
+
+                var read = await stream.ReadAsync(buffer.AsMemory(count), cancellationToken).ConfigureAwait(false);
+                if (read <= 0)
+                {
+                    var outcome = count == 0 ? ProxyRequestReadOutcome.Closed : ProxyRequestReadOutcome.Malformed;
+                    ArrayPool<byte>.Shared.Return(buffer);
+                    return new(outcome, Buffer: null, HeaderEnd: 0, TotalCount: 0);
+                }
+
+                var previousCount = count;
+                count += read;
+
+                // Разделитель мог начаться в предыдущей порции, поэтому поиск отступает на три байта.
+                var searchStart = Math.Max(0, previousCount - 3);
+                var separatorIndex = buffer.AsSpan(searchStart, count - searchStart).IndexOf("\r\n\r\n"u8);
+                if (separatorIndex >= 0)
+                    return new(ProxyRequestReadOutcome.Request, buffer, searchStart + separatorIndex, count);
             }
-
-            var read = await stream.ReadAsync(buffer.AsMemory(count), cancellationToken).ConfigureAwait(false);
-            if (read <= 0)
-            {
-                return new(
-                    count == 0 ? ProxyRequestReadOutcome.Closed : ProxyRequestReadOutcome.Malformed,
-                    Envelope: null);
-            }
-
-            var previousCount = count;
-            count += read;
-
-            if (TryExtractRequestEnvelope(buffer.AsSpan(0, count), previousCount, out var envelope))
-                return new(ProxyRequestReadOutcome.Request, envelope);
         }
-    }
-
-    private static bool TryExtractRequestEnvelope(ReadOnlySpan<byte> buffer, int previousCount, out (byte[] HeaderBytes, byte[] BufferedBodyBytes) envelope)
-    {
-        // Разделитель мог начаться в предыдущей порции, поэтому поиск отступает на три байта.
-        var searchStart = Math.Max(0, previousCount - 3);
-        var separatorIndex = buffer[searchStart..].IndexOf("\r\n\r\n"u8);
-        if (separatorIndex < 0)
+        catch
         {
-            envelope = default;
-            return false;
+            ArrayPool<byte>.Shared.Return(buffer);
+            throw;
         }
-
-        var headerEnd = searchStart + separatorIndex;
-        envelope = (
-            buffer[..headerEnd].ToArray(),
-            buffer[(headerEnd + 4)..].ToArray());
-        return true;
     }
 
     // Синтетическое решение «продолжить как есть» для запросов без зарегистрированного решения.
@@ -1265,19 +1356,47 @@ internal sealed class BridgeNavigationProxyServer(
         var contentStream = await forwardResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await using (contentStream.ConfigureAwait(false))
         {
-            using var body = new MemoryStream();
-            var chunk = new byte[64 * 1024];
-
-            while (true)
+            // ★ Известная длина — читаем СРАЗУ в итоговый массив. Прежде тело сначала копилось в
+            // MemoryStream, а затем копировалось целиком через ToArray: две копии ответа вместо
+            // нуля лишних. Для страницы это тело каждого ресурса.
+            if (forwardResponse.Content.Headers.ContentLength is { } exactLength and > 0)
             {
-                var read = await contentStream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
-                if (read <= 0)
-                    return body.ToArray();
+                var exact = new byte[(int)exactLength];
+                var filled = 0;
 
-                if (body.Length + read > MaxForwardResponseBytes)
-                    return null;
+                while (filled < exact.Length)
+                {
+                    var read = await contentStream.ReadAsync(exact.AsMemory(filled), cancellationToken).ConfigureAwait(false);
+                    if (read <= 0)
+                        break;
 
-                await body.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                    filled += read;
+                }
+
+                // Сервер объявил длину, но отдал меньше: обрезанное тело наружу не отдаём.
+                return filled == exact.Length ? exact : null;
+            }
+
+            using var body = new MemoryStream();
+            var chunk = ArrayPool<byte>.Shared.Rent(64 * 1024);
+
+            try
+            {
+                while (true)
+                {
+                    var read = await contentStream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
+                    if (read <= 0)
+                        return body.ToArray();
+
+                    if (body.Length + read > MaxForwardResponseBytes)
+                        return null;
+
+                    await body.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(chunk);
             }
         }
     }
@@ -1835,12 +1954,20 @@ internal sealed class BridgeNavigationProxyServer(
         var effectiveReasonPhrase = string.IsNullOrWhiteSpace(reasonPhrase)
             ? GetReasonPhrase(statusCode)
             : reasonPhrase;
-        var headerBytes = Encoding.ASCII.GetBytes(BuildResponseHeader(statusCode, effectiveReasonPhrase, headers, effectiveBody.Length));
+        var (headerBuffer, headerLength) = RentResponseHeaderBytes(statusCode, effectiveReasonPhrase, headers, effectiveBody.Length);
 
         // Запись — самостоятельная фаза со своим бюджетом: клиент, переставший читать сокет,
         // не должен удерживать обработчик после того, как ответ уже получен от upstream.
         using var writeBudget = CreatePhaseBudget(cancellationToken);
-        await stream.WriteAsync(headerBytes, writeBudget.Token).ConfigureAwait(false);
+
+        try
+        {
+            await stream.WriteAsync(headerBuffer.AsMemory(0, headerLength), writeBudget.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(headerBuffer);
+        }
 
         if (includeBody && effectiveBody.Length > 0)
             await stream.WriteAsync(effectiveBody, writeBudget.Token).ConfigureAwait(false);
@@ -1898,7 +2025,16 @@ internal sealed class BridgeNavigationProxyServer(
             candidates.Add(candidate);
     }
 
-    private static string BuildResponseHeader(
+    /// <summary>
+    /// Кодирует стартовую строку и заголовки ответа в арендованный буфер; вернуть его в пул
+    /// обязан вызывающий.
+    /// </summary>
+    /// <remarks>
+    /// Построитель и раньше работал по стековому буферу, но результат уходил через
+    /// <c>ToString()</c> и <c>Encoding.ASCII.GetBytes(string)</c> — строка и массив на КАЖДЫЙ
+    /// ответ прокси. Кодируем прямо из символьного спана.
+    /// </remarks>
+    private static (byte[] Buffer, int Length) RentResponseHeaderBytes(
         int statusCode,
         string reasonPhrase,
         IReadOnlyDictionary<string, string>? headers,
@@ -1931,7 +2067,12 @@ internal sealed class BridgeNavigationProxyServer(
             headerBuilder.Append("Content-Length: ");
             headerBuilder.Append(contentLength);
             headerBuilder.Append("\r\nConnection: close\r\n\r\n");
-            return headerBuilder.ToString();
+
+            var chars = headerBuilder.AsSpan();
+            var byteCount = Encoding.ASCII.GetByteCount(chars);
+            var buffer = ArrayPool<byte>.Shared.Rent(byteCount);
+            Encoding.ASCII.GetBytes(chars, buffer);
+            return (buffer, byteCount);
         }
         finally
         {

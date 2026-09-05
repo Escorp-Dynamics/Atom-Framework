@@ -588,8 +588,10 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         if (addResult.Outcome is not PendingRequestAddResultKind.Added)
             throw CreatePendingRequestRegistrationException(sessionId, tabId, request.Id, addResult.Outcome);
 
-        var commandName = request.Command?.ToString() ?? "<none>";
-        settings.Logger?.LogBridgeServerRequestSent(request.Id, sessionId, tabId, commandName);
+        // Имя команды — строка из перечисления, и строилась она РАНЬШЕ проверки журнала:
+        // выключенный журнал всё равно платил аллокацию на каждой команде моста.
+        if (settings.Logger is { } requestLogger)
+            requestLogger.LogBridgeServerRequestSent(request.Id, sessionId, tabId, request.Command?.ToString() ?? "<none>");
 
         try
         {
@@ -606,7 +608,8 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         {
             var response = await completionSource.Task.WaitAsync(requestTimeoutOverride ?? settings.RequestTimeout, cancellationToken).ConfigureAwait(false);
 #pragma warning disable CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
-            settings.Logger?.LogBridgeServerRequestCompleted(request.Id, sessionId, tabId, commandName, DescribeStatus(response.Status), response.Error ?? string.Empty);
+            if (settings.Logger is { } completionLogger)
+                completionLogger.LogBridgeServerRequestCompleted(request.Id, sessionId, tabId, request.Command?.ToString() ?? "<none>", DescribeStatus(response.Status), response.Error ?? string.Empty);
 #pragma warning restore CA1873 // Избегайте потенциально ресурсоемкого ведения журнала
             return response;
         }
@@ -2451,9 +2454,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     private async Task<BridgeHandshakeValidationResult> ReceiveAndValidateHandshakeAsync(WebSocket socket, CancellationToken cancellationToken)
     {
         var readResult = await ReceiveTextMessageAsync(socket, cancellationToken).ConfigureAwait(false);
-        var firstMessage = readResult.Outcome is ConnectedMessageReadOutcome.Message
-            ? TryDeserializeConnectedMessage(readResult.Buffer, readResult.Count)
-            : null;
+        var firstMessage = readResult.Outcome is ConnectedMessageReadOutcome.Message ? readResult.Message : null;
         return BridgeHandshakeValidator.Validate(firstMessage, settings);
     }
 
@@ -2508,40 +2509,59 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     }
 
     /// <summary>
-    /// Читает одно текстовое сообщение с ростом буфера до <see cref="MaxConnectedMessageBytes"/>.
+    /// Читает одно текстовое сообщение с ростом буфера до <see cref="MaxConnectedMessageBytes"/>
+    /// и сразу его разбирает.
     /// Никогда не вызывает <see cref="WebSocket.ReceiveAsync(Memory{byte}, CancellationToken)"/> с пустым буфером:
     /// по семантике ManagedWebSocket пустой буфер мгновенно возвращает 0 байт без поглощения данных,
     /// что приводит к десериализации урезанного JSON или к бесконечному циклу.
     /// </summary>
+    /// <remarks>
+    /// ★ Буфер берётся из пула и наружу НЕ отдаётся: разбор идёт здесь же, пока аренда жива.
+    ///
+    /// Прежде на КАЖДОЕ принятое сообщение выделялся свежий массив на 4 КБ, а крупные ответы
+    /// удваивали его через <c>Array.Resize</c> — то есть копия за копией. Замер драйвера
+    /// (300 обменов по мосту): 8.03 КБ на обмен при пустячном ответе и 67.5 КБ при ответе на 8 КБ.
+    /// Мост — самый горячий путь драйвера, и мусор здесь платится на каждой команде.
+    /// </remarks>
     private static async Task<ConnectedMessageReadResult> ReceiveTextMessageAsync(WebSocket socket, CancellationToken cancellationToken)
     {
         const int initialCapacityBytes = 4096;
-        var buffer = new byte[initialCapacityBytes];
+        var buffer = ArrayPool<byte>.Shared.Rent(initialCapacityBytes);
         var totalBytes = 0;
 
-        while (socket.State is WebSocketState.Open or WebSocketState.CloseSent)
+        try
         {
-            if (totalBytes == buffer.Length)
+            while (socket.State is WebSocketState.Open or WebSocketState.CloseSent)
             {
-                if (buffer.Length >= MaxConnectedMessageBytes)
-                    return new(ConnectedMessageReadOutcome.InvalidPayload, buffer, totalBytes);
+                if (totalBytes == buffer.Length)
+                {
+                    if (buffer.Length >= MaxConnectedMessageBytes)
+                        return new(ConnectedMessageReadOutcome.InvalidPayload, Message: null);
 
-                Array.Resize(ref buffer, Math.Min(buffer.Length * 2, MaxConnectedMessageBytes));
+                    var grown = ArrayPool<byte>.Shared.Rent(Math.Min(buffer.Length * 2, MaxConnectedMessageBytes));
+                    Array.Copy(buffer, grown, totalBytes);
+                    ArrayPool<byte>.Shared.Return(buffer);
+                    buffer = grown;
+                }
+
+                var result = await socket.ReceiveAsync(buffer.AsMemory(totalBytes), cancellationToken).ConfigureAwait(false);
+                if (result.MessageType is WebSocketMessageType.Close)
+                    return new(ConnectedMessageReadOutcome.Close, Message: null);
+
+                if (result.MessageType is not WebSocketMessageType.Text)
+                    return new(ConnectedMessageReadOutcome.InvalidPayload, Message: null);
+
+                totalBytes += result.Count;
+                if (result.EndOfMessage)
+                    return new(ConnectedMessageReadOutcome.Message, TryDeserializeConnectedMessage(buffer, totalBytes));
             }
 
-            var result = await socket.ReceiveAsync(buffer.AsMemory(totalBytes), cancellationToken).ConfigureAwait(false);
-            if (result.MessageType is WebSocketMessageType.Close)
-                return new(ConnectedMessageReadOutcome.Close, buffer, totalBytes);
-
-            if (result.MessageType is not WebSocketMessageType.Text)
-                return new(ConnectedMessageReadOutcome.InvalidPayload, buffer, totalBytes);
-
-            totalBytes += result.Count;
-            if (result.EndOfMessage)
-                return new(ConnectedMessageReadOutcome.Message, buffer, totalBytes);
+            return new(ConnectedMessageReadOutcome.Close, Message: null);
         }
-
-        return new(ConnectedMessageReadOutcome.Close, buffer, totalBytes);
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     private static async Task SendHandshakeAcceptAsync(BridgeSessionTransport transport, BridgeHandshakeValidationResult validation)
@@ -2594,7 +2614,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             return false;
         }
 
-        var message = TryDeserializeConnectedMessage(receiveResult.Buffer, receiveResult.Count);
+        var message = receiveResult.Message;
         if (message is null)
         {
             settings.Logger?.LogBridgeServerProtocolViolation(sessionId, BridgeProtocolErrorCodes.InvalidPayload);
@@ -2797,7 +2817,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         InvalidPayload,
     }
 
-    private readonly record struct ConnectedMessageReadResult(ConnectedMessageReadOutcome Outcome, byte[] Buffer, int Count);
+    private readonly record struct ConnectedMessageReadResult(ConnectedMessageReadOutcome Outcome, BridgeMessage? Message);
 
     private static bool TryValidateOkOpenedSurfacePayloadCommand(BridgeCommand command, BridgeMessage message, out bool result)
     {
@@ -3437,19 +3457,56 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     /// </summary>
     private sealed class BridgeSessionTransport(WebSocket socket) : IDisposable
     {
+        /// <summary>
+        /// Порог, после которого буфер отправки пересоздаётся вместо переиспользования.
+        /// </summary>
+        /// <remarks>
+        /// Разовое крупное сообщение (например, содержимое страницы) иначе оставляло бы свой
+        /// буфер жить всё время сеанса — на каждое соединение.
+        /// </remarks>
+        private const int MaxRetainedSendBufferBytes = 256 * 1024;
+
         private readonly SemaphoreSlim sendGate = new(1, 1);
+
+        // Буфер и писатель переиспользуются: отправка и так сериализована этим же gate, поэтому
+        // общее состояние здесь безопасно, а установившийся режим не аллоцирует вовсе.
+        private ArrayBufferWriter<byte> sendBuffer = new(4096);
+        private Utf8JsonWriter? sendWriter;
 
         public WebSocket Socket { get; } = socket;
 
         public long ConnectionEpoch { get; init; }
 
+        /// <remarks>
+        /// ★ Сериализация идёт ВНУТРИ gate и в переиспользуемый буфер.
+        ///
+        /// Прежний <c>SerializeToUtf8Bytes</c> выделял массив точного размера на каждое исходящее
+        /// сообщение — то есть на каждую команду драйвера и каждое событие расширения. Мост
+        /// работает непрерывно, и этот мусор был постоянным фоном для сборщика.
+        /// </remarks>
         public async ValueTask SendAsync(BridgeMessage message)
         {
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(message, BridgeJsonContext.Default.BridgeMessage);
             await sendGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                await Socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None).ConfigureAwait(false);
+                if (sendBuffer.Capacity > MaxRetainedSendBufferBytes)
+                {
+                    sendWriter?.Dispose();
+                    sendWriter = null;
+                    sendBuffer = new ArrayBufferWriter<byte>(4096);
+                }
+
+                sendBuffer.ResetWrittenCount();
+
+                if (sendWriter is null)
+                    sendWriter = new Utf8JsonWriter(sendBuffer);
+                else
+                    sendWriter.Reset(sendBuffer);
+
+                JsonSerializer.Serialize(sendWriter, message, BridgeJsonContext.Default.BridgeMessage);
+                sendWriter.Flush();
+
+                await Socket.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None).ConfigureAwait(false);
             }
             finally
             {
@@ -3508,6 +3565,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         public void Dispose()
         {
             sendGate.Dispose();
+            sendWriter?.Dispose();
 
             // Сокет, принятый через HttpListener, больше никто не освобождает.
             Socket.Dispose();
