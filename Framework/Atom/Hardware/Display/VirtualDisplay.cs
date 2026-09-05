@@ -51,6 +51,20 @@ public sealed class VirtualDisplay : IAsyncDisposable
 {
     private static readonly Lock displayReservationGate = new();
     private static readonly HashSet<int> reservedDisplayNumbers = [];
+
+    /// <summary>
+    /// Межпроцессные захваты номеров дисплеев: номер — открытый эксклюзивно файл-замок.
+    /// </summary>
+    /// <remarks>
+    /// ★ Резервирование было ТОЛЬКО внутри процесса, а номер выбирается по отсутствию файлов
+    /// дисплея — то есть по состоянию, которое появляется лишь ПОСЛЕ старта X-сервера. Два
+    /// процесса, стартующие браузер одновременно, видели :100 свободным оба и запускали на нём
+    /// свои xpra: замер показал обоюдный отказ «xpra завершился до создания сокета
+    /// /tmp/.X11-unix/X100». Файл-замок закрывает окно между выбором и стартом: держится
+    /// эксклюзивно всё время жизни дисплея, а осиротевший после падения процесса открывается
+    /// снова, потому что блокировка живёт вместе с дескриптором.
+    /// </remarks>
+    private static readonly Dictionary<int, FileStream> displayNumberClaims = [];
     private Process? xpraServerProcess;
     private Process? xpraAttachProcess;
     private Process? wmProcess;
@@ -351,6 +365,12 @@ public sealed class VirtualDisplay : IAsyncDisposable
                 if (!reservedDisplayNumbers.Add(explicitDisplayNumber))
                     throw new VirtualDisplayException("Дисплей :" + explicitDisplayNumber.ToString(CultureInfo.InvariantCulture) + " уже зарезервирован текущим процессом.");
 
+                if (!TryClaimDisplayNumberAcrossProcesses(explicitDisplayNumber))
+                {
+                    _ = reservedDisplayNumbers.Remove(explicitDisplayNumber);
+                    throw new VirtualDisplayException("Дисплей :" + explicitDisplayNumber.ToString(CultureInfo.InvariantCulture) + " занят другим процессом.");
+                }
+
                 return explicitDisplayNumber;
             }
 
@@ -361,7 +381,49 @@ public sealed class VirtualDisplay : IAsyncDisposable
     private static void ReleaseDisplayReservation(int displayNumber)
     {
         lock (displayReservationGate)
+        {
             _ = reservedDisplayNumbers.Remove(displayNumber);
+
+            if (displayNumberClaims.Remove(displayNumber, out var claim))
+            {
+                try
+                {
+                    claim.Dispose();
+                }
+                catch (IOException)
+                {
+                    // Файл-замок мог быть удалён извне: освобождение номера от этого не зависит.
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Захватывает номер дисплея так, чтобы его не выбрал другой ПРОЦЕСС на этой машине.
+    /// </summary>
+    private static bool TryClaimDisplayNumberAcrossProcesses(int displayNumber)
+    {
+        if (displayNumberClaims.ContainsKey(displayNumber))
+            return true;
+
+        var claimPath = Path.Combine(Path.GetTempPath(), "atom-vdisplay-" + displayNumber.ToString(CultureInfo.InvariantCulture) + ".claim");
+
+        try
+        {
+            // FileShare.None на Unix — это flock: замок живёт вместе с дескриптором и снимается
+            // сам, если процесс-владелец умер, поэтому осиротевший файл никого не блокирует.
+            var claim = new FileStream(claimPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            displayNumberClaims[displayNumber] = claim;
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static int ReserveFreeDisplayNumberUnsafe()
@@ -390,6 +452,9 @@ public sealed class VirtualDisplay : IAsyncDisposable
         CleanupStaleXpraRuntimeArtifacts(displayNumber);
 
         if (HasXpraRuntimeArtifacts(displayNumber))
+            return false;
+
+        if (!TryClaimDisplayNumberAcrossProcesses(displayNumber))
             return false;
 
         _ = reservedDisplayNumbers.Add(displayNumber);
