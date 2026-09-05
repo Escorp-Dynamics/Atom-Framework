@@ -631,6 +631,7 @@ public sealed partial class WebBrowser
 
         ConfigureTimezoneEnvironment(startInfo, settings);
         ConfigureLocaleEnvironment(startInfo, settings);
+        ConfigureSoftwareGraphicsEnvironment(startInfo, settings);
 
         return startInfo;
     }
@@ -654,6 +655,28 @@ public sealed partial class WebBrowser
     /// Значение приводится к виду <c>en_US.UTF-8</c>: ICU ждёт разделитель подчёркиванием, а
     /// кодировку — явной; профильная же локаль записана в дефисной форме BCP-47.
     /// </remarks>
+    /// <summary>
+    /// Переводит графику браузера на программный рендерер, когда профиль заявляет WebGL.
+    /// </summary>
+    /// <remarks>
+    /// На виртуальном дисплее GPU нет. Chromium получает контекст через SwiftShader (аргументы
+    /// запуска), Firefox — через Mesa: без явного указания он пробует свой SWGL и падает
+    /// («RenderCompositorSWGL failed mapping default framebuffer»), оставляя страницу вовсе без
+    /// WebGL.
+    ///
+    /// ★ Только Firefox. Первая версия правки выставляла переменные ЛЮБОМУ браузеру, и Chromium
+    /// уходил с ANGLE/SwiftShader на Mesa: замер на живом Cloudflare показал 0 задач из 4 с
+    /// таймаутом 45 с на каждой (до правки — 3 из 3 за ~10 с), тогда как Firefox в том же окне
+    /// решал 3 из 4. Чужая цепочка рендеринга ломает ровно то, ради чего SwiftShader и включён.
+    /// </remarks>
+    private static void ConfigureSoftwareGraphicsEnvironment(ProcessStartInfo startInfo, WebBrowserSettings settings)
+    {
+        if (settings.Device?.WebGL is null || settings.Profile is not FirefoxProfile) return;
+
+        startInfo.Environment["LIBGL_ALWAYS_SOFTWARE"] = "1";
+        startInfo.Environment["GALLIUM_DRIVER"] = "llvmpipe";
+    }
+
     private static void ConfigureLocaleEnvironment(ProcessStartInfo startInfo, WebBrowserSettings settings)
     {
         if (settings.Device?.Locale is not { Length: > 0 } locale) return;

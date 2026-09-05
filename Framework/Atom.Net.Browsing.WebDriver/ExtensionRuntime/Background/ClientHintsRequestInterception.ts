@@ -6,6 +6,29 @@ import { getWebRequestTabId } from './Browser/BrowserApi';
 import { cloneHeaders, setHeaderValue, type HeaderLike } from './Cookies/VirtualCookies';
 import type { WebRequestDetails, WebRequestHeaderMutation } from './WebRequest/WebRequestListenerPolicy';
 
+/**
+ * Работает ли расширение в браузере на движке Gecko.
+ *
+ * Определяется по API расширений, которого нет в Chromium: <c>browser.runtime.getBrowserInfo</c>
+ * реализует только Firefox. По строке агента судить нельзя — драйвер задаёт Firefox
+ * <c>general.useragent.override</c>, и собственная страница расширения видит ту же подменённую
+ * строку, что и сайт.
+ */
+let geckoRuntime: boolean | undefined;
+
+function runsOnGecko(): boolean {
+    if (geckoRuntime === undefined) {
+        try {
+            const namespaces = globalThis as { browser?: { runtime?: { getBrowserInfo?: unknown } } };
+            geckoRuntime = typeof namespaces.browser?.runtime?.getBrowserInfo === 'function';
+        } catch {
+            geckoRuntime = false;
+        }
+    }
+
+    return geckoRuntime;
+}
+
 export function handleClientHintsRequestInterception(
     details: WebRequestDetails,
     getTabContext: (tabId: string) => TabContextEnvelope | undefined,
@@ -49,7 +72,23 @@ export function handleClientHintsRequestInterception(
                 && userAgent.indexOf('Chrome/') < 0
                 && userAgent.indexOf('Chromium/') < 0));
 
-    if (declaresWebKit) {
+    // ★ То же самое верно для Gecko: клиентских подсказок у Firefox нет ВОВСЕ.
+    //
+    // Замер на живом Cloudflare: браузер Firefox с профилем устройства отдавал
+    // 'Sec-CH-UA: "Chromium";v="131"' при собственном фаерфоксовом 'Accept' — и виджет отвечал
+    // error-callback 600010 («среда слишком ограничена»), 0 задач из 14. Тот же Firefox БЕЗ
+    // профиля устройства решал 3 из 3 за ~5 секунд. Признак читается прямо в заголовках, до
+    // любого JavaScript.
+    const declaresGecko = userAgent !== undefined
+        && userAgent.indexOf('Firefox/') >= 0
+        && userAgent.indexOf('Chrome/') < 0
+        && userAgent.indexOf('Chromium/') < 0;
+
+    // ★ И наоборот: на НАСТОЯЩЕМ Gecko подсказок не бывает, какую бы строку агента мы ни заявляли.
+    // Их вообще некому породить — их добавляем только мы. Профиль «Chrome на Windows», выданный
+    // браузеру Firefox, уезжал с полным набором Sec-CH-UA*, которого движок физически отдать не
+    // может: замер 0 задач из 3, error-callback 600010 на каждой.
+    if (declaresWebKit || declaresGecko || runsOnGecko()) {
         const webKitHeaders = cloneHeaders(baseHeaders ?? details.requestHeaders);
         setHeaderValue(webKitHeaders, 'User-Agent', userAgent);
 
@@ -77,16 +116,19 @@ export function handleClientHintsRequestInterception(
         }
 
         // Кодировки: Chromium предлагает zstd, Safari — нет. Заголовок читается тем же запросом,
-        // что и строка агента, и расходится с ней так же явно, как подсказки.
+        // что и строка агента, и расходится с ней так же явно, как подсказки. Firefox zstd шлёт,
+        // поэтому его это не касается.
         const acceptEncoding = readHeaderValue(webKitHeaders, 'Accept-Encoding');
-        if (acceptEncoding !== undefined && acceptEncoding.indexOf('zstd') >= 0) {
+        if (declaresWebKit && acceptEncoding !== undefined && acceptEncoding.indexOf('zstd') >= 0) {
             setHeaderValue(webKitHeaders, 'Accept-Encoding', 'gzip, deflate, br');
         }
 
         // Список принимаемых типов у Chromium заметно длиннее: он перечисляет свои форматы
         // изображений (avif/apng) и подписанный обмен. Safari таких значений не шлёт, а тип
         // запроса виден из 'Sec-Fetch-Dest' — по нему и подставляется значение того же ресурса.
-        const acceptForDestination = resolveWebKitAccept(readHeaderValue(webKitHeaders, 'Sec-Fetch-Dest'));
+        const acceptForDestination = declaresWebKit
+            ? resolveWebKitAccept(readHeaderValue(webKitHeaders, 'Sec-Fetch-Dest'))
+            : undefined;
         if (acceptForDestination !== undefined && readHeaderValue(webKitHeaders, 'Accept') !== undefined) {
             setHeaderValue(webKitHeaders, 'Accept', acceptForDestination);
         }

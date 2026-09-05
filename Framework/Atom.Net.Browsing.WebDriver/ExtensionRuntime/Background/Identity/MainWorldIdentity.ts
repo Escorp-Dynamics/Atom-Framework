@@ -340,7 +340,6 @@ export function installIdentityInWorker(context: TabContextEnvelope): void {
                 'userAgentData',
                 'deviceMemory',
                 'connection',
-                'globalPrivacyControl',
                 'usb',
                 'serial',
                 'hid',
@@ -1353,6 +1352,26 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
         //
         // Поэтому при заявленном Safari поверхности, которых у него не существует, УБИРАЮТСЯ.
         // Отсутствие здесь — не подделка, а правда о заявленном браузере.
+        // Объявляет свойство навигатора, которого в текущем браузере не существует: на прототипе,
+        // как и все остальные, чтобы список собственных свойств объекта остался пустым.
+        const defineMissingNavigatorProperty = (property: string, value: string): void => {
+            try {
+                const target = globalObject.Navigator?.prototype ?? navigatorObject;
+                if (Object.getOwnPropertyDescriptor(target, property) !== undefined) {
+                    defineNavigatorGetter(property, () => value);
+                    return;
+                }
+
+                Object.defineProperty(target, property, {
+                    configurable: true,
+                    enumerable: true,
+                    get: asNativeGetter(property, undefined, () => value),
+                });
+            } catch {
+                // Неподменяемый навигатор — остальные поверхности всё равно должны встать.
+            }
+        };
+
         const declaredUserAgent = typeof context.userAgent === 'string' ? context.userAgent : '';
 
         // Любой iOS/iPadOS — это WebKit: других движков там не бывает, включая Chrome (CriOS) и
@@ -1365,6 +1384,15 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                 && declaredUserAgent.indexOf('Chrome/') < 0
                 && declaredUserAgent.indexOf('Chromium/') < 0);
         const declaresSafari = declaresWebKit;
+
+        // ★ Заявленный Gecko. Firefox — единственный движок, кроме WebKit, у которого нет
+        // клиентских подсказок и хромовых поверхностей: профиль «Firefox» на браузере Chromium
+        // обязан выглядеть так же, как настоящий Firefox, иначе строка агента противоречит всему
+        // остальному. Проверка «Firefox/ без Chrome/» отделяет его от хромовых сборок, которые
+        // держат в строке 'like Gecko'.
+        const declaresGecko = declaredUserAgent.indexOf('Firefox/') >= 0
+            && declaredUserAgent.indexOf('Chrome/') < 0
+            && declaredUserAgent.indexOf('Chromium/') < 0;
 
         // ★ МОБИЛЬНЫЕ ПОВЕРХНОСТИ. У браузера на телефоне НЕТ плагинов вовсе: и Chrome на Android,
         // и Safari на iOS отдают пустой 'navigator.plugins'. Замер показывал пять настольных
@@ -1393,331 +1421,370 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
             defineNavigatorGetter('mimeTypes', () => emptyMimeTypes);
         }
 
-        if (declaresSafari) {
+        if (declaresSafari || declaresGecko) {
             // Safari на iOS объявляет 'navigator.standalone' (признак запуска с домашнего экрана);
             // у Chromium такого свойства нет вовсе, и его отсутствие противоречит строке агента.
-            try {
-                // На ПРОТОТИПЕ, как и все атрибуты навигатора: собственное свойство прямо на объекте
-                // видно обычным getOwnPropertyNames, а у настоящего браузера этот список пуст.
-                const standaloneTarget = globalObject.Navigator?.prototype ?? navigatorObject;
-
-                if (Object.getOwnPropertyDescriptor(standaloneTarget, 'standalone') === undefined) {
-                    Object.defineProperty(standaloneTarget, 'standalone', {
-                        configurable: true,
-                        enumerable: true,
-                        get: asNativeGetter('standalone', undefined, () => false),
-                    });
-                }
-            } catch {
-                // Неподменяемый навигатор — остальные поверхности всё равно должны встать.
-            }
-
-            // Вендор у Safari свой; у Chromium — 'Google Inc.', и он бы противоречил строке агента.
-            defineNavigatorGetter('vendor', () => 'Apple Computer, Inc.');
-
-            // Свойства, которых у Safari не бывает. Убираем их С ПРОТОТИПА: собственное свойство на
-            // самом навигаторе (в том числе удалённое) наблюдаемо описателем.
-            // Свойства навигатора, которых у WebKit НЕТ вовсе. Часть — интерфейсы к железу,
-            // которые Apple намеренно не реализует (usb/serial/hid/bluetooth), часть — чисто
-            // хромовые (userAgentData, deviceMemory, connection).
-            //
-            // ★ Список выведен ЗАМЕРОМ: перечислением 'Navigator.prototype' на профиле iPhone.
-            // Крупнейший кластер — Protected Audience (аукцион рекламы): тринадцать имён, которых
-            // нет ни у одного браузера, кроме Chromium. Рядом — WebXR, FedCM, Web MIDI, батарея,
-            // корзины хранилища и оба 'webkit*Storage' (префикс обманчив: это чисто хромовые API).
-            const chromiumOnly = [
-                'userAgentData',
-                'deviceMemory',
-                'connection',
-                'globalPrivacyControl',
-                'usb',
-                'serial',
-                'hid',
-                'bluetooth',
-                'presentation',
-                'keyboard',
-                'ink',
-                'windowControlsOverlay',
-                'virtualKeyboard',
-                'managed',
-                'scheduling',
-                'adAuctionComponents',
-                'canLoadAdAuctionFencedFrame',
-                'clearOriginJoinedAdInterestGroups',
-                'createAuctionNonce',
-                'deprecatedReplaceInURN',
-                'deprecatedRunAdAuctionEnforcesKAnonymity',
-                'deprecatedURNToURL',
-                'getInterestGroupAdAuctionData',
-                'joinAdInterestGroup',
-                'leaveAdInterestGroup',
-                'protectedAudience',
-                'runAdAuction',
-                'updateAdInterestGroups',
-                'getBattery',
-                'getInstalledRelatedApps',
-                'devicePosture',
-                'cpuPerformance',
-                'login',
-                'requestMIDIAccess',
-                'storageBuckets',
-                'userActivation',
-                'webkitPersistentStorage',
-                'webkitTemporaryStorage',
-                'xr',
-                'gpu',
-                'vibrate',
-                'registerProtocolHandler',
-                'unregisterProtocolHandler',
-            ];
-            const navigatorPrototype = globalObject.Navigator?.prototype;
-
-            for (const property of chromiumOnly) {
+            if (declaresSafari) {
                 try {
-                    if (navigatorPrototype && Object.getOwnPropertyDescriptor(navigatorPrototype, property) !== undefined) {
-                        delete navigatorPrototype[property];
+                        // На ПРОТОТИПЕ, как и все атрибуты навигатора: собственное свойство прямо на
+                        // объекте видно обычным getOwnPropertyNames, а у настоящего браузера этот
+                        // список пуст.
+                        const standaloneTarget = globalObject.Navigator?.prototype ?? navigatorObject;
+
+                        if (Object.getOwnPropertyDescriptor(standaloneTarget, 'standalone') === undefined) {
+                            Object.defineProperty(standaloneTarget, 'standalone', {
+                                configurable: true,
+                                enumerable: true,
+                                get: asNativeGetter('standalone', undefined, () => false),
+                            });
+                        }
+                    } catch {
+                        // Неподменяемый навигатор — остальные поверхности всё равно должны встать.
                     }
 
-                    if (Object.getOwnPropertyDescriptor(navigatorObject, property) !== undefined) {
-                        delete navigatorObject[property];
-                    }
-                } catch {
-                    // Неудаляемое свойство пропускаем: остальные всё равно должны исчезнуть.
+                    // Вендор у Safari свой; у Chromium — 'Google Inc.'.
+                    defineNavigatorGetter('vendor', () => 'Apple Computer, Inc.');
                 }
-            }
 
-            // Объект 'chrome' — самый заметный признак движка: у Safari его нет.
-            //
-            // ★ Вместе с ним убираются и остальные хромовые глобальные объекты, и — главное —
-            // СЛЕДЫ ДВИЖКА V8. Проверка на движок стоит одну строку: 'Error.stackTraceLimit' и
-            // 'Error.captureStackTrace' существуют только в V8, 'Intl.v8BreakIterator' — только
-            // в нём же, а диалоги выбора файлов ('showOpenFilePicker') Apple не реализует.
-            // Заявлять iOS и держать их на месте — противоречие уровня движка, а не свойства.
-            const chromiumOnlyGlobals = [
-                'chrome',
-                'showOpenFilePicker',
-                'showSaveFilePicker',
-                'showDirectoryPicker',
-                'EyeDropper',
-                'IdleDetector',
-                'BeforeInstallPromptEvent',
-                'LaunchQueue',
-                'USB',
-                'Serial',
-                'HID',
-                'Bluetooth',
-                // Перечисление 'window' на профиле iPhone: всё нижеследующее существует только в
-                // Chromium. Навигационный API, хранилище cookie, Trusted Types, планировщик задач,
-                // датчик нагрузки, выбор шрифтов, картинка-в-картинке для документа, изолированные
-                // фреймы и обработчики событий, которых у WebKit нет вовсе.
-                'navigation',
-                'cookieStore',
-                'sharedStorage',
-                // ★ 'trustedTypes' НЕ удаляем, хотя у WebKit его нет.
+                if (declaresGecko) {
+                    // Firefox отдаёт пустой вендор и собственный productSub; 'oscpu' и 'buildID' —
+                    // свойства, которых у Chromium нет вовсе, и их отсутствие противоречит строке
+                    // агента так же, как лишний хромовый объект.
+                    defineNavigatorGetter('vendor', () => '');
+                    defineNavigatorGetter('productSub', () => '20100101');
+
+                    // 'buildID' и 'oscpu' у Chromium отсутствуют вовсе, поэтому их нужно ОБЪЯВИТЬ,
+                    // а не переопределить: помощник выше правит только существующие свойства.
+                    defineMissingNavigatorProperty('buildID', '20181001000000');
+
+                    // 'oscpu' обязан совпадать с заявленной ОС: замер на живом Firefox показывал
+                    // 'Linux x86_64' при заявленном Win32.
+                    const declaredOsCpu = declaredUserAgent.indexOf('Windows NT 10.0; Win64; x64') >= 0
+                        ? 'Windows NT 10.0; Win64; x64'
+                        : declaredUserAgent.indexOf('Macintosh') >= 0
+                            ? 'Intel Mac OS X 10.15'
+                            : declaredUserAgent.indexOf('Linux') >= 0
+                                ? 'Linux x86_64'
+                                : undefined;
+
+                    if (declaredOsCpu !== undefined)
+                        defineMissingNavigatorProperty('oscpu', declaredOsCpu);
+                }
+
+                // Свойства, которых у Safari не бывает. Убираем их С ПРОТОТИПА: собственное свойство на
+                // самом навигаторе (в том числе удалённое) наблюдаемо описателем.
+                // Свойства навигатора, которых у WebKit НЕТ вовсе. Часть — интерфейсы к железу,
+                // которые Apple намеренно не реализует (usb/serial/hid/bluetooth), часть — чисто
+                // хромовые (userAgentData, deviceMemory, connection).
                 //
-                // Политику Trusted Types документу задаёт CSP, и Chromium ТРЕБУЕТ её независимо от
-                // того, объявлен ли API. Убрав API, мы оставляли требование без исполнителя: во
-                // фрейме проверки Cloudflare это давало EvalError и отказ присвоения innerHTML —
-                // её скрипт умирал, переставал отвечать на сторожевой пинг, и виджет объявлял
-                // 300030. Сокрытие одного признака ломало исполнение страницы целиком.
-                'scheduler',
-                'PressureObserver',
-                'queryLocalFonts',
-                'documentPictureInPicture',
-                'launchQueue',
-                'fence',
-                'fetchLater',
-                'getScreenDetails',
-                'credentialless',
-                'crashReport',
-                'offscreenBuffering',
-                'onappinstalled',
-                'onbeforeinstallprompt',
-                'onbeforexrselect',
-                'oncontentvisibilityautostatechange',
-                'oncommand',
-                'onpagereveal',
-                'onpageswap',
-                'onpointerrawupdate',
-                'NavigateEvent',
-                'Navigation',
-                'CookieStore',
-                'CookieChangeEvent',
-                'Scheduler',
-                'TaskController',
-                'TaskSignal',
-                'TaskPriorityChangeEvent',
-                'SharedStorage',
-                'FencedFrameConfig',
-                'DocumentPictureInPicture',
-                'FileSystemHandle',
-                'FileSystemFileHandle',
-                'FileSystemDirectoryHandle',
-                'FileSystemWritableFileStream',
-                'NavigatorUAData',
-                'BatteryManager',
-                'XRSystem',
-                'XRSession',
-                'MIDIAccess',
-                'MIDIInput',
-                'MIDIOutput',
-                'MIDIMessageEvent',
-                'DevicePosture',
-                'StorageBucketManager',
-                'VirtualKeyboard',
-                'WindowControlsOverlay',
-                'Ink',
-                'Presentation',
-                'PresentationRequest',
-            ];
+                // ★ Список выведен ЗАМЕРОМ: перечислением 'Navigator.prototype' на профиле iPhone.
+                // Крупнейший кластер — Protected Audience (аукцион рекламы): тринадцать имён, которых
+                // нет ни у одного браузера, кроме Chromium. Рядом — WebXR, FedCM, Web MIDI, батарея,
+                // корзины хранилища и оба 'webkit*Storage' (префикс обманчив: это чисто хромовые API).
+                const chromiumOnly = [
+                    'userAgentData',
+                    'deviceMemory',
+                    'connection',
+                    'globalPrivacyControl',
+                    'usb',
+                    'serial',
+                    'hid',
+                    'bluetooth',
+                    'presentation',
+                    'keyboard',
+                    'ink',
+                    'windowControlsOverlay',
+                    'virtualKeyboard',
+                    'managed',
+                    'scheduling',
+                    'adAuctionComponents',
+                    'canLoadAdAuctionFencedFrame',
+                    'clearOriginJoinedAdInterestGroups',
+                    'createAuctionNonce',
+                    'deprecatedReplaceInURN',
+                    'deprecatedRunAdAuctionEnforcesKAnonymity',
+                    'deprecatedURNToURL',
+                    'getInterestGroupAdAuctionData',
+                    'joinAdInterestGroup',
+                    'leaveAdInterestGroup',
+                    'protectedAudience',
+                    'runAdAuction',
+                    'updateAdInterestGroups',
+                    'getBattery',
+                    'getInstalledRelatedApps',
+                    'devicePosture',
+                    'cpuPerformance',
+                    'login',
+                    'storageBuckets',
+                    'userActivation',
+                    'webkitPersistentStorage',
+                    'webkitTemporaryStorage',
+                    'xr',
+                ];
 
-            // Конструкторы интерфейсов лежат прямо на глобальном объекте, а вот атрибуты и методы
-            // самого интерфейса Window — на 'Window.prototype'. Проверка одного лишь собственного
-            // свойства пропускала вторую половину: замер показывал 'scheduler', 'queryLocalFonts'
-            // и 'documentPictureInPicture' живыми на профиле iPhone. Поэтому идём по всей цепочке.
-            for (const property of chromiumOnlyGlobals) {
+                // У Firefox эти поверхности ЕСТЬ, поэтому удаляются только при заявленном Safari:
+                // глобальный контроль приватности, Web MIDI, вибрация и обработчики протоколов.
+                if (declaresSafari) {
+                    chromiumOnly.push(
+                        'globalPrivacyControl',
+                        'requestMIDIAccess',
+                        'gpu',
+                        'vibrate',
+                        'registerProtocolHandler',
+                        'unregisterProtocolHandler');
+                }
+                const navigatorPrototype = globalObject.Navigator?.prototype;
+
+                for (const property of chromiumOnly) {
+                    try {
+                        if (navigatorPrototype && Object.getOwnPropertyDescriptor(navigatorPrototype, property) !== undefined) {
+                            delete navigatorPrototype[property];
+                        }
+
+                        if (Object.getOwnPropertyDescriptor(navigatorObject, property) !== undefined) {
+                            delete navigatorObject[property];
+                        }
+                    } catch {
+                        // Неудаляемое свойство пропускаем: остальные всё равно должны исчезнуть.
+                    }
+                }
+
+                // Объект 'chrome' — самый заметный признак движка: у Safari его нет.
+                //
+                // ★ Вместе с ним убираются и остальные хромовые глобальные объекты, и — главное —
+                // СЛЕДЫ ДВИЖКА V8. Проверка на движок стоит одну строку: 'Error.stackTraceLimit' и
+                // 'Error.captureStackTrace' существуют только в V8, 'Intl.v8BreakIterator' — только
+                // в нём же, а диалоги выбора файлов ('showOpenFilePicker') Apple не реализует.
+                // Заявлять iOS и держать их на месте — противоречие уровня движка, а не свойства.
+                const chromiumOnlyGlobals = [
+                    'chrome',
+                    'showOpenFilePicker',
+                    'showSaveFilePicker',
+                    'showDirectoryPicker',
+                    'EyeDropper',
+                    'IdleDetector',
+                    'BeforeInstallPromptEvent',
+                    'LaunchQueue',
+                    'USB',
+                    'Serial',
+                    'HID',
+                    'Bluetooth',
+                    // Перечисление 'window' на профиле iPhone: всё нижеследующее существует только в
+                    // Chromium. Навигационный API, хранилище cookie, Trusted Types, планировщик задач,
+                    // датчик нагрузки, выбор шрифтов, картинка-в-картинке для документа, изолированные
+                    // фреймы и обработчики событий, которых у WebKit нет вовсе.
+                    'navigation',
+                    'cookieStore',
+                    'sharedStorage',
+                    // ★ 'trustedTypes' НЕ удаляем, хотя у WebKit его нет.
+                    //
+                    // Политику Trusted Types документу задаёт CSP, и Chromium ТРЕБУЕТ её независимо от
+                    // того, объявлен ли API. Убрав API, мы оставляли требование без исполнителя: во
+                    // фрейме проверки Cloudflare это давало EvalError и отказ присвоения innerHTML —
+                    // её скрипт умирал, переставал отвечать на сторожевой пинг, и виджет объявлял
+                    // 300030. Сокрытие одного признака ломало исполнение страницы целиком.
+                    'scheduler',
+                    'PressureObserver',
+                    'queryLocalFonts',
+                    'documentPictureInPicture',
+                    'launchQueue',
+                    'fence',
+                    'fetchLater',
+                    'getScreenDetails',
+                    'credentialless',
+                    'crashReport',
+                    'offscreenBuffering',
+                    'onappinstalled',
+                    'onbeforeinstallprompt',
+                    'onbeforexrselect',
+                    'oncontentvisibilityautostatechange',
+                    'oncommand',
+                    'onpagereveal',
+                    'onpageswap',
+                    'onpointerrawupdate',
+                    'NavigateEvent',
+                    'Navigation',
+                    'CookieStore',
+                    'CookieChangeEvent',
+                    'Scheduler',
+                    'TaskController',
+                    'TaskSignal',
+                    'TaskPriorityChangeEvent',
+                    'SharedStorage',
+                    'FencedFrameConfig',
+                    'DocumentPictureInPicture',
+                    'FileSystemHandle',
+                    'FileSystemFileHandle',
+                    'FileSystemDirectoryHandle',
+                    'FileSystemWritableFileStream',
+                    'NavigatorUAData',
+                    'BatteryManager',
+                    'XRSystem',
+                    'XRSession',
+                    'MIDIAccess',
+                    'MIDIInput',
+                    'MIDIOutput',
+                    'MIDIMessageEvent',
+                    'DevicePosture',
+                    'StorageBucketManager',
+                    'VirtualKeyboard',
+                    'WindowControlsOverlay',
+                    'Ink',
+                    'Presentation',
+                    'PresentationRequest',
+                ];
+
+                // Конструкторы интерфейсов лежат прямо на глобальном объекте, а вот атрибуты и методы
+                // самого интерфейса Window — на 'Window.prototype'. Проверка одного лишь собственного
+                // свойства пропускала вторую половину: замер показывал 'scheduler', 'queryLocalFonts'
+                // и 'documentPictureInPicture' живыми на профиле iPhone. Поэтому идём по всей цепочке.
+                for (const property of chromiumOnlyGlobals) {
+                    try {
+                        for (let holder: any = globalObject; holder !== null && holder !== undefined; holder = Object.getPrototypeOf(holder)) {
+                            if (Object.getOwnPropertyDescriptor(holder, property) !== undefined) {
+                                delete holder[property];
+                            }
+                        }
+                    } catch {
+                        // Неудаляемый глобальный объект пропускаем: остальные всё равно исчезнут.
+                    }
+                }
+
+                // ★ 'stackTraceLimit' НЕ удаляем, хотя у WebKit его нет.
+                //
+                // Замер показал цену: без него V8 перестаёт собирать стек вообще, и 'new Error().stack'
+                // становится ПУСТЫМ. Пустой стек не бывает ни у одного настоящего браузера, то есть
+                // сокрытие одного признака создавало признак заметнее исходного. Остальные точки входа
+                // V8 в стек убираются: они на сбор не влияют.
                 try {
-                    for (let holder: any = globalObject; holder !== null && holder !== undefined; holder = Object.getPrototypeOf(holder)) {
-                        if (Object.getOwnPropertyDescriptor(holder, property) !== undefined) {
-                            delete holder[property];
+                    delete (Error as any).captureStackTrace;
+                    delete (Error as any).prepareStackTrace;
+                } catch {
+                    // Свойства V8 неудаляемыми не бывают, но падать из-за них нельзя.
+                }
+
+                try {
+                    delete (Intl as any).v8BreakIterator;
+                } catch {
+                    // То же самое.
+                }
+
+            // Для заявленного Gecko этих поверхностей быть НЕ должно: у Firefox их нет,
+            // поэтому добавляются они только при заявленном Safari.
+            if (declaresSafari) {
+                // ★ И наоборот: поверхности, которые есть ТОЛЬКО у WebKit. Их отсутствие при заявленном
+                // iOS — такой же приговор, как лишний хромовый объект: 'GestureEvent' и события жестов
+                // существуют исключительно в WebKit, а Apple Pay доступен любому сайту на iOS.
+                // Проверка Cloudflare ветвится по строке агента, и на iOS-ветке она вправе на них
+                // рассчитывать — код 600010 означает именно сорванное исполнение проверки.
+                try {
+                    if (globalObject.GestureEvent === undefined) {
+                        const gestureEventHolder = {
+                            GestureEvent: class GestureEvent extends globalObject.UIEvent {
+                                constructor(type: string, init?: any) {
+                                    super(type, init);
+                                    Object.defineProperties(this, {
+                                        scale: { configurable: true, enumerable: true, value: init?.scale ?? 1 },
+                                        rotation: { configurable: true, enumerable: true, value: init?.rotation ?? 0 },
+                                    });
+                                }
+                            },
+                        };
+
+                        Object.defineProperty(globalObject, 'GestureEvent', {
+                            configurable: true,
+                            writable: true,
+                            value: gestureEventHolder.GestureEvent,
+                        });
+                    }
+
+                    for (const handler of ['ongesturestart', 'ongesturechange', 'ongestureend']) {
+                        if (!(handler in globalObject)) {
+                            Object.defineProperty(globalObject, handler, {
+                                configurable: true,
+                                enumerable: true,
+                                get: asNativeGetter(handler, undefined, () => null),
+                                set: () => undefined,
+                            });
                         }
                     }
-                } catch {
-                    // Неудаляемый глобальный объект пропускаем: остальные всё равно исчезнут.
-                }
-            }
 
-            // ★ 'stackTraceLimit' НЕ удаляем, хотя у WebKit его нет.
-            //
-            // Замер показал цену: без него V8 перестаёт собирать стек вообще, и 'new Error().stack'
-            // становится ПУСТЫМ. Пустой стек не бывает ни у одного настоящего браузера, то есть
-            // сокрытие одного признака создавало признак заметнее исходного. Остальные точки входа
-            // V8 в стек убираются: они на сбор не влияют.
-            try {
-                delete (Error as any).captureStackTrace;
-                delete (Error as any).prepareStackTrace;
-            } catch {
-                // Свойства V8 неудаляемыми не бывают, но падать из-за них нельзя.
-            }
+                    // Apple Pay доступен ЛЮБОМУ сайту на устройстве Apple, и его отсутствие при
+                    // заявленном iOS — такой же однозначный признак, как лишний хромовый объект.
+                    // Достаточно самого интерфейса: проверки читают его наличие, а не проводят оплату.
+                    if (globalObject.ApplePaySession === undefined) {
+                        const applePayHolder = {
+                            ApplePaySession: class ApplePaySession extends globalObject.EventTarget {
+                                static canMakePayments(): boolean {
+                                    return true;
+                                }
 
-            try {
-                delete (Intl as any).v8BreakIterator;
-            } catch {
-                // То же самое.
-            }
+                                static canMakePaymentsWithActiveCard(): Promise<boolean> {
+                                    return Promise.resolve(false);
+                                }
 
-            // ★ И наоборот: поверхности, которые есть ТОЛЬКО у WebKit. Их отсутствие при заявленном
-            // iOS — такой же приговор, как лишний хромовый объект: 'GestureEvent' и события жестов
-            // существуют исключительно в WebKit, а Apple Pay доступен любому сайту на iOS.
-            // Проверка Cloudflare ветвится по строке агента, и на iOS-ветке она вправе на них
-            // рассчитывать — код 600010 означает именно сорванное исполнение проверки.
-            try {
-                if (globalObject.GestureEvent === undefined) {
-                    const gestureEventHolder = {
-                        GestureEvent: class GestureEvent extends globalObject.UIEvent {
-                            constructor(type: string, init?: any) {
-                                super(type, init);
-                                Object.defineProperties(this, {
-                                    scale: { configurable: true, enumerable: true, value: init?.scale ?? 1 },
-                                    rotation: { configurable: true, enumerable: true, value: init?.rotation ?? 0 },
-                                });
-                            }
-                        },
-                    };
+                                static supportsVersion(version: number): boolean {
+                                    return version <= 14;
+                                }
+                            },
+                        };
 
-                    Object.defineProperty(globalObject, 'GestureEvent', {
-                        configurable: true,
-                        writable: true,
-                        value: gestureEventHolder.GestureEvent,
-                    });
-                }
+                        for (const [name, value] of [
+                            ['STATUS_SUCCESS', 0],
+                            ['STATUS_FAILURE', 1],
+                            ['STATUS_INVALID_BILLING_POSTAL_ADDRESS', 2],
+                            ['STATUS_INVALID_SHIPPING_POSTAL_ADDRESS', 3],
+                            ['STATUS_INVALID_SHIPPING_CONTACT', 4],
+                            ['STATUS_PIN_REQUIRED', 5],
+                            ['STATUS_PIN_INCORRECT', 6],
+                            ['STATUS_PIN_LOCKOUT', 7],
+                        ] as [string, number][]) {
+                            Object.defineProperty(applePayHolder.ApplePaySession, name, {
+                                configurable: false,
+                                enumerable: true,
+                                value,
+                            });
+                        }
 
-                for (const handler of ['ongesturestart', 'ongesturechange', 'ongestureend']) {
-                    if (!(handler in globalObject)) {
-                        Object.defineProperty(globalObject, handler, {
+                        Object.defineProperty(globalObject, 'ApplePaySession', {
+                            configurable: true,
+                            writable: true,
+                            value: applePayHolder.ApplePaySession,
+                        });
+                    }
+
+                    // Методы преобразования координат существуют только в WebKit и живут прямо на окне.
+                    for (const method of ['webkitConvertPointFromNodeToPage', 'webkitConvertPointFromPageToNode']) {
+                        if (typeof globalObject[method] !== 'function') {
+                            Object.defineProperty(globalObject, method, {
+                                configurable: true,
+                                writable: true,
+                                value: asNativeMethod(method, undefined, function (this: unknown, node: any, point: any) {
+                                    return point;
+                                }),
+                            });
+                        }
+                    }
+
+                    // Ориентация экрана на телефоне: устаревшее, но на iOS живое свойство. Обратное
+                    // тоже верно — на настольном Safari его нет, поэтому ставим только мобильным.
+                    if (context.isMobile === true && globalObject.orientation === undefined) {
+                        Object.defineProperty(globalObject, 'orientation', {
                             configurable: true,
                             enumerable: true,
-                            get: asNativeGetter(handler, undefined, () => null),
+                            get: asNativeGetter('orientation', undefined, () => 0),
+                        });
+
+                        Object.defineProperty(globalObject, 'onorientationchange', {
+                            configurable: true,
+                            enumerable: true,
+                            get: asNativeGetter('onorientationchange', undefined, () => null),
                             set: () => undefined,
                         });
                     }
+                } catch {
+                    // Частичная установка лучше сорванной: остальные поверхности всё равно нужны.
                 }
-
-                // Apple Pay доступен ЛЮБОМУ сайту на устройстве Apple, и его отсутствие при
-                // заявленном iOS — такой же однозначный признак, как лишний хромовый объект.
-                // Достаточно самого интерфейса: проверки читают его наличие, а не проводят оплату.
-                if (globalObject.ApplePaySession === undefined) {
-                    const applePayHolder = {
-                        ApplePaySession: class ApplePaySession extends globalObject.EventTarget {
-                            static canMakePayments(): boolean {
-                                return true;
-                            }
-
-                            static canMakePaymentsWithActiveCard(): Promise<boolean> {
-                                return Promise.resolve(false);
-                            }
-
-                            static supportsVersion(version: number): boolean {
-                                return version <= 14;
-                            }
-                        },
-                    };
-
-                    for (const [name, value] of [
-                        ['STATUS_SUCCESS', 0],
-                        ['STATUS_FAILURE', 1],
-                        ['STATUS_INVALID_BILLING_POSTAL_ADDRESS', 2],
-                        ['STATUS_INVALID_SHIPPING_POSTAL_ADDRESS', 3],
-                        ['STATUS_INVALID_SHIPPING_CONTACT', 4],
-                        ['STATUS_PIN_REQUIRED', 5],
-                        ['STATUS_PIN_INCORRECT', 6],
-                        ['STATUS_PIN_LOCKOUT', 7],
-                    ] as [string, number][]) {
-                        Object.defineProperty(applePayHolder.ApplePaySession, name, {
-                            configurable: false,
-                            enumerable: true,
-                            value,
-                        });
-                    }
-
-                    Object.defineProperty(globalObject, 'ApplePaySession', {
-                        configurable: true,
-                        writable: true,
-                        value: applePayHolder.ApplePaySession,
-                    });
-                }
-
-                // Методы преобразования координат существуют только в WebKit и живут прямо на окне.
-                for (const method of ['webkitConvertPointFromNodeToPage', 'webkitConvertPointFromPageToNode']) {
-                    if (typeof globalObject[method] !== 'function') {
-                        Object.defineProperty(globalObject, method, {
-                            configurable: true,
-                            writable: true,
-                            value: asNativeMethod(method, undefined, function (this: unknown, node: any, point: any) {
-                                return point;
-                            }),
-                        });
-                    }
-                }
-
-                // Ориентация экрана на телефоне: устаревшее, но на iOS живое свойство. Обратное
-                // тоже верно — на настольном Safari его нет, поэтому ставим только мобильным.
-                if (context.isMobile === true && globalObject.orientation === undefined) {
-                    Object.defineProperty(globalObject, 'orientation', {
-                        configurable: true,
-                        enumerable: true,
-                        get: asNativeGetter('orientation', undefined, () => 0),
-                    });
-
-                    Object.defineProperty(globalObject, 'onorientationchange', {
-                        configurable: true,
-                        enumerable: true,
-                        get: asNativeGetter('onorientationchange', undefined, () => null),
-                        set: () => undefined,
-                    });
-                }
-            } catch {
-                // Частичная установка лучше сорванной: остальные поверхности всё равно нужны.
             }
         }
 

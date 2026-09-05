@@ -404,6 +404,9 @@ internal static class ProfileAutomationPresets
             ["media.ffmpeg.vaapi.enabled"] = false,
             ["media.hardware-video-decoding.enabled"] = false,
             ["media.rdd-process.enabled"] = false,
+            // WebGL по умолчанию выключен: на виртуальном дисплее он стоит заметного времени, а
+            // профилю, который его не заявляет, не даёт ничего (у Chromium ровно то же условие).
+            // Значение переопределяется ниже, если профиль устройства WebGL всё-таки заявляет.
             ["webgl.disabled"] = true,
             ["browser.startup.page"] = 0,
             ["browser.startup.homepage"] = "about:blank",
@@ -424,6 +427,22 @@ internal static class ProfileAutomationPresets
             ["browser.tabs.min_inactive_duration_before_unload"] = 0,
             ["page_load.deprioritization_period"] = 0,
         };
+
+        // ★ Программный WebGL для заявленного профиля.
+        //
+        // Firefox запускался с полностью выключенным WebGL, и страница видела браузер, у которого
+        // getContext('webgl') не создаётся вовсе. Замер на живом Cloudflare: виджет отвечал
+        // error-callback 600010 («среда слишком ограничена») за 6–13 секунд, 0 задач из 14. У
+        // Chromium в той же ситуации поднимается SwiftShader, здесь — программный Mesa (llvmpipe),
+        // а строки vendor/renderer всё равно подменяет расширение.
+        //
+        // Условие то же, что у Chromium: платим за контекст только когда профиль его заявляет.
+        if (settings.Device?.WebGL is not null)
+        {
+            preferences["webgl.disabled"] = false;
+            preferences["webgl.force-enabled"] = true;
+            preferences["webgl.disable-fail-if-major-performance-caveat"] = true;
+        }
 
         if (ResolveAcceptLanguages(settings) is { } acceptLanguages)
             preferences["intl.accept_languages"] = acceptLanguages;
@@ -571,7 +590,22 @@ internal static class ProfileAutomationPresets
                 && !userAgent.Contains("Chromium/", StringComparison.Ordinal));
 
         if (declaresWebKit)
+        {
             settings.Logger?.LogProfileAutomationWebKitEngineMismatch(userAgent, family);
+            return;
+        }
+
+        // ★ Обратный случай: Gecko, которому подсунули профиль Chromium. Он так же безнадёжен —
+        // у Firefox нет ни клиентских подсказок, ни 'navigator.userAgentData', ни объекта 'chrome',
+        // а формат исходника нативных функций и тексты исключений принадлежат SpiderMonkey.
+        // Замер: 0 из 4, error-callback 600010. Обратное направление (профиль Firefox на Chromium)
+        // при этом работает — там лишние поверхности можно убрать, а недостающие объявить.
+        var declaresChromium = !userAgent.Contains("Firefox/", StringComparison.Ordinal)
+            && (userAgent.Contains("Chrome/", StringComparison.Ordinal)
+                || userAgent.Contains("Chromium/", StringComparison.Ordinal));
+
+        if (declaresChromium && string.Equals(family, "firefox", StringComparison.Ordinal))
+            settings.Logger?.LogProfileAutomationChromiumEngineMismatch(userAgent);
     }
 
     /// <summary>

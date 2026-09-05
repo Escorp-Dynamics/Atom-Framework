@@ -176,7 +176,7 @@ internal static class BridgeExtensionBootstrap
                 Secret = GenerateSecret(),
                 Logger = settings.Logger,
                 UseRootlessChromiumBootstrap = settings.UseRootlessChromiumBootstrap,
-                ForwardProfile = CreateForwardProfile(settings.Device),
+                ForwardProfile = CreateForwardProfile(settings.Device, profile),
             },
             SourceExtensionPath: sourceExtensionPath,
             BrowserFamily: profile is FirefoxProfile ? "firefox" : "chromium",
@@ -198,9 +198,22 @@ internal static class BridgeExtensionBootstrap
     /// Семейство выбирается по строке агента: она же и заявляется странице, так что источник
     /// истины остаётся один.
     /// </remarks>
-    private static Atom.Net.Https.Profiles.BrowserProfile? CreateForwardProfile(Device? device)
+    private static Atom.Net.Https.Profiles.BrowserProfile? CreateForwardProfile(Device? device, WebBrowserProfile browserProfile)
     {
         if (device?.UserAgent is not { Length: > 0 } userAgent) return null;
+
+        // ★ Отпечаток провода следует за РЕАЛЬНЫМ движком, когда тот расходится с заявленной строкой.
+        //
+        // Клиентских подсказок у Gecko нет вовсе, а профиль Chromium на проводе их отправляет.
+        // Замер: браузер Firefox с профилем «Chrome на Windows» уезжал с
+        // 'Sec-CH-UA: "Chromium";v="131"', которого движок отдать не может, и Cloudflare отвечал
+        // 600010 на каждой из трёх попыток. Заявленную строку агента мы при этом сохраняем — она
+        // задана вызывающим; согласуем ровно то, что физически не может расходиться.
+        if (browserProfile is FirefoxProfile
+            && !Atom.Net.Https.Profiles.BrowserProfileResolver.Resolve(userAgent).DisplayName.Contains("Firefox", StringComparison.OrdinalIgnoreCase))
+        {
+            return Atom.Net.Https.Profiles.BrowserProfileCatalog.CreateFirefoxDesktop();
+        }
 
         // ★ Профиль подбирается ОБЩИМ резолвером, а не собственной веткой.
         //

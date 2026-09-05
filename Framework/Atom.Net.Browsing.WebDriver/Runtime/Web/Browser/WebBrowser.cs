@@ -1042,7 +1042,7 @@ public sealed partial class WebBrowser : IWebBrowser
         // отдающий 'Sec-CH-UA-Platform: "iOS"' и 'navigator.userAgentData', противоречит
         // собственной строке агента ещё до исполнения любого скрипта — это видно прямо в
         // заголовках запроса. Поэтому для профиля на WebKit подсказки в контекст не кладутся.
-        if (!DeclaresWebKitEngine(device.UserAgent))
+        if (DeclaresChromiumEngine(device.UserAgent))
             AppendOptionalObject(payload, "clientHints", BuildClientHintsPayload(device.ClientHints));
 
         // WebGL передаём вместе с остальным контекстом вкладки: заявленная платформа обязана
@@ -1234,6 +1234,34 @@ public sealed partial class WebBrowser : IWebBrowser
                 && userAgent.Contains("Version/", StringComparison.Ordinal)
                 && !userAgent.Contains("Chrome/", StringComparison.Ordinal)
                 && !userAgent.Contains("Chromium/", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Объявляет ли профиль браузер на движке Chromium.
+    /// </summary>
+    /// <remarks>
+    /// ★ Клиентские подсказки существуют ТОЛЬКО в Chromium: ни Safari, ни Firefox их не шлют и
+    /// не объявляют <c>navigator.userAgentData</c>. Прежнее условие «не WebKit» пропускало Gecko,
+    /// и профиль Firefox уезжал с заголовком <c>Sec-CH-UA: "Chromium";v="131"</c> при собственном
+    /// фаерфоксовом <c>Accept</c> — Cloudflare отвечал на это 600010 («среда слишком ограничена»),
+    /// 0 задач из 14, тогда как тот же Firefox без профиля решал 3 из 3.
+    /// </remarks>
+    internal static bool DeclaresChromiumEngine(string? userAgent)
+    {
+        if (string.IsNullOrEmpty(userAgent))
+            return false;
+
+        if (DeclaresWebKitEngine(userAgent))
+            return false;
+
+        if (userAgent.Contains("Firefox/", StringComparison.Ordinal)
+            || userAgent.Contains("Gecko/", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return userAgent.Contains("Chrome/", StringComparison.Ordinal)
+            || userAgent.Contains("Chromium/", StringComparison.Ordinal);
     }
 
     private static JsonObject? BuildScreenPayload(ScreenSettings? screen)
