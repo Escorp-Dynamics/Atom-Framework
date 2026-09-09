@@ -18,13 +18,13 @@ public static class Http3ProfileCatalog
     /// </summary>
     /// <returns>Набор параметров.</returns>
     /// <remarks>
-    /// Снято с настоящего Chrome через его журнал сети (событие <c>HTTP3_SETTINGS_SENT</c>):
+    /// Снято с настоящего Chrome через его журнал сети (событие <c lang="text">HTTP3_SETTINGS_SENT</c>):
     /// таблица QPACK 65536, поле заголовков 262144, сто заблокированных потоков, датаграммы.
     ///
     /// ★ Ёмкость таблицы QPACK — не декоративное число: декодировщик обязан завести таблицу
     /// РОВНО такого же размера. Объявив серверу больше, чем держим сами, мы вытесняем записи,
     /// на которые он ссылается, и ответ перестаёт разбираться. Ровно это и происходило с
-    /// <c>www.google.com</c>, пока ёмкость бралась из значения по умолчанию.
+    /// <c lang="text">www.google.com</c>, пока ёмкость бралась из значения по умолчанию.
     /// </remarks>
     public static IReadOnlyList<(Http3SettingId Id, ulong Value)> CreateChrome() =>
     [
@@ -42,15 +42,15 @@ public static class Http3ProfileCatalog
     /// ★ Состав и порядок взяты из ИСХОДНИКОВ стека, а не с провода: журнал neqo в файл не
     /// пишется, а сами параметры уходят под ключами и пассивно не наблюдаемы.
     ///
-    /// Источник — <c>mozilla/neqo</c>, преобразование <c>Http3Parameters</c> в <c>HSettings</c>
-    /// (<c>neqo-http3/src/settings.rs</c>), сверено с веткой <c>release</c> самого Firefox
+    /// Источник — <c lang="text">mozilla/neqo</c>, преобразование <c lang="text">Http3Parameters</c> в <c lang="text">HSettings</c>
+    /// (<c lang="text">neqo-http3/src/settings.rs</c>), сверено с веткой <c lang="text">release</c> самого Firefox
     /// (154.0.1, вендоренный neqo 0.29.0). Порядок жёстко задан вектором —
-    /// <c>MaxTableCapacity</c>, <c>BlockedStreams</c>, <c>EnableWebTransport</c>,
-    /// <c>EnableH3Datagram</c>, <c>EnableConnect</c>. Значения задаёт сам Firefox в
-    /// <c>netwerk/socket/neqo_glue</c>: <c>.connect(true)</c> и <c>.http3_datagram(true)</c>
+    /// <c lang="text">MaxTableCapacity</c>, <c lang="text">BlockedStreams</c>, <c lang="text">EnableWebTransport</c>,
+    /// <c lang="text">EnableH3Datagram</c>, <c lang="text">EnableConnect</c>. Значения задаёт сам Firefox в
+    /// <c lang="text">netwerk/socket/neqo_glue</c>: <c lang="text">.connect(true)</c> и <c lang="text">.http3_datagram(true)</c>
     /// стоят там жёстко, а размер таблицы и число заблокированных потоков приходят из настроек
-    /// <c>network.http.http3.default-qpack-table-size</c> = 65536 и
-    /// <c>default-max-stream-blocked</c> = 20.
+    /// <c lang="text">network.http.http3.default-qpack-table-size</c> = 65536 и
+    /// <c lang="text">default-max-stream-blocked</c> = 20.
     ///
     /// ★ Главное отличие от движков Chromium: предела списка заголовков (0x06) Firefox НЕ
     /// отправляет вовсе, зато отправляет три флага, которых нет у них. Прежний наш набор был

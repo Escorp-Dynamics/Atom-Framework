@@ -25,7 +25,7 @@ internal sealed class QPackDecoderStream(QPackDynamicTable t)
     /// серверной НАВСЕГДА, а ответ переставал разбираться с жалобой на вытесненную запись.
     ///
     /// Проявлялось это только на серверах, которые таблицей действительно пользуются:
-    /// <c>www.google.com</c> по HTTP/3 не открывался вовсе, Cloudflare работал.
+    /// <c lang="text">www.google.com</c> по HTTP/3 не открывался вовсе, Cloudflare работал.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [SkipLocalsInit]

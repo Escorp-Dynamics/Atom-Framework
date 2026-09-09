@@ -13,7 +13,7 @@ namespace Atom.Net.Tcp;
 /// </summary>
 /// <remarks>
 /// Класс включает все низкоуровневые настройки в духе браузеров: NoDelay, буферы, DSCP/TTL, локальный bind,
-/// per-socket MSS/TFO (где доступны), TCP keep-alive (политика <c>Always</c>), и «пауза перед TLS». Значения берутся из <see cref="Settings"/>.
+/// per-socket MSS/TFO (где доступны), TCP keep-alive (политика <c lang="text">Always</c>), и «пауза перед TLS». Значения берутся из <see cref="Settings"/>.
 /// Алгоритм выбора адреса реализован как последовательный «Happy Eyeballs-подобный» (чередование семейств с задержками).
 /// </remarks>
 public sealed partial class TcpStream : NetworkStream
@@ -84,7 +84,7 @@ public sealed partial class TcpStream : NetworkStream
     /// Инициализирует новый экземпляр <see cref="TcpStream"/>.
     /// </summary>
     /// <remarks>
-    /// Используем IPv6-сокет с <c>DualMode=true</c>, чтобы уметь ходить как к IPv6, так и к IPv4 узлам одним инстансом.
+    /// Используем IPv6-сокет с <c lang="text">DualMode=true</c>, чтобы уметь ходить как к IPv6, так и к IPv4 узлам одним инстансом.
     /// Все настройки, не зависящие от адресного семейства удалённого узла, применяются сразу.
     /// Адресоспецифичные (например DSCP для IPv4) — после успешного Connect.
     /// </remarks>

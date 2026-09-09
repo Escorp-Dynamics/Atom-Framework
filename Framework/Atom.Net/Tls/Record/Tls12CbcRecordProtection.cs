@@ -9,9 +9,9 @@ namespace Atom.Net.Tls;
 /// Защита записи TLS 1.2 в режиме CBC с отдельным HMAC (RFC 5246 §6.2.3.2), одно направление.
 /// </summary>
 /// <remarks>
-/// Форма записи: <c>IV(16) || AES-CBC(content || MAC(20) || padding || padding_length(1))</c>,
-/// где все байты дополнения равны <c>padding_length</c>, а сумма
-/// <c>content + MAC + padding + 1</c> кратна длине блока.
+/// Форма записи: <c lang="text">IV(16) || AES-CBC(content || MAC(20) || padding || padding_length(1))</c>,
+/// где все байты дополнения равны <c lang="text">padding_length</c>, а сумма
+/// <c lang="text">content + MAC + padding + 1</c> кратна длине блока.
 ///
 /// ★ Почему этот класс существует отдельно, а не «ещё одним if» в каждом месте расшифровки.
 /// В потоке TLS 1.2 запись расшифровывается из пяти разных мест (Finished, тикеты,
@@ -29,8 +29,8 @@ namespace Atom.Net.Tls;
 /// наружу — единственное <see langword="false"/> без подробностей.
 ///
 /// ★ Что закрыто НЕ полностью — честно. Число блоков сжатия SHA-1 зависит от длины content, а та
-/// зависит от <c>padding_length</c>, то есть от секрета. Убрать эту зависимость до конца можно
-/// лишь ручным управлением блоками сжатия (как <c>ssl3_cbc_digest_record</c> в OpenSSL);
+/// зависит от <c lang="text">padding_length</c>, то есть от секрета. Убрать эту зависимость до конца можно
+/// лишь ручным управлением блоками сжатия (как <c lang="text">ssl3_cbc_digest_record</c> в OpenSSL);
 /// <see cref="HMACSHA1"/> такого интерфейса не даёт. Здесь разница компенсируется холостым
 /// дохешированием на недостающую длину — это выравнивает счёт блоков с точностью до одного, но не
 /// является математическим доказательством. Смягчающее обстоятельство: мы КЛИЕНТ, а Lucky13
@@ -159,12 +159,12 @@ internal sealed class Tls12CbcRecordProtection : IDisposable
     /// </summary>
     /// <param name="record">Тело записи: явный вектор и шифротекст.</param>
     /// <param name="macHeader">Тринадцать байт seq|type|version|length; поле длины будет дописано здесь.</param>
-    /// <param name="plain">Буфер под открытые данные длиной не менее <c>record.Length - 16</c>.</param>
+    /// <param name="plain">Буфер под открытые данные длиной не менее <c lang="text">record.Length - 16</c>.</param>
     /// <param name="plainLength">Длина открытых данных.</param>
     /// <returns><see langword="true"/>, если запись подлинна.</returns>
     /// <remarks>
     /// Единственный отказ на все причины — см. пояснение к классу. Вызывающая сторона обязана
-    /// превращать <see langword="false"/> в один и тот же алерт <c>bad_record_mac</c>: различимые
+    /// превращать <see langword="false"/> в один и тот же алерт <c lang="text">bad_record_mac</c>: различимые
     /// снаружи причины отказа и есть оракул.
     /// </remarks>
     public bool TryUnprotect(ReadOnlySpan<byte> record, Span<byte> macHeader, Span<byte> plain, out int plainLength)

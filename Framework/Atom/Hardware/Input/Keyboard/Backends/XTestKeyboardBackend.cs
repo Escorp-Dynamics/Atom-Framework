@@ -26,7 +26,7 @@ internal sealed partial class XTestKeyboardBackend : IVirtualKeyboardBackend
     public string DeviceIdentifier { get; private set; } = string.Empty;
 
     /// <summary>
-    /// Строка дисплея X11 (например, <c>:99</c>).
+    /// Строка дисплея X11 (например, <c lang="text">:99</c>).
     /// </summary>
     public string DisplayName { get; private set; } = string.Empty;
 

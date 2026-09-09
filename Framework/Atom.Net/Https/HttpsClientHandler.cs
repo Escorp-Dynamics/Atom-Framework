@@ -96,7 +96,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// </summary>
     /// <remarks>
     /// По умолчанию включено ВСЁ — как у браузера. Значение относится только к разбору ответа и
-    /// на провод не влияет: заголовок <c>accept-encoding</c> формирует профиль браузера, потому
+    /// на провод не влияет: заголовок <c lang="text">accept-encoding</c> формирует профиль браузера, потому
     /// что он входит в отпечаток. Из этого следует и обратное: выключив распаковку, вы получите
     /// сжатое тело, но по-прежнему будете объявлять серверу, что принимаете сжатие.
     /// </remarks>
@@ -124,7 +124,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     public CookieContainer CookieContainer { get; set; } = new();
 
     /// <summary>
-    /// Объявления альтернативных служб, полученные от узлов (<c>alt-svc</c>).
+    /// Объявления альтернативных служб, полученные от узлов (<c lang="text">alt-svc</c>).
     /// </summary>
     /// <remarks>
     /// Живёт вместе с обработчиком, как и пул соединений: узел объявляет поддержку HTTP/3 один
@@ -156,7 +156,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// <remarks>
     /// Двадцать — столько же, сколько у браузеров. Прежние пятьдесят достались от умолчания
     /// платформы и стоили времени: узел, перенаправляющий сам на себя (а такие в сети есть —
-    /// например отдающий <c>location: https://он же:443/</c>), заставлял делать полсотни
+    /// например отдающий <c lang="text">location: https://он же:443/</c>), заставлял делать полсотни
     /// запросов, прежде чем признать петлю. Заодно это и вопрос мимикрии: клиент, готовый идти
     /// по полусотне переходов, ведёт себя не как браузер.
     /// </remarks>
@@ -920,7 +920,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// <param name="redirect">Запрос очередного перехода либо <see langword="null"/>.</param>
     /// <remarks>
     /// ★ Тело у перехода — ЧУЖОЕ: для 307 и 308 метод и тело сохраняются, поэтому
-    /// <c>TryCreateRedirect</c> передаёт сюда ту же самую ссылку на <c>HttpContent</c>, что и в
+    /// <c lang="text">TryCreateRedirect</c> передаёт сюда ту же самую ссылку на <c lang="text">HttpContent</c>, что и в
     /// исходном запросе. Освобождая запрос целиком, мы освобождали и её — а дальше либо
     /// следующий переход той же цепочки пытался это тело отправить и получал обращение к
     /// освобождённому объекту, либо тело просто исчезало у вызывающей стороны, которая своим
@@ -1400,7 +1400,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// <param name="cancellationToken">Токен отмены.</param>
     /// <returns>Открытое соединение.</returns>
     /// <remarks>
-    /// Именно так решает браузер: он предлагает <c>h2</c> и <c>http/1.1</c>, а выбирает сервер.
+    /// Именно так решает браузер: он предлагает <c lang="text">h2</c> и <c lang="text">http/1.1</c>, а выбирает сервер.
     /// Транспорт при этом устанавливается ровно один раз — подключаться повторно ради «нужного»
     /// класса соединения означало бы лишнее рукопожатие TLS на каждый первый запрос к узлу.
     /// </remarks>
@@ -2356,12 +2356,12 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// <remarks>
     /// ★ <see cref="CookieContainer.SetCookies"/> бросает исключение на куке, которую браузер
     /// просто ОТБРАСЫВАЕТ, — и запрос падал целиком, уже после успешного получения ответа.
-    /// Замер на двух сотнях узлов: так терялись <c>dotnet.microsoft.com</c>, <c>www.target.com</c>,
-    /// <c>www.ikea.com</c>, <c>www.ebay.com</c>, <c>www.edx.org</c> — то есть около двух процентов
+    /// Замер на двух сотнях узлов: так терялись <c lang="text">dotnet.microsoft.com</c>, <c lang="text">www.target.com</c>,
+    /// <c lang="text">www.ikea.com</c>, <c lang="text">www.ebay.com</c>, <c lang="text">www.edx.org</c> — то есть около двух процентов
     /// живых сайтов, и ни один из них не «сломан» с точки зрения браузера.
     ///
     /// Две причины, обе встречены на проводе: чужой домен в атрибуте (Azure отдаёт куку для
-    /// <c>*.azurewebsites.net</c> на запрос к <c>dotnet.microsoft.com</c>) и попросту битое
+    /// <c lang="text">*.azurewebsites.net</c> на запрос к <c lang="text">dotnet.microsoft.com</c>) и попросту битое
     /// значение, где сервер склеил куку саму с собой посреди даты.
     ///
     /// Поведение приведено к браузерному: негодная кука отбрасывается молча, остальные из того же
@@ -2390,7 +2390,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// Сохраняет по отдельности те объявления, что удаётся разобрать.
     /// </summary>
     /// <param name="uri">Адрес ответа.</param>
-    /// <param name="value">Поле <c>Set-Cookie</c> целиком.</param>
+    /// <param name="value">Поле <c lang="text">Set-Cookie</c> целиком.</param>
     private void StoreCookiesSeparately(Uri uri, string value)
     {
         foreach (var declaration in SplitCookieDeclarations(value))
@@ -2409,11 +2409,11 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// <summary>
     /// Разбивает поле на отдельные объявления кук.
     /// </summary>
-    /// <param name="value">Поле <c>Set-Cookie</c>.</param>
+    /// <param name="value">Поле <c lang="text">Set-Cookie</c>.</param>
     /// <returns>Объявления по одному.</returns>
     /// <remarks>
-    /// Запятая разделяет объявления только тогда, когда следом идёт <c>имя=</c>. Внутри даты
-    /// (<c>Expires=Thu, 24 Sep 2026 …</c>) запятая тоже есть, и деление по ней вслепую разорвало
+    /// Запятая разделяет объявления только тогда, когда следом идёт <c lang="text">имя=</c>. Внутри даты
+    /// (<c lang="text">Expires=Thu, 24 Sep 2026 …</c>) запятая тоже есть, и деление по ней вслепую разорвало
     /// бы годную куку пополам.
     /// </remarks>
     private static List<string> SplitCookieDeclarations(string value)
@@ -2440,7 +2440,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// </summary>
     /// <param name="value">Поле целиком.</param>
     /// <param name="position">Позиция сразу после запятой.</param>
-    /// <returns><see langword="true"/>, если дальше идёт <c>имя=</c>.</returns>
+    /// <returns><see langword="true"/>, если дальше идёт <c lang="text">имя=</c>.</returns>
     private static bool StartsNewCookie(string value, int position)
     {
         while (position < value.Length && value[position] is ' ') position++;

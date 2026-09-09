@@ -17,7 +17,7 @@ namespace Atom.Net.Tls;
 ///
 /// Реализация опирается на <see cref="HKDF"/> из платформы: собственная реализация HMAC здесь не
 /// нужна и была бы лишним источником ошибок. Специфика TLS сводится к структуре метки
-/// (<c>HkdfLabel</c>) и к порядку вычислений.
+/// (<c lang="text">HkdfLabel</c>) и к порядку вычислений.
 /// </remarks>
 public static class Tls13KeySchedule
 {
@@ -29,7 +29,7 @@ public static class Tls13KeySchedule
     /// </summary>
     /// <param name="hash">Хэш-функция, заданная набором шифров.</param>
     /// <param name="secret">Входной секрет.</param>
-    /// <param name="label">Метка без префикса <c>tls13 </c>.</param>
+    /// <param name="label">Метка без префикса <c lang="text">tls13 </c>.</param>
     /// <param name="context">Контекст (обычно хэш транскрипта либо пустой).</param>
     /// <param name="length">Требуемая длина результата в байтах.</param>
     /// <returns>Выведенный ключевой материал.</returns>

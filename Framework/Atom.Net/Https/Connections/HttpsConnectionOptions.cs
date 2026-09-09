@@ -9,7 +9,7 @@ namespace Atom.Net.Https.Connections;
 
 /// <summary>
 /// Иммутабельный снимок настроек, необходимых для открытия/привязки соединения
-/// под конкретный <c>authority</c> (host:port + схема).
+/// под конкретный <c lang="text">authority</c> (host:port + схема).
 /// Хранится и передаётся по ссылке (<see langword="in"/>) для исключения копий и аллокаций.
 /// </summary>
 internal readonly record struct HttpsConnectionOptions
@@ -92,7 +92,7 @@ internal readonly record struct HttpsConnectionOptions
     /// <remarks>
     /// Предел на заголовки был, на тело — нет. Значение по умолчанию оставлено нулевым, чтобы не
     /// ломать выгрузку крупных файлов: от исчерпания памяти защищает не он, а отказ выделять
-    /// память по ЗАЯВЛЕННОЙ длине (см. <c>Https11Connection.MaxEagerBodyAllocation</c>). Предел
+    /// память по ЗАЯВЛЕННОЙ длине (см. <c lang="text">Https11Connection.MaxEagerBodyAllocation</c>). Предел
     /// нужен там, где размер ответа заведомо ограничен и превышение стоит считать отказом.
     /// </remarks>
     public long MaxResponseContentBytes { get; init; }
@@ -150,7 +150,7 @@ internal readonly record struct HttpsConnectionOptions
     /// </summary>
     /// <remarks>
     /// Только HTTP-прокси с туннелем CONNECT: именно так работают браузеры и именно такие прокси
-    /// используются для смены исходящего адреса. Учётные данные берутся из <c>UserInfo</c> адреса.
+    /// используются для смены исходящего адреса. Учётные данные берутся из <c lang="text">UserInfo</c> адреса.
     ///
     /// Влияет на тождество соединения: соединения, установленные через разные прокси, ведут в
     /// разные точки сети и переиспользовать их вперемешку нельзя.

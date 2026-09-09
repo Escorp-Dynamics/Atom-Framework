@@ -650,7 +650,7 @@ internal sealed class Https2Connection : HttpsConnection
     /// и у браузеров он устойчив. Политика форматирования, описывающая его, в модуле была — и
     /// применялась ТОЛЬКО к HTTP/1.1, тогда как основной путь профилей идёт по HTTP/2. Замер
     /// настоящего Chrome на зеркале даёт
-    /// <c>sec-ch-ua*, upgrade-insecure-requests, user-agent, accept, sec-fetch-*, accept-encoding,
+    /// <c lang="text">sec-ch-ua*, upgrade-insecure-requests, user-agent, accept, sec-fetch-*, accept-encoding,
     /// accept-language, priority</c>, а мы отправляли их в порядке добавления — начиная с
     /// user-agent и заканчивая подсказками клиента.
     ///

@@ -4,16 +4,16 @@ using System.IO.Compression;
 namespace Atom.Net.Https.Headers;
 
 /// <summary>
-/// Распаковка тела ответа по заголовку <c>content-encoding</c>.
+/// Распаковка тела ответа по заголовку <c lang="text">content-encoding</c>.
 /// </summary>
 /// <remarks>
 /// Без этого стек был бы неработоспособен, оставаясь при этом полностью правдоподобным на проводе.
-/// Браузер объявляет <c>accept-encoding: gzip, deflate, br, zstd</c>, и убрать это объявление
+/// Браузер объявляет <c lang="text">accept-encoding: gzip, deflate, br, zstd</c>, и убрать это объявление
 /// нельзя — оно часть отпечатка. Но объявив, обязан и распаковывать: сервер, увидев такой
 /// заголовок, отвечает сжатым телом. Не распаковав, вызывающая сторона получает двоичный мусор
 /// вместо разметки, причём молча и только на тех серверах, которые сжимают. Так это и жило:
-/// <c>www.cloudflare.com</c> отдавал <c>content-encoding: gzip</c> и тело, начинающееся с
-/// <c>1F 8B</c>, а проверки на <c>tls.peet.ws</c> проходили лишь потому, что он не сжимает.
+/// <c lang="text">www.cloudflare.com</c> отдавал <c lang="text">content-encoding: gzip</c> и тело, начинающееся с
+/// <c lang="text">1F 8B</c>, а проверки на <c lang="text">tls.peet.ws</c> проходили лишь потому, что он не сжимает.
 ///
 /// Кодировки применяются справа налево: заголовок перечисляет их в порядке ПРИМЕНЕНИЯ, значит
 /// снимать надо с конца. Незнакомая кодировка означает, что дальше разбирать нечего — тело
@@ -34,7 +34,7 @@ public static class ContentEncodingDecoder
     /// Распаковывает тело ответа.
     /// </summary>
     /// <param name="body">Тело как получено с провода.</param>
-    /// <param name="contentEncoding">Значение заголовка <c>content-encoding</c>.</param>
+    /// <param name="contentEncoding">Значение заголовка <c lang="text">content-encoding</c>.</param>
     /// <param name="decoded">Распакованное тело либо исходное, если распаковка не требуется.</param>
     /// <returns><see langword="true"/>, если тело действительно распаковано.</returns>
     public static bool TryDecode(byte[] body, string? contentEncoding, out byte[] decoded)
@@ -126,7 +126,7 @@ public static class ContentEncodingDecoder
     }
 
     /// <summary>
-    /// Распаковывает <c>deflate</c>, у которого на практике две несовместимые формы.
+    /// Распаковывает <c lang="text">deflate</c>, у которого на практике две несовместимые формы.
     /// </summary>
     /// <remarks>
     /// RFC 9110 требует обёртку zlib (RFC 1950), но заметная часть серверов отдаёт «голый»

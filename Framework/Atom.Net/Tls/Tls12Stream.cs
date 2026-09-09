@@ -371,7 +371,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     /// <param name="plain">Открытые данные.</param>
     /// <param name="record">Буфер тела записи ровно на <see cref="ProtectedRecordLength(int)"/> байт.</param>
     /// <remarks>
-    /// Счётчик <c>seqWrite12</c> здесь НЕ увеличивается: он принадлежит отправке, а отправка может
+    /// Счётчик <c lang="text">seqWrite12</c> здесь НЕ увеличивается: он принадлежит отправке, а отправка может
     /// не состояться. Увеличивает его вызывающий, ровно один раз, после успешной записи в сокет.
     /// </remarks>
     private void ProtectRecord(TlsContentType type, ReadOnlySpan<byte> plain, Span<byte> record)
@@ -406,7 +406,7 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
     /// <remarks>
     /// Для AEAD длина известна точно, для CBC — нет: она выясняется лишь после снятия дополнения,
     /// а до тех пор всё, что о ней известно, — что она не больше шифротекста. Отсюда оценка
-    /// сверху и обязательный <c>out plainLength</c> у снятия защиты.
+    /// сверху и обязательный <c lang="text">out plainLength</c> у снятия защиты.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int MaxPlaintextForRecord(int recordLength)

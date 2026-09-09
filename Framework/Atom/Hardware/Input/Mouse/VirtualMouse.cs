@@ -17,12 +17,12 @@ namespace Atom.Hardware.Input;
 /// После создания можно перемещать курсор, кликать и скроллить.
 /// </para>
 /// <para>
-/// На Linux используется <c>/dev/uinput</c> — виртуальное устройство
-/// на уровне ядра. Требуется доступ к <c>/dev/uinput</c>
-/// (пользователь в группе <c>input</c> или udev-правило).
+/// На Linux используется <c langword="/dev/uinput"></c> — виртуальное устройство
+/// на уровне ядра. Требуется доступ к <c langword="/dev/uinput"></c>
+/// (пользователь в группе <c langword="input"></c> или udev-правило).
 /// </para>
 /// <example>
-/// <code>
+/// <code lang="csharp">
 /// var settings = new VirtualMouseSettings { ScreenSize = new(1920, 1080) };
 /// await using var mouse = await VirtualMouse.CreateAsync(settings);
 ///

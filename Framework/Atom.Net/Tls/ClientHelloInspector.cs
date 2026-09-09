@@ -177,7 +177,7 @@ public sealed class ClientHelloInspector
     /// Вычисляет отпечаток JA4.
     /// </summary>
     /// <param name="isQuic">Снят ли ClientHello с транспорта QUIC.</param>
-    /// <returns>Строка вида <c>t13d1516h2_..._...</c>.</returns>
+    /// <returns>Строка вида <c lang="text">t13d1516h2_..._...</c>.</returns>
     /// <remarks>
     /// В отличие от JA3, здесь наборы и расширения СОРТИРУЮТСЯ, поэтому отпечаток устойчив к
     /// перестановкам — а современный Chrome перемешивает порядок расширений на каждое соединение.

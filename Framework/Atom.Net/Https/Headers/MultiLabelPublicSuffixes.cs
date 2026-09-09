@@ -11,8 +11,8 @@ namespace Atom.Net.Https.Headers;
 /// Правила публичных суффиксов (ICANN-секция Public Suffix List) для классификации сайтов.
 /// </summary>
 /// <remarks>
-/// Используется <c>sec-fetch-site</c>-классификацией: hosts под одним публичным суффиксом
-/// считаются одним сайтом (<c>example.co.uk</c> и <c>api.example.co.uk</c> — same-site).
+/// Используется <c lang="text">sec-fetch-site</c>-классификацией: hosts под одним публичным суффиксом
+/// считаются одним сайтом (<c lang="text">example.co.uk</c> и <c lang="text">api.example.co.uk</c> — same-site).
 /// Приоритет правил: exception → wildcard → exact; поиск — от самых длинных к коротким.
 /// </remarks>
 internal static class MultiLabelPublicSuffixes

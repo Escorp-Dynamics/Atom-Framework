@@ -3199,7 +3199,7 @@ public sealed partial class Country(
     /// </summary>
     /// <param name="obj">Объект для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
+    /// <c lang="text">True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public override bool Equals(object? obj)
     {
@@ -3222,7 +3222,7 @@ public sealed partial class Country(
     /// </summary>
     /// <param name="other">Экземпляр <see cref="Country"/> для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
+    /// <c lang="text">True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public bool Equals(Country? other) => Equals(other as object);
 
@@ -3244,7 +3244,7 @@ public sealed partial class Country(
     /// <param name="s">Символьный код страны.</param>
     /// <param name="provider">Параметры форматирования.</param>
     /// <param name="result">Экземпляр <see cref="Country"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
+    /// <returns><c lang="text">True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse([NotNullWhen(true)] string? s, IFormatProvider? provider, [MaybeNullWhen(false)] out Country? result)
     {
         result = s?.Trim().ToUpperInvariant() switch
@@ -3759,7 +3759,7 @@ public sealed partial class Country(
     /// </summary>
     /// <param name="s">Символьный код страны.</param>
     /// <param name="result">Экземпляр <see cref="Country"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
+    /// <returns><c lang="text">True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse([NotNullWhen(true)] string? s, [MaybeNullWhen(false)] out Country? result) => TryParse(s, default, out result);
 
     /// <summary>
@@ -3767,7 +3767,7 @@ public sealed partial class Country(
     /// </summary>
     /// <param name="code">Цифровой код страны.</param>
     /// <param name="country">Экземпляр <see cref="Country"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
+    /// <returns><c lang="text">True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse(ushort code, [MaybeNullWhen(false)] out Country? country)
     {
         country = code switch
@@ -4099,7 +4099,7 @@ public sealed partial class Country(
     /// <param name="country">Экземпляр <see cref="Country"/>.</param>
     /// <param name="str">Строка для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
+    /// <c lang="text">True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public static bool operator ==(Country? country, string? str) => (country is null && str is null) || (country is not null && str is not null && country.Equals(str));
 
@@ -4109,7 +4109,7 @@ public sealed partial class Country(
     /// <param name="country">Экземпляр <see cref="Country"/>.</param>
     /// <param name="str">Строка для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов не совпадают, иначе <see langword="false"/>.
+    /// <c lang="text">True</c>, если хеш-коды объектов не совпадают, иначе <see langword="false"/>.
     /// </returns>
     public static bool operator !=(Country? country, string? str) => !(country == str);
 }

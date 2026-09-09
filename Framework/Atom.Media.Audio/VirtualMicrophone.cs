@@ -22,7 +22,7 @@ namespace Atom.Media.Audio;
 /// как PipeWire audio source нода без root-прав.
 /// </para>
 /// <example>
-/// <code>
+/// <code lang="csharp">
 /// var settings = new VirtualMicrophoneSettings { SampleRate = 48000, Channels = 1 };
 /// await using var mic = await VirtualMicrophone.CreateAsync(settings);
 ///

@@ -25,7 +25,7 @@ namespace Atom.Media.ColorSpaces;
 /// </para>
 /// <para>
 /// Формулы преобразования:
-/// <code>
+/// <code lang="csharp">
 /// Forward (RGB → YCoCgR32):
 ///   Co = R - B
 ///   t  = B + (Co &gt;&gt; 1)

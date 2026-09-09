@@ -17,7 +17,7 @@ namespace Atom.Media.Video;
 /// как PipeWire video source нода без root-прав.
 /// </para>
 /// <example>
-/// <code>
+/// <code lang="csharp">
 /// var settings = new VirtualCameraSettings { Width = 1920, Height = 1080 };
 /// await using var camera = await VirtualCamera.CreateAsync(settings);
 ///

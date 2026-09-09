@@ -177,14 +177,14 @@ public sealed class ZstdStream(System.IO.Stream stream, CompressionMode mode, bo
     public ZstdStream(System.IO.Stream stream, CompressionLevel compressionLevel) : this(stream, compressionLevel, default) { }
 
     /// <summary>
-    /// Создаёт поток Zstd, принимая <see cref="ZLibCompressionOptions"/> (учитывается только <c>Level</c>).
+    /// Создаёт поток Zstd, принимая <see cref="ZLibCompressionOptions"/> (учитывается только <c lang="text">Level</c>).
     /// </summary>
     /// <remarks>
     /// Zstd не использует параметры zlib (WindowBits/Strategy/WrapperType и т.д.) — они игнорируются.
     /// Берётся только <see cref="ZLibCompressionOptions.CompressionLevel"/> для унификации с BCL.
     /// </remarks>
     /// <param name="stream">Базовый поток ввода/вывода.</param>
-    /// <param name="compressionOptions">Опции zlib (будет взят только <c>Level</c>).</param>
+    /// <param name="compressionOptions">Опции zlib (будет взят только <c lang="text">Level</c>).</param>
     /// <param name="leaveOpen">Не закрывать базовый поток при закрытии <see cref="ZstdStream"/>.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ZstdStream(System.IO.Stream stream, [NotNull] ZLibCompressionOptions compressionOptions, bool leaveOpen = false) : this(stream, compressionOptions.CompressionLevel, leaveOpen) { }

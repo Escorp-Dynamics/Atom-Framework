@@ -10,9 +10,9 @@ namespace Atom.Net.Https.Http2;
 /// </summary>
 /// <remarks>
 /// Порядок псевдозаголовков — наблюдаемая часть отпечатка. Браузеры на движке Chromium
-/// отправляют их в порядке <c>:method</c>, <c>:authority</c>, <c>:scheme</c>, <c>:path</c>, тогда
+/// отправляют их в порядке <c lang="text">:method</c>, <c lang="text">:authority</c>, <c lang="text">:scheme</c>, <c lang="text">:path</c>, тогда
 /// как многие библиотеки используют «естественный» порядок из спецификации
-/// (<c>:method</c>, <c>:scheme</c>, <c>:authority</c>, <c>:path</c>). Различие в одной перестановке
+/// (<c lang="text">:method</c>, <c lang="text">:scheme</c>, <c lang="text">:authority</c>, <c lang="text">:path</c>). Различие в одной перестановке
 /// достаточно, чтобы клиент перестал выглядеть браузером.
 ///
 /// Второй наблюдаемый признак — обращение с cookie. Chromium дробит их на отдельные заголовки по
@@ -24,7 +24,7 @@ public static class Http2RequestHeaders
     /// Строит упорядоченный список заголовков для кадра HEADERS.
     /// </summary>
     /// <param name="method">Метод запроса.</param>
-    /// <param name="authority">Значение <c>:authority</c> — хост с портом, если он нестандартный.</param>
+    /// <param name="authority">Значение <c lang="text">:authority</c> — хост с портом, если он нестандартный.</param>
     /// <param name="path">Путь с query-строкой.</param>
     /// <param name="headers">Обычные заголовки запроса в порядке отправки.</param>
     /// <param name="settings">Профиль HTTP/2.</param>

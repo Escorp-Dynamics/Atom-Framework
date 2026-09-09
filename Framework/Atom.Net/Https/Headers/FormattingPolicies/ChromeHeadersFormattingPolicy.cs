@@ -39,7 +39,7 @@ public class ChromeHeadersFormattingPolicy : HeadersFormattingPolicy
     /// </summary>
     /// <remarks>
     /// Живой capture (fetch GET/POST, bodyless PUT, img/script/style на loopback):
-    /// <c>Host, Connection, [Content-Length], sec-ch-ua-platform, User-Agent, sec-ch-ua,
+    /// <c lang="text">Host, Connection, [Content-Length], sec-ch-ua-platform, User-Agent, sec-ch-ua,
     /// [Content-Type], sec-ch-ua-mobile, Accept, [Origin], Sec-Fetch-Site, Sec-Fetch-Mode,
     /// Sec-Fetch-Dest, Referer, Accept-Encoding, Accept-Language</c>. Нестандартные
     /// fetch-заголовки браузер встраивает сразу после User-Agent (capture: X-Probe).
@@ -69,7 +69,7 @@ public class ChromeHeadersFormattingPolicy : HeadersFormattingPolicy
     /// Accept стоит первым содержательным заголовком, а ACR-заголовки — до Origin и User-Agent.
     /// </summary>
     /// <remarks>
-    /// Живой capture (preflight OPTIONS на loopback): <c>Host, Connection, Accept,
+    /// Живой capture (preflight OPTIONS на loopback): <c lang="text">Host, Connection, Accept,
     /// Access-Control-Request-Method, Access-Control-Request-Headers, Origin, User-Agent,
     /// Sec-Fetch-Mode, Sec-Fetch-Site, Sec-Fetch-Dest, Referer, Accept-Encoding,
     /// Accept-Language</c>. Подавление самих подсказок выполняет обработчик запроса:

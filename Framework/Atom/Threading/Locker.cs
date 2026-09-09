@@ -82,7 +82,7 @@ public sealed class Locker : IDisposable
     /// Отправляет поток в ожидание.
     /// </summary>
     /// <param name="millisecondsTimeout">Таймаут ожидания (в миллисекундах).</param>
-    /// <returns><c>True</c>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Wait(int millisecondsTimeout)
     {
@@ -94,7 +94,7 @@ public sealed class Locker : IDisposable
     /// Отправляет поток в ожидание.
     /// </summary>
     /// <param name="timeout">Таймаут ожидания.</param>
-    /// <returns><c>True</c>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Wait(TimeSpan timeout)
     {
@@ -107,7 +107,7 @@ public sealed class Locker : IDisposable
     /// </summary>
     /// <param name="millisecondsTimeout">Таймаут ожидания (в миллисекундах).</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    /// <returns><c>True</c>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Wait(int millisecondsTimeout, CancellationToken cancellationToken)
     {
@@ -120,7 +120,7 @@ public sealed class Locker : IDisposable
     /// </summary>
     /// <param name="timeout">Таймаут ожидания.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    /// <returns><c>True</c>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Wait(TimeSpan timeout, CancellationToken cancellationToken)
     {
@@ -153,7 +153,7 @@ public sealed class Locker : IDisposable
     /// Отправляет поток в ожидание.
     /// </summary>
     /// <param name="millisecondsTimeout">Таймаут ожидания (в миллисекундах).</param>
-    /// <returns><c>True</c>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Task<bool> WaitAsync(int millisecondsTimeout)
     {
@@ -165,7 +165,7 @@ public sealed class Locker : IDisposable
     /// Отправляет поток в ожидание.
     /// </summary>
     /// <param name="timeout">Таймаут ожидания.</param>
-    /// <returns><c>True</c>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Task<bool> WaitAsync(TimeSpan timeout)
     {
@@ -178,7 +178,7 @@ public sealed class Locker : IDisposable
     /// </summary>
     /// <param name="millisecondsTimeout">Таймаут ожидания (в миллисекундах).</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    /// <returns><c>True</c>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Task<bool> WaitAsync(int millisecondsTimeout, CancellationToken cancellationToken)
     {
@@ -191,7 +191,7 @@ public sealed class Locker : IDisposable
     /// </summary>
     /// <param name="timeout">Таймаут ожидания.</param>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    /// <returns><c>True</c>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если текущий поток успешно зашёл в ожидание, иначе <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Task<bool> WaitAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {

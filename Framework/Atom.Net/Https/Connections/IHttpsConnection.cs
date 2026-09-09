@@ -114,10 +114,10 @@ internal interface IHttpsConnection : IDisposable, IAsyncDisposable
     /// Реализация берёт на себя: построение заголовков под профиль, кодирование (HPACK/QPACK),
     /// управление потоком (flow-control), авто-декомпрессию (если включена), учёт трафика и таймаутов.
     /// </summary>
-    /// <param name="request">Запрос в расширенном формате (<c>HttpsRequestMessage</c>), уже валидированный хэндлером.</param>
+    /// <param name="request">Запрос в расширенном формате (<c lang="text">HttpsRequestMessage</c>), уже валидированный хэндлером.</param>
     /// <param name="cancellationToken">Токен отмены. Отмена не должна разрывать соединение (если возможно).</param>
     /// <returns>
-    /// Безопасный <c>HttpsResponseMessage</c> (никогда не бросает исключений наружу). В случае ошибок заполнено поле <c>Exception</c>.
+    /// Безопасный <c lang="text">HttpsResponseMessage</c> (никогда не бросает исключений наружу). В случае ошибок заполнено поле <c lang="text">Exception</c>.
     /// </returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     ValueTask<HttpsResponseMessage> SendAsync(HttpsRequestMessage request, CancellationToken cancellationToken);
@@ -127,9 +127,9 @@ internal interface IHttpsConnection : IDisposable, IAsyncDisposable
     /// Реализация берёт на себя: построение заголовков под профиль, кодирование (HPACK/QPACK),
     /// управление потоком (flow-control), авто-декомпрессию (если включена), учёт трафика и таймаутов.
     /// </summary>
-    /// <param name="request">Запрос в расширенном формате (<c>HttpsRequestMessage</c>), уже валидированный хэндлером.</param>
+    /// <param name="request">Запрос в расширенном формате (<c lang="text">HttpsRequestMessage</c>), уже валидированный хэндлером.</param>
     /// <returns>
-    /// Безопасный <c>HttpsResponseMessage</c> (никогда не бросает исключений наружу). В случае ошибок заполнено поле <c>Exception</c>.
+    /// Безопасный <c lang="text">HttpsResponseMessage</c> (никогда не бросает исключений наружу). В случае ошибок заполнено поле <c lang="text">Exception</c>.
     /// </returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     ValueTask<HttpsResponseMessage> SendAsync(HttpsRequestMessage request) => SendAsync(request, CancellationToken.None);

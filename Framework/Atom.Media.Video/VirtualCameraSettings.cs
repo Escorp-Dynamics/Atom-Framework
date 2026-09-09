@@ -81,7 +81,7 @@ public sealed record VirtualCameraSettings
     public string? IconName { get; init; }
 
     /// <summary>
-    /// Идентификатор устройства для связи с <c>VirtualMicrophone</c>.
+    /// Идентификатор устройства для связи с <c lang="text">VirtualMicrophone</c>.
     /// Если задан одинаковый DeviceId у камеры и микрофона,
     /// PipeWire группирует их как одно логическое устройство.
     /// </summary>

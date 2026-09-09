@@ -18,8 +18,8 @@ public readonly struct QuicSettings() : IEquatable<QuicSettings>
     /// Настройки UDP-уровня, применимые к используемому сокету (буферы, DSCP, TTL/HopLimit, pktinfo, и т.д.).
     /// </summary>
     /// <remarks>
-    /// Если конструктор <c>QuicConnection</c> вызывается с параметром <see cref="UdpStream"/>,
-    /// и это свойство не задано (<see langword="default"/>), будут использованы настройки из <c>udpStream.Settings</c>.
+    /// Если конструктор <c lang="text">QuicConnection</c> вызывается с параметром <see cref="UdpStream"/>,
+    /// и это свойство не задано (<see langword="default"/>), будут использованы настройки из <c lang="text">udpStream.Settings</c>.
     /// </remarks>
     public UdpSettings Udp { get; init; }
 

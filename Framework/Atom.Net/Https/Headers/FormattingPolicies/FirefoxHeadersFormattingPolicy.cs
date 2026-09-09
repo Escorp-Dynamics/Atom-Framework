@@ -6,8 +6,8 @@
 /// <remarks>
 /// Отличается от движков Chromium и порядком псевдозаголовков, и порядком обычных. Оба сняты с
 /// настоящего Firefox 154: первый — по сигнатуре HTTP/2 на зеркале
-/// (<c>1:65536;2:0;4:131072;5:16384|12517377|0|m,p,a,s</c>), второй — из собственного журнала
-/// браузера (<c>MOZ_LOG=nsHttp:5</c>), где список заголовков виден до кодирования.
+/// (<c lang="text">1:65536;2:0;4:131072;5:16384|12517377|0|m,p,a,s</c>), второй — из собственного журнала
+/// браузера (<c lang="text">MOZ_LOG=nsHttp:5</c>), где список заголовков виден до кодирования.
 /// </remarks>
 public class FirefoxHeadersFormattingPolicy : HeadersFormattingPolicy
 {
@@ -17,23 +17,23 @@ public class FirefoxHeadersFormattingPolicy : HeadersFormattingPolicy
     /// Порядок обычных заголовков, снятый с Firefox 154.
     /// </summary>
     /// <remarks>
-    /// Замер (запрос навигации с cookie и referer, лишние для HTTP/2 <c>Host</c> и
-    /// <c>Connection</c> опущены):
+    /// Замер (запрос навигации с cookie и referer, лишние для HTTP/2 <c lang="text">Host</c> и
+    /// <c lang="text">Connection</c> опущены):
     ///
-    /// <code>
+    /// <code lang="csharp">
     /// User-Agent  Accept  Accept-Language  Accept-Encoding  Referer  Cookie
     /// Upgrade-Insecure-Requests  Sec-Fetch-Dest  Sec-Fetch-Mode  Sec-Fetch-Site  Sec-Fetch-User
     /// Priority
     /// </code>
     ///
     /// Три отличия от Chromium существенны: язык идёт РАНЬШЕ кодировок, признак навигации стоит
-    /// не в начале, а после них, и порядок <c>sec-fetch-*</c> обратный хромиумовскому.
+    /// не в начале, а после них, и порядок <c lang="text">sec-fetch-*</c> обратный хромиумовскому.
     ///
-    /// Живой capture h1 (Chromium/Firefox 154 на loopback) уточняет позицию <c>Referer</c>:
-    /// он стоит сразу после <c>Connection</c> (iframe-навигация), а на h2, где соединный
+    /// Живой capture h1 (Chromium/Firefox 154 на loopback) уточняет позицию <c lang="text">Referer</c>:
+    /// он стоит сразу после <c lang="text">Connection</c> (iframe-навигация), а на h2, где соединный
     /// заголовок не пишется, журнал показывает его сразу после кодировок — одно и то же место.
     ///
-    /// Подсказок клиента (<c>sec-ch-ua*</c>) Firefox не отправляет вовсе, поэтому их в списке нет.
+    /// Подсказок клиента (<c lang="text">sec-ch-ua*</c>) Firefox не отправляет вовсе, поэтому их в списке нет.
     /// </remarks>
     private static readonly string[] FirefoxOrderCommon =
     [
@@ -63,7 +63,7 @@ public class FirefoxHeadersFormattingPolicy : HeadersFormattingPolicy
     /// </summary>
     /// <remarks>
     /// Живой capture Firefox 154 (fetch POST text/plain на loopback):
-    /// <c>... Accept-Encoding, Referer, Content-Type, Content-Length, Origin, Connection, ...</c>
+    /// <c lang="text">... Accept-Encoding, Referer, Content-Type, Content-Length, Origin, Connection, ...</c>
     /// </remarks>
     private static readonly string[] FirefoxFetchCorsOrder =
     [
@@ -108,7 +108,7 @@ public class FirefoxHeadersFormattingPolicy : HeadersFormattingPolicy
     /// CORS-preflight: ACR-заголовки уходят сразу после кодировок, до реферера и Origin.
     /// </summary>
     /// <remarks>
-    /// Живой capture Firefox 154 (preflight OPTIONS): <c>... Accept-Encoding,
+    /// Живой capture Firefox 154 (preflight OPTIONS): <c lang="text">... Accept-Encoding,
     /// Access-Control-Request-Method, Access-Control-Request-Headers, Referer, Origin,
     /// Connection, Sec-Fetch-Dest, ...</c>
     /// </remarks>

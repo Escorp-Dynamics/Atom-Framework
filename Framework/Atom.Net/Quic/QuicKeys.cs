@@ -46,8 +46,8 @@ public sealed class QuicKeys : IDisposable
     /// <param name="keyLength">Длина ключа AEAD: 16 для AES-128 и ChaCha20, 32 для AES-256.</param>
     /// <param name="useChaCha">Использовать ли ChaCha20-Poly1305 вместо AES-GCM.</param>
     /// <remarks>
-    /// Метки <c>quic key</c>, <c>quic iv</c> и <c>quic hp</c> заданы RFC 9001, §5.1 и разворачиваются
-    /// той же функцией HKDF-Expand-Label, что и в TLS, — включая префикс <c>tls13 </c>. Своя
+    /// Метки <c lang="text">quic key</c>, <c lang="text">quic iv</c> и <c lang="text">quic hp</c> заданы RFC 9001, §5.1 и разворачиваются
+    /// той же функцией HKDF-Expand-Label, что и в TLS, — включая префикс <c lang="text">tls13 </c>. Своя
     /// реализация здесь была бы лишней и разошлась бы с TLS при первой же правке.
     /// </remarks>
     public QuicKeys(HashAlgorithmName hash, ReadOnlySpan<byte> secret, int keyLength, bool useChaCha)

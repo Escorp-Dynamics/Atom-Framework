@@ -33,7 +33,7 @@ public sealed record VirtualMicrophoneSettings
     public string Name { get; init; } = "Virtual Microphone";
 
     /// <summary>
-    /// Идентификатор устройства для связи с <c>VirtualCamera</c>.
+    /// Идентификатор устройства для связи с <c lang="text">VirtualCamera</c>.
     /// Если задан одинаковый DeviceId у камеры и микрофона,
     /// PipeWire группирует их как одно логическое устройство.
     /// </summary>

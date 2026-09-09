@@ -9,7 +9,7 @@ namespace Atom.SourceGeneration.PipeWire;
 /// <summary>
 /// Инкрементальный генератор C# констант из SPA заголовочных файлов PipeWire.
 /// Читает .h файлы добавленные как AdditionalFiles с префиксом "spa_" и генерирует
-/// статический класс <c>SpaConstants</c> с <c>internal const uint</c> полями.
+/// статический класс <c lang="text">SpaConstants</c> с <c lang="text">internal const uint</c> полями.
 /// </summary>
 [Generator]
 public sealed class SpaConstantsSourceGenerator : IIncrementalGenerator

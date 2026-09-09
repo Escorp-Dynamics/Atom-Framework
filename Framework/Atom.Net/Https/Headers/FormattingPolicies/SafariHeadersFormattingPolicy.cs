@@ -4,26 +4,26 @@ namespace Atom.Net.Https.Headers;
 /// Правила оформления заголовков, свойственные Safari.
 /// </summary>
 /// <remarks>
-/// Отличается от движков Chromium и Gecko и порядком псевдозаголовков (<c>m,s,a,p</c>), и
+/// Отличается от движков Chromium и Gecko и порядком псевдозаголовков (<c lang="text">m,s,a,p</c>), и
 /// порядком обычных, и самим их составом.
 ///
 /// Порядок снят с записанного обмена Safari 18.4 на macOS — файл эталонных подписей проекта
-/// <c>curl-impersonate</c> (<c>tests/signatures/safari_18.4_macOS.yaml</c>). Восемь заголовков:
+/// <c lang="text">curl-impersonate</c> (<c lang="text">tests/signatures/safari_18.4_macOS.yaml</c>). Восемь заголовков:
 ///
-/// <code>
+/// <code lang="csharp">
 /// sec-fetch-dest  user-agent  accept  sec-fetch-site  sec-fetch-mode
 /// accept-language  priority  accept-encoding
 /// </code>
 ///
-/// Три особенности видны сразу. Признака навигации (<c>upgrade-insecure-requests</c>) Safari не
-/// отправляет вовсе. Подсказок клиента (<c>sec-ch-ua*</c>) — тоже, их поддерживают только движки
-/// Chromium. И <c>sec-fetch-user</c> у Safari не реализован, что подтверждается и таблицами
+/// Три особенности видны сразу. Признака навигации (<c lang="text">upgrade-insecure-requests</c>) Safari не
+/// отправляет вовсе. Подсказок клиента (<c lang="text">sec-ch-ua*</c>) — тоже, их поддерживают только движки
+/// Chromium. И <c lang="text">sec-fetch-user</c> у Safari не реализован, что подтверждается и таблицами
 /// совместимости.
 ///
-/// Самое приметное — <c>accept-encoding</c> стоит ПОСЛЕДНИМ, тогда как у Chromium он в середине,
+/// Самое приметное — <c lang="text">accept-encoding</c> стоит ПОСЛЕДНИМ, тогда как у Chromium он в середине,
 /// а у Firefox сразу после языка. Одного этого достаточно, чтобы отличить три браузера.
 ///
-/// Положение <c>referer</c>, <c>origin</c> и <c>cookie</c> замером НЕ подтверждено: в записанном
+/// Положение <c lang="text">referer</c>, <c lang="text">origin</c> и <c lang="text">cookie</c> замером НЕ подтверждено: в записанном
 /// обмене их не было. Они поставлены после языка — там, где их держат остальные браузеры.
 /// </remarks>
 public class SafariHeadersFormattingPolicy : HeadersFormattingPolicy

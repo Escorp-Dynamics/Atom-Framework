@@ -25,7 +25,7 @@ public abstract class MediaStream(MediaStreamType streamType) : IO.Stream
     public bool IsActive { get; protected set; } = true;
 
     /// <summary>
-    /// Длительность потока в микросекундах. Для потоков без фиксированной длительности возвращает <c>-1</c>.
+    /// Длительность потока в микросекундах. Для потоков без фиксированной длительности возвращает <c lang="text">-1</c>.
     /// </summary>
     public virtual long DurationUs
     {

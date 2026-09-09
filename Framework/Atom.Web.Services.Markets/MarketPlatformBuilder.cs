@@ -41,7 +41,7 @@ public sealed class MarketPlatformRegistration
 /// </summary>
 /// <remarks>
 /// Пример использования:
-/// <code>
+/// <code lang="csharp">
 /// var registry = new MarketPlatformBuilder()
 ///     .AddPlatform("Polymarket", new MarketPlatformRegistration
 ///     {

@@ -17,7 +17,7 @@ internal static class Vp8Dct
     /// </summary>
     /// <remarks>
     /// RFC 6386 §20.8 short_idct4x4llm_c reference:
-    /// <code>
+    /// <code lang="csharp">
     /// temp1 = (ip[n] * sinpi8sqrt2) >> 16;
     /// temp2 = ip[n] + ((ip[n] * cospi8sqrt2minus1) >> 16);
     /// </code>

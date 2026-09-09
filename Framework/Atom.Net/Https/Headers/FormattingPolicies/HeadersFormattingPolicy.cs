@@ -141,7 +141,7 @@ public abstract class HeadersFormattingPolicy : IHeadersFormattingPolicy
     /// <param name="requestKind">Род запроса.</param>
     /// <returns>Порядок для h1 либо <see langword="null"/>, когда годится общий список, и имя
     /// известного заголовка, сразу после которого уходят нестандартные (для Chromium это
-    /// <c>user-agent</c>, для Firefox — <c>referer</c>); <see langword="null"/> — в конце.</returns>
+    /// <c lang="text">user-agent</c>, для Firefox — <c lang="text">referer</c>); <see langword="null"/> — в конце.</returns>
     /// <remarks>
     /// Живые браузеры встраивают нестандартные fetch-заголовки ВНУТРЬ известного блока
     /// (Chromium 151: X-Probe сразу после User-Agent; Firefox 154: сразу после Referer) —
@@ -436,9 +436,9 @@ public abstract class HeadersFormattingPolicy : IHeadersFormattingPolicy
     /// </summary>
     /// <remarks>
     /// ★ Порядок наблюдаем и у браузеров РАЗНЫЙ. Замер настоящего Firefox 154 (его собственный
-    /// журнал <c>nsHttp</c>) даёт последовательность, отличную от хромиумовской сразу в трёх
-    /// местах: <c>accept-language</c> раньше <c>accept-encoding</c>, <c>upgrade-insecure-requests</c>
-    /// не в начале, а после них, и порядок <c>sec-fetch-*</c> обратный.
+    /// журнал <c lang="text">nsHttp</c>) даёт последовательность, отличную от хромиумовской сразу в трёх
+    /// местах: <c lang="text">accept-language</c> раньше <c lang="text">accept-encoding</c>, <c lang="text">upgrade-insecure-requests</c>
+    /// не в начале, а после них, и порядок <c lang="text">sec-fetch-*</c> обратный.
     ///
     /// По умолчанию берётся порядок движков Chromium — он снят с настоящего Chrome и совпал с ним
     /// заголовок в заголовок.

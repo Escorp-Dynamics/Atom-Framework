@@ -1253,7 +1253,7 @@ public sealed partial class Currency
     /// </summary>
     /// <param name="obj">Объект для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
+    /// <c lang="text">True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public override bool Equals(object? obj) => obj switch
     {
@@ -1268,7 +1268,7 @@ public sealed partial class Currency
     /// </summary>
     /// <param name="other">Экземпляр <see cref="Currency"/> для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
+    /// <c lang="text">True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public bool Equals(Currency? other) => Equals(other as object);
 
@@ -1290,7 +1290,7 @@ public sealed partial class Currency
     /// <param name="s">Символьный код валюты.</param>
     /// <param name="provider">Параметры форматирования.</param>
     /// <param name="result">Экземпляр <see cref="Currency"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
+    /// <returns><c lang="text">True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse([NotNullWhen(true)] string? s, IFormatProvider? provider, [MaybeNullWhen(false)] out Currency? result)
     {
         result = s?.Trim().ToUpperInvariant() switch
@@ -1490,7 +1490,7 @@ public sealed partial class Currency
     /// </summary>
     /// <param name="s">Символьный код валюты.</param>
     /// <param name="result">Экземпляр <see cref="Currency"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
+    /// <returns><c lang="text">True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse([NotNullWhen(true)] string? s, [MaybeNullWhen(false)] out Currency? result) => TryParse(s, default, out result);
 
     /// <summary>
@@ -1498,7 +1498,7 @@ public sealed partial class Currency
     /// </summary>
     /// <param name="code">Цифровой код валюты.</param>
     /// <param name="currency">Экземпляр <see cref="Currency"/>.</param>
-    /// <returns><c>True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
+    /// <returns><c lang="text">True</c>, если экземпляр был найден, иначе <see langword="false"/>.</returns>
     public static bool TryParse(ushort code, [MaybeNullWhen(false)] out Currency? currency)
     {
         currency = code switch
@@ -1761,7 +1761,7 @@ public sealed partial class Currency
     /// <param name="currency">Экземпляр <see cref="Currency"/>.</param>
     /// <param name="str">Строка для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
+    /// <c lang="text">True</c>, если хеш-коды объектов совпадают, иначе <see langword="false"/>.
     /// </returns>
     public static bool operator ==(Currency? currency, string? str) => (currency is null && str is null) || (currency is not null && str is not null && currency.Equals(str));
 
@@ -1771,7 +1771,7 @@ public sealed partial class Currency
     /// <param name="currency">Экземпляр <see cref="Currency"/>.</param>
     /// <param name="str">Строка для сравнения.</param>
     /// <returns>
-    /// <c>True</c>, если хеш-коды объектов не совпадают, иначе <see langword="false"/>.
+    /// <c lang="text">True</c>, если хеш-коды объектов не совпадают, иначе <see langword="false"/>.
     /// </returns>
     public static bool operator !=(Currency? currency, string? str) => !(currency == str);
 }

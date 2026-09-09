@@ -249,7 +249,7 @@ public static class Extensions
     /// </summary>
     /// <param name="name">Строковое представление цвета.</param>
     /// <param name="color">Консольный цвет.</param>
-    /// <returns><c>True</c>, если операция была удачной, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если операция была удачной, иначе <see langword="false"/>.</returns>
     public static bool TryGetColor(this string name, out ConsoleColor color) => colorMap.TryGetValue(name, out color);
 
     /// <summary>
@@ -257,7 +257,7 @@ public static class Extensions
     /// </summary>
     /// <param name="name">Строковое представление цвета.</param>
     /// <param name="color">Консольный цвет.</param>
-    /// <returns><c>True</c>, если операция была удачной, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если операция была удачной, иначе <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TryGetColor(this ReadOnlySpan<char> name, out ConsoleColor color)
     {
@@ -467,7 +467,7 @@ public static class Extensions
     /// </summary>
     /// <param name="name">Строковое представление стиля.</param>
     /// <param name="style">Консольный стиль.</param>
-    /// <returns><c>True</c>, если операция была удачной, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если операция была удачной, иначе <see langword="false"/>.</returns>
     public static bool TryGetStyle(this string? name, out ConsoleStyle? style)
     {
         style = name?.ToUpperInvariant() switch
@@ -486,7 +486,7 @@ public static class Extensions
     /// </summary>
     /// <param name="name">Строковое представление стиля.</param>
     /// <param name="style">Консольный стиль.</param>
-    /// <returns><c>True</c>, если операция была удачной, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если операция была удачной, иначе <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TryGetStyle(this ReadOnlySpan<char> name, out ConsoleStyle style)
     {
