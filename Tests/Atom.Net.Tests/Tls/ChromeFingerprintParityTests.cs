@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using Atom.Net.Https.Profiles;
 using Atom.Net.Tls;
 using Atom.Net.Tls.Extensions;
@@ -31,11 +31,15 @@ public sealed class ChromeFingerprintParityTests
         0xC013, 0xC014, 0x009C, 0x009D, 0x002F, 0x0035,
     ];
 
-    /// <summary>Типы расширений Chrome 151 без учёта GREASE и порядка.</summary>
+    /// <summary>Типы расширений Chrome 152 без учёта GREASE и порядка.</summary>
+    /// <remarks>
+    /// Замер 2026-09-09 добавил к прежнему составу <c lang="text">trust_anchors</c> (0xCA34): браузер
+    /// отправляет его со 143-й версии, и без него первая часть JA4 даёт 16 расширений вместо 17.
+    /// </remarks>
     private static readonly ushort[] ChromeExtensionIds =
     [
         0x0000, 0x0005, 0x000A, 0x000B, 0x000D, 0x0010, 0x0012, 0x001B,
-        0x0017, 0x0023, 0x002B, 0x002D, 0x0033, 0x44CD, 0xFE0D, 0xFF01,
+        0x0017, 0x0023, 0x002B, 0x002D, 0x0033, 0x44CD, 0xCA34, 0xFE0D, 0xFF01,
     ];
 
     private static readonly NamedGroup[] ChromeGroups =
@@ -45,6 +49,38 @@ public sealed class ChromeFingerprintParityTests
         NamedGroup.Secp256r1,
         NamedGroup.Secp384r1,
     ];
+
+    /// <summary>Отпечаток JA4 настоящего Chrome 152 (Linux x86_64).</summary>
+    /// <remarks>
+    /// Снят 2026-09-09 с браузера, а не выведен из профиля:
+    /// <c lang="text">chrome --headless=new --no-proxy-server --disable-extensions --dump-dom
+    /// https://tls.peet.ws/api/all</c>. Ключ <c lang="text">--disable-extensions</c> обязателен:
+    /// управляемая политика форсит расширение моста в любой Chrome на машине, и без него вместо
+    /// снимка приходит страница обнаружения моста.
+    ///
+    /// Проверка ЗАКРЫВАЕТ СЛЕПОЕ ПЯТНО, из-за которого расхождение прожило до боевого прогона:
+    /// сверка одного лишь состава профиля пропускала и отсутствие подставной записи в подписях, и
+    /// целиком отсутствующее расширение доверенных корней. JA4 считается по БАЙТАМ приветствия и
+    /// ловит оба случая сразу.
+    /// </remarks>
+    private const string ChromeJa4 = "t13d1517h2_8daaf6152771_cb7bf5808d99";
+
+    [Test]
+    public void Ja4MatchesRealChrome()
+    {
+        var profile = BrowserProfileCatalog.CreateChromeDesktopWindowsTls13();
+        var settings = profile.Tls with
+        {
+            Extensions = [.. profile.Tls.Extensions.Select(static extension => extension is ServerNameTlsExtension serverName
+                ? new ServerNameTlsExtension { Id = serverName.Id, HostName = "tls.peet.ws" }
+                : extension)],
+        };
+
+        using var handshake = new Tls13ClientHandshake(settings);
+        var inspector = ClientHelloInspector.Parse(handshake.BuildClientHello());
+
+        Assert.That(inspector.ComputeJa4(), Is.EqualTo(ChromeJa4));
+    }
 
     [Test]
     public void CipherSuitesMatchChrome()

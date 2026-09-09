@@ -61,6 +61,17 @@ public static class Grease
     public static ushort Extension => Pick(scope: 3);
 
     /// <summary>
+    /// Возвращает GREASE-значение для домена "signature_algorithms".
+    /// </summary>
+    /// <remarks>
+    /// Домен взят из ХВОСТА таблицы (scope 64), а не из ряда 0..3: места 3 и далее заняты
+    /// расширениями через <see cref="ExtensionAt"/>, и совпадение доменов дало бы одинаковые
+    /// подставные значения в списке подписей и в списке расширений — сочетание, которого у
+    /// браузера не бывает.
+    /// </remarks>
+    public static ushort SignatureAlgorithms => Pick(scope: 64);
+
+    /// <summary>
     /// Возвращает GREASE-значение для расширения по его порядковому месту в списке.
     /// </summary>
     /// <param name="slot">Место расширения: 0 — первое, 1 — второе и так далее.</param>

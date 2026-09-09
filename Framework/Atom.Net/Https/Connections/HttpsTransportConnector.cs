@@ -194,7 +194,7 @@ internal static class HttpsTransportConnector
     /// </summary>
     /// <param name="tcpStream">Уже установленное соединение с прокси.</param>
     /// <param name="options">Параметры соединения.</param>
-    /// <param name="proxy">Адрес прокси; учётные данные берутся из его <c>UserInfo</c>.</param>
+    /// <param name="proxy">Адрес прокси; учётные данные берутся из его <c lang="text">UserInfo</c>.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
     /// <remarks>
     /// Запрос отправляется открытым текстом ДО рукопожатия TLS: в этом и смысл туннеля — прокси
@@ -539,10 +539,14 @@ internal static class HttpsTransportConnector
                 Id = ecPointFormats.Id,
                 Formats = [.. ecPointFormats.Formats],
             },
+            // ★ Признак подставной записи копируется вместе со списком — ровно та же ловушка,
+            // что описана выше для групп. Потеряв его здесь, мы отправляли бы GREASE в группах и
+            // не отправляли в подписях, хотя Chromium ставит его в оба списка сразу.
             SignatureAlgorithmsTlsExtension signatureAlgorithms => new SignatureAlgorithmsTlsExtension
             {
                 Id = signatureAlgorithms.Id,
                 Algorithms = [.. signatureAlgorithms.Algorithms],
+                UseGrease = signatureAlgorithms.UseGrease,
             },
             ExtendedMasterSecretTlsExtension extendedMasterSecret => new ExtendedMasterSecretTlsExtension
             {

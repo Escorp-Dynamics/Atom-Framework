@@ -414,7 +414,7 @@ public static class BrowserProfileCatalog
     /// Настройки TLS современного Safari.
     /// </summary>
     /// <remarks>
-    /// ★ Состав взят из <c>refraction-networking/utls</c>, профиль <c>HelloSafari_26_3</c> — это
+    /// ★ Состав взят из <c lang="text">refraction-networking/utls</c>, профиль <c lang="text">HelloSafari_26_3</c> — это
     /// записанный с настоящего браузера ClientHello, а не описание по памяти. Прежний профиль был
     /// догадкой: TLS 1.2, четыре набора шифров, ни GREASE, ни постквантового гибрида — то есть
     /// Safari, какого не существует.
@@ -469,7 +469,7 @@ public static class BrowserProfileCatalog
     /// Отдельный набор, а не правка существующего: профиль TLS 1.2 остаётся рабочим путём для
     /// совместимости, и ломать его переключением версии нельзя. Здесь важны три вещи, каждая из
     /// которых наблюдаема сервером до единой строки скриптов: наборы шифров 1.3 идут первыми,
-    /// ALPN предлагает <c>h2</c> перед <c>http/1.1</c>, а key_share несёт X25519 — основную группу
+    /// ALPN предлагает <c lang="text">h2</c> перед <c lang="text">http/1.1</c>, а key_share несёт X25519 — основную группу
     /// браузера. Отсутствие любой из них выдаёт не-браузерный клиент.
     /// </remarks>
     private static TlsSettings CreateChromeTls13Settings()
@@ -544,7 +544,14 @@ public static class BrowserProfileCatalog
             new ExtendedMasterSecretTlsExtension { IsEnabled = true },
             new RenegotiationInfoTlsExtension(),
             new StatusRequestTlsExtension(),
-            CreateSignatureAlgorithmsExtension(
+            // ★ Список СНЯТ С ПРОВОДА, а не составлен по памяти. Замер 2026-09-09: наш ClientHello
+            // отдавал 9 алгоритмов и обрывался на rsa_pkcs1_sha384, тогда как настоящий Chrome
+            // отдаёт 11 плюс подставную запись впереди. Оба хвостовых алгоритма выбраны быть не
+            // могут — SHA-512 сертификатов в обращении практически нет, — но их отсутствие меняет
+            // третью часть JA4 (у нас 806a8c22fdea против cb7bf5808d99 у браузера), а её как раз и
+            // сверяют: она считается по СПИСКУ ПОДПИСЕЙ и, в отличие от порядка расширений, не
+            // «плавает» от соединения к соединению. Проверять снимком tls.peet.ws — см. заметки.
+            CreateGreasedSignatureAlgorithmsExtension(
                 // Постквантовые подписи ML-DSA современный Chrome ставит первыми.
                 SignatureAlgorithm.MlDsa44,
                 SignatureAlgorithm.MlDsa65,
@@ -575,6 +582,10 @@ public static class BrowserProfileCatalog
             // каждое соединение, поэтому профиль запрашивается заново, а не кешируется.
             new KeyShareTlsExtension { Entries = CreateChromeKeyShares(), UseGrease = true },
             new PskKeyExchangeModesTlsExtension { Modes = [PskKeyExchangeMode.PskDheKe] },
+
+            // Список доверенных корней Chromium отправляет со 143-й версии. Он объявительный —
+            // на нашу проверку цепочки не влияет, — но входит в счётчик расширений JA4.
+            new TrustAnchorsTlsExtension(),
             GreaseTlsExtension.Create(slot: 1, payloadLength: 1),
         ];
 
@@ -586,7 +597,7 @@ public static class BrowserProfileCatalog
     /// <remarks>
     /// От обычного профиля отличается ровно тем, что требует сам QUIC (RFC 9001, §8):
     ///
-    /// ALPN объявляет <c>h3</c> — иного прикладного протокола поверх QUIC у браузера нет;
+    /// ALPN объявляет <c lang="text">h3</c> — иного прикладного протокола поверх QUIC у браузера нет;
     /// supported_versions содержит ТОЛЬКО TLS 1.3, потому что QUIC с более ранними версиями не
     /// определён; legacy_session_id обязан быть ПУСТЫМ — совместимость с посредниками, ради
     /// которой он заполняется поверх TCP, здесь бессмысленна, а непустое поле сервер расценит как
@@ -757,7 +768,7 @@ public static class BrowserProfileCatalog
     /// Расширения ClientHello современного Safari.
     /// </summary>
     /// <remarks>
-    /// Порядок и состав — из профиля <c>HelloSafari_26_3</c> проекта utls. GREASE открывает и
+    /// Порядок и состав — из профиля <c lang="text">HelloSafari_26_3</c> проекта utls. GREASE открывает и
     /// закрывает список, как у движков Chromium, но набор между ними другой: у Safari нет ни
     /// шифрования ClientHello, ни application_settings, ни record_size_limit, ни делегированных
     /// удостоверений. Зато есть сжатие сертификата и постквантовый гибрид в долях ключа.
@@ -823,6 +834,22 @@ public static class BrowserProfileCatalog
         => new()
         {
             Algorithms = algorithms,
+        };
+
+    /// <summary>
+    /// Создаёт список подписей с подставной записью в начале.
+    /// </summary>
+    /// <param name="algorithms">Алгоритмы браузера в порядке приоритета.</param>
+    /// <returns>Готовое расширение.</returns>
+    /// <remarks>
+    /// Отдельный помощник по той же причине, что и у групп: подставную запись в подписях шлёт
+    /// только Chromium. У Firefox и Safari её нет, и добавить её значило бы выдать себя.
+    /// </remarks>
+    private static SignatureAlgorithmsTlsExtension CreateGreasedSignatureAlgorithmsExtension(params SignatureAlgorithm[] algorithms)
+        => new()
+        {
+            Algorithms = algorithms,
+            UseGrease = true,
         };
 
     /// <summary>
