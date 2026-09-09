@@ -871,7 +871,7 @@ internal static class BridgeExtensionBootstrap
     /// Отклоняет ли branded-сборка загрузку распакованного расширения через командную строку.
     /// </summary>
     /// <remarks>
-    /// Google Chrome и Microsoft Edge блокируют <c>--load-extension</c>/<c>--disable-extensions-except</c>
+    /// Google Chrome и Microsoft Edge блокируют <c lang="text">--load-extension</c>/<c lang="text">--disable-extensions-except</c>
     /// в стабильных сборках, поэтому их расширение нужно ставить только через managed policy
     /// (force-install). Chromium/Brave/Opera/Vivaldi эти флаги по-прежнему принимают.
     /// </remarks>
@@ -937,11 +937,11 @@ internal static class BridgeExtensionBootstrap
     /// Направляет Chromium в локальный навигационный прокси.
     /// </summary>
     /// <remarks>
-    /// В Firefox маршрутизацией per-request занимается <c>proxy.onRequest</c>, которого в Chromium нет,
+    /// В Firefox маршрутизацией per-request занимается <c lang="text">proxy.onRequest</c>, которого в Chromium нет,
     /// поэтому там прокси задаётся на весь запуск. Пользовательский upstream-прокси это не отменяет:
     /// локальный прокси форвардит через него по данным маршрута, как и на Firefox-пути.
     /// <para>
-    /// <c>--proxy-bypass-list=&lt;-loopback&gt;</c> обязателен: по умолчанию Chromium не проксирует
+    /// <c lang="text">--proxy-bypass-list=&lt;-loopback&gt;</c> обязателен: по умолчанию Chromium не проксирует
     /// loopback, а перехватывать нужно в том числе локальные адреса. Собственный трафик расширения к
     /// мосту при этом тоже идёт через прокси и обслуживается его прямым маршрутом.
     /// </para>

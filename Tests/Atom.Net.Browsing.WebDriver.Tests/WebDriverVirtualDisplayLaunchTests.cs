@@ -99,7 +99,7 @@ public sealed class WebDriverVirtualDisplayLaunchTests
 
     [Test]
     [SupportedOSPlatform("linux")]
-    public async Task LaunchAsyncDoesNotAutoCreateLinuxDisplayForHeadlessRunAndKeepsBrowserHeadlessFlag()
+    public async Task LaunchAsyncAutoCreatesHiddenLinuxDisplayForHeadlessRunAndKeepsRequestedHeadlessFlag()
     {
         if (!OperatingSystem.IsLinux())
             Assert.Ignore("Тест рассчитан на Linux virtual display lifecycle.");
@@ -107,6 +107,8 @@ public sealed class WebDriverVirtualDisplayLaunchTests
         var directory = CreateTemporaryDirectory();
         var binaryPath = CreateExecutableBrowserHarness(directory);
         var profile = new ChromeProfile(binaryPath, WebBrowserChannel.Stable);
+        VirtualDisplay? autoDisplay = null;
+        var ownsDisplay = false;
         try
         {
             var launchSettings = new WebBrowserSettings
@@ -115,26 +117,32 @@ public sealed class WebDriverVirtualDisplayLaunchTests
                 UseHeadlessMode = true,
             };
 
-            var (autoDisplay, _, ownsDisplay) = await PrepareLinuxLaunchForTestsAsync(launchSettings).ConfigureAwait(false);
+            (autoDisplay, _, ownsDisplay) = await PrepareLinuxLaunchForTestsAsync(launchSettings).ConfigureAwait(false);
+            if (autoDisplay is null)
+            {
+                // Бэкенд виртуального дисплея недоступен: headless-запуск откатился на прежний
+                // чисто-headless режим (см. AutoCreateDisplayAsync) — паритет проверить не на чём.
+                Assert.Ignore("Display backend недоступен — headless-запуск работает без виртуального дисплея.");
+            }
+
             _ = await MaterializeLaunchArtifactsAsync(launchSettings).ConfigureAwait(false);
             var manifestPath = Path.Combine(profile.Path, "profile.json");
             var manifestText = await File.ReadAllTextAsync(manifestPath).ConfigureAwait(false);
 
             Assert.Multiple(() =>
             {
-                Assert.That(autoDisplay, Is.Null);
-                Assert.That(ownsDisplay, Is.False);
-                Assert.That(launchSettings.Display, Is.Null);
+                Assert.That(autoDisplay.Settings.IsVisible, Is.False);
+                Assert.That(ownsDisplay, Is.True);
+                Assert.That(launchSettings.Display, Is.SameAs(autoDisplay));
                 Assert.That(manifestText, Does.Contain("\"headless\":true"));
                 Assert.That(manifestText, Does.Contain("--headless=new"));
             });
         }
-        catch (VirtualDisplayException ex) when (IsDisplayBackendUnavailable(ex))
-        {
-            Assert.Ignore("Display backend недоступен — пропускаем: " + ex.Message);
-        }
         finally
         {
+            if (autoDisplay is not null)
+                await autoDisplay.DisposeAsync().ConfigureAwait(false);
+
             if (!string.IsNullOrWhiteSpace(profile.Path))
                 DeleteDirectoryIfExists(profile.Path);
 

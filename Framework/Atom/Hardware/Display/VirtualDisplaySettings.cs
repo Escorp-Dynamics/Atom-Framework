@@ -26,7 +26,7 @@ public sealed record VirtualDisplaySettings
     public int ColorDepth { get; init; } = 24;
 
     /// <summary>
-    /// Номер дисплея X11 (например, 99 → <c>:99</c>).
+    /// Номер дисплея X11 (например, 99 → <c lang="text">:99</c>).
     /// Если <see langword="null"/>, номер выбирается автоматически.
     /// </summary>
     public int? DisplayNumber { get; init; }

@@ -82,7 +82,10 @@ internal static partial class BridgeServerLogs
     [LoggerMessage(EventId = 1825, Level = LogLevel.Warning, Message = "Navigation proxy отклонил запрос {Method} {Target} по причине {Reason}")]
     public static partial void LogBridgeServerNavigationProxyRejected(this ILogger logger, string method, string target, string reason);
 
-    [LoggerMessage(EventId = 1832, Level = LogLevel.Information, Message = "Bridge debug-event получен: kind {Kind}, sessionId {SessionId}, details {Details}")]
+    // Отладочная телеметрия расширения: сотни событий на КАЖДУЮ задачу (в замере — 1641 строка и
+    // 638 КБ из 788 КБ всего лога). На Information это забивает вывод и делает остальные записи
+    // нечитаемыми, поэтому уровень отладочный — как и у прочей поштучной мостовой диагностики.
+    [LoggerMessage(EventId = 1832, Level = LogLevel.Debug, Message = "Bridge debug-event получен: kind {Kind}, sessionId {SessionId}, details {Details}")]
     public static partial void LogBridgeServerDebugEventReceived(this ILogger logger, string kind, string sessionId, string details);
 
     [LoggerMessage(EventId = 1833, Level = LogLevel.Warning, Message = "Bridge debug-event отклонён: причина {Reason}")]

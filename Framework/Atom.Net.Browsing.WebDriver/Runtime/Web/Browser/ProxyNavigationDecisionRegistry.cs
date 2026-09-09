@@ -134,6 +134,33 @@ internal sealed class ProxyNavigationDecisionRegistry
         return tokensByContextId.TryGetValue(contextId, out routeToken);
     }
 
+    /// <summary>
+    /// Токен, отменяемый в момент снятия маршрута. Позволяет привязать работу прокси к жизни
+    /// маршрута, а не к жизни всего сервера, — без опоры на сроки ожидания.
+    /// </summary>
+    public CancellationToken GetRouteLifetimeToken(string routeToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(routeToken);
+
+        return routesByToken.TryGetValue(routeToken, out var state)
+            ? state.LifetimeToken
+            : CancellationToken.None;
+    }
+
+    /// <summary>
+    /// Возвращает первый живой маршрут реестра. Используется nav-proxy в unresolved-пути:
+    /// когда запрос пришёл без распознанного токена, но решение (например, WaitRoom-перехват
+    /// POST-реплея) должно доехать до драйвера через перехват, привязанный к любому живому
+    /// маршруту сеанса. Маршрут при этом НЕ потребляется.
+    /// </summary>
+    public bool TryResolveAnyRoute([NotNullWhen(true)] out ProxyNavigationRoute? route)
+    {
+        route = routesByToken.Values.Count > 0
+            ? routesByToken.Values.First().Route
+            : null;
+        return route is not null;
+    }
+
     public bool EnqueueDecision(string contextId, ProxyNavigationPendingDecision decision, DateTimeOffset nowUtc)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(contextId);
@@ -179,6 +206,44 @@ internal sealed class ProxyNavigationDecisionRegistry
         return tokensByContextId.TryGetValue(contextId, out var routeToken)
             && routesByToken.TryGetValue(routeToken, out var state)
             && state.HasDecisionForRequest(requestId, nowUtc);
+    }
+
+    /// <summary>
+    /// Потребляет решение по паре «метод + URL» без привязки к route token'у вкладки.
+    /// </summary>
+    /// <remarks>
+    /// Страховка доставки навигационного fulfill на Chromium. Токен вкладки там ставится
+    /// declarativeNetRequest-правилом, и канал доставки не гарантируется: правило может не
+    /// успеть создаться, не сматчиться или быть снятым к моменту запроса. Если при этом
+    /// решение искать только по токену, запрос уходит в «неявный continue» и вкладка получает
+    /// НАСТОЯЩИЙ сайт вместо подменённого — ровно это виделось как немотивированный провал
+    /// подмены. Для main_frame-навигации на уникальный URL привязка к вкладке избыточна:
+    /// пара «метод + точный URL» уже однозначно адресует подготовленное решение. Токен
+    /// остаётся обязательным для маршрутизации upstream — здесь маршрута нет, поэтому
+    /// форвард выполняется по апстриму последнего известного маршрута.
+    /// </remarks>
+    public bool TryConsumeDecisionByUrl(
+        string method,
+        string absoluteUrl,
+        DateTimeOffset nowUtc,
+        [NotNullWhen(true)] out ProxyNavigationRoute? route,
+        [NotNullWhen(true)] out ProxyNavigationPendingDecision? decision)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(method);
+        ArgumentException.ThrowIfNullOrWhiteSpace(absoluteUrl);
+
+        foreach (var state in routesByToken.Values)
+        {
+            if (state.TryConsume(method, absoluteUrl, nowUtc, out decision))
+            {
+                route = state.Route;
+                return true;
+            }
+        }
+
+        route = null;
+        decision = null;
+        return false;
     }
 
     public bool RemoveRouteByContextId(string contextId)
@@ -227,10 +292,10 @@ internal sealed class ProxyNavigationDecisionRegistry
             throw new ArgumentException("Pending proxy navigation decision must target an absolute URL", nameof(decision));
     }
 
-    private sealed class ProxyNavigationRouteState(ProxyNavigationRoute route)
+    private sealed class ProxyNavigationRouteState(ProxyNavigationRoute route) : IDisposable
     {
         /// <summary>
-        /// Локальный прокси отвечает <c>Connection: close</c>, поэтому браузер повторяет запрос
+        /// Локальный прокси отвечает <c lang="text">Connection: close</c>, поэтому браузер повторяет запрос
         /// на новом соединении. Без повтора решения такой ретрай не находил бы ничего и уходил
         /// в «неявный continue», то есть fulfill/abort обходились бы простой перепосылкой.
         /// </summary>
@@ -239,6 +304,36 @@ internal sealed class ProxyNavigationDecisionRegistry
         private readonly Lock gate = new();
         private readonly List<ProxyNavigationPendingDecision> pendingDecisions = [];
         private readonly List<ConsumedDecision> consumedDecisions = [];
+
+        /// <summary>
+        /// Отменяется при снятии маршрута — то есть когда вкладка закончила задачу.
+        /// </summary>
+        /// <remarks>
+        /// Без него запросы завершённой задачи оставались висеть в прокси на общем токене сервера
+        /// (живёт до смерти браузера) и доигрывали свои сетевые бюджеты уже во время СЛЕДУЮЩЕЙ
+        /// задачи, ломая её. Замер: после провальной задачи следующая падала в 69% случаев против
+        /// 11% после успешной. Привязка отмены к маршруту делает границу задач настоящей.
+        /// </remarks>
+        private readonly CancellationTokenSource lifetime = new();
+
+        /// <summary>
+        /// Токен жизни маршрута. После освобождения источника отдаём уже отменённый токен:
+        /// подписчик тогда сразу узнаёт, что маршрут снят, вместо <see cref="ObjectDisposedException"/>.
+        /// </summary>
+        public CancellationToken LifetimeToken
+        {
+            get
+            {
+                try
+                {
+                    return lifetime.Token;
+                }
+                catch (ObjectDisposedException)
+                {
+                    return new CancellationToken(canceled: true);
+                }
+            }
+        }
 
         // Изменяется только под registryGate владеющего реестра.
         public int AttachedContextCount { get; private set; }
@@ -333,6 +428,25 @@ internal sealed class ProxyNavigationDecisionRegistry
                 pendingDecisions.Clear();
                 consumedDecisions.Clear();
             }
+
+            // Снятие маршрута обрывает и незавершённые запросы по нему: ждать их сетевых бюджетов
+            // некому и незачем — вкладка уже отдана следующей задаче.
+            Dispose();
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                lifetime.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Уже освобождён параллельным снятием маршрута.
+                return;
+            }
+
+            lifetime.Dispose();
         }
 
         private static bool Matches(ProxyNavigationPendingDecision candidate, string method, string absoluteUrl)

@@ -1143,9 +1143,9 @@ public sealed partial class WebBrowser : IWebBrowser
     /// Готовит WebGL-часть контекста вкладки.
     /// </summary>
     /// <remarks>
-    /// Маскированные (<c>Vendor</c>/<c>Renderer</c>) и немаскированные значения передаются отдельно:
-    /// страница читает их разными путями — обычным <c>getParameter</c> и через расширение
-    /// <c>WEBGL_debug_renderer_info</c>, — и подменять нужно оба, иначе они разойдутся между собой.
+    /// Маскированные (<c lang="text">Vendor</c>/<c lang="text">Renderer</c>) и немаскированные значения передаются отдельно:
+    /// страница читает их разными путями — обычным <c lang="text">getParameter</c> и через расширение
+    /// <c lang="text">WEBGL_debug_renderer_info</c>, — и подменять нужно оба, иначе они разойдутся между собой.
     /// </remarks>
     /// <summary>
     /// Собирает числовые пределы WebGL для контекста вкладки.
@@ -1241,9 +1241,9 @@ public sealed partial class WebBrowser : IWebBrowser
     /// </summary>
     /// <remarks>
     /// ★ Клиентские подсказки существуют ТОЛЬКО в Chromium: ни Safari, ни Firefox их не шлют и
-    /// не объявляют <c>navigator.userAgentData</c>. Прежнее условие «не WebKit» пропускало Gecko,
-    /// и профиль Firefox уезжал с заголовком <c>Sec-CH-UA: "Chromium";v="131"</c> при собственном
-    /// фаерфоксовом <c>Accept</c> — Cloudflare отвечал на это 600010 («среда слишком ограничена»),
+    /// не объявляют <c lang="text">navigator.userAgentData</c>. Прежнее условие «не WebKit» пропускало Gecko,
+    /// и профиль Firefox уезжал с заголовком <c lang="text">Sec-CH-UA: "Chromium";v="131"</c> при собственном
+    /// фаерфоксовом <c lang="text">Accept</c> — Cloudflare отвечал на это 600010 («среда слишком ограничена»),
     /// 0 задач из 14, тогда как тот же Firefox без профиля решал 3 из 3.
     /// </remarks>
     internal static bool DeclaresChromiumEngine(string? userAgent)
@@ -1366,12 +1366,37 @@ public sealed partial class WebBrowser : IWebBrowser
         return payload;
     }
 
+    // Открытие вкладки под Chrome-семейством будит/перезапускает service worker расширения
+    // (Manifest V3): новый воркер переподключается с тем же sessionId, сервер вытесняет прежний
+    // сокет close 1008 «идентификатор-сеанса-уже-занят», и ожидающая команда контекста вкладки
+    // падает с surface-disconnect. Транспорт клиента автопереподключается (transport-reconnected),
+    // поэтому отправку контекста достаточно повторить: вкладка перерегистрируется, и следующая
+    // попытка доходит. Бюджет как у перехвата запросов в WebPage.Bridge.cs (≈5 c).
+    private const int TabContextRetryAttempts = 100;
+
+    private static readonly TimeSpan TabContextRetryDelay = TimeSpan.FromMilliseconds(50);
+
     internal static async ValueTask ApplyBridgeTabContextAsync(WebPage page, CancellationToken cancellationToken)
     {
         var bridgeCommands = page.BridgeCommands
             ?? throw new InvalidOperationException("Bridge-backed page is not bound to command transport");
 
-        await bridgeCommands.SetTabContextAsync(BuildSetTabContextPayload(page), cancellationToken).ConfigureAwait(false);
+        var attempt = 0;
+        while (true)
+        {
+            attempt++;
+            try
+            {
+                await bridgeCommands.SetTabContextAsync(BuildSetTabContextPayload(page), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            catch (InvalidOperationException exception)
+                when (attempt < TabContextRetryAttempts
+                    && Protocol.BridgeCommandException.IsSurfaceDisconnect(exception))
+            {
+                await Task.Delay(TabContextRetryDelay, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     private async ValueTask<BridgeTabChannelSnapshot> WaitForRegisteredTabAsync(string rawTabId, CancellationToken cancellationToken)

@@ -47,8 +47,6 @@ public sealed partial class WebWindow
 
             if (!string.IsNullOrWhiteSpace(targetTabId))
                 await bridge.ActivateTabAsync(targetTabId, cancellationToken).ConfigureAwait(false);
-
-            await Task.Delay(75, cancellationToken).ConfigureAwait(false);
         }
 
         SetCurrentPage(page);
@@ -120,8 +118,12 @@ public sealed partial class WebWindow
         {
             await ActivateAsync(page, cancellationToken).ConfigureAwait(false);
 
+            // Ждём ФАКТ фокуса, а не отмеренный срок: активация доходит до содержимого за разное
+            // время, и фиксированная пауза либо отпускала шлюз до того, как вкладка реально вышла
+            // вперёд (тогда виджет не монтировался и клика не было вовсе), либо держала его зря.
+            // WaitForDocumentFocusAsync возвращается сразу, как только документ сфокусирован.
             if (hold > TimeSpan.Zero)
-                await Task.Delay(hold, cancellationToken).ConfigureAwait(false);
+                await WaitForDocumentFocusAsync(page, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -184,6 +186,13 @@ public sealed partial class WebWindow
         // намеренно фоновое, либо у окружения вовсе нет понятия активного окна), выжидать его
         // целиком перед каждым нажатием — чистые потери на горячем пути; дальше хватит короткой
         // перепроверки, которая сама снимет пометку, как только фокус всё-таки появится.
+        //
+        // ★ Пометка НЕ переживает границу задачи. Вкладка переиспользуется, поэтому один сбой
+        // фокуса урезал бюджет всем последующим задачам на ней: они не успевали дождаться
+        // переднего плана, challenge-iframe не монтировался и клика не было вовсе. Замер показал
+        // ровно это — у заражённых задач в стадиях страницы нет ни одного 'focus', а провал после
+        // провала повторялся в 67% случаев против 8-13% после успеха. Снятие пометки при смене
+        // контекста вкладки (см. ResetDocumentFocusTracking) возвращает каждой задаче полный бюджет.
         var budget = ReferenceEquals(documentFocusUnconfirmedPage, page)
             ? DocumentFocusRecheckBudget
             : DocumentFocusActivationBudget;
@@ -224,6 +233,16 @@ public sealed partial class WebWindow
             || exception.Status is Protocol.BridgeStatus.Timeout;
 
     private WebPage? documentFocusUnconfirmedPage;
+
+    /// <summary>
+    /// Снимает пометку «фокус не подтверждён» для страницы: следующая задача на той же вкладке
+    /// должна получить полный бюджет ожидания, а не урезанный из-за чужого сбоя.
+    /// </summary>
+    internal void ResetDocumentFocusTracking(WebPage page)
+    {
+        if (ReferenceEquals(documentFocusUnconfirmedPage, page))
+            documentFocusUnconfirmedPage = null;
+    }
 
     private static readonly TimeSpan DocumentFocusActivationBudget = TimeSpan.FromSeconds(10);
 

@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
@@ -2519,7 +2519,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
     /// ★ Буфер берётся из пула и наружу НЕ отдаётся: разбор идёт здесь же, пока аренда жива.
     ///
     /// Прежде на КАЖДОЕ принятое сообщение выделялся свежий массив на 4 КБ, а крупные ответы
-    /// удваивали его через <c>Array.Resize</c> — то есть копия за копией. Замер драйвера
+    /// удваивали его через <c lang="text">Array.Resize</c> — то есть копия за копией. Замер драйвера
     /// (300 обменов по мосту): 8.03 КБ на обмен при пустячном ответе и 67.5 КБ при ответе на 8 КБ.
     /// Мост — самый горячий путь драйвера, и мусор здесь платится на каждой команде.
     /// </remarks>
@@ -3477,10 +3477,13 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
 
         public long ConnectionEpoch { get; init; }
 
+        /// <summary>
+        /// Отправляет сообщение через сокет с переиспользуемым буфером.
+        /// </summary>
         /// <remarks>
         /// ★ Сериализация идёт ВНУТРИ gate и в переиспользуемый буфер.
         ///
-        /// Прежний <c>SerializeToUtf8Bytes</c> выделял массив точного размера на каждое исходящее
+        /// Прежний <c lang="text">SerializeToUtf8Bytes</c> выделял массив точного размера на каждое исходящее
         /// сообщение — то есть на каждую команду драйвера и каждое событие расширения. Мост
         /// работает непрерывно, и этот мусор был постоянным фоном для сборщика.
         /// </remarks>
@@ -3491,7 +3494,11 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
             {
                 if (sendBuffer.Capacity > MaxRetainedSendBufferBytes)
                 {
-                    sendWriter?.Dispose();
+                    if (sendWriter is not null)
+                    {
+                        await sendWriter.DisposeAsync().ConfigureAwait(false);
+                    }
+
                     sendWriter = null;
                     sendBuffer = new ArrayBufferWriter<byte>(4096);
                 }
@@ -3504,7 +3511,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
                     sendWriter.Reset(sendBuffer);
 
                 JsonSerializer.Serialize(sendWriter, message, BridgeJsonContext.Default.BridgeMessage);
-                sendWriter.Flush();
+                await sendWriter.FlushAsync(CancellationToken.None).ConfigureAwait(false);
 
                 await Socket.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None).ConfigureAwait(false);
             }

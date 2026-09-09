@@ -15,7 +15,7 @@ namespace Atom.Net.Browsing.WebDriver;
 /// force-install своего расширения и разваливался. Поэтому запись здесь ведётся по ключу
 /// extensionId: свою добавляем, свою же снимаем, чужие не трогаем.
 /// <para>
-/// Разложить записи по отдельным файлам нельзя: Chromium читает все <c>*.json</c> каталога и при
+/// Разложить записи по отдельным файлам нельзя: Chromium читает все <c lang="text">*.json</c> каталога и при
 /// совпадении ключа берёт значение из файла, идущего последним по имени, — то есть запуски
 /// молча гасили бы друг друга. Отсюда один файл и слияние секций.
 /// </para>
@@ -31,7 +31,7 @@ internal static class BridgeManagedPolicyRegistry
     private static readonly TimeSpan LockRetryDelay = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
-    /// Служебные файлы лежат ВНЕ каталога политик: любой <c>*.json</c> рядом Chromium попытается
+    /// Служебные файлы лежат ВНЕ каталога политик: любой <c lang="text">*.json</c> рядом Chromium попытается
     /// прочитать как политику.
     /// </summary>
     private static string StateDirectory

@@ -73,4 +73,7 @@ internal static partial class WebBrowserLogs
     // ДИАГ (временное): встало ли fulfill-решение (иначе NavigateAsync уходит в Transport-симулятор).
     [LoggerMessage(EventId = 1831, Level = LogLevel.Information, Message = "ДИАГ enqueue: ctx={ContextId} token={RouteToken} enqueued={Enqueued}")]
     public static partial void LogNavigationFulfillEnqueueDiag(this ILogger logger, string contextId, string? routeToken, bool enqueued);
+
+    [LoggerMessage(EventId = 1832, Level = LogLevel.Warning, Message = "Не удалось поднять скрытый виртуальный дисплей для headless-запуска, браузер возвращается в чисто-headless режим")]
+    public static partial void LogWebBrowserHeadlessDisplayFallback(this ILogger logger, Exception exception);
 }

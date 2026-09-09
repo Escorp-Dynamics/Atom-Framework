@@ -1,5 +1,5 @@
-using System.Buffers;
-﻿using System.Collections.Concurrent;
+﻿using System.Buffers;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
@@ -76,7 +76,7 @@ internal sealed class BridgeNavigationProxyServer(
     /// <remarks>
     /// Chromium не отдаёт расширению прокси-аутентификацию (событие onAuthRequired в режиме
     /// asyncBlocking не приходит), поэтому route token там доставляется не через
-    /// <c>Proxy-Authorization</c>, а этим заголовком: его ставит правило declarativeNetRequest,
+    /// <c lang="text">Proxy-Authorization</c>, а этим заголовком: его ставит правило declarativeNetRequest,
     /// привязанное к конкретной вкладке. Заголовок входит в список hop-by-hop и срезается до
     /// отправки на origin — сайт не должен видеть никаких следов автоматизации.
     /// </remarks>
@@ -485,6 +485,14 @@ internal sealed class BridgeNavigationProxyServer(
         // отменяем 204 (вкладка остаётся на месте до следующей команды), подзапрос — обрываем.
         if (IsDriverRouteToken(routeToken))
         {
+            // Страховка доставки fulfill на Chromium: канал заголовка (declarativeNetRequest)
+            // не гарантируется, и запрос может приехать с устаревшим/чужим токеном при живом
+            // решении. Пара «метод + точный URL» для main_frame-навигации однозначно адресует
+            // подготовленный fulfill, поэтому пробуем потребить решение по URL. Не находится —
+            // значит маршрут действительно снят, и запрос genuinely stale.
+            if (await TryServeDecisionByUrlAsync(sslStream, tunneledRequest, absoluteTargetUrl, cancellationToken).ConfigureAwait(false))
+                return;
+
             logger?.LogBridgeServerNavigationProxyStaleRouteAborted(tunneledRequest.Method, absoluteTargetUrl, routeToken!);
             if (IsNavigationRequest(tunneledRequest))
             {
@@ -502,7 +510,73 @@ internal sealed class BridgeNavigationProxyServer(
             return;
         }
 
+        // Запрос вообще без токена (Chromium: заголовок не доехал — правило не создано,
+        // не сматчилось по вкладке или снято раньше запроса). При выключенном 407-вызове
+        // такой запрос иначе молча форвардится на origin, и вкладка получает НАСТОЯЩИЙ
+        // сайт вместо подменённого. Пара «метод + точный URL» для main_frame-навигации
+        // однозначно адресует подготовленный fulfill — пробуем потребить его по URL.
+        if (await TryServeDecisionByUrlAsync(sslStream, tunneledRequest, absoluteTargetUrl, cancellationToken).ConfigureAwait(false))
+            return;
+
+        // Решения по URL нет: прежде чем форвардить, поднимаем перехват драйвера (как это
+        // делает HandleNavigationRequestAsync при отсутствии решения). Без этого POST-запросы
+        //_WAITROOM-реплея и подзапросы страниц, чей маршрут не разрешился по токену (токен не
+        // доехал/вкладка переоткрыта), молча уходили на origin — процедура солвера не видела
+        // ни запрос, ни ответ, и висла до общего таймаута.
+        var unresolvedRoute = ResolveAnyRouteForTab();
+        if (unresolvedRoute is not null)
+        {
+            await TryDispatchInterceptionAsync(tunneledRequest, absoluteTargetUrl, unresolvedRoute, cancellationToken).ConfigureAwait(false);
+        }
+
         await ForwardUnroutedRequestAsync(sslStream, tunneledRequest, cancellationToken, absoluteTargetUrl).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Ищет любой живой маршрут реестра: развязка запрос-маршрут по токену не удалась,
+    /// а перехват должен доехать до драйвера.
+    /// </summary>
+    private ProxyNavigationRoute? ResolveAnyRouteForTab()
+    {
+        var registry = registryResolver();
+        if (registry is null)
+        {
+            return null;
+        }
+
+        return registry.TryResolveAnyRoute(out var route) ? route : null;
+    }
+
+    /// <summary>
+    /// Пытается потребить навигационное решение по паре «метод + точный URL» без привязки
+    /// к route token'у вкладки и отдать его в открытый туннель.
+    /// </summary>
+    /// <returns>True — решение найдено и отправлено; false — решения нет, продолжаем фолбэком.</returns>
+    private async Task<bool> TryServeDecisionByUrlAsync(
+        SslStream sslStream,
+        ProxyRequest tunneledRequest,
+        string absoluteTargetUrl,
+        CancellationToken cancellationToken)
+    {
+        var registry = registryResolver();
+        ProxyNavigationRoute? decisionRoute = null;
+        ProxyNavigationPendingDecision? decision = null;
+        var found = registry is not null && registry.TryConsumeDecisionByUrl(
+            tunneledRequest.Method, absoluteTargetUrl, DateTimeOffset.UtcNow, out decisionRoute, out decision);
+        if (!found || decision is null || decisionRoute is null)
+        {
+            return false;
+        }
+
+        logger?.LogBridgeServerNavigationProxyMatched(decision.Action.ToString(), tunneledRequest.Method, absoluteTargetUrl);
+        await WriteMatchedDecisionResponseAsync(
+            sslStream,
+            tunneledRequest.Method,
+            absoluteTargetUrl,
+            decision,
+            IsNavigationRequest(tunneledRequest),
+            cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     private async Task HandleNavigationRequestAsync(
@@ -840,8 +914,8 @@ internal sealed class BridgeNavigationProxyServer(
     /// </summary>
     /// <remarks>
     /// ★ Раньше блок заголовков сначала превращался в строку целиком
-    /// (<c>Encoding.ASCII.GetString</c>, то есть удвоение в UTF-16), затем резался
-    /// <c>Split("\r\n")</c> на массив строк, а стартовая строка — ещё одним <c>Split</c>. На
+    /// (<c lang="text">Encoding.ASCII.GetString</c>, то есть удвоение в UTF-16), затем резался
+    /// <c lang="text">Split("\r\n")</c> на массив строк, а стартовая строка — ещё одним <c lang="text">Split</c>. На
     /// запрос приходилось два массива и строка на КАЖДУЮ строку заголовка, тогда как наружу нужны
     /// только имена и значения. Страница делает десятки запросов, и этот мусор шёл на каждый.
     ///
@@ -858,7 +932,7 @@ internal sealed class BridgeNavigationProxyServer(
         headers = null;
 
         var startLineEnd = headerBytes.IndexOf("\r\n"u8);
-        var startLine = startLineEnd < 0 ? headerBytes : headerBytes[..startLineEnd];
+        var startLine = StartLineBeforeSeparator(headerBytes, startLineEnd);
 
         var methodEnd = startLine.IndexOf((byte)' ');
         if (methodEnd <= 0)
@@ -866,9 +940,7 @@ internal sealed class BridgeNavigationProxyServer(
 
         // Повторные пробелы между полями стартовой строки прежний Split проглатывал
         // (RemoveEmptyEntries), поэтому пропускаем их и здесь.
-        var afterMethod = startLine[(methodEnd + 1)..];
-        while (!afterMethod.IsEmpty && afterMethod[0] == (byte)' ')
-            afterMethod = afterMethod[1..];
+        var afterMethod = TrimLeadingAsciiSpaces(startLine[(methodEnd + 1)..]);
 
         var targetEnd = afterMethod.IndexOf((byte)' ');
         var targetSpan = targetEnd < 0 ? afterMethod : afterMethod[..targetEnd];
@@ -877,14 +949,14 @@ internal sealed class BridgeNavigationProxyServer(
 
         method = Encoding.ASCII.GetString(startLine[..methodEnd]);
         target = Encoding.ASCII.GetString(targetSpan);
-        headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        headers = [];
 
-        var rest = startLineEnd < 0 ? ReadOnlySpan<byte>.Empty : headerBytes[(startLineEnd + 2)..];
+        var rest = RestAfterStartLine(headerBytes, startLineEnd);
         while (!rest.IsEmpty)
         {
             var lineEnd = rest.IndexOf("\r\n"u8);
             var line = lineEnd < 0 ? rest : rest[..lineEnd];
-            rest = lineEnd < 0 ? ReadOnlySpan<byte>.Empty : rest[(lineEnd + 2)..];
+            rest = SliceAfterDoubleNewline(rest, lineEnd);
 
             if (line.IsEmpty)
                 break;
@@ -904,7 +976,43 @@ internal sealed class BridgeNavigationProxyServer(
     }
 
     /// <summary>
-    /// Отрезает ведущие и хвостовые пробелы и табуляции — то же, что делал <c>string.Trim</c>
+    /// <summary>
+    /// Отрезает ведущие пробелы — пропуск повторных пробелов стартовой строки.
+    /// </summary>
+    private static ReadOnlySpan<byte> TrimLeadingAsciiSpaces(ReadOnlySpan<byte> value)
+    {
+        var start = 0;
+        while (start < value.Length && value[start] == (byte)' ')
+            start++;
+
+        return value[start..];
+    }
+
+    private static ReadOnlySpan<byte> StartLineBeforeSeparator(ReadOnlySpan<byte> headerBytes, int startLineEnd)
+        => startLineEnd < 0 ? headerBytes : headerBytes[..startLineEnd];
+
+    private static ReadOnlySpan<byte> RestAfterStartLine(ReadOnlySpan<byte> headerBytes, int startLineEnd)
+    {
+        if (startLineEnd >= 0)
+        {
+            return headerBytes[(startLineEnd + 2)..];
+        }
+
+        return default;
+    }
+
+    private static ReadOnlySpan<byte> SliceAfterDoubleNewline(ReadOnlySpan<byte> rest, int lineEnd)
+    {
+        if (lineEnd >= 0)
+        {
+            return rest[(lineEnd + 2)..];
+        }
+
+        return default;
+    }
+
+    /// <summary>
+    /// Отрезает ведущие и хвостовые пробелы и табуляции — то же, что делал <c lang="text">string.Trim</c>
     /// для разобранных заголовков, но без промежуточной строки.
     /// </summary>
     private static ReadOnlySpan<byte> TrimAsciiSpace(ReadOnlySpan<byte> value)
@@ -957,10 +1065,13 @@ internal sealed class BridgeNavigationProxyServer(
         int HeaderEnd,
         int TotalCount);
 
+    /// <summary>
+    /// Читает конверт запроса из потока в арендованный буфер.
+    /// </summary>
     /// <remarks>
     /// ★ Буфер берётся из пула, а заголовки наружу КОПИЕЙ не отдаются: вызывающий разбирает их
     /// прямо в арендованной памяти и возвращает буфер. Прежде на каждый запрос страницы выделялся
-    /// свежий массив на 4 КБ (плюс удвоения через <c>Array.Resize</c>) и ещё одна копия блока
+    /// свежий массив на 4 КБ (плюс удвоения через <c lang="text">Array.Resize</c>) и ещё одна копия блока
     /// заголовков.
     /// </remarks>
     private static async Task<RequestEnvelopeReadResult> ReadRequestEnvelopeAsync(Stream stream, CancellationToken cancellationToken)
@@ -1011,7 +1122,9 @@ internal sealed class BridgeNavigationProxyServer(
         }
     }
 
-    // Синтетическое решение «продолжить как есть» для запросов без зарегистрированного решения.
+    /// <summary>
+    /// Синтетическое решение «продолжить как есть» для запросов без зарегистрированного решения.
+    /// </summary>
     /// <summary>
     /// Пытается сопоставить запросу зарегистрированный маршрут по route token.
     /// </summary>
@@ -1053,12 +1166,20 @@ internal sealed class BridgeNavigationProxyServer(
             return;
         }
 
+        // Токен берём у живого маршрута, а не оставляем пустым. Запрос без распознанного токена
+        // принадлежит той же вкладке и обязан умереть вместе с её задачей: при пустом токене
+        // отмена по жизни маршрута не работала, и такие запросы доигрывали ForwardTimeout уже во
+        // время следующей задачи — в логе таймаут ответа приходил ровно в секунду её старта.
+        var inheritedRouteToken = registryResolver()?.TryResolveAnyRoute(out var liveRoute) == true
+            ? liveRoute.RouteToken
+            : string.Empty;
+
         var unroutedRoute = new ProxyNavigationRoute
         {
             SessionId = string.Empty,
             TabId = string.Empty,
             ContextId = string.Empty,
-            RouteToken = string.Empty,
+            RouteToken = inheritedRouteToken,
 
             // Апстрим наследуется у последнего живого маршрута: прямой выход в сеть для запроса
             // задачи недопустим — см. lastResolvedUpstreamProxy.
@@ -1252,7 +1373,14 @@ internal sealed class BridgeNavigationProxyServer(
 
         // Бюджет upstream отсчитывается от токена сервера, а не от фазы обмена с клиентом:
         // иначе он поглощался бы уже потраченным на чтение запроса временем.
-        using var forwardBudget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        //
+        // К нему подмешан токен ЖИЗНИ МАРШРУТА: когда вкладка заканчивает задачу и маршрут
+        // снимается, незавершённые запросы обрываются сразу, а не доигрывают ForwardTimeout уже
+        // во время следующей задачи. Именно это доигрывание делало сбой заразным (после провала
+        // следующая задача падала в 69% случаев против 11% после успеха).
+        using var forwardBudget = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            ResolveRouteLifetimeToken(route));
         forwardBudget.CancelAfter(ForwardTimeout);
 
         // Один повтор при обрыве CONNECT-туннеля (апстрим-прокси ответил 5xx на установку туннеля).
@@ -1265,7 +1393,7 @@ internal sealed class BridgeNavigationProxyServer(
         // повтору не подлежит, тело запроса не переигрываем.
         async Task<HttpResponseMessage> SendUpstreamAsync()
         {
-            var client = GetForwardClient(route.UpstreamProxy);
+            var client = GetForwardClient(route.UpstreamProxy, route.RouteToken);
             using var forwardRequest = CreateForwardRequest(clientRequest, decision, forwardTargetUrl);
             return await client.SendAsync(
                 forwardRequest,
@@ -1342,24 +1470,27 @@ internal sealed class BridgeNavigationProxyServer(
     /// Лимит проверяется по мере чтения, а не после него: ответ без Content-Length (chunked)
     /// иначе успевал бы полностью попасть в память до отбраковки.
     /// </summary>
-    private static async Task<byte[]?> ReadForwardResponseBodyAsync(HttpResponseMessage forwardResponse, CancellationToken cancellationToken)
+    private static Task<byte[]?> ReadForwardResponseBodyAsync(HttpResponseMessage forwardResponse, CancellationToken cancellationToken)
     {
-        if (forwardResponse.Content.Headers.ContentLength is { } knownLength)
-        {
-            if (knownLength > MaxForwardResponseBytes)
-                return null;
+        var knownLength = forwardResponse.Content.Headers.ContentLength;
+        if (knownLength is 0)
+            return Task.FromResult<byte[]?>([]);
 
-            if (knownLength == 0)
-                return [];
-        }
+        if (knownLength is > MaxForwardResponseBytes)
+            return Task.FromResult<byte[]?>(null);
 
-        var contentStream = await forwardResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        return ReadForwardResponseBodySlowPathAsync(forwardResponse.Content, knownLength, cancellationToken);
+    }
+
+    private static async Task<byte[]?> ReadForwardResponseBodySlowPathAsync(HttpContent content, long? knownLength, CancellationToken cancellationToken)
+    {
+        var contentStream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await using (contentStream.ConfigureAwait(false))
         {
             // ★ Известная длина — читаем СРАЗУ в итоговый массив. Прежде тело сначала копилось в
             // MemoryStream, а затем копировалось целиком через ToArray: две копии ответа вместо
             // нуля лишних. Для страницы это тело каждого ресурса.
-            if (forwardResponse.Content.Headers.ContentLength is { } exactLength and > 0)
+            if (knownLength is { } exactLength and > 0)
             {
                 var exact = new byte[(int)exactLength];
                 var filled = 0;
@@ -1445,7 +1576,7 @@ internal sealed class BridgeNavigationProxyServer(
 
     private static Dictionary<string, string> CollectForwardResponseHeaders(HttpResponseMessage forwardResponse)
     {
-        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> headers = new(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, values) in forwardResponse.Headers)
             AddForwardHeader(headers, name, values);
 
@@ -1481,7 +1612,7 @@ internal sealed class BridgeNavigationProxyServer(
     /// <remarks>
     /// ★ Запрос БЕЗ маршрутного токена прежде форвардился напрямую, мимо прокси задачи. Это разом
     /// и утечка настоящего адреса, и функциональный отказ: замер на живом Cloudflare показал, что
-    /// проверка тянет ресурс с <c>brunhild.challenges.cloudflare.com</c>, у которого есть ТОЛЬКО
+    /// проверка тянет ресурс с <c lang="text">brunhild.challenges.cloudflare.com</c>, у которого есть ТОЛЬКО
     /// адрес IPv6. Машина без IPv6 отвечала «Network is unreachable», запрос проверки не доходил,
     /// и Cloudflare закрывал задачу error-callback 600010 — 0 успехов из 4 при работе через прокси.
     ///
@@ -1496,14 +1627,45 @@ internal sealed class BridgeNavigationProxyServer(
             lastResolvedUpstreamProxy = upstreamProxy;
     }
 
-    private HttpClient GetForwardClient(string? upstreamProxy)
+    /// <summary>
+    /// Токен, отменяемый при снятии маршрута. Привязывает работу к жизни задачи, а не к срокам.
+    /// </summary>
+    private CancellationToken ResolveRouteLifetimeToken(ProxyNavigationRoute route)
     {
-        var key = upstreamProxy ?? string.Empty;
+        if (string.IsNullOrEmpty(route.RouteToken))
+            return CancellationToken.None;
+
+        return registryResolver()?.GetRouteLifetimeToken(route.RouteToken) ?? CancellationToken.None;
+    }
+
+    /// <summary>
+    /// Клиент переотправки для маршрута. Ключ включает маршрут, а не только адрес апстрима.
+    /// </summary>
+    /// <remarks>
+    /// Пул соединений обязан жить ровно столько же, сколько маршрут. Пока ключом был один адрес
+    /// апстрима, пул переживал смену задач: отмена по концу задачи рвала чужие рукопожатия прямо
+    /// в нём, и следующая задача доставала из кэша испорченные соединения. Замер это показал —
+    /// TLS-сбои выросли с 0.05-0.20 до 0.62 на задачу. Отдельный пул на маршрут делает границу
+    /// задач настоящей и для соединений тоже.
+    /// </remarks>
+    private HttpClient GetForwardClient(string? upstreamProxy, string routeToken)
+    {
+        var key = string.Concat(routeToken, "\u0000", upstreamProxy ?? string.Empty);
+        var isNew = false;
         var entry = forwardClients.GetOrAdd(
             key,
-            static (upstream, profile) => new ForwardClientEntry(CreateForwardClient(upstream, profile)),
-            forwardProfile);
+            (_, state) =>
+            {
+                isNew = true;
+                return new ForwardClientEntry(CreateForwardClient(state.Upstream, state.Profile));
+            },
+            (Upstream: upstreamProxy ?? string.Empty, Profile: forwardProfile));
         entry.MarkUsed();
+
+        // Пул умирает вместе с маршрутом — по СОБЫТИЮ его снятия, а не по сроку простоя.
+        // Регистрируем подписку один раз, при создании записи.
+        if (isNew && !string.IsNullOrEmpty(routeToken))
+            RegisterForwardClientLifetime(key, routeToken);
 
         // Подметаем только когда записей уже заметно много: на горячем пути лишний обход словаря
         // не нужен, а до порога кэш и так невелик.
@@ -1511,6 +1673,39 @@ internal sealed class BridgeNavigationProxyServer(
             EvictIdleForwardClients();
 
         return entry.Client;
+    }
+
+    /// <summary>
+    /// Освобождает пул маршрута ровно тогда, когда маршрут снят.
+    /// </summary>
+    private void RegisterForwardClientLifetime(string cacheKey, string routeToken)
+    {
+        var lifetime = registryResolver()?.GetRouteLifetimeToken(routeToken) ?? CancellationToken.None;
+        if (!lifetime.CanBeCanceled)
+            return;
+
+        // Маршрут мог быть снят между взятием клиента и подпиской — тогда убираем сразу.
+        if (lifetime.IsCancellationRequested)
+        {
+            RemoveForwardClient(cacheKey);
+            return;
+        }
+
+        try
+        {
+            _ = lifetime.Register(() => RemoveForwardClient(cacheKey));
+        }
+        catch (ObjectDisposedException)
+        {
+            // Маршрут сняли прямо во время подписки — освобождаем пул сами.
+            RemoveForwardClient(cacheKey);
+        }
+    }
+
+    private void RemoveForwardClient(string cacheKey)
+    {
+        if (forwardClients.TryRemove(cacheKey, out var removed))
+            DisposeForwardClientDelayed(removed.Client);
     }
 
     /// <summary>
@@ -1569,6 +1764,13 @@ internal sealed class BridgeNavigationProxyServer(
             AllowAutoRedirect = false,
             UseCookies = false,
             ConnectTimeout = TimeSpan.FromSeconds(10),
+
+            // Срок ответа апстрима. Занижать его нельзя: через этот прокси идёт и загрузка
+            // challenges.cloudflare.com/turnstile/v0/api.js, которая в замере занимала до ~24с
+            // (через тот же upstream напрямую — 0.6с). Ограничение в 8с обрывало её на полпути,
+            // страница оставалась без объекта turnstile (scriptError=1, renderCalls=0) и задача
+            // гарантированно проваливалась. 30с покрывают наблюдённый худший случай с запасом.
+            ResponseHeadersTimeout = TimeSpan.FromSeconds(30),
 
             // Соединения кешируются на всё время жизни прокси, поэтому их нужно периодически
             // пересоздавать: иначе они держали бы устаревшие записи DNS.
@@ -1657,7 +1859,7 @@ internal sealed class BridgeNavigationProxyServer(
 
     /// <summary>
     /// <see langword="null"/> — заголовок присутствует, но не является корректным неотрицательным
-    /// числом; <c>0</c> — тела нет.
+    /// числом; <c lang="text">0</c> — тела нет.
     /// </summary>
     private static long? TryReadContentLength(Dictionary<string, string> headers)
     {
@@ -2031,7 +2233,7 @@ internal sealed class BridgeNavigationProxyServer(
     /// </summary>
     /// <remarks>
     /// Построитель и раньше работал по стековому буферу, но результат уходил через
-    /// <c>ToString()</c> и <c>Encoding.ASCII.GetBytes(string)</c> — строка и массив на КАЖДЫЙ
+    /// <c lang="text">ToString()</c> и <c lang="text">Encoding.ASCII.GetBytes(string)</c> — строка и массив на КАЖДЫЙ
     /// ответ прокси. Кодируем прямо из символьного спана.
     /// </remarks>
     private static (byte[] Buffer, int Length) RentResponseHeaderBytes(

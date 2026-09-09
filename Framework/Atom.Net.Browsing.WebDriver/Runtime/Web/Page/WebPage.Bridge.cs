@@ -83,11 +83,10 @@ public sealed partial class WebPage
             sessionId,
             tabId,
             commands,
-            cancellationToken => commands.SetTabContextAsync(
-                sessionId,
-                tabId,
-                WebBrowser.BuildSetTabContextPayload(this),
-                cancellationToken),
+            // Reapply идёт через общий retry-путь ApplyBridgeTabContextAsync: при перезапуске
+            // service worker прямая отправка ловит «сеанс-отключён» до переподключения
+            // транспорта, из-за чего recovery-контур навигации застревал с reapply=false.
+            cancellationToken => WebBrowser.ApplyBridgeTabContextAsync(this, cancellationToken),
             trackPendingNavigateUrl: SetPendingBridgeNavigationUrl);
         appliedRequestInterceptionState = null;
     }

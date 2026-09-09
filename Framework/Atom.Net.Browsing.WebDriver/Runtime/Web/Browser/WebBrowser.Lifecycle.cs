@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
-using System.Drawing;
 using System.Diagnostics.CodeAnalysis;
+using System.Drawing;
 using System.Runtime.Versioning;
 using Atom.Hardware.Display;
 using Atom.Hardware.Input;
@@ -411,19 +411,34 @@ public sealed partial class WebBrowser
     }
 
     [SupportedOSPlatform("linux")]
-    private static ValueTask<VirtualDisplay?> AutoCreateDisplayAsync(VirtualDisplay? existingDisplay, WebBrowserSettings launchSettings, CancellationToken cancellationToken)
+    private static async ValueTask<VirtualDisplay?> AutoCreateDisplayAsync(VirtualDisplay? existingDisplay, WebBrowserSettings launchSettings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(launchSettings);
 
-        if (launchSettings.UseHeadlessMode && existingDisplay is null)
-            return ValueTask.FromResult<VirtualDisplay?>(null);
-
         if (!ShouldAutoCreateDisplay(existingDisplay, OperatingSystem.IsLinux()))
-            return ValueTask.FromResult<VirtualDisplay?>(null);
+            return null;
 
         launchSettings.Logger?.LogWebBrowserAutoDisplayCreating();
 
-        return CreateLinuxDisplayAsync(launchSettings, cancellationToken);
+        try
+        {
+            return await CreateLinuxDisplayAsync(launchSettings, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (launchSettings.UseHeadlessMode && exception is not OperationCanceledException)
+        {
+            // Раньше headless-запуск не создавал дисплей вовсе и уходил в настоящий --headless.
+            // Это ломало всё, чему нужна живая поверхность окна: кадры/rAF на «невидимой» вкладке
+            // не шли (виджеты проверок не монтировали свои iframe), а активация вкладки и
+            // доверенный ввод падали — виртуальную мышь (XTEST) без дисплея создать нельзя.
+            // Теперь headless получает СКРЫТЫЙ виртуальный дисплей, и браузер запускается на нём
+            // ОБЫЧНЫМ ОКНОМ (аргументы --headless/-headless срезаются в LaunchBrowserProcess),
+            // то есть ровно тот же рендер-конвейер, что и в headful: parity headless/headful,
+            // независимо от заявляемого профиля устройства. Если X-бэкенда на машине нет —
+            // откатываемся на прежний чисто-headless запуск вместо поломки запуска: хуже,
+            // но это прежнее поведение.
+            launchSettings.Logger?.LogWebBrowserHeadlessDisplayFallback(exception);
+            return null;
+        }
     }
 
     [SupportedOSPlatform("linux")]
@@ -447,10 +462,10 @@ public sealed partial class WebBrowser
     /// </summary>
     /// <remarks>
     /// ★ Замер эмуляции показал разрыв в геометрии: страница получала подменённые
-    /// <c>innerWidth/innerHeight</c> размером с экран профиля (1512×982), а настоящая область
-    /// документа была 780×493 — и <c>documentElement.clientHeight</c> вместе с
-    /// <c>visualViewport</c> отдавали именно её. Расхождение вдвое читается одной строкой и не
-    /// лечится подменой: за <c>clientHeight</c> стоит настоящая раскладка страницы.
+    /// <c lang="text">innerWidth/innerHeight</c> размером с экран профиля (1512×982), а настоящая область
+    /// документа была 780×493 — и <c lang="text">documentElement.clientHeight</c> вместе с
+    /// <c lang="text">visualViewport</c> отдавали именно её. Расхождение вдвое читается одной строкой и не
+    /// лечится подменой: за <c lang="text">clientHeight</c> стоит настоящая раскладка страницы.
     ///
     /// Поэтому геометрию не подменяют, а ЗАДАЮТ: дисплей поднимается размером с заявленный экран,
     /// окно получает размер заявленной области просмотра, и тогда все метрики согласованы сами —
@@ -641,18 +656,18 @@ public sealed partial class WebBrowser
     /// </summary>
     /// <remarks>
     /// ★ Замер эмуляции показал расхождение того же рода, что и с часовым поясом: заявлен профиль
-    /// en-US, страница видела <c>navigator.languages = ['en-US','en']</c> (подмена расширением), а
-    /// <c>Intl.DateTimeFormat().resolvedOptions().locale</c> отдавал <c>ru</c>, и название пояса в
-    /// <c>Date.prototype.toString()</c> печаталось по-русски: «Восточная Америка, стандартное
+    /// en-US, страница видела <c lang="text">navigator.languages = ['en-US','en']</c> (подмена расширением), а
+    /// <c lang="text">Intl.DateTimeFormat().resolvedOptions().locale</c> отдавал <c lang="text">ru</c>, и название пояса в
+    /// <c lang="text">Date.prototype.toString()</c> печаталось по-русски: «Восточная Америка, стандартное
     /// время» вместо «Eastern Standard Time». Одного чтения любого из этих путей хватало, чтобы
     /// увидеть настоящую машину сквозь профиль.
     ///
-    /// Аргумент <c>--lang</c> здесь не помогает: он задаёт язык интерфейса и Accept-Language, а
-    /// локаль ICU (её и читает <c>Intl</c>) Chromium на Linux берёт из окружения. Поэтому лечится
+    /// Аргумент <c lang="text">--lang</c> здесь не помогает: он задаёт язык интерфейса и Accept-Language, а
+    /// локаль ICU (её и читает <c lang="text">Intl</c>) Chromium на Linux берёт из окружения. Поэтому лечится
     /// это тем же способом, что и пояс, — переменными процесса, а не обёрткой в странице:
     /// согласованными становятся сразу все пути, включая воркеры и чужой код.
     ///
-    /// Значение приводится к виду <c>en_US.UTF-8</c>: ICU ждёт разделитель подчёркиванием, а
+    /// Значение приводится к виду <c lang="text">en_US.UTF-8</c>: ICU ждёт разделитель подчёркиванием, а
     /// кодировку — явной; профильная же локаль записана в дефисной форме BCP-47.
     /// </remarks>
     /// <summary>
@@ -692,8 +707,8 @@ public sealed partial class WebBrowser
     /// Переводит процесс браузера в заявленный часовой пояс.
     /// </summary>
     /// <remarks>
-    /// ★ Замер эмуляции показал грубое расхождение: <c>Intl.DateTimeFormat().resolvedOptions()</c>
-    /// сообщал заявленный пояс (America/New_York), а <c>Date.prototype.getTimezoneOffset()</c> —
+    /// ★ Замер эмуляции показал грубое расхождение: <c lang="text">Intl.DateTimeFormat().resolvedOptions()</c>
+    /// сообщал заявленный пояс (America/New_York), а <c lang="text">Date.prototype.getTimezoneOffset()</c> —
     /// НАСТОЯЩИЙ пояс машины (−180, то есть UTC+3). Подменялся только Intl, и одного вычитания
     /// хватало, чтобы поймать подмену.
     ///

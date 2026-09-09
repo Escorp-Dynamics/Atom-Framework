@@ -254,6 +254,19 @@ internal static class ProfileAutomationPresets
             "--disable-backgrounding-occluded-windows",
             "--disable-background-timer-throttling",
 
+            // Не трогать аппаратную видеоподсистему хоста: браузер живёт на виртуальном дисплее,
+            // выводить через GPU некуда, а GPU-процесс всё равно открывал драйвер реальной карты и
+            // срывал внешний монитор.
+            "--disable-gpu",
+            "--disable-gpu-compositing",
+
+            // ...но WebGL при этом обязан остаться рабочим. Замер показал webgl=НЕТ-КОНТЕКСТА и
+            // пустые glVendor/glRenderer — для настоящего десктопного Chrome это невозможно, и
+            // Cloudflare отвечал на такой отпечаток error-callback 300010 («bot behavior detected»
+            // по его документации). SwiftShader даёт контекст программно, без обращения к железу,
+            // поэтому монитор остаётся нетронутым, а страница видит нормальный ANGLE-рендерер.
+            "--enable-unsafe-swiftshader",
+            "--use-angle=swiftshader",
         ];
 
         if (!enableManagedChromiumBootstrap)
@@ -568,7 +581,7 @@ internal static class ProfileAutomationPresets
     /// ★ На iOS и iPadOS ЛЮБОЙ браузер работает на WebKit — там нет ни Blink, ни Gecko: Chrome
     /// (CriOS) и Firefox (FxiOS) там лишь оболочки над системным движком. Поэтому профиль iPhone
     /// или iPad, запущенный на Chromium, противоречив не в свойствах, а в самом движке: формат
-    /// <c>Error.stack</c>, тексты исключений, состав глобальных объектов и поведение встроенных
+    /// <c lang="text">Error.stack</c>, тексты исключений, состав глобальных объектов и поведение встроенных
     /// типов принадлежат V8 и подменой свойств не закрываются.
     ///
     /// Замер это подтвердил напрямую: живой Cloudflare Turnstile отдаёт такому профилю
@@ -612,14 +625,14 @@ internal static class ProfileAutomationPresets
     /// Аргументы размера и положения окна под заявленную область просмотра.
     /// </summary>
     /// <remarks>
-    /// ★ Замер эмуляции показал разрыв: подменённые <c>innerWidth/innerHeight</c> отдавали размер
+    /// ★ Замер эмуляции показал разрыв: подменённые <c lang="text">innerWidth/innerHeight</c> отдавали размер
     /// профиля (1512×982), а настоящая область документа была 780×493 — и её же отдавали
-    /// <c>documentElement.clientHeight</c> и <c>visualViewport</c>, до которых подмена не
+    /// <c lang="text">documentElement.clientHeight</c> и <c lang="text">visualViewport</c>, до которых подмена не
     /// дотягивается: за ними стоит настоящая раскладка страницы. Расхождение вдвое видно одной
     /// строкой.
     ///
     /// Поэтому окно получает заявленный размер по-настоящему. Тогда согласованы сразу все метрики,
-    /// включая недоступные подмене, а разница <c>outerHeight − innerHeight</c> становится
+    /// включая недоступные подмене, а разница <c lang="text">outerHeight − innerHeight</c> становится
     /// настоящей высотой рамки браузера вместо нуля — который сам по себе выдавал среду без окна.
     /// </remarks>
     private static IEnumerable<string> TryResolveChromiumWindowArguments(WebBrowserSettings settings)

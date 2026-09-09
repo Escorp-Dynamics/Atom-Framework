@@ -7,12 +7,12 @@ namespace Atom.Net.Browsing.WebDriver;
 /// ЗАЧЕМ. <see cref="Device.UserAgent"/>, <see cref="Device.Platform"/> и
 /// <see cref="Device.ClientHints"/> — независимые поля, и ничто не связывает их между собой. Если
 /// задать только UA, остальные признаки останутся от РЕАЛЬНОЙ машины: заявляем Windows, а
-/// <c>navigator.platform</c> отдаёт <c>Linux x86_64</c> и заголовок <c>Sec-CH-UA-Platform</c> —
-/// <c>"Linux"</c>. Такое расхождение замечается антибот-защитой: проверка на реальном таргете с одним
+/// <c lang="text">navigator.platform</c> отдаёт <c lang="text">Linux x86_64</c> и заголовок <c lang="text">Sec-CH-UA-Platform</c> —
+/// <c lang="text">"Linux"</c>. Такое расхождение замечается антибот-защитой: проверка на реальном таргете с одним
 /// лишь подменённым UA дала 0 решений из 8 при явных error-callback от Cloudflare, тогда как без
 /// подмены — 151 из 151.
 /// Здесь по строке UA выводится согласованный набор: платформа, client hints (включая бренды для
-/// <c>navigator.userAgentData</c>), мобильность и число точек касания.
+/// <c lang="text">navigator.userAgentData</c>), мобильность и число точек касания.
 /// ГРАНИЦЫ: заполняются только поля, ОДНОЗНАЧНО следующие из UA. Значения, которые UA не задаёт
 /// (часовой пояс, локаль, размеры экрана, память, число ядер), намеренно не трогаются — их
 /// правдоподобие определяется задачей, а не строкой UA. Уже заданные вызывающим значения не
@@ -206,7 +206,7 @@ public static class UserAgentProfileAlignment
     /// Определяет бренд и версию Chromium-браузера.
     /// </summary>
     /// <remarks>
-    /// Порядок проверок важен: UA Edge содержит и <c>Chrome/…</c>, и <c>Edg/…</c>, поэтому бренд
+    /// Порядок проверок важен: UA Edge содержит и <c lang="text">Chrome/…</c>, и <c lang="text">Edg/…</c>, поэтому бренд
     /// определяет именно Edge-токен.
     /// </remarks>
     private static bool TryDetectChromiumBrand(
@@ -235,7 +235,7 @@ public static class UserAgentProfileAlignment
     }
 
     /// <summary>
-    /// Читает версию, стоящую сразу за токеном (например, <c>Chrome/151.0.0.0</c>).
+    /// Читает версию, стоящую сразу за токеном (например, <c lang="text">Chrome/151.0.0.0</c>).
     /// </summary>
     /// <param name="major">Мажорная часть версии.</param>
     /// <param name="full">Полная версия, дополненная до четырёх компонентов.</param>
@@ -369,7 +369,7 @@ public static class UserAgentProfileAlignment
             Model: string.Empty);
     }
 
-    /// <summary>Версия Android из фрагмента вида <c>Android 13; …</c>.</summary>
+    /// <summary>Версия Android из фрагмента вида <c lang="text">Android 13; …</c>.</summary>
     private static string ReadAndroidVersion(ReadOnlySpan<char> userAgent)
     {
         var start = userAgent.IndexOf("Android ", StringComparison.OrdinalIgnoreCase);
@@ -381,7 +381,7 @@ public static class UserAgentProfileAlignment
     }
 
     /// <summary>
-    /// Модель устройства из фрагмента вида <c>Android 13; SM-S901B)</c> или <c>… SM-S901B Build/…</c>.
+    /// Модель устройства из фрагмента вида <c lang="text">Android 13; SM-S901B)</c> или <c lang="text">… SM-S901B Build/…</c>.
     /// </summary>
     private static string ReadAndroidModel(ReadOnlySpan<char> userAgent)
     {
@@ -415,7 +415,7 @@ public static class UserAgentProfileAlignment
     }
 
     /// <summary>
-    /// Версия macOS из фрагмента вида <c>Mac OS X 10_15_7</c>; подчёркивания приводятся к точкам.
+    /// Версия macOS из фрагмента вида <c lang="text">Mac OS X 10_15_7</c>; подчёркивания приводятся к точкам.
     /// </summary>
     private static string ReadMacVersion(ReadOnlySpan<char> userAgent)
     {

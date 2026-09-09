@@ -1,9 +1,9 @@
 ﻿using System.Diagnostics;
 using System.Reflection;
 using Atom.Debug.Logging;
-using Microsoft.Extensions.Logging;
 using Atom.Hardware.Display;
 using Atom.Hardware.Input;
+using Microsoft.Extensions.Logging;
 using RuntimeWebBrowser = Atom.Net.Browsing.WebDriver.WebBrowser;
 
 namespace Atom.Net.Browsing.WebDriver.Tests;

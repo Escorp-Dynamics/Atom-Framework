@@ -46,7 +46,7 @@ public readonly struct ProcessInfo : IEquatable<ProcessInfo>, IDisposable
     /// Ожидает завершения процесса.
     /// </summary>
     /// <param name="cancellationToken">Токен отмены задачи.</param>
-    /// <returns><c>True</c>, если процесс был закрыт успешно, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если процесс был закрыт успешно, иначе <see langword="false"/>.</returns>
     public readonly async ValueTask<bool> WaitForEndingAsync(CancellationToken cancellationToken)
     {
         await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
@@ -56,7 +56,7 @@ public readonly struct ProcessInfo : IEquatable<ProcessInfo>, IDisposable
     /// <summary>
     /// Ожидает завершения процесса.
     /// </summary>
-    /// <returns><c>True</c>, если процесс был закрыт успешно, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если процесс был закрыт успешно, иначе <see langword="false"/>.</returns>
     public readonly ValueTask<bool> WaitForEndingAsync() => WaitForEndingAsync(CancellationToken.None);
 
     /// <summary>
@@ -85,14 +85,14 @@ public readonly struct ProcessInfo : IEquatable<ProcessInfo>, IDisposable
     /// Сравнивает объект с текущим экземпляром.
     /// </summary>
     /// <param name="obj">Сравниваемый объект.</param>
-    /// <returns><c>True</c>, если экземпляры равны, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если экземпляры равны, иначе <see langword="false"/>.</returns>
     public override bool Equals([NotNullWhen(true)] object? obj) => obj is ProcessInfo info && Equals(info);
 
     /// <summary>
     /// Сравнивает объект с текущим экземпляром.
     /// </summary>
     /// <param name="other">Сравниваемый объект.</param>
-    /// <returns><c>True</c>, если экземпляры равны, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если экземпляры равны, иначе <see langword="false"/>.</returns>
     public bool Equals(ProcessInfo other) => process.Id == other.process.Id;
 
     /// <summary>
@@ -100,7 +100,7 @@ public readonly struct ProcessInfo : IEquatable<ProcessInfo>, IDisposable
     /// </summary>
     /// <param name="left">Экземпляр слева.</param>
     /// <param name="right">Экземпляр справа.</param>
-    /// <returns><c>True</c>, если экземпляры равны, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если экземпляры равны, иначе <see langword="false"/>.</returns>
     public static bool operator ==(ProcessInfo left, ProcessInfo right) => left.Equals(right);
 
     /// <summary>
@@ -108,7 +108,7 @@ public readonly struct ProcessInfo : IEquatable<ProcessInfo>, IDisposable
     /// </summary>
     /// <param name="left">Экземпляр слева.</param>
     /// <param name="right">Экземпляр справа.</param>
-    /// <returns><c>True</c>, если экземпляры не равны, иначе <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/>, если экземпляры не равны, иначе <see langword="false"/>.</returns>
     public static bool operator !=(ProcessInfo left, ProcessInfo right) => !left.Equals(right);
 
     /// <summary>

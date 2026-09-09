@@ -1,6 +1,7 @@
 ﻿#pragma warning disable S5443
 
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Globalization;
 using System.Runtime.Versioning;
@@ -17,7 +18,7 @@ namespace Atom.Hardware.Display;
 /// При <see cref="VirtualDisplaySettings.IsVisible"/> = <see langword="false"/> (по умолчанию)
 /// запускается изолированная xpra-сессия без локального attach.
 /// При <see cref="VirtualDisplaySettings.IsVisible"/> = <see langword="true"/>
-/// дополнительно запускается локальный <c>xpra attach</c>, публикующий окна rootless на текущем экране.
+/// дополнительно запускается локальный <c lang="bash">xpra attach</c>, публикующий окна rootless на текущем экране.
 /// </para>
 /// <para>
 /// Браузеры и другие X11-приложения, запущенные с <see cref="Display"/>,
@@ -28,7 +29,7 @@ namespace Atom.Hardware.Display;
 /// инжектит события только в этот X-сервер и не затрагивает физическую мышь.
 /// </para>
 /// <example>
-/// <code>
+/// <code lang="csharp">
 /// // Невидимый rootless-сеанс без локального attach:
 /// await using var display = await VirtualDisplay.CreateAsync();
 ///
@@ -76,8 +77,8 @@ public sealed class VirtualDisplay : IAsyncDisposable
     public VirtualDisplaySettings Settings { get; }
 
     /// <summary>
-    /// Строка дисплея X11 (например, <c>:99</c>).
-    /// Используйте для переменной окружения <c>DISPLAY</c>.
+    /// Строка дисплея X11 (например, <c lang="text">:99</c>).
+    /// Используйте для переменной окружения <c lang="bash">DISPLAY</c>.
     /// </summary>
     public string Display { get; }
 
@@ -384,16 +385,24 @@ public sealed class VirtualDisplay : IAsyncDisposable
         {
             _ = reservedDisplayNumbers.Remove(displayNumber);
 
-            if (displayNumberClaims.Remove(displayNumber, out var claim))
+            if (displayNumberClaims.TryGetValue(displayNumber, out var claim))
             {
-                try
+                [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+                    Justification = "Замок уже снят с реестра displayNumberClaims; здесь он только освобождается.")]
+                static void DisposeClaim(FileStream claim)
                 {
-                    claim.Dispose();
+                    try
+                    {
+                        claim.Dispose();
+                    }
+                    catch (IOException)
+                    {
+                        // Файл-замок мог быть удалён извне: освобождение номера от этого не зависит.
+                    }
                 }
-                catch (IOException)
-                {
-                    // Файл-замок мог быть удалён извне: освобождение номера от этого не зависит.
-                }
+
+                _ = displayNumberClaims.Remove(displayNumber);
+                DisposeClaim(claim);
             }
         }
     }
@@ -1219,10 +1228,10 @@ public sealed class VirtualDisplay : IAsyncDisposable
     /// </summary>
     /// <remarks>
     /// Штатный <see cref="Process.Kill(bool)"/> с обходом дерева на Linux для КАЖДОГО процесса в
-    /// системе вычитывает <c>/proc/&lt;pid&gt;/stat</c> и заново проверяет происхождение, поэтому на
+    /// системе вычитывает <c lang="bash">/proc/&lt;pid&gt;/stat</c> и заново проверяет происхождение, поэтому на
     /// машине с тысячами процессов один вызов занимает минуты, полностью съедая ядро. Освобождение
     /// дисплея при этом не завершалось, брошенные Xvfb/xpra копились и делали следующий вызов ещё
-    /// дороже. Здесь дерево строится одним проходом по <c>/proc</c>, что превращает квадратичный
+    /// дороже. Здесь дерево строится одним проходом по <c lang="bash">/proc</c>, что превращает квадратичный
     /// перебор в линейный и возвращает освобождению предсказуемое время.
     /// </remarks>
     private static void KillProcessTreeWithinBudget(Process process)
@@ -1247,7 +1256,7 @@ public sealed class VirtualDisplay : IAsyncDisposable
     }
 
     /// <summary>
-    /// Собирает идентификаторы всех потомков процесса одним проходом по <c>/proc</c>.
+    /// Собирает идентификаторы всех потомков процесса одним проходом по <c lang="bash">/proc</c>.
     /// </summary>
     /// <remarks>
     /// Возвращает потомков в порядке «от листьев к корню».

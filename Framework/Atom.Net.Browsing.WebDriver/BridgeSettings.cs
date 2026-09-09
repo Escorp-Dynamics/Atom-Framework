@@ -111,22 +111,22 @@ internal sealed class BridgeSettings
     public string Host { get; init; } = "127.0.0.1";
 
     /// <summary>
-    /// Порт bridge endpoint. <c>0</c> означает автоматический выбор.
+    /// Порт bridge endpoint. <c lang="text">0</c> означает автоматический выбор.
     /// </summary>
     public int Port { get; init; }
 
     /// <summary>
-    /// Порт HTTPS delivery endpoint для managed Chromium install path. <c>0</c> означает автоматический выбор.
+    /// Порт HTTPS delivery endpoint для managed Chromium install path. <c lang="text">0</c> означает автоматический выбор.
     /// </summary>
     public int ManagedDeliveryPort { get; init; }
 
     /// <summary>
-    /// Порт WSS transport endpoint для browser-side bridge. <c>0</c> означает автоматический выбор.
+    /// Порт WSS transport endpoint для browser-side bridge. <c lang="text">0</c> означает автоматический выбор.
     /// </summary>
     public int SecureTransportPort { get; init; }
 
     /// <summary>
-    /// Порт локального navigation proxy endpoint для request-side fulfill path. <c>0</c> означает автоматический выбор.
+    /// Порт локального navigation proxy endpoint для request-side fulfill path. <c lang="text">0</c> означает автоматический выбор.
     /// </summary>
     public int NavigationProxyPort { get; init; }
 

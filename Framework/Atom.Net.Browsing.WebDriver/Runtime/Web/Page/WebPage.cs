@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Net;
@@ -446,6 +446,10 @@ public sealed partial class WebPage : IWebPage
         {
             OwnerWindow.OwnerBrowser.ProxyNavigationDecisions.RemoveRouteByContextId(previousContextId);
         }
+
+        // Перенастройка — это граница задач: прошлый сбой фокуса не должен урезать бюджет
+        // ожидания следующей, иначе она не дождётся переднего плана и виджет не смонтируется.
+        OwnerWindow.ResetDocumentFocusTracking(this);
 
         if (BridgeCommands is not null)
         {

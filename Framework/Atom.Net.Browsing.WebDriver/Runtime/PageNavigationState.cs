@@ -1473,7 +1473,7 @@ internal sealed class PageNavigationState : IPageTransport
 
     /// <summary>
     /// <see cref="Cookie.Expires"/> обычно имеет <see cref="DateTimeKind.Unspecified"/>, а
-    /// <c>new DateTimeOffset(DateTime)</c> трактует такое значение как локальное время и сдвигает
+    /// <c lang="text">new DateTimeOffset(DateTime)</c> трактует такое значение как локальное время и сдвигает
     /// срок жизни на смещение часового пояса. Неуказанный Kind считаем UTC.
     /// </summary>
     private static long ToUnixTimeSeconds(DateTime expires)
