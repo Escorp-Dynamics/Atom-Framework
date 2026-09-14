@@ -6,7 +6,7 @@
 			$(NoWarn);CA1873;CA5399;MA0051;S4790;CA1003;CA1031;CA1012;CA1064;CA1819;CA1822;CA2000;CA2227;CS0067;CS1570;CS1572;CS1573;CS1574;CS1591;IDE0005;IDE0028;IDE0039;IDE0305;IL2026;IL3050;AsyncFixer01;MA0017;MA0038;MA0042;MA0084;MA0106;MA0182;RCS1263;S1117;S1481;S2292;S2325;S3237;S3442;S3871;S4136;S4144</NoWarn>
 
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.8.8</Version>
+		<Version>0.9.0</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -92,6 +92,12 @@
 		<None Include="../Atom.Net.Browsing/icon.png" Link="icon.png" PackagePath="icon.png"
 			Pack="true" />
 		<None Update="README.md" PackagePath="\" Pack="true" />
+
+		<!-- Цель раскладывает расширение по output потребителя: сами contentFiles туда не копируются. -->
+		<None Include="build/Escorp.Atom.Net.Browsing.WebDriver.targets"
+			PackagePath="buildTransitive/Escorp.Atom.Net.Browsing.WebDriver.targets" Pack="true" />
+		<None Include="build/Escorp.Atom.Net.Browsing.WebDriver.targets"
+			PackagePath="build/Escorp.Atom.Net.Browsing.WebDriver.targets" Pack="true" />
 	</ItemGroup>
 
 	<Target Name="EnsureNodeAvailable"
@@ -195,15 +201,31 @@
 		</ItemGroup>
 	</Target>
 
+	<!--
+		Потребителю пакета нужен эталонный каталог расширения и бандл упаковщика CRX: на запуске
+		рантайм копирует каталог в профиль, дописывает identity.profile.js и config.json сессии и
+		пакует результат сам. ContentWithTargetPath через пакет не переносится, а contentFiles в
+		output не копируются, поэтому файлы кладём в свою папку, а раскладку делает
+		buildTransitive-цель Escorp.Atom.Net.Browsing.WebDriver.targets.
+	-->
 	<Target Name="CollectExtensionRuntimePackageFiles"
 		DependsOnTargets="PrepareExtensionRuntimeWorkingDirectories"
 		Condition="Exists('$(ExtensionRuntimeDirectory)/package.json')">
 		<ItemGroup>
 			<TfmSpecificPackageFile Include="$(ExtensionWorkingDirectory)\**\*">
-				<PackagePath>contentFiles\any\any\Extension</PackagePath>
+				<PackagePath>extension\Extension\%(RecursiveDir)</PackagePath>
 			</TfmSpecificPackageFile>
 			<TfmSpecificPackageFile Include="$(ExtensionFirefoxWorkingDirectory)\**\*">
-				<PackagePath>contentFiles\any\any\Extension.Firefox</PackagePath>
+				<PackagePath>extension\Extension.Firefox\%(RecursiveDir)</PackagePath>
+			</TfmSpecificPackageFile>
+
+			<!--
+				Самодостаточный бандл упаковщика: рядом с ним в output нет node_modules, поэтому
+				кладём именно сгенерированный бандл, а не исходный скрипт с import crx3.
+			-->
+			<TfmSpecificPackageFile Include="$(ExtensionGeneratedDirectory)/package-bridge-extension.mjs"
+				Condition="Exists('$(ExtensionGeneratedDirectory)/package-bridge-extension.mjs')">
+				<PackagePath>extension\ExtensionRuntime\scripts\</PackagePath>
 			</TfmSpecificPackageFile>
 		</ItemGroup>
 	</Target>

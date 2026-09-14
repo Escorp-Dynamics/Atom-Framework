@@ -4,7 +4,9 @@
 #endif
 
 using System.Buffers;
+#if DEBUG
 using System.Diagnostics;
+#endif
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;

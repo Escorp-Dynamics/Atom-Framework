@@ -5,7 +5,7 @@
 		<NoWarn>CA1003;CA1708</NoWarn>
 
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.3.9</Version>
+		<Version>0.4.0</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>

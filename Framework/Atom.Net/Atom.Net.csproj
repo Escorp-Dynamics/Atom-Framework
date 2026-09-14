@@ -6,7 +6,7 @@
 			CA1003;CA1028;CA1031;CA1711;ERP022;CS1591;RCS1138;S125;MA0007;MA0051;S3776;S907;CA2014;S3358;MA0071;S2692;MA0099;MA0078;MA0055;IDE0005;CA5398;MA0053;S1186;S1854;MA0076</NoWarn>
 
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.0.5</Version>
+		<Version>0.0.6</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>

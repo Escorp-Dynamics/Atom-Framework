@@ -1,0 +1,53 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+	<!--
+		Раскладка расширения-моста в output потребителя пакета.
+
+		Это эталон, а не то, что увидит браузер: на каждый запуск BridgeExtensionBootstrap копирует каталог в
+		профиль, дописывает identity.profile.js и config.json с параметрами сессии и только потом пакует
+		результат в CRX. Поэтому предсобранный архив здесь не годится, а упаковщик нужен в runtime.
+	-->
+
+	<PropertyGroup>
+		<AtomWebDriverExtensionSourceDirectory Condition="'$(AtomWebDriverExtensionSourceDirectory)' == ''">$(MSBuildThisFileDirectory)../extension/</AtomWebDriverExtensionSourceDirectory>
+		<AtomWebDriverCopyExtensionToOutput Condition="'$(AtomWebDriverCopyExtensionToOutput)' == ''">true</AtomWebDriverCopyExtensionToOutput>
+	</PropertyGroup>
+
+	<ItemGroup Condition="'$(AtomWebDriverCopyExtensionToOutput)' == 'true' and Exists('$(AtomWebDriverExtensionSourceDirectory)')">
+		<_AtomWebDriverChromeExtensionFile Include="$(AtomWebDriverExtensionSourceDirectory)Extension/**/*" />
+		<_AtomWebDriverFirefoxExtensionFile Include="$(AtomWebDriverExtensionSourceDirectory)Extension.Firefox/**/*" />
+		<_AtomWebDriverPackagerFile Include="$(AtomWebDriverExtensionSourceDirectory)ExtensionRuntime/**/*" />
+
+		<ContentWithTargetPath Include="@(_AtomWebDriverChromeExtensionFile)"
+			CopyToOutputDirectory="PreserveNewest"
+			CopyToPublishDirectory="PreserveNewest"
+			Pack="false"
+			TargetPath="Extension/%(RecursiveDir)%(Filename)%(Extension)" />
+
+		<ContentWithTargetPath Include="@(_AtomWebDriverFirefoxExtensionFile)"
+			CopyToOutputDirectory="PreserveNewest"
+			CopyToPublishDirectory="PreserveNewest"
+			Pack="false"
+			TargetPath="Extension.Firefox/%(RecursiveDir)%(Filename)%(Extension)" />
+
+		<ContentWithTargetPath Include="@(_AtomWebDriverPackagerFile)"
+			CopyToOutputDirectory="PreserveNewest"
+			CopyToPublishDirectory="PreserveNewest"
+			Pack="false"
+			TargetPath="ExtensionRuntime/%(RecursiveDir)%(Filename)%(Extension)" />
+	</ItemGroup>
+
+	<!--
+		Пустой манифест означает, что браузер запустится без моста и молча потеряет управление,
+		поэтому обрываем сборку здесь, а не ловим это в рантайме.
+	-->
+	<Target Name="_AtomWebDriverVerifyExtensionPayload"
+		BeforeTargets="Build"
+		Condition="'$(AtomWebDriverCopyExtensionToOutput)' == 'true'">
+		<Error Condition="!Exists('$(AtomWebDriverExtensionSourceDirectory)Extension/manifest.json')"
+			Text="Пакет Escorp.Atom.Net.Browsing.WebDriver не содержит Extension/manifest.json (искали в $(AtomWebDriverExtensionSourceDirectory)). Пакет собран без расширения-моста — пересоберите его через dotnet pack -c Release." />
+		<Error Condition="!Exists('$(AtomWebDriverExtensionSourceDirectory)Extension.Firefox/manifest.json')"
+			Text="Пакет Escorp.Atom.Net.Browsing.WebDriver не содержит Extension.Firefox/manifest.json (искали в $(AtomWebDriverExtensionSourceDirectory)). Пакет собран без расширения-моста для Firefox — пересоберите его через dotnet pack -c Release." />
+	</Target>
+
+</Project>

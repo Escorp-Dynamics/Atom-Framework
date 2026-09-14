@@ -15,7 +15,7 @@
 		<NoWarn>CA1031;CA1716;CA1724;RS1041;NU5128</NoWarn>
 
 		<PackageId>$(AssemblyName)</PackageId>
-		<Version>0.6.6</Version>
+		<Version>0.6.8</Version>
 		<Authors>Yuriy Yesin, Escorp Labs</Authors>
 		<Company>Escorp Dynamics</Company>
 		<Product>Escorp.$(AssemblyName)</Product>
@@ -81,19 +81,27 @@
 		<None Update="README.md" PackagePath="\" Pack="true" />
 	</ItemGroup>
 
-	<ItemGroup>
-		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true"
-			PackagePath="analyzers/dotnet/cs" Visible="false"
-			Condition="Exists('$(OutputPath)\$(AssemblyName).dll')" />
-		<None Include="$(OutputPath)\$(AssemblyName).pdb" Pack="true"
-			PackagePath="analyzers/dotnet/cs" Visible="false"
-			Condition="Exists('$(OutputPath)\$(AssemblyName).pdb')" />
-		<None Include="$(OutputPath)\$(AssemblyName).xml" Pack="true"
-			PackagePath="analyzers/dotnet/cs" Visible="false"
-			Condition="Exists('$(OutputPath)\$(AssemblyName).xml')" />
-		<None Include="$(OutputPath)\Escorp.Atom.dll" Pack="true"
-			PackagePath="analyzers/dotnet/cs" Visible="false"
-			Condition="Exists('$(OutputPath)\Escorp.Atom.dll')" />
-	</ItemGroup>
+	<!--
+		Файлы анализатора добавляются в пакет на старте Pack-цели: при GeneratePackageOnBuild
+		pack выполняется в той же MSBuild-сессии после сборки, и к этому моменту выходные
+		файлы уже существуют. Статический ItemGroup с условиями Exists() оценивается ДО сборки —
+		на чистой машине условия дают false, и пакет уходит на nuget.org без analyzers/
+		(так получился битый Escorp.Atom.SourceGeneration 0.6.7).
+		Escorp.Atom.dll берётся из кеша пакетов через $(PkgEscorp_Atom) (GeneratePathProperty),
+		чтобы не зависеть от CopyLocalLockFileAssemblies и времени копирования.
+	-->
+	<Target Name="_IncludeAnalyzerPackFiles" BeforeTargets="_GetPackageFiles"
+		Condition="'$(DisableAnalyzerDependencyInclusion)' != 'true'">
+		<ItemGroup>
+			<None Include="$(OutputPath)$(AssemblyName).dll" Pack="true"
+				PackagePath="analyzers/dotnet/cs" Visible="false" />
+			<None Include="$(OutputPath)$(AssemblyName).pdb" Pack="true"
+				PackagePath="analyzers/dotnet/cs" Visible="false" />
+			<None Include="$(OutputPath)$(AssemblyName).xml" Pack="true"
+				PackagePath="analyzers/dotnet/cs" Visible="false" />
+			<None Include="$(PkgEscorp_Atom)/lib/$(TargetFramework)/Escorp.Atom.dll" Pack="true"
+				PackagePath="analyzers/dotnet/cs" Visible="false" />
+		</ItemGroup>
+	</Target>
 
 </Project>

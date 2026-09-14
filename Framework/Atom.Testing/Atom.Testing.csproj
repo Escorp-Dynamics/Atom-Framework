@@ -7,7 +7,7 @@
 
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>$(AssemblyName)</PackageId>
-    <Version>0.0.2</Version>
+    <Version>0.0.3</Version>
     <Authors>Yuriy Yesin, Escorp Labs</Authors>
     <Company>Escorp Dynamics</Company>
     <Product>Escorp.$(AssemblyName)</Product>

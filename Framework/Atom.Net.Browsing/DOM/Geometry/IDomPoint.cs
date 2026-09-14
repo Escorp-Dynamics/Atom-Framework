@@ -3,6 +3,4 @@
 /// <summary>
 /// Spec-shaped contract generated from the accepted geometry surface.
 /// </summary>
-public interface IDomPoint
-{
-}
+public interface IDomPoint;
