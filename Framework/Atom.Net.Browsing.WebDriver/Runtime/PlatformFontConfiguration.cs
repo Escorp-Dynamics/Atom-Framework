@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using IOPath = System.IO.Path;
 
 namespace Atom.Net.Browsing.WebDriver;
@@ -56,6 +56,23 @@ internal static class PlatformFontConfiguration
         ["Carlito"] = "Carlito",
         ["Caladea"] = "Caladea",
         ["Noto Color Emoji"] = "NotoColorEmoji",
+    };
+
+    /// <summary>Чем заменить донора, которого нет на машине, — по убыванию близости начертания.</summary>
+    /// <remarks>
+    /// Carlito и Caladea метрически совместимы с Calibri и Cambria, но в базовую поставку
+    /// дистрибутивов не входят: замер на рабочей машине нашёл 0 файлов обоих. Без замены
+    /// семейство остаётся без файла и разрешается в чужой шрифт — ровно то расхождение, которое
+    /// и выдаёт подмену.
+    /// </remarks>
+    private static readonly Dictionary<string, string[]> DonorSubstitutes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Carlito"] = ["Liberation Sans", "DejaVu Sans"],
+        ["Caladea"] = ["Liberation Serif", "DejaVu Sans"],
+        ["Noto Color Emoji"] = ["DejaVu Sans"],
+        ["Liberation Sans"] = ["DejaVu Sans"],
+        ["Liberation Serif"] = ["DejaVu Sans"],
+        ["Liberation Mono"] = ["DejaVu Sans"],
     };
 
     /// <summary>Каталог с копиями доноров внутри профиля.</summary>
@@ -224,13 +241,6 @@ internal static class PlatformFontConfiguration
     private static List<(string Path, string Family)> CopyDonorFonts((string Family, string Fallback)[] families, string profilePath)
     {
         var result = new List<(string Path, string Family)>();
-        var primaryByDonor = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var (family, fallback) in families)
-        {
-            if (!primaryByDonor.ContainsKey(fallback)) primaryByDonor[fallback] = family;
-        }
-
         var targetDirectory = IOPath.Combine(profilePath, FontsDirectoryName);
 
         try
@@ -242,18 +252,33 @@ internal static class PlatformFontConfiguration
             return result;
         }
 
-        foreach (var (donor, primary) in primaryByDonor)
+        // ★ КАЖДОЕ семейство получает СВОЮ копию донора под своим именем.
+        //
+        // Прежде донор давал имя лишь ПЕРВОМУ семейству из списка, а остальные оставались вовсе
+        // без файла: `Verdana` и `Tahoma` делят донора DejaVu, и Verdana существовала только как
+        // строка в alias. Замер `fc-match` под живым конфигом показывал, во что это выливается:
+        // Calibri, Cambria, Tahoma и Verdana разрешались в ОДИН файл под чужим именем
+        // «Segoe UI Symbol», а браузер видел 5 семейств вместо шестнадцати заявленных. Отдельная
+        // копия на семейство снимает и то, и другое — имена перестают делить файл.
+        foreach (var (family, fallback) in families)
         {
-            if (!DonorFilePrefixes.TryGetValue(donor, out var prefix)) continue;
+            // Отсутствующий на машине донор заменяется запасным того же начертания: без этого
+            // семейство остаётся без файла и падает в подстановку к соседу. На большинстве
+            // дистрибутивов нет Carlito и Caladea, то есть Calibri и Cambria — почти всегда.
+            var prefix = ResolveDonorPrefix(fallback);
+            if (prefix is null) continue;
 
             foreach (var source in FindFontFiles(prefix))
             {
-                var target = IOPath.Combine(targetDirectory, IOPath.GetFileName(source));
+                // Имя файла несёт семейство: один и тот же донор копируется под разными именами,
+                // и правило сканирования различает копии по пути.
+                var fileName = SanitizeFileName(family) + "-" + IOPath.GetFileName(source);
+                var target = IOPath.Combine(targetDirectory, fileName);
 
                 try
                 {
                     if (!File.Exists(target)) File.Copy(source, target);
-                    result.Add((target, primary));
+                    result.Add((target, family));
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
@@ -263,6 +288,41 @@ internal static class PlatformFontConfiguration
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Подбирает префикс файлов донора, подставляя запасного при отсутствии основного.
+    /// </summary>
+    /// <param name="donor">Имя семейства-донора.</param>
+    /// <returns>Префикс имени файла либо <see langword="null"/>, если ни одного файла нет.</returns>
+    private static string? ResolveDonorPrefix(string donor)
+    {
+        if (DonorFilePrefixes.TryGetValue(donor, out var prefix) && FindFontFiles(prefix).Any())
+            return prefix;
+
+        if (!DonorSubstitutes.TryGetValue(donor, out var substitutes)) return null;
+
+        foreach (var substitute in substitutes)
+        {
+            if (DonorFilePrefixes.TryGetValue(substitute, out var substitutePrefix)
+                && FindFontFiles(substitutePrefix).Any())
+            {
+                return substitutePrefix;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Приводит имя семейства к безопасному имени файла.</summary>
+    private static string SanitizeFileName(string family)
+    {
+        var builder = new StringBuilder(family.Length);
+
+        foreach (var character in family)
+            builder.Append(char.IsLetterOrDigit(character) ? character : '_');
+
+        return builder.ToString();
     }
 
     /// <summary>
@@ -321,6 +381,15 @@ internal static class PlatformFontConfiguration
         AppendGeneric(builder, available, "sans-serif", ["Helvetica Neue", "Helvetica", "Arial", "Segoe UI"]);
         AppendGeneric(builder, available, "serif", ["Times", "Times New Roman", "Georgia", "Cambria"]);
         AppendGeneric(builder, available, "monospace", ["Menlo", "Consolas", "Courier New", "Courier"]);
+
+        // ★ Шрифт оболочки. Без привязки 'system-ui' и системные CSS-шрифты ('caption', 'menu',
+        // 'message-box', 'icon') резолвились в родной линуксовый ответ — замер при заявленном
+        // Windows давал 'Arial 16px', тогда как оболочка Windows рисует ими 'Segoe UI 12px',
+        // а macOS — свой системный шрифт. Читается двумя строками CSS, без измерений.
+        AppendGeneric(builder, available, "system-ui", ["Segoe UI", "SF Pro Text", "Helvetica Neue"]);
+        AppendGeneric(builder, available, "ui-sans-serif", ["Segoe UI", "SF Pro Text", "Helvetica Neue"]);
+        AppendGeneric(builder, available, "ui-serif", ["Times New Roman", "Cambria", "Georgia"]);
+        AppendGeneric(builder, available, "ui-monospace", ["Consolas", "Menlo", "Courier New"]);
     }
 
     /// <summary>
@@ -451,51 +520,48 @@ internal static class PlatformFontConfiguration
         // не бывает. Переименование на этапе сканирования убирает донора под его собственным
         // именем: остаётся ровно то семейство, которое мы заявляем.
         //
-        // Один донор обслуживает несколько заявленных семейств, поэтому первое из них становится
-        // ОСНОВНЫМ (в него донор и переименовывается), а остальные ссылаются на основное
-        // псевдонимом. Так каждый файл шрифта имеет ровно одно настоящее имя.
-        var primaryByDonor = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var (family, fallback) in families)
-        {
-            if (!primaryByDonor.ContainsKey(fallback)) primaryByDonor[fallback] = family;
-        }
-
-        foreach (var (donor, primary) in primaryByDonor)
-        {
-            builder.AppendLine("  <match target=\"scan\">");
-            builder.AppendLine($"    <test name=\"family\"><string>{donor}</string></test>");
-            builder.AppendLine($"    <edit name=\"family\" mode=\"assign\"><string>{primary}</string></edit>");
-            builder.AppendLine("  </match>");
-        }
-
-        foreach (var (family, fallback) in families)
-        {
-            var primary = primaryByDonor[fallback];
-
-            // Основное семейство теперь и есть имя файла — псевдоним ему не нужен.
-            if (string.Equals(family, primary, StringComparison.OrdinalIgnoreCase)) continue;
-
-            // Двусторонняя привязка: `alias` объявляет семейство известным и задаёт замену, а
-            // `match` с `binding="same"` заставляет отдавать подстановку и при точном запросе
-            // семейства — иначе fontconfig считает неизвестное семейство отсутствующим.
-            builder.AppendLine("  <alias binding=\"same\">");
-            builder.AppendLine($"    <family>{family}</family>");
-            builder.AppendLine("    <accept>");
-            builder.AppendLine($"      <family>{primary}</family>");
-            builder.AppendLine("    </accept>");
-            builder.AppendLine("  </alias>");
-
-            builder.AppendLine("  <match target=\"pattern\">");
-            builder.AppendLine($"    <test qual=\"any\" name=\"family\"><string>{family}</string></test>");
-            builder.AppendLine($"    <edit name=\"family\" mode=\"assign\" binding=\"same\"><string>{primary}</string></edit>");
-            builder.AppendLine("  </match>");
-        }
+        // ★ Псевдонимов между заявленными семействами БОЛЬШЕ НЕТ.
+        //
+        // Пока один донор обслуживал несколько имён, первое становилось основным, а остальные
+        // ссылались на него псевдонимом — и запрос `Verdana` разрешался в файл с именем
+        // «Segoe UI Symbol». Именно так подмена и читалась: `fc-match` под живым конфигом
+        // показывал у Tahoma, Verdana, Georgia и Times New Roman ЧУЖОЕ имя семейства, тогда как
+        // на настоящей Windows каждое имеет собственный файл. Теперь каждому семейству копируется
+        // свой экземпляр донора (см. CopyDonorFonts), и правило сканирования по ПУТИ файла даёт
+        // ему собственное имя — псевдонимы не нужны вовсе.
+        //
+        // Переименование по имени донора здесь тоже не требуется: доноры лежат только в нашем
+        // каталоге и уже переименованы пофайлово, под собственными именами их не существует.
 
         AppendGenericBinding(builder, families);
         AppendFamilyHiding(builder, device?.ClientHints?.Platform);
+        AppendRenderingDefaults(builder);
 
         builder.AppendLine("</fontconfig>");
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// Правила отрисовки: слабый хинтинг и сглаживание, как в системной настройке.
+    /// </summary>
+    /// <remarks>
+    /// ★ Наш конфиг подменяет системный целиком, и вместе со списком шрифтов терялись правила
+    /// отрисовки: fontconfig брал умолчание с полным хинтингом. Полный хинтинг прибивает глифы к
+    /// пиксельной сетке, и ширина текста выходит ЦЕЛОЙ — тогда как Chrome считает компоновку в
+    /// 1/64 пикселя, и <c lang="text">getBoundingClientRect</c> почти никогда не даёт целого числа.
+    /// Замер: 13 семейств из 13 дали целую ширину при заявленном Windows против 0 из 13 без подмены,
+    /// причём <c lang="text">measureText</c> в том же документе оставался дробным — два пути
+    /// измерения одного шрифта расходились характером числа. Проверяется одной строкой
+    /// <c lang="text">Number.isInteger(rect.width)</c>.
+    /// </remarks>
+    private static void AppendRenderingDefaults(StringBuilder builder)
+    {
+        builder.AppendLine("  <match target=\"font\">");
+        builder.AppendLine("    <edit name=\"antialias\" mode=\"assign\"><bool>true</bool></edit>");
+        builder.AppendLine("    <edit name=\"hinting\" mode=\"assign\"><bool>true</bool></edit>");
+        builder.AppendLine("    <edit name=\"hintstyle\" mode=\"assign\"><const>hintslight</const></edit>");
+        builder.AppendLine("    <edit name=\"rgba\" mode=\"assign\"><const>rgb</const></edit>");
+        builder.AppendLine("    <edit name=\"lcdfilter\" mode=\"assign\"><const>lcddefault</const></edit>");
+        builder.AppendLine("  </match>");
     }
 }

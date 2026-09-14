@@ -63,37 +63,23 @@ public sealed class WebDriverVirtualDisplayLaunchTests
         if (!OperatingSystem.IsLinux())
             Assert.Ignore("Тест рассчитан на Linux virtual display lifecycle.");
 
-        var reasonField = typeof(WebDriverTestEnvironment).GetField(
-            "linuxDisplayBackendUnavailableReason",
-            BindingFlags.Static | BindingFlags.NonPublic);
-
-        Assert.That(reasonField, Is.Not.Null, "Не удалось найти cached display backend failure field.");
-
-        var originalReason = (string?)reasonField!.GetValue(obj: null);
         var originalPath = Environment.GetEnvironmentVariable("PATH");
-        var originalBrowser = Environment.GetEnvironmentVariable("ATOM_TEST_WEBDRIVER_BROWSER");
-        var originalBrowserPath = Environment.GetEnvironmentVariable("ATOM_TEST_WEBDRIVER_BROWSER_PATH");
 
         try
         {
-            reasonField.SetValue(obj: null, value: null);
             Environment.SetEnvironmentVariable("PATH", string.Empty);
-            Environment.SetEnvironmentVariable("ATOM_TEST_WEBDRIVER_BROWSER", value: null);
-            Environment.SetEnvironmentVariable("ATOM_TEST_WEBDRIVER_BROWSER_PATH", value: null);
 
+            // ★ Отказ бэкенда проверяется на СТАРОМ пути (X11): собственному композитору внешние
+            // пакеты не нужны вовсе, и с пустым PATH он поднимается штатно — сценарий «xpra/Xvfb
+            // не найдены» на пути по умолчанию больше не наступает.
             Assert.That(
-                async () => await WebDriverTestEnvironment.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false),
-                Throws.InstanceOf<IgnoreException>());
-
-            var cachedReason = (string?)reasonField.GetValue(obj: null);
-            Assert.That(cachedReason, Does.Contain("xpra").Or.Contain("Xvfb"));
+                async () => await VirtualDisplay.CreateAsync(new VirtualDisplaySettings { UseX11Backend = true })
+                    .ConfigureAwait(false),
+                Throws.InstanceOf<VirtualDisplayException>());
         }
         finally
         {
             Environment.SetEnvironmentVariable("PATH", originalPath);
-            Environment.SetEnvironmentVariable("ATOM_TEST_WEBDRIVER_BROWSER", originalBrowser);
-            Environment.SetEnvironmentVariable("ATOM_TEST_WEBDRIVER_BROWSER_PATH", originalBrowserPath);
-            reasonField.SetValue(obj: null, value: originalReason);
         }
     }
 

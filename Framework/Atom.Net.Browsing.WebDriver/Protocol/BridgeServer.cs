@@ -833,7 +833,11 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         if (response.Payload is not JsonElement shadowRootPayload || !TryParseStringPayload(shadowRootPayload, propertyName: null, out var shadowRootState))
             throw new BridgeCommandException("Мостовая команда вернула неверное состояние теневого корня");
 
-        return string.Equals(shadowRootState, "open", StringComparison.OrdinalIgnoreCase);
+        // Закрытый корень ТОЖЕ корень: расширение читает его через chrome.dom.openOrClosedShadowRoot,
+        // и все команды над ним работают. Прежде принимался только "open", и закрытые корни были
+        // непрозрачны для драйвера целиком.
+        return string.Equals(shadowRootState, "open", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(shadowRootState, "closed", StringComparison.OrdinalIgnoreCase);
     }
 
     private async ValueTask<(string TabId, string? WindowId)> SendOpenedSurfaceCommandAsync(

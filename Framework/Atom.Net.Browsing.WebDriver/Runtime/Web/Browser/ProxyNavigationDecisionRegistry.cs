@@ -23,6 +23,11 @@ internal sealed record ProxyNavigationRoute
 
     public string? UpstreamProxy { get; init; }
 
+    /// <summary>
+    /// TLS-профиль переотправки маршрута (по UA задачи); null — общий профиль браузера.
+    /// </summary>
+    public Atom.Net.Https.Profiles.BrowserProfile? ForwardProfile { get; init; }
+
     public long Revision { get; init; }
 }
 
@@ -159,6 +164,43 @@ internal sealed class ProxyNavigationDecisionRegistry
             ? routesByToken.Values.First().Route
             : null;
         return route is not null;
+    }
+
+    /// <summary>
+    /// Сообщает, одинакова ли личность переотправки у всех живых маршрутов реестра.
+    /// </summary>
+    /// <remarks>
+    /// ★ Реестр — ОДИН НА БРАУЗЕР, а слот-пул держит в браузере несколько вкладок, у каждой свой
+    /// профиль задачи. Поэтому «любой маршрут» из <see cref="TryResolveAnyRoute"/> при мультислоте
+    /// принадлежит произвольной вкладке, и наследовать из него профиль вслепую нельзя: запрос ушёл
+    /// бы на origin отпечатком ЧУЖОЙ задачи. Наследование допустимо только когда выбирать не из
+    /// чего — личность у всех живых маршрутов совпадает.
+    /// </remarks>
+    public bool HasUnambiguousForwardProfile()
+    {
+        // Личности сверяются по строке агента, а не через Equals профиля: BrowserProfile.Equals
+        // уходит в TlsSettings.Equals, который зовёт CipherSuites.Equals на неинициализированном
+        // поле вложенного Http2.Tls и падает NullReferenceException на любом профиле каталога —
+        // включая самосравнение. Строка агента для нашей задачи и есть различитель личности:
+        // именно она входит в ключ пула форвард-клиентов.
+        string? first = null;
+        var seen = false;
+
+        foreach (var state in routesByToken.Values)
+        {
+            var candidate = state.Route.ForwardProfile?.UserAgent;
+            if (!seen)
+            {
+                first = candidate;
+                seen = true;
+                continue;
+            }
+
+            if (!string.Equals(first, candidate, StringComparison.Ordinal))
+                return false;
+        }
+
+        return true;
     }
 
     public bool EnqueueDecision(string contextId, ProxyNavigationPendingDecision decision, DateTimeOffset nowUtc)

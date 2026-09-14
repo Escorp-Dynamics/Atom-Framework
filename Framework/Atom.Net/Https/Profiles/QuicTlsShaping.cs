@@ -1,4 +1,4 @@
-using System.Security.Authentication;
+﻿using System.Security.Authentication;
 using Atom.Net.Quic;
 using Atom.Net.Tls;
 using Atom.Net.Tls.Extensions;

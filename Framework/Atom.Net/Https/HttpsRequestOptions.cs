@@ -13,6 +13,7 @@ public static class HttpsRequestOptions
     private static readonly HttpRequestOptionsKey<RequestKind> requestKindKey = new("Atom.Net.Https.RequestKind");
     private static readonly HttpRequestOptionsKey<HttpsBrowserRequestContext> browserRequestContextKey = new("Atom.Net.Https.BrowserRequestContext");
     private static readonly HttpRequestOptionsKey<ReferrerPolicyMode> referrerPolicyKey = new("Atom.Net.Https.ReferrerPolicy");
+    private static readonly HttpRequestOptionsKey<IReadOnlyCollection<string>> suppressedDefaultHeadersKey = new("Atom.Net.Https.SuppressedDefaultHeaders");
 
     /// <summary>
     /// Сохраняет тип browser-shaped запроса на обычном <see cref="HttpRequestMessage"/>.
@@ -85,6 +86,28 @@ public static class HttpsRequestOptions
         ArgumentNullException.ThrowIfNull(request);
         request.Options.Set(referrerPolicyKey, policy);
         return request;
+    }
+
+    /// <summary>
+    /// Отменяет подстановку перечисленных заголовков по умолчанию.
+    /// </summary>
+    /// <remarks>
+    /// Для запросов, у которых в записанном обмене браузера отдельного заголовка нет вовсе.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static HttpRequestMessage WithoutHttpsDefaultHeaders([NotNull] this HttpRequestMessage request, params string[] headerNames)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(headerNames);
+        request.Options.Set(suppressedDefaultHeadersKey, headerNames);
+        return request;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool TryGetSuppressedDefaultHeaders(HttpRequestMessage request, [NotNullWhen(true)] out IReadOnlyCollection<string>? headerNames)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return request.Options.TryGetValue(suppressedDefaultHeadersKey, out headerNames);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using Atom.Net.Https.Connections;
 using Atom.Net.Https.Headers;
 using Atom.Net.Https.Headers.HPack;
@@ -37,7 +37,7 @@ public readonly struct Http2Settings() : IEquatable<Http2Settings>
     public uint InitialWindowSize { get; init; } = 65535;
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public uint MaxConcurrentStreams { get; init; }
 
@@ -47,22 +47,22 @@ public readonly struct Http2Settings() : IEquatable<Http2Settings>
     public uint HeaderTableSize { get; init; } = 65535;
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public uint MaxFrameSize { get; init; }
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public bool UseConnectProtocol { get; init; }
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public bool UsePriorityFrames { get; init; }
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public IEnumerable<StreamPriority> PriorityTree { get; init; } = [];
 
@@ -102,37 +102,37 @@ public readonly struct Http2Settings() : IEquatable<Http2Settings>
     public string PseudoHeaderOrder { get; init; } = "masp";
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public bool UseCookieCrumbling { get; init; } = true;
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public bool UsePreserveHeaderOrder { get; init; } = true;
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public bool UseOriginalHeaderCase { get; init; } = true;
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public TimeSpan PrefaceDelay { get; init; } = TimeSpan.Zero;
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public TimeSpan SettingsAckDelay { get; init; } = TimeSpan.Zero;
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public bool UsePadHeaders { get; init; }
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public bool UsePadData { get; init; }
 
@@ -180,7 +180,10 @@ public readonly struct Http2Settings() : IEquatable<Http2Settings>
         hash.Add(MaxFrameSize.GetHashCode());
         hash.Add(UseConnectProtocol.GetHashCode());
         hash.Add(UsePriorityFrames.GetHashCode());
-        hash.Add(PriorityTree.GetHashCode());
+
+        // Ссылочное поле с инициализатором `= []`, который не срабатывает у default(Http2Settings):
+        // вызов на экземпляре ронял хэш NullReferenceException — как и сравнение до правки Equals.
+        hash.Add(PriorityTree);
         hash.Add(UseCookieCrumbling.GetHashCode());
         hash.Add(UsePreserveHeaderOrder.GetHashCode());
         hash.Add(UseOriginalHeaderCase.GetHashCode());
@@ -203,7 +206,9 @@ public readonly struct Http2Settings() : IEquatable<Http2Settings>
     public bool Equals(Http2Settings other) => ((HeadersFormattingPolicy is null && other.HeadersFormattingPolicy is null) || (HeadersFormattingPolicy is not null && other.HeadersFormattingPolicy is not null && HeadersFormattingPolicy.Equals(other.HeadersFormattingPolicy))) && InitialStreamWindowSize.Equals(other.InitialStreamWindowSize) && InitialWindowSize.Equals(other.InitialWindowSize)
         && MaxConcurrentStreams.Equals(other.MaxConcurrentStreams) && HeaderTableSize.Equals(other.HeaderTableSize)
         && MaxFrameSize.Equals(other.MaxFrameSize) && UseConnectProtocol.Equals(other.UseConnectProtocol)
-        && UsePriorityFrames.Equals(other.UsePriorityFrames) && PriorityTree.Equals(other.PriorityTree)
+        // Набор — ссылочный с инициализатором `= []`, а он не срабатывает у default(Http2Settings):
+        // вызов Equals на экземпляре ронял сравнение NullReferenceException (см. TlsSettings.Equals).
+        && UsePriorityFrames.Equals(other.UsePriorityFrames) && Equals(PriorityTree, other.PriorityTree)
         && UseCookieCrumbling.Equals(other.UseCookieCrumbling) && UsePreserveHeaderOrder.Equals(other.UsePreserveHeaderOrder)
         && UseOriginalHeaderCase.Equals(other.UseOriginalHeaderCase) && PrefaceDelay.Equals(other.PrefaceDelay)
         && SettingsAckDelay.Equals(other.SettingsAckDelay) && UsePadHeaders.Equals(other.UsePadHeaders)

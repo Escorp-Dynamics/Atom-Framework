@@ -34,7 +34,9 @@ import {
     ensureVirtualCookieStore,
     ensureDiscoveryTab,
     executeScriptInFrames,
+    executeScriptInSingleFrame,
     evaluateMainWorldScript,
+    describeIdentity,
     hasIdentityOverrides,
     injectIdentityIntoFrames,
     findFirstWindowTab,
@@ -47,6 +49,7 @@ import {
     handleCookieResponseInterception,
     handleGetCookiesCommand,
     handleGetTitleCommand,
+    invokeBrowserCall,
     handleGetUrlCommand,
     handleGetWindowBoundsCommand,
     handleActivateWindowCommand,
@@ -65,6 +68,7 @@ import {
     getRuntimeApi,
     getWebRequestTabId,
     getTab,
+    getTabZoom,
     getWindow,
     getVisibleVirtualCookies,
     InMemoryRequestCorrelationStore,
@@ -79,6 +83,7 @@ import {
     RuntimePortTabEndpoint,
     resolveWindowTab,
     setCookie,
+    setTabZoom,
     TabPortCommandRouter,
     loadBootstrapRuntimeConfigWithSource,
     moveVirtualCookieStore,
@@ -176,11 +181,47 @@ interface InterceptedRequestBody {
     readonly formData?: Record<string, string[]>;
 }
 
+/** Шаблон перехвата: адрес плюс необязательное ограничение по методу. */
+export interface CompiledInterceptionPattern {
+    readonly method: string | null;
+    test(url: string, method?: string): boolean;
+}
+
 /// Максимум придержанных тел: записи снимаются в onBeforeSendHeaders и терминальными событиями,
 /// но запрос может не дойти ни до одного из них (отмена, редирект), поэтому карта ограничена.
 const maxPendingRequestBodies = 256;
 
-function encodeRequestBodyBytes(raw: unknown): string | undefined {
+/**
+ * ★ Проверять тип через `instanceof ArrayBuffer` здесь НЕЛЬЗЯ. В Firefox `requestBody.raw[].bytes`
+ * приходит из другого JS-realm (привилегированного контекста браузера), а `instanceof` сверяет
+ * прототип с прототипом ТЕКУЩЕГО realm — для чужого объекта он всегда false. Из-за этого тело
+ * POST-запроса молча отбрасывалось, и вторичный токен Turnstile не извлекался вовсе: перехват
+ * при этом выглядел рабочим, ошибок в журнале не было.
+ *
+ * `Object.prototype.toString` читает внутренний тег объекта и от realm не зависит. Заодно
+ * принимаем типизированные представления (`Uint8Array` и прочие ArrayBufferView) — Firefox
+ * отдаёт именно их в части сборок.
+ */
+function toByteChunk(value: unknown): Uint8Array | undefined {
+    if (typeof value !== 'object' || value === null) {
+        return undefined;
+    }
+
+    const tag = Object.prototype.toString.call(value);
+
+    if (tag === '[object ArrayBuffer]') {
+        return new Uint8Array(value as ArrayBuffer);
+    }
+
+    if (ArrayBuffer.isView(value as ArrayBufferView)) {
+        const view = value as ArrayBufferView;
+        return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+    }
+
+    return undefined;
+}
+
+export function encodeRequestBodyBytes(raw: unknown): string | undefined {
     if (!Array.isArray(raw)) {
         return undefined;
     }
@@ -188,8 +229,9 @@ function encodeRequestBodyBytes(raw: unknown): string | undefined {
     const chunks: Uint8Array[] = [];
     for (const entry of raw) {
         const bytes: unknown = isNonEmptyRecord(entry) ? entry.bytes : undefined;
-        if (typeof bytes === 'object' && bytes !== null && bytes instanceof ArrayBuffer) {
-            chunks.push(new Uint8Array(bytes));
+        const chunk = toByteChunk(bytes);
+        if (chunk !== undefined) {
+            chunks.push(chunk);
         }
     }
 
@@ -279,7 +321,7 @@ export class BackgroundRuntimeHost {
     private readonly pendingNavigations = new Map<string, PendingNavigationState>();
     private readonly pendingNavigationGateDiagnostics = new Map<string, string>();
     private readonly interceptEnabledTabs = new Set<string>();
-    private readonly interceptPatterns = new Map<string, readonly RegExp[]>();
+    private readonly interceptPatterns = new Map<string, readonly CompiledInterceptionPattern[]>();
     private readonly pendingResponseHeaderOverrides = new Map<string, HeaderMap>();
 
     /// Вкладки, по которым уже прошли разовым обходом всех фреймов (см. applyIdentityToAllFrames).
@@ -1504,16 +1546,31 @@ export class BackgroundRuntimeHost {
             return;
         }
 
-        // Проход по ВСЕМ фреймам нужен ровно один раз на вкладку — чтобы накрыть фреймы, которые
-        // уже существовали к моменту, когда слушатель начал работать. Дальше каждый новый документ
-        // приходит через onCommitted и обслуживается точечно. Без этой отсечки замер показал 624
-        // избыточных внедрения из ~870 (ответы «already»), и они стоили заметного времени: median
-        // 9.91с, p90 14.40с.
-        if (this.identityCoveredTabs.has(tabId)) {
+        // Проход по ВСЕМ фреймам нужен ровно один раз на вкладку ДЛЯ ОДНОЙ ЛИЧНОСТИ — чтобы
+        // накрыть фреймы, которые уже существовали к моменту, когда слушатель начал работать.
+        // Дальше каждый новый документ приходит через onCommitted и обслуживается точечно. Без
+        // этой отсечки замер показал 624 избыточных внедрения из ~870 (ответы «already»), и они
+        // стоили заметного времени: median 9.91с, p90 14.40с.
+        //
+        // ★ Ключ включает саму личность, а не только вкладку. Пока он был только по вкладке, смена
+        // профиля БЕЗ навигации не применялась вовсе: обход пропускался как «уже сделанный», а
+        // onCommitted не срабатывал, потому что нового документа нет. Замер это показал прямо —
+        // после ReconfigureAsync на живой странице менялся только userAgentData (его ставит
+        // отдельный путь), а UA, экран, пояс, GPU и языки оставались прежними.
+        const identityKey = tabId + '\u0000' + describeIdentity(context);
+        if (this.identityCoveredTabs.has(identityKey)) {
             return;
         }
 
-        this.identityCoveredTabs.add(tabId);
+        // Прежние ключи этой вкладки больше не нужны: личность сменилась, и повторная установка
+        // старой не предвидится.
+        for (const covered of [...this.identityCoveredTabs]) {
+            if (covered === tabId || covered.startsWith(tabId + '\u0000')) {
+                this.identityCoveredTabs.delete(covered);
+            }
+        }
+
+        this.identityCoveredTabs.add(identityKey);
 
         const numericTabId = Number(tabId);
         if (!Number.isFinite(numericTabId)) {
@@ -1536,6 +1593,88 @@ export class BackgroundRuntimeHost {
     }
 
     /**
+     * Сужает область просмотра вкладки до заявленной профилем через масштаб.
+     *
+     * Подмена геттеров закрывает числа, но не раскладку: `100vw`, `position: fixed` и
+     * `getBoundingClientRect` считаются по НАСТОЯЩЕЙ ширине окна, и замер показывал там 500 при
+     * заявленных 412 — расхождение, видимое одним сравнением. Масштаб меняет размер CSS-пикселя,
+     * поэтому раскладка съезжает честно, без отладочного протокола.
+     *
+     * Масштаб задаётся по вкладке, а не по окну: вкладки одного окна несут разные профили.
+     */
+    private async applyViewportZoomAsync(numericTabId: number, tabId: string, context: TabContextEnvelope): Promise<void> {
+        const declaredWidth = context.viewport?.width ?? context.screen?.width;
+
+        // Масштаб — часть дисплейного слоя: он делит devicePixelRatio и сужает вьюпорт, поэтому
+        // гасится тем же рубильником, что и подмены геометрии.
+        const disabled = (context as unknown as { disabledOsSurfaces?: unknown }).disabledOsSurfaces;
+        if (Array.isArray(disabled) && disabled.includes('display')) {
+            emitBackgroundDebugEvent(this.config, 'viewport-zoom-skipped', { tabId, reason: 'дисплейный слой отключён' });
+            return;
+        }
+
+        if (typeof declaredWidth !== 'number' || declaredWidth <= 0) {
+            emitBackgroundDebugEvent(this.config, 'viewport-zoom-skipped', { tabId, reason: 'ширина не заявлена' });
+            return;
+        }
+
+        try {
+            // Ширину области просмотра знает только сама вкладка: фон видит окно браузера целиком,
+            // а вычесть из него рамку и полосу прокрутки нельзя. Замер идёт ФУНКЦИЕЙ, а не строкой:
+            // политика безопасности расширения запрещает eval, и строковый вариант возвращал текст
+            // отказа вместо числа. Изолированный мир выбран потому, что подмены личности стоят в
+            // основном и вернули бы уже подменённое значение.
+            const results = await invokeBrowserCall<any[]>(
+                this.runtime,
+                this.browserHost.scripting.executeScript,
+                this.browserHost.scripting,
+                {
+                    target: { tabId: numericTabId, frameIds: [0] },
+                    func: () => window.innerWidth,
+                });
+
+            const measured = Number(results?.[0]?.result);
+
+            if (!Number.isFinite(measured) || measured <= 0) {
+                emitBackgroundDebugEvent(this.config, 'viewport-zoom-skipped', { tabId, declaredWidth, measured, reason: 'замер не дал числа' });
+                return;
+            }
+
+            // Замер идёт при уже действующем масштабе, поэтому новый множится на текущий.
+            const currentZoom = await getTabZoom(this.runtime, this.browserHost.tabs, numericTabId);
+            const zoomFactor = (measured / declaredWidth) * currentZoom;
+
+            // Chromium принимает масштаб в пределах 25–500 %; выход за них отвергается целиком.
+            if (!Number.isFinite(zoomFactor) || zoomFactor < 0.25 || zoomFactor > 5) {
+                emitBackgroundDebugEvent(this.config, 'viewport-zoom-skipped', { tabId, declaredWidth, measured, currentZoom, zoomFactor, reason: 'вне пределов 0.25–5' });
+                return;
+            }
+
+            // Разница меньше пикселя на всю ширину — ставить масштаб не за чем, а лишняя установка
+            // сбрасывает положение прокрутки.
+            if (Math.abs(measured - declaredWidth) < 1) {
+                emitBackgroundDebugEvent(this.config, 'viewport-zoom-skipped', { tabId, declaredWidth, measured, currentZoom, reason: 'уже совпадает' });
+                return;
+            }
+
+            await setTabZoom(this.runtime, this.browserHost.tabs, numericTabId, zoomFactor);
+
+            emitBackgroundDebugEvent(this.config, 'viewport-zoom-applied', {
+                tabId,
+                declaredWidth,
+                measured,
+                currentZoom,
+                zoomFactor,
+            });
+        } catch (error) {
+            emitBackgroundDebugEvent(this.config, 'viewport-zoom-failed', {
+                tabId,
+                error: toErrorMessage(error),
+            });
+        }
+    }
+
+    /**
      * Догоняет фреймы, создаваемые ПОСЛЕ применения контекста: виджет Cloudflare создаёт свой
      * iframe уже по ходу работы страницы, поэтому разовой установки по всем фреймам мало.
      * Слушатель поднимаем один раз и держим на весь срок жизни фона.
@@ -1553,8 +1692,15 @@ export class BackgroundRuntimeHost {
             return;
         }
 
+        emitBackgroundDebugEvent(this.config, 'identity-frame-listener-attached', {});
+
         webNavigation.onCommitted.addListener((details: { tabId?: number; frameId?: number; url?: string }) => {
             const frameId = details?.frameId;
+            emitBackgroundDebugEvent(this.config, 'identity-frame-committed', {
+                tabId: String(details?.tabId),
+                frameId,
+                url: (details?.url ?? '').slice(0, 60),
+            });
             // Главный фрейм (frameId 0) обслуживаем ТОЖЕ. Его контент-скрипт применяет контекст
             // асинхронно, по приходу SetTabContext, и опаздывает: замер показал, что первый же
             // встроенный скрипт документа успевает прочитать НАСТОЯЩУЮ платформу
@@ -1575,6 +1721,12 @@ export class BackgroundRuntimeHost {
                     knownTabs: Array.from(this.tabContexts.keys()).join(',').slice(0, 80),
                 });
                 return;
+            }
+
+            // Масштаб сбрасывается на каждой навигации, поэтому ставится здесь, а не вместе с
+            // разовым обходом фреймов: тот отсекается ключом личности и повторно не сработает.
+            if (frameId === 0) {
+                void this.applyViewportZoomAsync(details.tabId, String(details.tabId), context);
             }
 
             void injectIdentityIntoFrames(this.browserHost, this.runtime, details.tabId, frameId, context)
@@ -2030,7 +2182,9 @@ export class BackgroundRuntimeHost {
         }
 
         const patterns = this.interceptPatterns.get(tabId);
-        if (patterns !== undefined && patterns.length > 0 && !patterns.some((pattern) => pattern.test(url))) {
+        if (patterns !== undefined
+            && patterns.length > 0
+            && !patterns.some((pattern) => pattern.test(url, details.method))) {
             return null;
         }
 
@@ -3335,12 +3489,53 @@ function readStringArrayPayload(payload: unknown, propertyName: string): string[
         .map((item) => item.trim());
 }
 
-function compileInterceptionPattern(pattern: string): RegExp {
+/**
+ * ★ Шаблон может нести префикс метода — например `POST https://…/c/*` (паритет с .NET
+ * `RequestInterceptionState.SplitMethodPrefix`). Прежде расширение компилировало строку ЦЕЛИКОМ и
+ * сверяло её с одним лишь URL — выражение, начинающееся со слова `POST`, не совпадало с адресом
+ * никогда, и перехват по такому шаблону молча не срабатывал вовсе. Именно так терялся вторичный
+ * токен Turnstile: фильтр в C# отрабатывал верно, но до него дело не доходило.
+ *
+ * Граница определяется однозначно: пробел до первого двоеточия, голова только из букв (иначе
+ * схема `https://` была бы принята за метод).
+ */
+function splitInterceptionMethodPrefix(pattern: string): { method: string | null; urlPattern: string } {
+    const space = pattern.indexOf(' ');
+    if (space <= 0) {
+        return { method: null, urlPattern: pattern };
+    }
+
+    const head = pattern.slice(0, space);
+    const colon = pattern.indexOf(':');
+    if ((colon >= 0 && colon < space) || !/^[A-Za-z]+$/.test(head)) {
+        return { method: null, urlPattern: pattern };
+    }
+
+    const tail = pattern.slice(space + 1).trim();
+    return tail.length === 0
+        ? { method: null, urlPattern: pattern }
+        : { method: head.toUpperCase(), urlPattern: tail };
+}
+
+export function compileInterceptionPattern(pattern: string): CompiledInterceptionPattern {
+    const { method, urlPattern } = splitInterceptionMethodPrefix(pattern);
+
     // Единственный подстановочный символ — '*' (паритет с .NET UrlPatternMatcher). Все прочие
     // regex-метасимволы, включая '?' (иначе делает предыдущий символ опциональным) и часто
     // встречающийся в URL перед query-строкой, экранируются как литералы.
-    const escaped = pattern.replace(/[.+^${}()|[\]\\?]/g, '\\$&');
-    return new RegExp(`^${escaped.replace(/\*/g, '.*')}$`, 'i');
+    const escaped = urlPattern.replace(/[.+^${}()|[\]\\?]/g, '\\$&');
+    const url = new RegExp(`^${escaped.replace(/\*/g, '.*')}$`, 'i');
+
+    return {
+        method,
+        test: (candidateUrl: string, candidateMethod?: string): boolean => {
+            if (method !== null && (candidateMethod ?? '').toUpperCase() !== method) {
+                return false;
+            }
+
+            return url.test(candidateUrl);
+        },
+    };
 }
 
 function normalizeEventTimestamp(timestamp: number | undefined): number {
@@ -3730,6 +3925,10 @@ function toJsonContext(context: TabContextEnvelope | undefined): JsonRecord | un
             height: context.viewport.height,
         };
     }
+    // Без экрана вкладка со своим профилем берёт доступную область от профиля БРАУЗЕРА.
+    if (context.screen !== undefined) {
+        jsonContext.screen = toJsonScreen(context.screen);
+    }
     if (context.deviceScaleFactor !== undefined) {
         jsonContext.deviceScaleFactor = context.deviceScaleFactor;
     }
@@ -3774,6 +3973,27 @@ function toJsonContext(context: TabContextEnvelope | undefined): JsonRecord | un
     }
 
     return jsonContext;
+}
+
+function toJsonScreen(screen: TabContextEnvelope['screen']): JsonRecord | undefined {
+    if (screen === undefined) {
+        return undefined;
+    }
+
+    const jsonScreen: JsonRecord = {
+        width: screen.width,
+        height: screen.height,
+    };
+
+    for (const property of ['availWidth', 'availHeight', 'colorDepth', 'pixelDepth'] as const) {
+        const value = screen[property];
+
+        if (value !== undefined) {
+            jsonScreen[property] = value;
+        }
+    }
+
+    return jsonScreen;
 }
 
 function toJsonClientHints(clientHints: TabContextEnvelope['clientHints']): JsonRecord | undefined {

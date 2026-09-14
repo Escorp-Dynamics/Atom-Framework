@@ -247,6 +247,9 @@ internal sealed class BridgeNavigationProxyServer(
         using (client)
         using (var stream = client.GetStream())
         {
+            // Цель запоминается до обработки: без неё сетевая ошибка в журнале не говорит, куда шёл запрос.
+            var connectionTarget = "(неизвестна)";
+
             try
             {
                 ProxyRequestReadResult readResult;
@@ -254,6 +257,9 @@ internal sealed class BridgeNavigationProxyServer(
                 {
                     readResult = await ReadProxyRequestAsync(stream, readBudget.Token).ConfigureAwait(false);
                 }
+
+                if (readResult.Request is { Target: { Length: > 0 } requestTarget })
+                    connectionTarget = requestTarget;
 
                 if (readResult.Request is not { } request)
                 {
@@ -269,6 +275,16 @@ internal sealed class BridgeNavigationProxyServer(
                 if (request.IsConnect)
                 {
                     await HandleConnectTunnelAsync(stream, request, routeToken, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                // ★ Апгрейд протокола (WebSocket) форвардить через HttpClient нельзя: 'Upgrade' и
+                // 'Connection' входят в список hop-by-hop и срезаются, а сам HttpClient апгрейд не
+                // умеет. Сервер получал такой запрос уже как обычный GET и отвергал его с
+                // 'missing-upgrade-header'. Пробрасываем соединение байт в байт, как CONNECT.
+                if (IsProtocolUpgradeRequest(request))
+                {
+                    await HandleUpgradeTunnelAsync(stream, request, cancellationToken).ConfigureAwait(false);
                     return;
                 }
 
@@ -319,7 +335,7 @@ internal sealed class BridgeNavigationProxyServer(
             }
             catch (Exception exception)
             {
-                logger?.LogBridgeServerNavigationProxyConnectionFailed(exception);
+                logger?.LogBridgeServerNavigationProxyConnectionFailed(connectionTarget, exception);
             }
         }
     }
@@ -380,6 +396,121 @@ internal sealed class BridgeNavigationProxyServer(
 
         await WriteDirectResponseAsync(stream, directResponse, cancellationToken).ConfigureAwait(false);
         return true;
+    }
+
+    /// <summary>
+    /// Запрос на смену протокола — WebSocket и прочий <c lang="text">Upgrade</c>.
+    /// </summary>
+    private static bool IsProtocolUpgradeRequest(ProxyRequest request)
+        => request.Headers.TryGetValue("Upgrade", out var upgrade)
+            && !string.IsNullOrWhiteSpace(upgrade)
+            && request.Headers.TryGetValue("Connection", out var connection)
+            && connection.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(static token => string.Equals(token, "Upgrade", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Пробрасывает соединение со сменой протокола на origin байт в байт.
+    /// </summary>
+    /// <remarks>
+    /// Обычный путь через <see cref="HttpClient"/> для апгрейда непригоден: заголовки
+    /// <c lang="text">Upgrade</c> и <c lang="text">Connection</c> относятся к hop-by-hop и срезаются при
+    /// пересылке, а сам клиент апгрейд не поддерживает. Origin получал такой запрос как обычный
+    /// GET — мостовой WSS-канал отвечал на него отказом <c lang="text">missing-upgrade-header</c>.
+    /// </remarks>
+    private async Task HandleUpgradeTunnelAsync(
+        Stream stream,
+        ProxyRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryBuildAbsoluteTargetUrl("http", request.Target, request.Headers, fallbackHost: null, fallbackPort: 0, out var targetUrl)
+            || !Uri.TryCreate(targetUrl, UriKind.Absolute, out var targetUri))
+        {
+            logger?.LogBridgeServerNavigationProxyRejected(request.Method, request.Target, "upgrade-target-invalid");
+            await WriteErrorResponseAsync(stream, HttpStatusCode.BadRequest, "invalid-upgrade-target", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        using var upstream = new System.Net.Sockets.TcpClient();
+
+        try
+        {
+            await upstream.ConnectAsync(targetUri.Host, targetUri.Port, cancellationToken).ConfigureAwait(false);
+        }
+        catch (System.Net.Sockets.SocketException exception)
+        {
+            logger?.LogBridgeServerNavigationProxyConnectionFailed(request.Target, exception);
+            await WriteErrorResponseAsync(stream, HttpStatusCode.BadGateway, "upgrade-connect-failed", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var upstreamStream = upstream.GetStream();
+
+        // Запрос пересобирается в origin-форме: абсолютный URI допустим только в запросе К ПРОКСИ,
+        // а дальше по соединению идёт origin, который его не ждёт.
+        var builder = new StringBuilder()
+            .Append(request.Method)
+            .Append(' ')
+            .Append(targetUri.PathAndQuery)
+            .Append(" HTTP/1.1\r\n");
+
+        foreach (var (name, value) in request.Headers)
+        {
+            if (string.IsNullOrWhiteSpace(name)
+                || string.Equals(name, "Proxy-Connection", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, "Proxy-Authorization", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, RouteTokenHeaderName, StringComparison.OrdinalIgnoreCase)
+                || !IsSafeHeaderValue(value))
+            {
+                continue;
+            }
+
+            builder.Append(name).Append(": ").Append(value).Append("\r\n");
+        }
+
+        builder.Append("\r\n");
+
+        await upstreamStream.WriteAsync(Encoding.ASCII.GetBytes(builder.ToString()), cancellationToken).ConfigureAwait(false);
+
+        if (request.Body is { Length: > 0 } body)
+            await upstreamStream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
+
+        await upstreamStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+
+        // Дальше протокол уже не HTTP: перекладываем байты в обе стороны до закрытия любой из них.
+        // Вторую сторону не бросаем висеть — иначе она обратится к уже закрытому сокету.
+        var pumpBudget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        try
+        {
+            await Task.WhenAll(
+                PumpUpgradeStreamAsync(stream, upstreamStream, pumpBudget),
+                PumpUpgradeStreamAsync(upstreamStream, stream, pumpBudget)).ConfigureAwait(false);
+        }
+        finally
+        {
+            pumpBudget.Dispose();
+        }
+    }
+
+    /// <summary>Перекладывает байты одного направления туннеля и закрывает встречное по завершении.</summary>
+    private static async Task PumpUpgradeStreamAsync(Stream source, Stream destination, CancellationTokenSource budget)
+    {
+        try
+        {
+            await source.CopyToAsync(destination, budget.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Встречное направление закрылось первым.
+        }
+        catch (IOException)
+        {
+            // Сторона разорвала соединение — для туннеля это штатное завершение.
+        }
+        finally
+        {
+            await budget.CancelAsync().ConfigureAwait(false);
+        }
     }
 
     private async Task HandleConnectTunnelAsync(
@@ -536,6 +667,9 @@ internal sealed class BridgeNavigationProxyServer(
     /// Ищет любой живой маршрут реестра: развязка запрос-маршрут по токену не удалась,
     /// а перехват должен доехать до драйвера.
     /// </summary>
+    /// <remarks>
+    /// Апстрим запоминается и здесь: маршрут, найденный в обход токена, знает его не хуже.
+    /// </remarks>
     private ProxyNavigationRoute? ResolveAnyRouteForTab()
     {
         var registry = registryResolver();
@@ -544,7 +678,11 @@ internal sealed class BridgeNavigationProxyServer(
             return null;
         }
 
-        return registry.TryResolveAnyRoute(out var route) ? route : null;
+        if (!registry.TryResolveAnyRoute(out var route))
+            return null;
+
+        RememberUpstreamProxy(route);
+        return route;
     }
 
     /// <summary>
@@ -1170,9 +1308,33 @@ internal sealed class BridgeNavigationProxyServer(
         // принадлежит той же вкладке и обязан умереть вместе с её задачей: при пустом токене
         // отмена по жизни маршрута не работала, и такие запросы доигрывали ForwardTimeout уже во
         // время следующей задачи — в логе таймаут ответа приходил ровно в секунду её старта.
-        var inheritedRouteToken = registryResolver()?.TryResolveAnyRoute(out var liveRoute) == true
-            ? liveRoute.RouteToken
-            : string.Empty;
+        var liveRoute = ResolveAnyRouteForTab();
+        var inheritedRouteToken = liveRoute?.RouteToken ?? string.Empty;
+
+        // ★ Апстрим спрашивается У ЖИВОГО МАРШРУТА и только потом у запомненного. Запомненный
+        // заполняется лишь при РАСПОЗНАННОМ токене, поэтому первый же запрос вкладки, пришедший
+        // с чужим или потерянным токеном, заставал его пустым и уходил в сеть НАПРЯМУЮ. Замер
+        // 2026-09-09: единственная цель таких соединений — brunhild.challenges.cloudflare.com,
+        // у которого есть ТОЛЬКО адрес IPv6; машина без связности по нему отвечала «Network is
+        // unreachable», и проверка Cloudflare не доходила.
+        var inheritedUpstreamProxy = liveRoute?.UpstreamProxy is { Length: > 0 } liveUpstream
+            ? liveUpstream
+            : lastResolvedUpstreamProxy;
+
+        // ★ Профиль переотправки наследуется по той же причине, что токен и апстрим. Токена нет у
+        // запросов ИЗ ЗАКРЫТОГО ФРЕЙМА: расширение метит запросы вкладки через declarativeNetRequest,
+        // а внутрь чужого origin-фрейма достать нечем — именно так ходит challenges.cloudflare.com.
+        // Без наследования route.ForwardProfile оставался null, откат уводил на профиль ЗАПУСКА
+        // браузера, и проверочный фрейм уезжал отпечатком TLS и подсказками клиента, не совпадающими
+        // с личностью, которую вкладка заявляет в JS. Расхождение читается до исполнения скриптов.
+        //
+        // Наследуем ТОЛЬКО при однозначной личности: маршрут отдаётся без привязки к вкладке, а при
+        // нескольких слотах в браузере вкладки несут разные профили. Взять профиль соседней задачи
+        // хуже, чем откатиться на профиль запуска: к расхождению личности добавился бы чужой выходной
+        // адрес. Неоднозначность оставляет решение откату ниже по течению.
+        var inheritedForwardProfile = registryResolver()?.HasUnambiguousForwardProfile() == true
+            ? liveRoute?.ForwardProfile
+            : null;
 
         var unroutedRoute = new ProxyNavigationRoute
         {
@@ -1180,10 +1342,8 @@ internal sealed class BridgeNavigationProxyServer(
             TabId = string.Empty,
             ContextId = string.Empty,
             RouteToken = inheritedRouteToken,
-
-            // Апстрим наследуется у последнего живого маршрута: прямой выход в сеть для запроса
-            // задачи недопустим — см. lastResolvedUpstreamProxy.
-            UpstreamProxy = lastResolvedUpstreamProxy,
+            UpstreamProxy = inheritedUpstreamProxy,
+            ForwardProfile = inheritedForwardProfile,
         };
 
         await ForwardContinueDecisionAsync(
@@ -1235,7 +1395,7 @@ internal sealed class BridgeNavigationProxyServer(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger?.LogBridgeServerNavigationProxyConnectionFailed(exception);
+            logger?.LogBridgeServerNavigationProxyConnectionFailed(absoluteTargetUrl, exception);
         }
     }
 
@@ -1268,7 +1428,7 @@ internal sealed class BridgeNavigationProxyServer(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger?.LogBridgeServerNavigationProxyConnectionFailed(exception);
+            logger?.LogBridgeServerNavigationProxyConnectionFailed(absoluteTargetUrl, exception);
             return null;
         }
     }
@@ -1378,9 +1538,11 @@ internal sealed class BridgeNavigationProxyServer(
         // снимается, незавершённые запросы обрываются сразу, а не доигрывают ForwardTimeout уже
         // во время следующей задачи. Именно это доигрывание делало сбой заразным (после провала
         // следующая задача падала в 69% случаев против 11% после успеха).
+        var routeLifetime = ResolveRouteLifetimeToken(route);
+
         using var forwardBudget = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
-            ResolveRouteLifetimeToken(route));
+            routeLifetime);
         forwardBudget.CancelAfter(ForwardTimeout);
 
         // Один повтор при обрыве CONNECT-туннеля (апстрим-прокси ответил 5xx на установку туннеля).
@@ -1393,8 +1555,30 @@ internal sealed class BridgeNavigationProxyServer(
         // повтору не подлежит, тело запроса не переигрываем.
         async Task<HttpResponseMessage> SendUpstreamAsync()
         {
-            var client = GetForwardClient(route.UpstreamProxy, route.RouteToken);
-            using var forwardRequest = CreateForwardRequest(clientRequest, decision, forwardTargetUrl);
+            var effectiveProfile = route.ForwardProfile ?? forwardProfile;
+            var profileOrigin = DescribeForwardProfileOrigin(route, effectiveProfile);
+            var profileUserAgent = effectiveProfile?.UserAgent ?? "<нет>";
+
+            logger?.LogBridgeServerNavigationProxyForwardProfile(
+                clientRequest.Method,
+                forwardTargetUrl,
+                profileOrigin,
+                profileUserAgent,
+                route.RouteToken,
+                !string.IsNullOrEmpty(route.UpstreamProxy));
+
+            if (profileOrigin is "launch" or "none")
+            {
+                logger?.LogBridgeServerNavigationProxyForwardProfileMismatch(
+                    clientRequest.Method,
+                    forwardTargetUrl,
+                    profileOrigin,
+                    profileUserAgent,
+                    route.RouteToken);
+            }
+
+            var client = GetForwardClient(route.UpstreamProxy, route.RouteToken, effectiveProfile);
+            using var forwardRequest = CreateForwardRequest(clientRequest, decision, forwardTargetUrl, effectiveProfile);
             return await client.SendAsync(
                 forwardRequest,
                 HttpCompletionOption.ResponseHeadersRead,
@@ -1416,6 +1600,22 @@ internal sealed class BridgeNavigationProxyServer(
             var responseHeaders = CollectForwardResponseHeaders(forwardResponse);
             var statusCode = (int)forwardResponse.StatusCode;
             var reasonPhrase = forwardResponse.ReasonPhrase;
+
+            if (absoluteTargetUrl.Contains("challenges.cloudflare.com", StringComparison.OrdinalIgnoreCase))
+            {
+                logger?.LogBridgeServerChallengeExchange(
+                    clientRequest.Method,
+                    absoluteTargetUrl,
+                    statusCode,
+                    DescribeForwardProfileOrigin(route, route.ForwardProfile ?? forwardProfile),
+                    body.Length,
+                    DescribeChallengeBody(body));
+
+                logger?.LogBridgeServerChallengeRequestHeaders(
+                    clientRequest.Method,
+                    absoluteTargetUrl,
+                    DescribeChallengeRequest(clientRequest));
+            }
 
             // Ответ получен целиком, поэтому здесь доступна подмена тела — то, чего блокирующий
             // webRequest не даёт ни в одном браузере.
@@ -1461,7 +1661,17 @@ internal sealed class BridgeNavigationProxyServer(
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             // Истёкший таймаут upstream — тоже сетевой сбой, а не ответ сервера.
-            logger?.LogBridgeServerNavigationProxyRejected(clientRequest.Method, absoluteTargetUrl, "forward-timeout");
+            //
+            // ★ Отмена приходит из ДВУХ источников, и означают они прямо противоположное. Снятие
+            // маршрута — штатный конец задачи: незавершённые хвосты вкладки (фоновые обновления
+            // Chrome, телеметрия) обрываются намеренно, и это не сбой. Истёкший бюджет — настоящий
+            // отказ апстрима. Пока обе причины писались одним словом, шум первого рода прятал
+            // второй: в замере на 92 отклонения 56 приходились на служебный update.googleapis.com,
+            // который к решению задачи отношения не имеет вовсе.
+            logger?.LogBridgeServerNavigationProxyRejected(
+                clientRequest.Method,
+                absoluteTargetUrl,
+                routeLifetime.IsCancellationRequested ? "route-closed" : "forward-timeout");
         }
     }
 
@@ -1532,10 +1742,69 @@ internal sealed class BridgeNavigationProxyServer(
         }
     }
 
+    // ★ Подсказки клиента и строка агента, за которые отвечает ПРОФИЛЬ ЗАДАЧИ, а не браузер.
+    //
+    // Заголовки запроса копируются на upstream дословно, а HttpsClientHandler ставит профильные
+    // значения только через AddHeaderIfMissing — то есть уже присутствующий заголовок молча
+    // пропускает. Пока подмена расширения работает, это незаметно; стоит ей не сработать (деградация
+    // blocking-перехвата, запрос без вкладки, пустой контекст), и на origin уезжает РОДНОЙ агент
+    // браузера при том, что TLS-отпечаток уже профильный, задачный. Ровно то расхождение «JS
+    // заявляет одно, провод показывает другое», ради устранения которого профиль и прокидывается.
+    // Поэтому за эти заголовки отвечает профиль: копию клиента снимаем, дальше их проставит handler.
+    //
+    // Снятие копии заодно закрывает профили БЕЗ подсказок (Firefox, Safari): у них UseClientHints
+    // выключен, то есть handler их не добавит, а прежде скопированные с браузера sec-ch-ua* уезжали
+    // бы при заявленном Gecko/WebKit — движок физически не может их отдать, и это видно в заголовках.
+    private static readonly HashSet<string> ProfileOwnedRequestHeaderNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "User-Agent",
+        "sec-ch-ua",
+        "sec-ch-ua-full-version-list",
+        "sec-ch-ua-platform",
+        "sec-ch-ua-platform-version",
+        "sec-ch-ua-mobile",
+        "sec-ch-ua-arch",
+        "sec-ch-ua-model",
+        "sec-ch-ua-bitness",
+        "sec-ch-ua-full-version",
+        "sec-ch-ua-wow64",
+    };
+
+    /// <summary>
+    /// Снимать ли заголовок браузера в пользу профиля.
+    /// </summary>
+    /// <remarks>
+    /// ★ Снимаем ТОЛЬКО когда профиль заведомо поставит замену. Прежнее условие «профиль не null»
+    /// отправляло запросы к Cloudflare с ОДНИМ заголовком <c lang="text">Host</c>: handler ставит
+    /// свои значения через <c lang="text">AddHeaderIfMissing</c>, а подставить ему нечего, если
+    /// строка агента профиля пуста (<c lang="text">CreateForwardProfile</c> отдаёт такой профиль
+    /// при пустом <c lang="text">device.UserAgent</c>) либо подсказки клиента у профиля выключены
+    /// (Firefox, Safari). Браузер без User-Agent не ходит никогда — замер на проводе показывал
+    /// ровно это, и решение Cloudflare было предрешено до исполнения любого скрипта.
+    /// </remarks>
+    private static bool ShouldDropForProfile(string name, Atom.Net.Https.Profiles.BrowserProfile? profile)
+    {
+        if (profile is not { } effective || !ProfileOwnedRequestHeaderNames.Contains(name))
+            return false;
+
+        // Строку агента профиль подставит всегда, когда она у него есть.
+        if (string.Equals(name, "User-Agent", StringComparison.OrdinalIgnoreCase))
+            return !string.IsNullOrWhiteSpace(effective.UserAgent);
+
+        // Подсказки клиента. Профиль без них (Gecko, WebKit) замены не даст, но и хромовые
+        // подсказки браузера при заявленном чужом движке уехать не должны — такие снимаем без
+        // подстановки: их отсутствие правдиво для заявленного браузера.
+        if (!effective.Headers.UseClientHints)
+            return true;
+
+        return !string.IsNullOrWhiteSpace(effective.UserAgent);
+    }
+
     private HttpRequestMessage CreateForwardRequest(
         ProxyRequest clientRequest,
         ProxyNavigationPendingDecision decision,
-        string forwardTargetUrl)
+        string forwardTargetUrl,
+        Atom.Net.Https.Profiles.BrowserProfile? forwardProfileInEffect)
     {
         // Версия протокола — наблюдаемый признак, который сайт видит ДО исполнения скриптов.
         // Настоящий браузер по HTTPS всегда согласует HTTP/2, а мы уходили наверх на 1.1: связка
@@ -1552,6 +1821,14 @@ internal sealed class BridgeNavigationProxyServer(
         if (body is { Length: > 0 })
             request.Content = new ByteArrayContent(body);
 
+        // Навигацию помечаем явно: без этого handler берёт DefaultRequestKind профиля (Fetch), и
+        // политика форматирования вырезает присланные браузером 'Upgrade-Insecure-Requests: 1' и
+        // 'Sec-Fetch-User: ?1'. Chrome шлёт их на каждой навигации, и их отсутствие при
+        // 'Sec-Fetch-Dest: document' наблюдаемо. Заодно на HTTP/1.1 восстанавливается навигационный
+        // порядок заголовков вместо fetch-порядка.
+        if (IsNavigationRequest(clientRequest))
+            Atom.Net.Https.HttpsRequestOptions.WithHttpsRequestKind(request, Atom.Net.Https.RequestKind.Navigation);
+
         var headerSource = decision.RequestHeaders ?? clientRequest.Headers;
         foreach (var (name, value) in headerSource)
         {
@@ -1563,6 +1840,9 @@ internal sealed class BridgeNavigationProxyServer(
             {
                 continue;
             }
+
+            if (ShouldDropForProfile(name, forwardProfileInEffect))
+                continue;
 
             if (!request.Headers.TryAddWithoutValidation(name, value))
                 request.Content?.Headers.TryAddWithoutValidation(name, value);
@@ -1595,6 +1875,27 @@ internal sealed class BridgeNavigationProxyServer(
             || HopByHopHeaderNames.Contains(name)
             || string.Equals(name, "Content-Length", StringComparison.OrdinalIgnoreCase))
         {
+            return;
+        }
+
+        // ★ Set-Cookie склеивать НЕЛЬЗЯ: по RFC 6265 каждая кука — отдельная строка заголовка, а
+        // атрибут Expires сам содержит запятую ('Expires=Wed, 09 Jun 2027'). Склейка через ', '
+        // превращала несколько кук в одну неразбираемую строку, и всё после первой терялось —
+        // в том числе __cf_bm, которым Cloudflare привязывает сессию.
+        if (string.Equals(name, "Set-Cookie", StringComparison.OrdinalIgnoreCase))
+        {
+            var index = 0;
+            foreach (var value in values)
+            {
+                if (!IsSafeHeaderValue(value))
+                    continue;
+
+                // Ключ словаря уникален, а на провод уходит только имя до разделителя: так каждая
+                // кука получает собственную строку 'Set-Cookie: ...'.
+                headers[index == 0 ? name : name + "\u0000" + index.ToString(CultureInfo.InvariantCulture)] = value;
+                index++;
+            }
+
             return;
         }
 
@@ -1648,9 +1949,59 @@ internal sealed class BridgeNavigationProxyServer(
     /// TLS-сбои выросли с 0.05-0.20 до 0.62 на задачу. Отдельный пул на маршрут делает границу
     /// задач настоящей и для соединений тоже.
     /// </remarks>
-    private HttpClient GetForwardClient(string? upstreamProxy, string routeToken)
+    // Запрос к challenge-платформе целиком: заголовки с порядком и отправляемая телеметрия.
+    private static string DescribeChallengeRequest(ProxyRequest request)
     {
-        var key = string.Concat(routeToken, "\u0000", upstreamProxy ?? string.Empty);
+        var headers = string.Join(" | ", request.Headers.Select(static header => header.Key + ": " + header.Value));
+        var body = request.Body is { Length: > 0 } payload
+            ? DescribeChallengeBody(payload)
+            : "<пусто>";
+
+        return headers
+            + " :: ТЕЛО[" + (request.Body?.Length ?? 0).ToString(CultureInfo.InvariantCulture) + "]="
+            + body;
+    }
+
+    // Тело ответа challenge-платформы печатаемым куском: оно бывает двоичным, а нужен признак
+    // отказа, который платформа кладёт текстом.
+    private static string DescribeChallengeBody(byte[] body)
+    {
+        if (body.Length == 0) return "<пусто>";
+
+        var text = System.Text.Encoding.UTF8.GetString(body, 0, Math.Min(body.Length, 1200));
+        Span<char> buffer = stackalloc char[text.Length];
+        var written = 0;
+
+        foreach (var symbol in text)
+            buffer[written++] = char.IsControl(symbol) ? '.' : symbol;
+
+        return new string(buffer[..written]);
+    }
+
+    // Источник профиля различается по пустому SessionId: его не заполняет только unrouted-маршрут,
+    // собранный в ForwardUnroutedRequestAsync для запроса без распознанного токена.
+    private static string DescribeForwardProfileOrigin(
+        ProxyNavigationRoute route,
+        Atom.Net.Https.Profiles.BrowserProfile? effectiveProfile)
+    {
+        if (effectiveProfile is null) return "none";
+        if (route.ForwardProfile is null) return "launch";
+
+        return string.IsNullOrEmpty(route.SessionId) ? "inherited" : "task";
+    }
+
+    private HttpClient GetForwardClient(string? upstreamProxy, string routeToken, Atom.Net.Https.Profiles.BrowserProfile? routeForwardProfile)
+    {
+        // ★ Личность входит в ключ наравне с маршрутом и апстримом. Клиент создаётся фабрикой
+        // GetOrAdd, то есть ПРИ ПЕРВОМ запросе с этим ключом: запрос, пришедший до того, как маршрут
+        // получил профиль задачи, фиксировал под ключом бесхендлерный клиент — без TLS-отпечатка,
+        // без подсказок и без порядка заголовков, — и все последующие запросы задачи шли им же.
+        var key = string.Concat(
+            routeToken,
+            "\u0000",
+            upstreamProxy ?? string.Empty,
+            "\u0000",
+            routeForwardProfile?.UserAgent ?? string.Empty);
         var isNew = false;
         var entry = forwardClients.GetOrAdd(
             key,
@@ -1659,7 +2010,7 @@ internal sealed class BridgeNavigationProxyServer(
                 isNew = true;
                 return new ForwardClientEntry(CreateForwardClient(state.Upstream, state.Profile));
             },
-            (Upstream: upstreamProxy ?? string.Empty, Profile: forwardProfile));
+            (Upstream: upstreamProxy ?? string.Empty, Profile: routeForwardProfile));
         entry.MarkUsed();
 
         // Пул умирает вместе с маршрутом — по СОБЫТИЮ его снятия, а не по сроку простоя.
@@ -2259,7 +2610,11 @@ internal sealed class BridgeNavigationProxyServer(
                     if (string.IsNullOrWhiteSpace(key))
                         continue;
 
-                    headerBuilder.Append(key);
+                    // Повторяющиеся заголовки (Set-Cookie) хранятся под уникальным ключом с
+                    // суффиксом после разделителя — на провод уходит только само имя.
+                    var separatorIndex = key.IndexOf('\u0000', StringComparison.Ordinal);
+
+                    headerBuilder.Append(separatorIndex < 0 ? key : key[..separatorIndex]);
                     headerBuilder.Append(": ");
                     headerBuilder.Append(value);
                     headerBuilder.Append("\r\n");

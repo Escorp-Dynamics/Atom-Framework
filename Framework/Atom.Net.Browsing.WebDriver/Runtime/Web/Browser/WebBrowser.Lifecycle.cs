@@ -13,6 +13,9 @@ public sealed partial class WebBrowser
     private readonly string? materializedProfilePath;
     private readonly string? publishedManagedPolicyPath;
     private readonly string? publishedExtensionId;
+
+    /// <summary>Каталог материализованного расширения: там лежит запечённый профиль раннего скрипта.</summary>
+    private readonly string? localExtensionPath;
     private readonly Process? browserProcess;
 
     private static async ValueTask<WebBrowser> LaunchCoreAsync(WebBrowserSettings settings, CancellationToken cancellationToken)
@@ -378,7 +381,10 @@ public sealed partial class WebBrowser
         if (display is null)
             throw new InvalidOperationException("Доверенный ввод мышью на Linux требует браузерной сессии с виртуальным дисплеем");
 
-        return VirtualMouse.CreateForDisplayAsync(display, cancellationToken: cancellationToken);
+        // Дисплей на собственном композиторе подаёт ввод прямо в протокол, без X-сервера.
+        return display.Session is { } session
+            ? VirtualMouse.CreateForSessionAsync(session, cancellationToken: cancellationToken)
+            : VirtualMouse.CreateForDisplayAsync(display, cancellationToken: cancellationToken);
     }
 
     [SupportedOSPlatform("linux")]
@@ -387,7 +393,9 @@ public sealed partial class WebBrowser
         if (display is null)
             throw new InvalidOperationException("Доверенный ввод с клавиатуры на Linux требует браузерной сессии с виртуальным дисплеем");
 
-        return VirtualKeyboard.CreateForDisplayAsync(display, cancellationToken: cancellationToken);
+        return display.Session is { } session
+            ? VirtualKeyboard.CreateForSessionAsync(session, cancellationToken: cancellationToken)
+            : VirtualKeyboard.CreateForDisplayAsync(display, cancellationToken: cancellationToken);
     }
 
     [SupportedOSPlatform("linux")]
@@ -454,6 +462,13 @@ public sealed partial class WebBrowser
                 IsVisible = !launchSettings.UseHeadlessMode,
                 Logger = launchSettings.Logger,
                 Resolution = ResolveDisplayResolution(launchSettings.Device),
+
+                // Сенсор заявляется по профилю: мышиный клик по документу, описывающему телефон,
+                // невозможен физически и виден проверкам в каждом событии указателя.
+                HasTouch = launchSettings.Device?.HasTouch ?? false,
+
+                // По приложению окно получает заголовок и иконку — прослойка не видна на панели задач.
+                ApplicationPath = launchSettings.Profile?.BinaryPath,
             }, cancellationToken).ConfigureAwait(false);
     }
 
@@ -740,6 +755,12 @@ public sealed partial class WebBrowser
         if (settings.Profile?.Path is not { Length: > 0 } profilePath)
             return;
 
+        // Рубильник сравнительного замера: шрифтовой слой живёт в процессе браузера, а не в JS,
+        // и рубильником ОС-подмен (suppressOsSurfaces) не выключался — то есть из сравнения
+        // «Windows против Linux» до сих пор не исключался ни разу.
+        if (string.Equals(Environment.GetEnvironmentVariable("ATOM_DISABLE_PLATFORM_FONTS"), "1", StringComparison.Ordinal))
+            return;
+
         var configurationPath = IOPath.Combine(profilePath, PlatformFontConfiguration.FileName);
         if (!File.Exists(configurationPath))
             return;
@@ -809,6 +830,13 @@ public sealed partial class WebBrowser
 
         if (display is not null)
         {
+            // Дисплей на собственном композиторе сам знает, какие переменные и флаги нужны браузеру.
+            if (display.Session is { } session)
+            {
+                session.ConfigureEnvironment(startInfo);
+                return;
+            }
+
             startInfo.Environment["DISPLAY"] = display.Display;
 
             if (!isFirefox)

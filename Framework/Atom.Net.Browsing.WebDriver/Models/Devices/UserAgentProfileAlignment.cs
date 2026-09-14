@@ -1,4 +1,4 @@
-namespace Atom.Net.Browsing.WebDriver;
+﻿namespace Atom.Net.Browsing.WebDriver;
 
 /// <summary>
 /// Приводит профиль устройства в соответствие со строкой User-Agent.
@@ -317,13 +317,17 @@ public static class UserAgentProfileAlignment
 
         // navigator.platform на Windows — всегда "Win32", в том числе на 64-битных сборках:
         // разрядность отражается только в client hints (bitness), а не в этом поле.
-        // UA-строка Windows заморожена на «Windows NT 10.0» и не различает 10 и 11, тогда как client
-        // hints отдают версию платформы отдельно. Берём значение, соответствующее Windows 10: оно
-        // согласуется с самой строкой UA и не претендует на большее.
+        //
+        // ★ Версия платформы соответствует Windows 11, а не 10. Строка UA заморожена на
+        // «Windows NT 10.0» и две системы не различает — их различает ТОЛЬКО эта подсказка, и по
+        // таблице Microsoft значения 1.0.0–10.0.0 означают Windows 10, а 13.0.0 и выше — Windows 11.
+        // Стояло '10.0.0', то есть Windows 10 21H2: выпуск, снятый с поддержки, на котором
+        // современный Chrome уже не запускается. Заявлять его вместе с Chrome 153 — противоречие,
+        // читаемое по одной подсказке, без единого скрипта.
         return new PlatformDescriptor(
             NavigatorPlatform: "Win32",
             ClientHintsPlatform: "Windows",
-            ClientHintsPlatformVersion: "10.0.0",
+            ClientHintsPlatformVersion: "15.0.0",
             Architecture: Contains(userAgent, "ARM") ? "arm" : "x86",
             Bitness: is64 ? "64" : "32",
             Model: string.Empty);

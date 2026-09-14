@@ -19,8 +19,17 @@ public sealed partial class TcpStream
     {
         SocketException? last = default;
 
+        // Семейство, объявившее себя недостижимым, пропускается целиком: отказ относится к
+        // маршруту, а не к конкретному узлу, и следующий адрес того же семейства ответит тем же.
+        // Замер 2026-09-09: у машины с адресом IPv6, но без связности по нему, каждый адрес
+        // brunhild.challenges.cloudflare.com отрабатывал свой бюджет попытки впустую.
+        AddressFamily? unreachableFamily = null;
+
         for (var i = 0; i < addresses.Length; i++)
         {
+            if (unreachableFamily is { } skipped && addresses[i].AddressFamily == skipped)
+                continue;
+
             try
             {
                 using var attempt = CreateAttemptCts(cancellationToken);
@@ -30,6 +39,10 @@ public sealed partial class TcpStream
             catch (SocketException ex)
             {
                 if (!IsExpectedConnectFailure(ex)) throw;
+
+                if (ex.SocketErrorCode is SocketError.NetworkUnreachable or SocketError.NetworkDown)
+                    unreachableFamily = addresses[i].AddressFamily;
+
                 last = ex;
             }
         }

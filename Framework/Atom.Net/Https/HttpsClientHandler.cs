@@ -352,7 +352,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
 
         var versionPolicy = profile?.VersionPolicy ?? request.VersionPolicy;
         var upstreamProxy = ResolveUpstreamProxy(uri);
-        var preferredVersion = ResolvePreferredVersion(request, profile, upstreamProxy);
+        var preferredVersion = ResolvePreferredVersion(request, profile, upstreamProxy, isHttps);
 
         // Узел мог объявить поддержку HTTP/3 — так браузер её и узнаёт. Поднимаем версию только
         // при точном совпадении происхождения: объявление относится к узлу, а не к схеме.
@@ -463,6 +463,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// <param name="request">Запрос.</param>
     /// <param name="profile">Профиль браузера, если он задан.</param>
     /// <param name="upstreamProxy">Апстрим-прокси, если он настроен.</param>
+    /// <param name="isHttps">Схема запроса защищённая.</param>
     /// <returns>Предпочитаемая версия.</returns>
     /// <remarks>
     /// Профиль — это описание браузера, за который мы себя выдаём, поэтому объявленная им версия
@@ -483,29 +484,38 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
     /// туннелировать его через CONNECT нечем. То есть откат на HTTP/2 здесь не только безопасен,
     /// но и соответствует поведению, под которое мы маскируемся.
     /// </remarks>
-    private static Version ResolvePreferredVersion(HttpRequestMessage request, BrowserProfile? profile, Uri? upstreamProxy)
+    private static Version ResolvePreferredVersion(HttpRequestMessage request, BrowserProfile? profile, Uri? upstreamProxy, bool isHttps)
     {
         var requested = request.Version == default ? HttpVersion.Version11 : request.Version;
 
         if (profile is not { } browserProfile)
-            return Downgrade(requested, upstreamProxy);
+            return Downgrade(requested, upstreamProxy, isHttps);
 
         if (request.VersionPolicy is HttpVersionPolicy.RequestVersionExact)
-            return Downgrade(requested, upstreamProxy);
+            return Downgrade(requested, upstreamProxy, isHttps);
 
         var preferred = requested > browserProfile.PreferredHttpVersion ? requested : browserProfile.PreferredHttpVersion;
 
-        return Downgrade(preferred, upstreamProxy);
+        return Downgrade(preferred, upstreamProxy, isHttps);
     }
 
     /// <summary>
-    /// Опускает HTTP/3 до HTTP/2, когда трафик обязан идти через прокси.
+    /// Опускает HTTP/3 до HTTP/2 там, где QUIC неприменим.
     /// </summary>
     /// <param name="version">Желаемая версия.</param>
     /// <param name="upstreamProxy">Апстрим-прокси, если он настроен.</param>
+    /// <param name="isHttps">Схема запроса защищённая.</param>
     /// <returns>Версия, которую действительно можно использовать.</returns>
-    private static Version Downgrade(Version version, Uri? upstreamProxy)
-        => upstreamProxy is not null && version >= HttpVersion.Version30 ? HttpVersion.Version20 : version;
+    /// <remarks>
+    /// По <c lang="text">http://</c> HTTP/3 невозможен в принципе: QUIC всегда защищён. Без этого
+    /// понижения запрос с <c lang="text">Version30</c> и политикой <c lang="text">RequestVersionOrLower</c>
+    /// доходит до <see cref="Connections.Https3Connection"/> и падает там, хотя политика прямо
+    /// разрешает откат.
+    /// </remarks>
+    private static Version Downgrade(Version version, Uri? upstreamProxy, bool isHttps)
+        => version >= HttpVersion.Version30 && (upstreamProxy is not null || !isHttps)
+            ? HttpVersion.Version20
+            : version;
 
     private TcpSettings BuildTcpSettings(BrowserProfile? profile)
     {
@@ -1181,6 +1191,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         HttpsRequestOptions.TryGetRequestKind(request, out var requestKind);
         HttpsRequestOptions.TryGetBrowserRequestContext(request, out var browserRequestContext);
         HttpsRequestOptions.TryGetReferrerPolicy(request, out var referrerPolicy);
+        HttpsRequestOptions.TryGetSuppressedDefaultHeaders(request, out var suppressedDefaultHeaders);
 
         var prepared = new HttpsRequestMessage(request.Method, request.RequestUri)
         {
@@ -1190,6 +1201,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             Kind = requestKind,
             Context = browserRequestContext,
             ReferrerPolicy = referrerPolicy,
+            SuppressedDefaultHeaders = suppressedDefaultHeaders,
         };
 
         ownsPreparedRequest = true;
@@ -1575,6 +1587,37 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         AddHeaderIfMissing(request, "sec-ch-ua-platform", profile.ClientHintsPlatform is { Length: > 0 } platform
             ? "\"" + platform + "\""
             : GetSecChUaPlatformValue(profile.UserAgent));
+
+        if (profile.Headers.UseHighEntropyClientHints)
+        {
+            ApplyHighEntropyClientHints(request, profile, secChUa);
+        }
+    }
+
+    /// <summary>
+    /// Добавляет подсказки высокой энтропии — те, что браузер отдаёт по запросу сервера.
+    /// </summary>
+    /// <remarks>
+    /// Узлы, которым они нужны, просят их через <c lang="text">Accept-CH</c>, и дальше браузер шлёт их
+    /// САМ на каждый запрос к этому узлу. Cloudflare — из таких: в записанном обмене на POST
+    /// <c lang="text">/cdn-cgi/challenge-platform/h/g/c/</c> стоят все девять подсказок. Chromium-браузер,
+    /// заявленный строкой агента, но отдающий только три низкоэнтропийных, отличим этим одним
+    /// признаком.
+    ///
+    /// Значения выводятся из строки агента того же профиля, поэтому спорить с ним они не могут.
+    /// </remarks>
+    private static void ApplyHighEntropyClientHints(HttpsRequestMessage request, BrowserProfile profile, string secChUa)
+    {
+        var userAgent = profile.UserAgent;
+        var fullVersion = ExtractChromiumFullVersion(userAgent);
+        var brandVersion = ExtractBrandFullVersion(userAgent, fullVersion);
+
+        AddHeaderIfMissing(request, "sec-ch-ua-full-version-list", BuildFullVersionList(secChUa, fullVersion, brandVersion));
+        AddHeaderIfMissing(request, "sec-ch-ua-full-version", "\"" + brandVersion + "\"");
+        AddHeaderIfMissing(request, "sec-ch-ua-platform-version", "\"" + GetPlatformVersionValue(userAgent) + "\"");
+        AddHeaderIfMissing(request, "sec-ch-ua-arch", profile.IsMobile ? "\"\"" : "\"x86\"");
+        AddHeaderIfMissing(request, "sec-ch-ua-bitness", profile.IsMobile ? "\"\"" : "\"64\"");
+        AddHeaderIfMissing(request, "sec-ch-ua-model", GetDeviceModelValue(userAgent, profile.IsMobile));
     }
 
     private static void ApplyPriorityDefaults(HttpsRequestMessage request, BrowserProfile profile, in RequestContextSnapshot requestContext)
@@ -1603,12 +1646,27 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
 
     private static void AddHeaderIfMissing(HttpsRequestMessage request, string name, string value)
     {
-        if (request.Headers.Contains(name))
+        if (request.Headers.Contains(name) || IsSuppressedDefault(request, name))
         {
             return;
         }
 
         request.Headers.TryAddWithoutValidation(name, value);
+    }
+
+    private static bool IsSuppressedDefault(HttpsRequestMessage request, string name)
+    {
+        if (request.SuppressedDefaultHeaders is not { Count: > 0 } suppressed)
+        {
+            return false;
+        }
+
+        foreach (var candidate in suppressed)
+        {
+            if (string.Equals(candidate, name, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
     }
 
     internal static ReferrerPolicyMode ResolveEffectiveReferrerPolicy(HttpsRequestMessage request, in BrowserHeaderProfile headerProfile)
@@ -1720,7 +1778,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
 
     private static void ApplyOriginDefault(HttpsRequestMessage request, Uri? requestUri, Uri? sourceReferrer, Uri? derivedReferrer, string secFetchSite, string secFetchMode, RequestKind requestKind, RequestDestination destination, bool isFormSubmission)
     {
-        if (requestUri is null || sourceReferrer is null || request.Headers.Contains("Origin"))
+        if (requestUri is null || sourceReferrer is null || request.Headers.Contains("Origin") || IsSuppressedDefault(request, "Origin"))
         {
             return;
         }
@@ -2291,6 +2349,152 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         var majorVersion = ExtractChromiumMajorVersion(userAgent);
         value = string.Concat("\"Not_A Brand\";v=\"24\", \"Chromium\";v=\"", majorVersion, "\", \"", brand, "\";v=\"", majorVersion, "\"");
         return true;
+    }
+
+    /// <summary>
+    /// Полная версия Chromium из строки агента; при её отсутствии — мажорная с нулевым хвостом.
+    /// </summary>
+    private static string ExtractChromiumFullVersion(string userAgent)
+    {
+        var chromeMarker = userAgent.IndexOf("Chrome/", StringComparison.OrdinalIgnoreCase);
+        if (chromeMarker >= 0)
+        {
+            return NormalizeVersionParts(ExtractFullVersionComponent(userAgent, chromeMarker + "Chrome/".Length));
+        }
+
+        foreach (var marker in EdgeMarkers)
+        {
+            var edgeMarker = userAgent.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (edgeMarker >= 0) return NormalizeVersionParts(ExtractFullVersionComponent(userAgent, edgeMarker + marker.Length));
+        }
+
+        return "0.0.0.0";
+    }
+
+    /// <summary>
+    /// Полная версия марки: у Edge и Opera она своя и стоит в хвосте строки агента.
+    /// </summary>
+    private static string ExtractBrandFullVersion(string userAgent, string chromiumFullVersion)
+    {
+        foreach (var marker in BrandVersionMarkers)
+        {
+            var index = userAgent.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index >= 0) return NormalizeVersionParts(ExtractFullVersionComponent(userAgent, index + marker.Length));
+        }
+
+        return chromiumFullVersion;
+    }
+
+    /// <summary>Хвостовые маркеры марок, версия которых не совпадает с версией Chromium.</summary>
+    private static readonly string[] BrandVersionMarkers = ["Edg/", "EdgA/", "EdgiOS/", "OPR/"];
+
+    private static string ExtractFullVersionComponent(string userAgent, int start)
+    {
+        var end = start;
+        while (end < userAgent.Length && (char.IsAsciiDigit(userAgent[end]) || userAgent[end] is '.')) ++end;
+
+        return end > start ? userAgent[start..end].TrimEnd('.') : "0";
+    }
+
+    /// <summary>Марки печатают версию в четыре части; недостающие разряды дополняются нулями.</summary>
+    private static string NormalizeVersionParts(string version)
+    {
+        var parts = version.Split('.');
+        if (parts.Length >= 4) return version;
+
+        return string.Join('.', parts.Concat(Enumerable.Repeat("0", 4 - parts.Length)));
+    }
+
+    /// <summary>
+    /// Перестраивает список марок из sec-ch-ua, подставляя полные версии вместо мажорных.
+    /// </summary>
+    private static string BuildFullVersionList(string secChUa, string chromiumFullVersion, string brandFullVersion)
+    {
+        var entries = secChUa.Split(", ", StringSplitOptions.RemoveEmptyEntries);
+        var rebuilt = new string[entries.Length];
+
+        for (var i = 0; i < entries.Length; ++i)
+        {
+            var separator = entries[i].LastIndexOf(";v=\"", StringComparison.Ordinal);
+            if (separator < 0)
+            {
+                rebuilt[i] = entries[i];
+                continue;
+            }
+
+            var brand = entries[i][..separator];
+            var version = brand.Contains("Chromium", StringComparison.Ordinal)
+                ? chromiumFullVersion
+                : brand.Contains("Brand", StringComparison.OrdinalIgnoreCase)
+                    ? NormalizeVersionParts(entries[i][(separator + 4)..].TrimEnd('"'))
+                    : brandFullVersion;
+
+            rebuilt[i] = string.Concat(brand, ";v=\"", version, "\"");
+        }
+
+        return string.Join(", ", rebuilt);
+    }
+
+    /// <summary>
+    /// Версия платформы для подсказок клиента.
+    /// </summary>
+    /// <remarks>
+    /// Windows 10 и 11 обе заявляют в строке агента <c lang="text">Windows NT 10.0</c> и различаются ТОЛЬКО
+    /// этой подсказкой: 19 и выше означает Windows 11. Значение берётся оттуда же, откуда его
+    /// берёт браузер, — из платформы, а не из строки агента, поэтому противоречия между ними нет.
+    /// </remarks>
+    private static string GetPlatformVersionValue(string userAgent)
+    {
+        if (userAgent.Contains("Windows NT 10.0", StringComparison.OrdinalIgnoreCase)) return "19.0.0";
+        if (userAgent.Contains("Windows", StringComparison.OrdinalIgnoreCase)) return "0.0.0";
+
+        var androidVersion = ExtractTokenVersion(userAgent, "Android ");
+        if (androidVersion is not null) return androidVersion + ".0.0";
+
+        var macVersion = ExtractTokenVersion(userAgent, "Mac OS X ");
+        if (macVersion is not null) return macVersion.Replace('_', '.');
+
+        var iosVersion = ExtractTokenVersion(userAgent, "CPU iPhone OS ") ?? ExtractTokenVersion(userAgent, "CPU OS ");
+        if (iosVersion is not null) return iosVersion.Replace('_', '.');
+
+        return string.Empty;
+    }
+
+    private static string? ExtractTokenVersion(string userAgent, string marker)
+    {
+        var index = userAgent.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (index < 0) return null;
+
+        var start = index + marker.Length;
+        var end = start;
+        while (end < userAgent.Length && (char.IsAsciiDigit(userAgent[end]) || userAgent[end] is '.' or '_')) ++end;
+
+        return end > start ? userAgent[start..end] : null;
+    }
+
+    /// <summary>
+    /// Модель устройства: непустая только у мобильных Android, где она стоит в строке агента.
+    /// </summary>
+    private static string GetDeviceModelValue(string userAgent, bool isMobile)
+    {
+        if (!isMobile) return "\"\"";
+
+        var androidIndex = userAgent.IndexOf("Android ", StringComparison.OrdinalIgnoreCase);
+        if (androidIndex < 0) return "\"\"";
+
+        var separator = userAgent.IndexOf(';', androidIndex);
+        if (separator < 0) return "\"\"";
+
+        var end = userAgent.IndexOf(')', separator);
+        if (end < 0) return "\"\"";
+
+        var model = userAgent[(separator + 1)..end].Trim();
+
+        // Хвост «Build/…» в подсказку не входит — браузер печатает только саму модель.
+        var buildMarker = model.IndexOf(" Build/", StringComparison.OrdinalIgnoreCase);
+        if (buildMarker >= 0) model = model[..buildMarker];
+
+        return model.Length is 0 ? "\"\"" : "\"" + model + "\"";
     }
 
     private static string ExtractChromiumMajorVersion(string userAgent)

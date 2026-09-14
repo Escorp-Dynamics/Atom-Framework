@@ -272,6 +272,40 @@ public sealed class VirtualMouse : IAsyncDisposable
     }
 
     /// <summary>
+    /// Создаёт мышь для сеанса собственного композитора.
+    /// </summary>
+    /// <remarks>
+    /// ★ Предпочтительный путь на Linux: не требует ни X-сервера, ни внешних пакетов, а
+    /// координаты берёт в системе поверхности окна — пересчёт в экранные не нужен.
+    /// </remarks>
+    /// <param name="session">Сеанс дисплея.</param>
+    /// <param name="settings">Настройки мыши.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    [SupportedOSPlatform("linux")]
+#pragma warning disable CA2000 // Владение бэкендом переходит устройству.
+    public static async ValueTask<VirtualMouse> CreateForSessionAsync(
+        Atom.Display.WaylandDisplaySession session,
+        VirtualMouseSettings? settings = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        var effectiveSettings = (settings ?? new VirtualMouseSettings()) with
+        {
+            ScreenSize = session.Resolution,
+            UseSeparateCursor = false,
+        };
+
+        ValidateSettings(effectiveSettings);
+
+        var created = new WaylandMouseBackend(session.Input);
+        await created.InitializeAsync(effectiveSettings, cancellationToken).ConfigureAwait(false);
+
+        return new VirtualMouse(created, effectiveSettings);
+    }
+#pragma warning restore CA2000
+
+    /// <summary>
     /// Создаёт виртуальную мышь для указанного виртуального дисплея.
     /// Использует XTEST для инжекции событий напрямую в X-сервер.
     /// События мыши изолированы в пределах указанного X-сервера.

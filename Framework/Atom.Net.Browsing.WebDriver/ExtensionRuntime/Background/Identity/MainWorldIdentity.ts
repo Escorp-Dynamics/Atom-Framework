@@ -21,6 +21,29 @@ export function hasIdentityOverrides(context: TabContextEnvelope): boolean {
 }
 
 /**
+ * Краткая подпись личности: две разные личности обязаны давать разные строки.
+ *
+ * Нужна как ключ «эта вкладка уже накрыта» — по одной только вкладке смена профиля без навигации
+ * считалась бы уже применённой и не происходила бы вовсе. Состав тот же, что у сторожа повторной
+ * установки: строка агента, платформа, пояс, языки, память, ядра, экран и видеокарта.
+ */
+export function describeIdentity(context: TabContextEnvelope): string {
+    const screen = (context as { screen?: { width?: number; height?: number } }).screen;
+    const webGl = (context as { webGl?: { renderer?: string } }).webGl;
+
+    return [
+        context.userAgent ?? '',
+        context.platform ?? '',
+        context.timezone ?? '',
+        (context.languages ?? []).join('|'),
+        String(context.deviceMemory ?? ''),
+        String(context.hardwareConcurrency ?? ''),
+        screen ? String(screen.width ?? '') + 'x' + String(screen.height ?? '') : '',
+        webGl?.renderer ?? '',
+    ].join('\u0001');
+}
+
+/**
  * Минимальная подмена личности для контекста Web Worker.
  *
  * Намеренно СИЛЬНО уже установщика для документа. В воркер нельзя тащить ни диагностические
@@ -134,10 +157,11 @@ export function installIdentityInWorker(context: TabContextEnvelope): void {
 
         // Геттер аксессора: имя 'get <свойство>' проставляет сам движок, а исходник берётся у
         // родного геттера того же свойства — совпадают и текст, и имя.
+        // Получатель пробрасывается: без него подмена на прототипе элемента ломается об WebIDL.
         const asNativeGetter = (property: string, original: any, getter: () => unknown): any => {
             const holder: any = {
                 get [property]() {
-                    return getter();
+                    return getter.call(this);
                 },
             };
 
@@ -253,8 +277,16 @@ export function installIdentityInWorker(context: TabContextEnvelope): void {
             if (webGl) {
                 overrides[0x9245] = webGl.unmaskedVendor ?? webGl.vendor;
                 overrides[0x9246] = webGl.unmaskedRenderer ?? webGl.renderer;
-                overrides[0x1f00] = webGl.vendor;
-                overrides[0x1f01] = webGl.renderer;
+
+                // ★ МАСКИРОВАННЫЕ VENDOR/RENDERER — жёсткие константы Chromium, а не свойство машины.
+                // Без WEBGL_debug_renderer_info браузер отдаёт ровно 'WebKit' и 'WebKit WebGL' на любой
+                // ОС и любом железе. Сюда клали настоящее имя видеокарты — значение, которого в
+                // немодифицированном браузере не бывает: одна проверка getParameter(VENDOR) !== 'WebKit'
+                // ловит подмену без ложных срабатываний. Замер в одном прогоне: родной профиль дал
+                // 'WebKit', подменённый — 'Google Inc. (Google)'. Имя карты отдаётся только через
+                // расширение отладки, то есть через 0x9245/0x9246 выше.
+                overrides[0x1f00] = 'WebKit';
+                overrides[0x1f01] = 'WebKit WebGL';
             }
 
             // Числовые пределы: воркер обязан отдавать те же, что документ. Расхождение здесь
@@ -520,6 +552,10 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
         // сменить профиль на лету. При булевом стороже такая смена молча терялась бы — документ
         // остался бы с прежней личностью. Одинаковый профиль повторно не ставим: второй проход по
         // уже подменённым геттерам ничего не даёт и только множит риск.
+        // ★ Экран и видеокарта входят в сравнение наравне с остальным: два профиля могут нести
+        // одну строку агента и разные разрешение/GPU (так устроены дескрипторы устройств).
+        // Без них такая смена считалась «уже установленной», и вкладка дорабатывала задачу с экраном и GPU
+        // предыдущей личности.
         const desiredComponents = [
             context.userAgent ?? '',
             context.platform ?? '',
@@ -528,6 +564,8 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
             context.clientHints?.platform ?? '',
             String(context.deviceMemory ?? ''),
             String(context.hardwareConcurrency ?? ''),
+            context.screen ? String(context.screen.width ?? '') + 'x' + String(context.screen.height ?? '') : '',
+            context.webGl?.renderer ?? '',
         ];
 
         // Сторож НЕ хранится на window: любое имя там — след автоматики, который страница читает
@@ -549,7 +587,7 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
             try {
                 const liveNavigator: any = globalObject.navigator;
                 if (!liveNavigator) {
-                    return ['', '', '', '', '', '', ''];
+                    return ['', '', '', '', '', '', '', '', ''];
                 }
 
                 let liveTimezone = '';
@@ -564,6 +602,28 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                     ? liveNavigator.userAgentData.platform
                     : '';
 
+                let liveScreen = '';
+                try {
+                    const screenObject: any = globalObject.screen;
+                    liveScreen = screenObject ? String(screenObject.width ?? '') + 'x' + String(screenObject.height ?? '') : '';
+                } catch {
+                    liveScreen = '';
+                }
+
+                // Строка видеокарты читается через одноразовый контекст: держать его негде, а создание
+                // дешёвле пропущенной смены личности.
+                let liveRenderer = '';
+                try {
+                    const probeCanvas = globalObject.document?.createElement?.('canvas');
+                    const gl = probeCanvas?.getContext?.('webgl') ?? probeCanvas?.getContext?.('experimental-webgl');
+                    if (gl) {
+                        const debugInfo = gl.getExtension?.('WEBGL_debug_renderer_info');
+                        if (debugInfo) liveRenderer = String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) ?? '');
+                    }
+                } catch {
+                    liveRenderer = '';
+                }
+
                 return [
                     typeof liveNavigator.userAgent === 'string' ? liveNavigator.userAgent : '',
                     typeof liveNavigator.platform === 'string' ? liveNavigator.platform : '',
@@ -572,9 +632,11 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                     liveUserAgentDataPlatform,
                     typeof liveNavigator.deviceMemory === 'number' ? String(liveNavigator.deviceMemory) : '',
                     typeof liveNavigator.hardwareConcurrency === 'number' ? String(liveNavigator.hardwareConcurrency) : '',
+                    liveScreen,
+                    liveRenderer,
                 ];
             } catch {
-                return ['', '', '', '', '', '', ''];
+                return ['', '', '', '', '', '', '', '', ''];
             }
         })();
         const alreadyInstalled = desiredComponents.every(
@@ -662,22 +724,139 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
 
         // Метод без собственного 'prototype': сокращённая запись в литерале объекта даёт ровно
         // такую функцию, а обычное 'function ...' — нет.
+        // ★ Кадры расширения вычёркиваются из стека брошенной ошибки.
+        //
+        // Родной геттер, вызванный на чужом получателе, бросает ИЗНУТРИ нашей обёртки, и её кадр
+        // остаётся в '.stack': странице был виден 'at get width (chrome-extension://<id>/…)' —
+        // адрес расширения и имя файла, то есть прямое доказательство подмены, читаемое одной
+        // строкой. Замер: 4 такие поверхности при 0 у эталонного Chrome, и лишний кадр глубины
+        // (7 против 5) сверх того.
+        //
+        // Снимается только собственный кадр: сообщение, тип и порядок остальных строк сохраняются,
+        // поэтому ошибка неотличима от родной. Правка '.stack' безопасна — это обычное строковое
+        // свойство экземпляра, в отличие от 'Error.prepareStackTrace', крючок которого исполнялся
+        // бы при каждом чтении стека любым скриптом страницы (см. ниже, почему он не ставится).
+        const withoutExtensionFrames = (error: unknown): unknown => {
+            try {
+                const stack = (error as { stack?: unknown })?.stack;
+
+                if (typeof stack !== 'string') return error;
+
+                const cleaned = stack
+                    .split('\n')
+                    .filter(line => line.indexOf('chrome-extension://') < 0 && line.indexOf('moz-extension://') < 0)
+                    .join('\n');
+
+                if (cleaned !== stack) (error as { stack?: unknown }).stack = cleaned;
+            } catch {
+                // Неизменяемый стек — ошибка всё равно должна дойти до страницы.
+            }
+
+            return error;
+        };
+
         const asNativeMethod = (name: string, original: any, implementation: any): any => {
             const holder: any = {
                 [name](this: unknown, ...args: unknown[]) {
-                    return implementation.apply(this, args);
+                    try {
+                        return implementation.apply(this, args);
+                    } catch (error) {
+                        throw withoutExtensionFrames(error);
+                    }
                 },
             };
 
             return markNative(holder[name], original, name, typeof original === 'function' ? original.length : implementation.length);
         };
 
-        // Геттер аксессора: имя 'get <свойство>' проставляет сам движок, а исходник берётся у
-        // родного геттера того же свойства — совпадают и текст, и имя.
+        // ★ 'Error.prepareStackTrace': СВОЙ крючок не ставится, но ЧУЖОЙ оборачивается.
+        //
+        // Обработчик страницы получает кадры СТРУКТУРАМИ, до сборки строки, и видит
+        // 'getFileName() === chrome-extension://…' мимо любой чистки текста — замер показывал
+        // 'prepareStackTrace видит extension' = true при нуле утечек в обычном стеке, тогда как
+        // у эталонного Chrome false. Это последний канал, по которому адрес расширения виден.
+        //
+        // Ставить СВОЙ обработчик нельзя: он исполнялся бы при каждом чтении '.stack' любым
+        // скриптом, включая проверку Cloudflare, и ошибка внутри него рвала бы её целиком.
+        // Поэтому перехватывается УСТАНОВКА: пока страница обработчика не ставила, не исполняется
+        // ничего; как только поставила — её функция получает уже отфильтрованные кадры. Цена
+        // платится ровно теми страницами, которые сами полезли в стек.
+        // ★ ФОРМА СВОЙСТВА — сама по себе признак. У чистого V8 'prepareStackTrace' не существует
+        // вовсе (getOwnPropertyDescriptor даёт undefined), а пара get/set находится одной строкой.
+        // Рубильник нужен, чтобы измерить, не дороже ли сокрытие кадров самого их наличия.
+        try {
+            const surfacesOff = (context as unknown as { disabledOsSurfaces?: unknown }).disabledOsSurfaces;
+            if (Array.isArray(surfacesOff) && surfacesOff.includes('prepareStack')) throw new Error('disabled');
+
+            let pageHandler: unknown;
+            const isExtensionFrame = (frame: any): boolean => {
+                try {
+                    const fileName = typeof frame?.getFileName === 'function' ? frame.getFileName() : undefined;
+
+                    return typeof fileName === 'string'
+                        && (fileName.indexOf('chrome-extension://') >= 0 || fileName.indexOf('moz-extension://') >= 0);
+                } catch {
+                    return false;
+                }
+            };
+
+            Object.defineProperty(Error, 'prepareStackTrace', {
+                configurable: true,
+                enumerable: false,
+                get: () => pageHandler,
+                set: (handler: unknown) => {
+                    if (typeof handler !== 'function') {
+                        pageHandler = handler;
+                        return;
+                    }
+
+                    const wrapped = function (this: unknown, error: unknown, frames: unknown) {
+                        const visible = Array.isArray(frames)
+                            ? frames.filter(frame => !isExtensionFrame(frame))
+                            : frames;
+
+                        return (handler as (error: unknown, frames: unknown) => unknown).call(this, error, visible);
+                    };
+
+                    // Обёртка обязана выглядеть функцией страницы: исходник и длина берутся у неё,
+                    // иначе сам обработчик, прочитав свой 'toString', и выдаст подмену.
+                    markNative(wrapped, handler, (handler as { name?: string }).name ?? '', (handler as { length?: number }).length ?? 2);
+                    pageHandler = wrapped;
+                },
+            });
+        } catch {
+            // Неподменяемое свойство — остальные поверхности всё равно должны встать.
+        }
+
+        // ★ Получатель обязан доехать до подставленного геттера.
+        //
+        // Обёртка звала getter() без 'this'. Для свойств navigator/screen это безразлично, но
+        // подмена на HTMLElement.prototype так ЛОМАЕТСЯ: внутри 'this' оказывался объект-держатель,
+        // и родной WebIDL-геттер отвергал чужой получатель — 'offsetWidth' бросал TypeError
+        // «Illegal invocation» на ЛЮБОМ элементе. Настоящий браузер такого не делает никогда, а
+        // размеры виджета читаются именно им. Замер: ветка подмены шрифтов включается при
+        // declaredOs Windows/macOS — ровно на этих профилях элемент и ломался, тогда как Linux и
+        // Android (ветка выключена) работали. 'clientWidth' уцелел случайно: он объявлен на
+        // Element.prototype, и родной геттер предка перекрывал битую копию.
         const asNativeGetter = (property: string, original: any, getter: () => unknown): any => {
             const holder: any = {
                 get [property]() {
-                    return getter();
+                    // ★ Чужой получатель обязан ронять геттер так же, как родной.
+                    //
+                    // Атрибуты WebIDL проверяют тип получателя: 'Screen.prototype.width.get.call({})'
+                    // у настоящего браузера бросает TypeError «Illegal invocation». Наши обёртки
+                    // отдавали значение кому угодно — замер на 2507 методах: эталонный Chrome даёт
+                    // 0 таких протечек, у нас было 18. Одна строка проверки со стороны сайта, и
+                    // расхождение с эталоном абсолютное, без опоры на значения.
+                    if (typeof original === 'function') {
+                        try {
+                            original.call(this);
+                        } catch (error) {
+                            throw withoutExtensionFrames(error);
+                        }
+                    }
+
+                    return getter.call(this);
                 },
             };
 
@@ -910,11 +1089,25 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                 highEntropyValues.model = clientHints.model;
             }
 
-            if (typeof context.userAgent === 'string') {
-                highEntropyValues.uaFullVersion = '';
+            // ★ Полная версия берётся из СПИСКА версий, а не оставляется пустой.
+            //
+            // Пустая строка при заполненном 'fullVersionList' невозможна ни на одном настоящем
+            // Chrome: обе подсказки движок выводит из одной версии. Замер при заявленном Windows
+            // давал uaFullVersion='' и полный fullVersionList рядом — противоречие читается одним
+            // вызовом getHighEntropyValues.
+            const brandVersion = fullVersionList
+                .find((entry) => typeof entry?.brand === 'string' && entry.brand.indexOf('Brand') < 0)?.version;
+
+            if (typeof brandVersion === 'string' && brandVersion.length > 0) {
+                highEntropyValues.uaFullVersion = brandVersion;
             }
 
             highEntropyValues.fullVersionList = fullVersionList.slice();
+
+            // Форм-фактор и режим совместимости Chrome отдаёт ВСЕГДА начиная со 110-й версии.
+            // Их отсутствие в ответе — не «мы не знаем», а признак, что отвечает не браузер.
+            highEntropyValues.formFactors = mobile ? ['Mobile'] : ['Desktop'];
+            highEntropyValues.wow64 = false;
 
             const userAgentData = {
                 get brands() {
@@ -948,6 +1141,38 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                 },
             };
 
+            // ★ Исходник подставного объекта маскируется под родной.
+            //
+            // Литерал отдавал 'Function.prototype.toString' НАШ текст: замер показывал
+            // 'get brands() { return brands.slice(); }' вместо '[native code]'. Эталонный Chrome
+            // не печатает пользовательский код ни у одного свойства платформы — расхождение видно
+            // одной строкой и не зависит ни от значений, ни от заявленной ОС.
+            try {
+                const liveUserAgentData: any = (globalObject.navigator as { userAgentData?: unknown } | undefined)?.userAgentData;
+                const livePrototype = liveUserAgentData ? Object.getPrototypeOf(liveUserAgentData) : undefined;
+
+                for (const property of ['brands', 'mobile', 'platform'] as const) {
+                    const patched = Object.getOwnPropertyDescriptor(userAgentData, property)?.get;
+                    const origin = livePrototype
+                        ? Object.getOwnPropertyDescriptor(livePrototype, property)?.get
+                        : undefined;
+
+                    if (patched) markNative(patched, origin, 'get ' + property, 0);
+                }
+
+                for (const method of ['getHighEntropyValues', 'toJSON'] as const) {
+                    const origin = livePrototype?.[method];
+
+                    markNative(
+                        userAgentData[method],
+                        origin,
+                        method,
+                        typeof origin === 'function' ? origin.length : userAgentData[method].length);
+                }
+            } catch {
+                // Маскировка не удалась — подмена всё равно должна встать.
+            }
+
             defineNavigatorGetter('userAgentData', () => userAgentData);
         }
 
@@ -961,37 +1186,182 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
             defineNavigatorGetter('globalPrivacyControl', () => globalPrivacyControl);
         }
 
-        // ★ Метрики ОКНА не подменяются вовсе. Окно физически получает заявленный размер при
-        // запуске браузера, поэтому 'innerWidth/innerHeight' верны сами по себе, а вместе с ними
-        // согласованы 'documentElement.clientWidth/clientHeight' и 'visualViewport', до которых
-        // подмена не дотягивается: за ними стоит настоящая раскладка страницы. Замер прежнего
-        // поведения показывал подменённые 1512×982 против настоящих 780×493 в clientHeight —
-        // расхождение вдвое, видимое одной строкой. Заодно 'outerHeight' перестал равняться
-        // 'innerHeight': у настоящего окна между ними высота рамки браузера, а ноль выдавал среду
-        // без окна.
-        //
-        // Экран — наоборот, подменяем: настоящий экран машины противоречит заявленному устройству.
+        // ★ Экран и область просмотра следуют ПРОФИЛЮ, а не размеру окна. Размером окна задача
+        // нерешаема в принципе: вкладки одного окна несут разные профили, а Chromium вдобавок не сужает
+        // окно ниже примерно 500 точек — телефонные 412 недостижимы физически. Здесь запечён профиль
+        // БРАУЗЕРА; вкладка со своим профилем и раскладка доводятся установщиком во вкладке.
         const screenObject = globalObject.screen;
         const declaredScreen = context.screen;
 
-        // Экран не может быть МЕНЬШЕ окна — такого не бывает, и это видно вычитанием. Заявленный
-        // размер приходится приподнимать, когда браузер не смог сделать окно настолько узким:
-        // Chromium держит нижнюю границу ширины окна около 500 px, и мобильный профиль с экраном
-        // 412 px давал окно шире экрана.
-        //
-        // Размер окна читается В МОМЕНТ ОБРАЩЕНИЯ, а не при установке: замер показал, что к
-        // document_start окно ещё может иметь запрошенный размер, а к нижней границе Chromium
-        // его приводит позже. Запомненное тогда число оставляло экран 412 при окне 500.
-        const currentOuterWidth = (): number => (typeof globalObject.outerWidth === 'number' && globalObject.outerWidth > 0 ? globalObject.outerWidth : 0);
-        const currentOuterHeight = (): number => (typeof globalObject.outerHeight === 'number' && globalObject.outerHeight > 0 ? globalObject.outerHeight : 0);
+        // ★ Экран отдаёт РОВНО заявленный профилем размер. Раньше он подгонялся под окно через
+        // Math.max, и сайт видел экран 500 вместо телефонных 412 — то есть наше ограничение
+        // протекало в личность. Размер окна не должен определять метаданные экрана: у настоящего
+        // телефона они заданы аппаратно и от окна не зависят вовсе.
         const declaredWidth = declaredScreen?.width ?? context.viewport?.width;
         const declaredHeight = declaredScreen?.height ?? context.viewport?.height;
-        const resolveScreenWidth = (): number => Math.max(declaredWidth ?? 0, currentOuterWidth());
-        const resolveScreenHeight = (): number => Math.max(declaredHeight ?? 0, currentOuterHeight());
+
+        // ★ Метрики окна и области просмотра следуют заявленной области просмотра. Браузер держит
+        // нижнюю границу ширины окна около 500 px и до телефонных 412 его не сужает, а поверхность
+        // вдобавок шире окна на поля тени — оба числа выдают среду, отличную от заявленной.
+        // Раскладку под эти числа подгоняет установщик вкладки: здесь профиль ещё общебраузерный.
+        const declaredViewportWidth = context.viewport?.width ?? declaredWidth;
+        const declaredViewportHeight = context.viewport?.height ?? declaredHeight;
+
+        // Область просмотра не больше доступной области: профиль рабочего стола заявляет вьюпорт
+        // 1080 при доступных 1040, а окно вместе с рамкой браузера за экран не выходит.
+        const clampToAvailable = (value: number, available: number | undefined): number => typeof available === 'number' && available > 0
+            ? Math.min(value, available)
+            : value;
+
+        // У встроенного фрейма своя область просмотра — размер самого фрейма, а не устройства.
+        const isTopLevelDocument = (() => {
+            try {
+                return globalObject.top === globalObject.self;
+            } catch {
+                return false;
+            }
+        })();
+
+        // Размер раскладки объявлен на Element.prototype и читается ВСЕМИ элементами сразу,
+        // поэтому подменяется ровно корневой своего документа: у прочих размер обязан остаться настоящим.
+        const defineRootClientSizeGetter = (property: string, value: number): void => {
+            const elementPrototype = globalObject.Element?.prototype;
+            const descriptor = Object.getOwnPropertyDescriptor(elementPrototype, property);
+            const original = descriptor?.get;
+
+            if (!original) {
+                return;
+            }
+
+            // Обёртка ставится НАПРЯМУЮ, минуя 'defineGetter': тот зовёт подменяющий геттер без
+            // приёмника, и для свойства с Element.prototype это даёт «Illegal invocation» —
+            // родной геттер обязан вызываться на самом элементе.
+            try {
+                const holder: any = {
+                    get [property]() {
+                        if (this === globalObject.document?.documentElement) return value;
+
+                        // Чужой получатель роняет родной геттер ИЗНУТРИ обёртки, и её кадр с
+                        // адресом расширения остаётся в стеке — см. withoutExtensionFrames.
+                        try {
+                            return original.call(this);
+                        } catch (error) {
+                            throw withoutExtensionFrames(error);
+                        }
+                    },
+                };
+
+                Object.defineProperty(elementPrototype, property, {
+                    configurable: true,
+                    enumerable: descriptor.enumerable,
+                    get: markNative(Object.getOwnPropertyDescriptor(holder, property)?.get, original, 'get ' + property, 0),
+                });
+            } catch {
+                // Неподменяемое свойство пропускаем: остальные всё равно должны встать.
+            }
+        };
+
+        // Рубильник всего дисплейного слоя разом: вьюпорт, экран, devicePixelRatio и производные.
+        // Ни один путь чтения геометрии не подменяется, страница видит настоящее окно.
+        const displaySurfacesOff = (() => {
+            const names = (context as unknown as { disabledOsSurfaces?: unknown }).disabledOsSurfaces;
+            return Array.isArray(names) && names.includes('display');
+        })();
+
+        if (!displaySurfacesOff && isTopLevelDocument && typeof declaredViewportWidth === 'number' && declaredViewportWidth > 0) {
+            const viewportWidth = clampToAvailable(declaredViewportWidth, declaredScreen?.availWidth);
+
+            defineWindowGetter('innerWidth', () => viewportWidth);
+            defineWindowGetter('outerWidth', () => viewportWidth);
+
+            // ★ Раскладка корня идёт ВМЕСТЕ с 'innerWidth'. Пока её подменял только установщик
+            // вкладки, между ними зияла дыра: он приходит позже, и до его прихода страница видела
+            // 'innerWidth' заявленным, а 'clientWidth' — настоящим. Замер матрицы признаков дал
+            // разницу 32px там, где у чистого браузера стоит полоса прокрутки (15px).
+            defineRootClientSizeGetter('clientWidth', viewportWidth);
+        }
+
+        if (!displaySurfacesOff && isTopLevelDocument && typeof declaredViewportHeight === 'number' && declaredViewportHeight > 0) {
+            const viewportHeight = clampToAvailable(declaredViewportHeight, declaredScreen?.availHeight);
+
+            // ★ Рамка браузера (вкладки и адресная строка) съедает область просмотра ВНУТРИ
+            // окна, а не выталкивает само окно за экран. Равенство outer и inner невозможно у
+            // настольного браузера, но и окно выше экрана невозможно тоже — замер ловил out=1920x1127
+            // при экране 1080. Поэтому окно равно доступной области, а вьюпорт — окно минус рамка.
+            // Рамка берётся ЖИВАЯ, когда окно её уже знает: константа 87 расходилась с фактической
+            // раскладкой, и '(height: <innerHeight>px)' отвечал false — движок считает по настоящему
+            // окну. Константа остаётся запасным значением, пока размеры окна ещё не известны.
+            const liveChromeHeight = globalObject.outerHeight > globalObject.innerHeight
+                ? globalObject.outerHeight - globalObject.innerHeight
+                : 0;
+            const chromeHeight = context.isMobile === true ? 0 : (liveChromeHeight > 0 ? liveChromeHeight : 87);
+            const outerHeightValue = viewportHeight;
+            const innerHeightValue = Math.max(1, viewportHeight - chromeHeight);
+
+            defineWindowGetter('innerHeight', () => innerHeightValue);
+            defineWindowGetter('outerHeight', () => outerHeightValue);
+            defineRootClientSizeGetter('clientHeight', innerHeightValue);
+        }
+
+        // ★ Область просмотра обязана совпадать по ВСЕМ трём путям чтения.
+        //
+        // Ранний скрипт подменял 'innerWidth/innerHeight', а 'visualViewport' и медиазапросы
+        // '(width:)'/'(height:)' оставлял родными: замер давал innerWidth=1920 при '100vw'=1888 и
+        // 'matchMedia("(width: 1920px)")'=false — три независимых пути об одном вьюпорте расходились
+        // на 32 и 42 пикселя. У настоящего браузера они сходятся всегда, и расхождение читается
+        // одной строкой. Подмена вкладки эти пути накрывает, но приходит позже — до её прихода
+        // страница видит рассогласование.
+        if (!displaySurfacesOff
+            && isTopLevelDocument
+            && typeof declaredViewportWidth === 'number'
+            && typeof declaredViewportHeight === 'number'
+            && declaredViewportWidth > 0
+            && declaredViewportHeight > 0) {
+            const viewportWidth = clampToAvailable(declaredViewportWidth, declaredScreen?.availWidth);
+            const viewportHeight = clampToAvailable(declaredViewportHeight, declaredScreen?.availHeight);
+            const innerHeightValue = Math.max(1, viewportHeight - (context.isMobile === true ? 0 : 87));
+
+            try {
+                const visualViewportPrototype = globalObject.VisualViewport?.prototype;
+
+                if (visualViewportPrototype) {
+                    // Зазор между вьюпортом и областью просмотра сохраняется: у настоящего браузера
+                    // 'visualViewport.width' меньше 'innerWidth' ровно на полосу прокрутки, и строгое
+                    // равенство было бы таким же расхождением с эталоном, как прежний разнобой.
+                    const liveViewport: any = (globalObject as { visualViewport?: unknown }).visualViewport;
+                    const widthGap = Math.max(0, globalObject.innerWidth - (liveViewport?.width ?? globalObject.innerWidth));
+                    const heightGap = Math.max(0, globalObject.innerHeight - (liveViewport?.height ?? globalObject.innerHeight));
+
+                    const overrides = [
+                        ['width', Math.max(1, viewportWidth - widthGap)],
+                        ['height', Math.max(1, innerHeightValue - heightGap)],
+                    ] as const;
+
+                    for (const [property, value] of overrides) {
+                        if (Object.getOwnPropertyDescriptor(visualViewportPrototype, property)?.get) {
+                            defineGetter(visualViewportPrototype, property, () => value);
+                        }
+                    }
+                }
+            } catch {
+                // Недоступный VisualViewport — числовые подмены всё равно встали.
+            }
+
+            // ★ 'matchMedia' НЕ подменяется, хотя '(width: <innerWidth>px)' и отвечает false.
+            //
+            // Переписывание запроса ломает адаптивную вёрстку: '(min-width: 100px)' превращался в
+            // '(min-width: 1920px)' и давал false там, где браузер даёт true, а '(max-width: 500px)' —
+            // наоборот true. Плюс 'mql.media' возвращал НЕ ТО, что спросили, — признак подмены
+            // сильнее скрываемого. Согласовать этот путь текстом нельзя: движок раскладки считает по
+            // настоящему окну, и CSS '@media' в таблице стилей всё равно ответит по нему же.
+        }
+
+        const resolveScreenWidth = (): number => declaredWidth ?? 0;
+        const resolveScreenHeight = (): number => declaredHeight ?? 0;
         const screenWidth = declaredWidth;
         const screenHeight = declaredHeight;
 
-        if (screenObject && typeof screenWidth === 'number' && typeof screenHeight === 'number') {
+        if (!displaySurfacesOff && screenObject && typeof screenWidth === 'number' && typeof screenHeight === 'number') {
             defineScreenGetter(screenObject, 'width', resolveScreenWidth);
             defineScreenGetter(screenObject, 'height', resolveScreenHeight);
 
@@ -1006,9 +1376,16 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
             }
         }
 
-        if (typeof context.deviceScaleFactor === 'number') {
+        if (!displaySurfacesOff && typeof context.deviceScaleFactor === 'number') {
             const deviceScaleFactor = context.deviceScaleFactor;
-            defineWindowGetter('devicePixelRatio', () => deviceScaleFactor);
+
+            // ★ Подмена ставится БЕЗУСЛОВНО, минуя сверку «уже совпадает».
+            //
+            // Масштаб вкладки, которым сужается область просмотра, ДЕЛИТ devicePixelRatio: замер
+            // давал 0.9833 при заявленном 1 — значение, невозможное ни у одного устройства.
+            // Сверка же видела совпадение ДО масштабирования (масштаб ставится по onCommitted,
+            // то есть позже) и подмену пропускала, оставляя странице расхождение.
+            defineGetter(globalObject, 'devicePixelRatio', () => deviceScaleFactor);
         }
 
         // Соединение. Настоящий канал машины противоречит и заявленному устройству, и прокси:
@@ -1262,7 +1639,14 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                             return result;
                         }
 
-                        return { ...result, timeZone: timezone };
+                        // Локаль форматтера идёт оттуда же, откуда navigator.language: процесс
+                        // запущен со своей, и resolvedOptions().locale выдавал именно её —
+                        // прямое противоречие с заявленным языком страницы.
+                        const preferredLocale = (context.languages ?? [])[0];
+
+                        return preferredLocale
+                            ? { ...result, timeZone: timezone, locale: preferredLocale }
+                            : { ...result, timeZone: timezone };
                     }),
                 });
             } catch {
@@ -1275,9 +1659,13 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                     nextOptions.timeZone = timezone;
                 }
 
+                // Локаль по умолчанию — заявленная, иначе форматтер печатал бы японский формат,
+                // сам же рапортуя resolvedOptions().locale = 'en-US'.
+                const nextLocales = locales ?? (context.languages ?? [])[0];
+
                 return new.target !== undefined
-                    ? Reflect.construct(OriginalDateTimeFormat, [locales, nextOptions], new.target)
-                    : new OriginalDateTimeFormat(locales, nextOptions);
+                    ? Reflect.construct(OriginalDateTimeFormat, [nextLocales, nextOptions], new.target)
+                    : new OriginalDateTimeFormat(nextLocales, nextOptions);
             };
 
             try {
@@ -1290,6 +1678,205 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                 });
             } catch {
                 // То же самое: частичная подмена лучше, чем срыв всей установки.
+            }
+
+            // ★ Date.prototype.getTimezoneOffset ЖИВЁТ ОТДЕЛЬНО ОТ Intl и подмены выше не видит.
+            // Пока он отдавал смещение сервера, страница получала прямое противоречие: Intl
+            // называет один пояс, Date показывает смещение другого. Проверяется одной строкой и
+            // потому обесценивает всю подмену пояса.
+            //
+            // Смещение вычисляется через сам Intl в заявленном поясе, поэтому остаётся верным и
+            // при переходе на летнее время, а не берётся постоянной.
+            try {
+                const OriginalGetTimezoneOffset = Date.prototype.getTimezoneOffset;
+                const offsetFormatter = new Intl.DateTimeFormat('en-US', {
+                    timeZone: timezone,
+                    hour12: false,
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                });
+
+                Object.defineProperty(Date.prototype, 'getTimezoneOffset', {
+                    configurable: true,
+                    writable: true,
+                    value: asNativeMethod('getTimezoneOffset', OriginalGetTimezoneOffset, function (this: Date) {
+                        try {
+                            const parts: any = {};
+                            for (const part of offsetFormatter.formatToParts(this)) {
+                                if (part.type !== 'literal') parts[part.type] = part.value;
+                            }
+
+                            const asUtc = Date.UTC(
+                                Number(parts.year),
+                                Number(parts.month) - 1,
+                                Number(parts.day),
+                                Number(parts.hour) % 24,
+                                Number(parts.minute),
+                                Number(parts.second),
+                            );
+
+                            // Знак как в спецификации: западнее UTC смещение положительно.
+                            return Math.round((this.getTime() - asUtc) / 60000);
+                        } catch {
+                            return OriginalGetTimezoneOffset.call(this);
+                        }
+                    }),
+                });
+            } catch {
+                // Прототип Date неподменяем — остальные поверхности всё равно должны встать.
+            }
+
+            // ★ Текстовые представления даты живут ОТДЕЛЬНО от смещения: toString/toTimeString
+            // печатают пояс, заданный процессу переменной TZ при запуске. Замер: при заявленном
+            // America/Los_Angeles и уже верном getTimezoneOffset()=420 строка давала
+            // «GMT+0900 (日本標準時)» — то есть пояс запуска, прямо противоречащий числу.
+            try {
+                const OriginalToString = Date.prototype.toString;
+                const OriginalToTimeString = Date.prototype.toTimeString;
+                const OriginalToDateString = Date.prototype.toDateString;
+
+                // Строка вида «GMT-0700 (Pacific Daylight Time)» собирается из подменённого
+                // смещения и длинного имени пояса, которое выдаёт сам Intl в этом поясе.
+                const formatZoneSuffix = (date: Date): string => {
+                    const offsetMinutes = date.getTimezoneOffset();
+                    const sign = offsetMinutes > 0 ? '-' : '+';
+                    const absolute = Math.abs(offsetMinutes);
+                    const hours = String(Math.floor(absolute / 60)).padStart(2, '0');
+                    const minutes = String(absolute % 60).padStart(2, '0');
+
+                    let longName = '';
+                    try {
+                        const named = new Intl.DateTimeFormat('en-US', { timeZone: timezone, timeZoneName: 'long' })
+                            .formatToParts(date)
+                            .find((part) => part.type === 'timeZoneName');
+                        longName = named ? named.value : '';
+                    } catch {
+                        longName = '';
+                    }
+
+                    return 'GMT' + sign + hours + minutes + (longName ? ' (' + longName + ')' : '');
+                };
+
+                // Дата и время печатаются в заявленном поясе через en-US-форматтер, иначе сами
+                // цифры остались бы от пояса процесса.
+                const formatLocalParts = (date: Date): { dateText: string; timeText: string } | null => {
+                    try {
+                        const parts: any = {};
+                        for (const part of new Intl.DateTimeFormat('en-US', {
+                            timeZone: timezone,
+                            hour12: false,
+                            weekday: 'short',
+                            month: 'short',
+                            day: '2-digit',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                        }).formatToParts(date)) {
+                            if (part.type !== 'literal') parts[part.type] = part.value;
+                        }
+
+                        return {
+                            dateText: parts.weekday + ' ' + parts.month + ' ' + parts.day + ' ' + parts.year,
+                            timeText: (parts.hour === '24' ? '00' : parts.hour) + ':' + parts.minute + ':' + parts.second,
+                        };
+                    } catch {
+                        return null;
+                    }
+                };
+
+                Object.defineProperty(Date.prototype, 'toString', {
+                    configurable: true,
+                    writable: true,
+                    value: asNativeMethod('toString', OriginalToString, function (this: Date) {
+                        const local = formatLocalParts(this);
+                        return local === null
+                            ? OriginalToString.call(this)
+                            : local.dateText + ' ' + local.timeText + ' ' + formatZoneSuffix(this);
+                    }),
+                });
+
+                Object.defineProperty(Date.prototype, 'toTimeString', {
+                    configurable: true,
+                    writable: true,
+                    value: asNativeMethod('toTimeString', OriginalToTimeString, function (this: Date) {
+                        const local = formatLocalParts(this);
+                        return local === null
+                            ? OriginalToTimeString.call(this)
+                            : local.timeText + ' ' + formatZoneSuffix(this);
+                    }),
+                });
+
+                Object.defineProperty(Date.prototype, 'toDateString', {
+                    configurable: true,
+                    writable: true,
+                    value: asNativeMethod('toDateString', OriginalToDateString, function (this: Date) {
+                        const local = formatLocalParts(this);
+                        return local === null ? OriginalToDateString.call(this) : local.dateText;
+                    }),
+                });
+                // ★ toLocale* — ОТДЕЛЬНАЯ поверхность, и без неё подмена сама себе противоречит:
+                // замер показал toString() «05:05 GMT-0700» и toLocaleString() «21:05» на ОДНОМ
+                // объекте Date — разрыв в 16 часов, видимый одной строкой.
+                const preferredLocale = (context.languages ?? [])[0];
+                const localeDefaults = { timeZone: timezone };
+
+                const patchLocaleMethod = (name: 'toLocaleString' | 'toLocaleDateString' | 'toLocaleTimeString') => {
+                    const original = (Date.prototype as any)[name];
+
+                    Object.defineProperty(Date.prototype, name, {
+                        configurable: true,
+                        writable: true,
+                        value: asNativeMethod(name, original, function (this: Date, locales?: unknown, options?: any) {
+                            const nextOptions = options === null || options === undefined
+                                ? { ...localeDefaults }
+                                : { ...localeDefaults, ...options };
+
+                            // Явно переданный пояс уважаем: вызывающий код знает, чего просит.
+                            if (options && options.timeZone !== undefined) nextOptions.timeZone = options.timeZone;
+
+                            return original.call(this, locales ?? preferredLocale, nextOptions);
+                        }),
+                    });
+                };
+
+                patchLocaleMethod('toLocaleString');
+                patchLocaleMethod('toLocaleDateString');
+                patchLocaleMethod('toLocaleTimeString');
+            } catch {
+                // Те же соображения: частичная подмена лучше срыва всей установки.
+            }
+
+            // Локаль по умолчанию у соседних конструкторов Intl берётся из процесса, а не из
+            // navigator.language: NumberFormat и Collator рапортовали «ja» при заявленном en-US.
+            try {
+                const preferredLocale = (context.languages ?? [])[0];
+                if (preferredLocale) {
+                    for (const name of ['NumberFormat', 'Collator'] as const) {
+                        const Original: any = (Intl as any)[name];
+                        if (typeof Original !== 'function') continue;
+
+                        const Patched: any = function (this: unknown, locales?: unknown, options?: unknown) {
+                            return new.target !== undefined
+                                ? Reflect.construct(Original, [locales ?? preferredLocale, options], new.target)
+                                : Original(locales ?? preferredLocale, options);
+                        };
+
+                        Object.setPrototypeOf(Patched, Original);
+                        Patched.prototype = Original.prototype;
+                        Object.defineProperty(Intl, name, {
+                            configurable: true,
+                            writable: true,
+                            value: markNative(Patched, Original, name, Original.length),
+                        });
+                    }
+                }
+            } catch {
+                // Как и выше: неподменяемый Intl не должен рвать остальную установку.
             }
         }
 
@@ -1342,7 +1929,11 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
         // отдаёт непустой список голосов (Microsoft David/Zira ставятся с системой), а панель задач
         // всегда уменьшает `availHeight`. Каждого из этих признаков по отдельности достаточно,
         // чтобы заявление чужой ОС не сошлось с наблюдаемым окружением.
-        const declaredOs = clientHints?.platform ?? '';
+        // Рубильник сравнительного замера: пустая строка отключает ОС-зависимые подмены целиком,
+        // оставляя строку агента, платформу и клиентские подсказки нетронутыми.
+        const declaredOs = (context as { suppressOsSurfaces?: boolean }).suppressOsSurfaces === true
+            ? ''
+            : (clientHints?.platform ?? '');
 
         // ★ ЗАЯВЛЕННЫЙ ДВИЖОК. Профиль iPhone/iPad объявляет Safari, а исполняет всё Chromium — и
         // замер это показывал прямо: 'navigator.vendor' отдавал 'Google Inc.', на месте были
@@ -1469,6 +2060,23 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
 
                     if (declaredOsCpu !== undefined)
                         defineMissingNavigatorProperty('oscpu', declaredOsCpu);
+
+                    // Координаты области содержимого на экране: у Firefox это обычные числа, и их
+                    // отсутствие при заявленной строке агента Firefox противоречит ей само по себе.
+                    // Значения берутся от положения окна, чтобы не разойтись со 'screenX'.
+                    for (const [property, source] of [['mozInnerScreenX', 'screenX'], ['mozInnerScreenY', 'screenY']] as const) {
+                        try {
+                            if (!(property in globalObject)) {
+                                Object.defineProperty(globalObject, property, {
+                                    configurable: true,
+                                    enumerable: true,
+                                    get: asNativeGetter(property, undefined, () => Number(globalObject[source]) || 0),
+                                });
+                            }
+                        } catch {
+                            // Неподменяемая поверхность — остальные всё равно должны встать.
+                        }
+                    }
                 }
 
                 // Свойства, которых у Safari не бывает. Убираем их С ПРОТОТИПА: собственное свойство на
@@ -1658,7 +2266,6 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                 // V8 в стек убираются: они на сбор не влияют.
                 try {
                     delete (Error as any).captureStackTrace;
-                    delete (Error as any).prepareStackTrace;
                 } catch {
                     // Свойства V8 неудаляемыми не бывают, но падать из-за них нельзя.
                 }
@@ -1667,6 +2274,12 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                     delete (Intl as any).v8BreakIterator;
                 } catch {
                     // То же самое.
+                }
+
+                try {
+                    delete (Error as any).prepareStackTrace;
+                } catch {
+                    // Свойства V8 неудаляемыми не бывают, но падать из-за них нельзя.
                 }
 
             // Для заявленного Gecko этих поверхностей быть НЕ должно: у Firefox их нет,
@@ -1788,7 +2401,14 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
             }
         }
 
-        if (declaredOs === 'Windows' || declaredOs === 'macOS') {
+        // Рубильник отдельных ветвей ОС-подмен для бинарного поиска виновника отказа: список имён
+        // приходит в контексте вкладки, гасится только названное. Общий `suppressOsSurfaces`
+        // выключает слой целиком и разделить ветви не позволяет.
+        const disabledSurfacesValue = (context as unknown as { disabledOsSurfaces?: unknown }).disabledOsSurfaces;
+        const disabledSurfaces: string[] = Array.isArray(disabledSurfacesValue) ? disabledSurfacesValue : [];
+        const surfaceEnabled = (name: string): boolean => !disabledSurfaces.includes(name);
+
+        if ((declaredOs === 'Windows' || declaredOs === 'macOS') && surfaceEnabled('voices')) {
             const voiceNames = declaredOs === 'Windows'
                 ? [
                     ['Microsoft David - English (United States)', 'en-US'],
@@ -1801,24 +2421,35 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                     ['Daniel', 'en-GB'],
                 ];
 
-            const voices = voiceNames.map(([name, lang], index) => ({
-                voiceURI: name,
-                name,
-                lang,
-                localService: true,
-                default: index === 0,
-            }));
+            // Голоса выдаются объектами с настоящим прототипом: обычный литерал не проходит
+            // 'instanceof SpeechSynthesisVoice' и печатается как '[object Object]'.
+            const voicePrototype = globalObject.SpeechSynthesisVoice?.prototype;
+            const voices = voiceNames.map(([name, lang], index) => {
+                const voice = voicePrototype ? Object.create(voicePrototype) : {};
+
+                Object.defineProperties(voice, {
+                    voiceURI: { configurable: true, enumerable: true, get: asNativeGetter('voiceURI', undefined, () => name) },
+                    name: { configurable: true, enumerable: true, get: asNativeGetter('name', undefined, () => name) },
+                    lang: { configurable: true, enumerable: true, get: asNativeGetter('lang', undefined, () => lang) },
+                    localService: { configurable: true, enumerable: true, get: asNativeGetter('localService', undefined, () => true) },
+                    default: { configurable: true, enumerable: true, get: asNativeGetter('default', undefined, () => index === 0) },
+                });
+
+                return voice;
+            });
 
             const speech = globalObject.speechSynthesis;
             if (speech) {
                 try {
                     const speechPrototype = globalObject.SpeechSynthesis?.prototype;
                     const originalGetVoices = speech.getVoices?.bind(speech);
+                    // ★ Системные голоса ПОДМЕНЯЮТСЯ, а не уступают. Прежде подмена срабатывала
+                    // только на пустом списке, но у Linux-машины он не пуст: замер при заявленном
+                    // Windows показывал 'Google Deutsch|Google US English|…' — набор, которого на
+                    // Windows не бывает, тогда как там всегда есть 'Microsoft David/Zira'.
+                    // Чужие голоса — прямое указание на настоящую ОС, поэтому берём заявленные.
                     const patchedGetVoices = asNativeMethod('getVoices', speech.getVoices, function () {
-                        const native = originalGetVoices ? originalGetVoices() : [];
-                        // Если система голоса всё же отдаёт — не подменяем: правдивое окружение
-                        // всегда лучше выдуманного.
-                        return native !== null && native !== undefined && native.length > 0 ? native : voices.slice();
+                        return voices.slice();
                     });
 
                     // Метод объявлен на 'SpeechSynthesis.prototype'; собственное свойство прямо на
@@ -1839,19 +2470,298 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
             }
         }
 
+        // ★ ШРИФТЫ ОС. Набор семейств жёстко привязан к системе, и сайт читает его измерением:
+        // ширина строки в проверяемом шрифте сравнивается с шириной в базовом, и совпадение
+        // означает, что шрифта нет и сработала подстановка. Замер при заявленном Windows давал
+        // 0 из 5 windows-семейств при трёх linux-овых — расхождение уровня ОС, которое не
+        // закрывается ни строкой агента, ни клиентскими подсказками.
+        //
+        // Подменяется САМО ИЗМЕРЕНИЕ: подсунуть в систему шрифты нельзя, а оба пути измерения —
+        // 'measureText' и размер элемента — ведут к одному числу. Заявленным семействам даётся
+        // устойчивое смещение от базовой ширины, поэтому они «существуют»; чужим системным,
+        // которых на заявленной ОС быть не должно, — ровно базовая ширина, то есть «отсутствуют».
+        if ((declaredOs === 'Windows' || declaredOs === 'macOS') && surfaceEnabled('fonts')) {
+            // ★ Список — ПОЛНЫЙ штатный комплект заявленной ОС, а не десяток заметных имён.
+            // Перечисление шрифтов проверяет 40–100 семейств разом, и отсутствие обязательных
+            // выдаёт подмену вернее, чем присутствие подставных: Times New Roman и Georgia есть
+            // даже на голой Windows, а Marlett — системный шрифт элементов окна, без него живой
+            // Windows не бывает. Замер при 10 подменяемых семействах: 18 обязательных отсутствовали.
+            const ownFamilies = declaredOs === 'Windows'
+                ? [
+                    'segoe ui', 'segoe ui semibold', 'segoe ui light', 'segoe ui black',
+                    'segoe ui emoji', 'segoe ui symbol', 'segoe ui historic', 'segoe print',
+                    'segoe script', 'segoe mdl2 assets', 'segoe fluent icons',
+                    'calibri', 'cambria', 'cambria math', 'candara', 'consolas', 'constantia',
+                    'corbel', 'sylfaen', 'tahoma', 'verdana', 'georgia', 'impact',
+                    // Алиасы, которые Windows разрешает всегда: без них браузер сам подставлял
+                    // системный шрифт, и ширина уезжала мимо подмены при отрицательном fonts.check.
+                    'arial', 'helvetica', 'courier', 'times',
+                    'times new roman', 'courier new', 'arial black', 'arial narrow',
+                    'trebuchet ms', 'comic sans ms', 'palatino linotype', 'book antiqua',
+                    'lucida console', 'lucida sans unicode', 'lucida sans', 'microsoft sans serif',
+                    'ms sans serif', 'ms serif', 'ms shell dlg 2', 'ms gothic', 'ms pgothic',
+                    'ms ui gothic', 'ms mincho', 'ms pmincho', 'simsun', 'nsimsun', 'simhei',
+                    'microsoft yahei', 'microsoft jhenghei', 'malgun gothic', 'gulim', 'batang',
+                    'meiryo', 'yu gothic', 'yu mincho', 'mingliu', 'pmingliu',
+                    'marlett', 'webdings', 'wingdings', 'wingdings 2', 'wingdings 3', 'symbol',
+                    'franklin gothic medium', 'gabriola', 'gadugi', 'ebrima', 'nirmala ui',
+                    'leelawadee ui', 'mv boli', 'myanmar text', 'javanese text', 'mongolian baiti',
+                    'sitka small', 'sitka text', 'sitka subheading', 'sitka heading',
+                    'sitka display', 'sitka banner', 'bahnschrift', 'ink free', 'hololens mdl2 assets',
+                ]
+                : [
+                    'helvetica neue', 'helvetica', 'lucida grande', 'geneva', 'menlo', 'monaco',
+                    'optima', 'papyrus', 'sf pro text', 'sf pro display', 'sf mono', 'sf compact',
+                    'american typewriter', 'andale mono', 'apple chancery', 'apple color emoji',
+                    'apple sd gothic neo', 'apple symbols', 'avenir', 'avenir next',
+                    'avenir next condensed', 'baskerville', 'big caslon', 'bodoni 72',
+                    'bradley hand', 'brush script mt', 'chalkboard', 'chalkboard se', 'chalkduster',
+                    'cochin', 'copperplate', 'courier', 'didot', 'futura', 'gill sans',
+                    'herculanum', 'hoefler text', 'impact', 'marker felt', 'noteworthy',
+                    'palatino', 'phosphate', 'rockwell', 'savoye let', 'signpainter',
+                    'skia', 'snell roundhand', 'times', 'trattatello', 'zapfino',
+                    'georgia', 'times new roman', 'courier new', 'verdana', 'trebuchet ms',
+                    'comic sans ms', 'arial black', 'arial narrow', 'arial',
+                ];
+
+            // Семейства, которых на заявленной ОС не бывает: они обязаны выглядеть отсутствующими.
+            // Список тоже полный: перечисление ищет линуксовые имена ровно так же, как виндовые,
+            // и одна найденная 'DejaVu Sans' при заявленном Windows стоит всех подставленных.
+            const linuxFamilies = [
+                'dejavu sans', 'dejavu serif', 'dejavu sans mono', 'dejavu math tex gyre',
+                'liberation sans', 'liberation serif', 'liberation mono', 'liberation sans narrow',
+                'ubuntu', 'ubuntu mono', 'ubuntu condensed', 'cantarell', 'oxygen', 'oxygen-sans',
+                'noto sans', 'noto serif', 'noto mono', 'noto color emoji', 'noto sans cjk jp',
+                'noto sans cjk sc', 'noto sans symbols', 'fira sans', 'fira mono', 'fira code',
+                'droid sans', 'droid serif', 'droid sans mono', 'freesans', 'freeserif', 'freemono',
+                'nimbus sans', 'nimbus roman', 'nimbus mono ps', 'urw bookman', 'urw gothic',
+                'century schoolbook l', 'bitstream vera sans', 'bitstream vera serif',
+                'bitstream charter', 'c059', 'd050000l', 'p052', 'standard symbols ps', 'z003',
+                'source code pro', 'jetbrains mono', 'cascadia code', 'hack', 'inconsolata',
+                'carlito', 'caladea', 'croscore', 'arimo', 'tinos', 'cousine',
+                'lohit devanagari', 'kacst art', 'mry_kacstqurn', 'padauk', 'abyssinica sil',
+            ];
+
+            const foreignFamilies = declaredOs === 'Windows'
+                ? [...linuxFamilies, 'helvetica neue', 'lucida grande', 'menlo', 'monaco', 'geneva',
+                    'sf pro text', 'sf pro display', 'sf mono', 'apple color emoji', 'apple sd gothic neo',
+                    'avenir', 'avenir next', 'chalkboard', 'chalkduster', 'cochin', 'didot', 'futura',
+                    'gill sans', 'hoefler text', 'marker felt', 'noteworthy', 'optima', 'papyrus',
+                    'phosphate', 'skia', 'snell roundhand', 'zapfino']
+                : [...linuxFamilies, 'segoe ui', 'segoe ui emoji', 'segoe ui symbol', 'segoe print',
+                    'segoe script', 'calibri', 'cambria', 'candara', 'consolas', 'constantia', 'corbel',
+                    'sylfaen', 'tahoma', 'marlett', 'webdings', 'wingdings', 'ms shell dlg 2',
+                    'microsoft sans serif', 'ms gothic', 'simsun', 'microsoft yahei', 'malgun gothic',
+                    'franklin gothic medium', 'gabriola', 'gadugi', 'ebrima', 'nirmala ui', 'bahnschrift'];
+
+            // Обобщённые имена CSS: они есть на любой системе и подмене не подлежат.
+            const genericFamilies = [
+                'serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui',
+                'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded',
+                'math', 'emoji', 'fangsong', 'caption', 'icon', 'menu', 'message-box',
+                'small-caption', 'status-bar', '-webkit-body', 'inherit', 'initial', 'unset',
+            ];
+
+            // Первое семейство из списка CSS-шрифта: измеряют именно по нему, базовое идёт следом.
+            //
+            // ★ Имя берётся ЦЕЛИКОМ, а не последним словом. Прежний разбор резал по последнему
+            // пробелу, и многословные семейства не совпадали со списком НИКОГДА: '48px "Segoe UI"'
+            // давало 'ui', '"Times New Roman"' — 'roman', '"Liberation Sans"' — 'sans'. Подмена на
+            // них не срабатывала вовсе, а Segoe UI отдавал ширину донора, совпадая с Arial до байта —
+            // на живой Windows это разные шрифты. Кавычки снимаются до разбора: без них у
+            // '48px "Segoe UI"' нет иного признака, где кончается размер и начинается имя.
+            const firstFamily = (font: unknown): string => {
+                const head = (String(font ?? '').split(',')[0] ?? '').trim();
+
+                // Имя в кавычках — берём его содержимое как есть.
+                const quoted = /["']([^"']+)["']\s*$/.exec(head);
+                if (quoted?.[1] !== undefined) {
+                    return quoted[1].trim().toLowerCase();
+                }
+
+                // Без кавычек имя идёт после размера — берём остаток за ПОСЛЕДНИМ размером: до него
+                // могут стоять и числовая насыщенность ('400'), и другие дескрипторы ('small-caps 700').
+                const sized = /^.*(?:^|\s)\d*\.?\d+(?:px|pt|em|rem|%|ex|ch|vh|vw|q|cm|mm|in|pc)(?:\s*\/\s*\S+)?\s+(.+)$/.exec(head);
+
+                return (sized?.[1] ?? head).trim().toLowerCase();
+            };
+
+            // Смещение выводится из имени: у каждого семейства своя ширина, и одинаковая для всех
+            // выдала бы подмену не хуже отсутствия шрифтов.
+            const familyShift = (family: string): number => {
+                let hash = 0;
+                for (let index = 0; index < family.length; index++) {
+                    hash = (hash * 31 + family.charCodeAt(index)) >>> 0;
+                }
+
+                return 1.03 + ((hash % 180) / 1000);
+            };
+
+            // ★ ИЗМЕРЕНИЕ НЕ ПОДМЕНЯЕТСЯ ВОВСЕ — ни в canvas, ни в раскладке.
+            //
+            // Источник истины о шрифтах ровно один: fontconfig профиля (PlatformFontConfiguration),
+            // который отдаёт браузеру доноров под заявленными именами. Он подменяет ФАЙЛ, поэтому
+            // все пути измерения — canvas, размер элемента, перечисление — меряют один и тот же
+            // глиф и сходятся сами собой, как у настоящей машины.
+            //
+            // Подмена ширины в canvas этому прямо противоречила. Замер: `Calibri` и `Verdana`
+            // раскладка рисует ОДНИМ файлом (оба падают на донора DejaVu), а canvas давал им
+            // разную ширину по хешу имени. Расхождение двух путей на одном шрифте доходило до
+            // 24 px, тогда как у родного профиля и у профиля своей ОС оно равно 0.008 px на всех
+            // 18 проверенных семействах — то есть инвариант, ломать который дороже, чем прятать
+            // ширину. Проверяется одним циклом: `measureText(f).width` против
+            // `getBoundingClientRect().width` для того же CSS-шрифта.
+            //
+            // Если какого-то заявленного семейства недостаёт — лечится донором в fontconfig,
+            // а не умножением на множитель поверх чужого глифа.
+
+            // ★ 'document.fonts.check()' тоже НЕ подменяется — по той же причине.
+            //
+            // Подмена отвечала по списку имён, а раскладка рисовала по fontconfig, и они спорили
+            // внутри одного документа: замер при заявленном Windows дал 'check("DejaVu Sans")'
+            // = false, тогда как движок этим самым файлом строку и рисовал (ширина совпадала
+            // с донорской), а 'check("ZzNoSuchFamily7331")' = true. Родной ответ согласован
+            // с fontconfig по построению — он его и спрашивает.
+            //
+            // Семантику метода стоит помнить: настоящий Chrome отвечает 'true' почти на всё,
+            // включая заведомо несуществующие имена, — проверяется готовность шрифта к отрисовке,
+            // а не его наличие. Отрицательный ответ по умолчанию инвертировал бы API.
+
+            // ★ Четвёртый путь — 'queryLocalFonts()'. Он отдаёт СПИСОК семейств машины целиком,
+            // мимо любой подмены измерения: замер вернул 701 хостовое имя при заявленном Windows.
+            // Подменять список нечем — postscriptName и style каждого шрифта нам неоткуда взять,
+            // а правдоподобно выдумать их для сотни семейств нельзя. Поэтому API снимается: он
+            // требует разрешения пользователя, в непривилегированном контексте недоступен и его
+            // отсутствие — обычное состояние, а не признак.
+            try {
+                if ('queryLocalFonts' in globalObject) {
+                    delete (globalObject as { queryLocalFonts?: unknown }).queryLocalFonts;
+                }
+            } catch {
+                // Неудаляемое свойство — измерение всё равно подменено.
+            }
+
+            // ★ РАСКЛАДКА КЛАВИАТУРЫ. 'navigator.keyboard.getLayoutMap()' отдаёт соответствие
+            // физических клавиш символам, и оно задано ОС, а не браузером. Замер при заявленном
+            // Windows: 'IntlBackslash' отдавал '<' — так его печатают раскладки X11, тогда как на
+            // US-Windows это '\'. Одна строка у сайта, и результат однозначно указывает на Linux.
+            try {
+                const keyboard: any = (globalObject.navigator as { keyboard?: unknown } | undefined)?.keyboard;
+                const originalGetLayoutMap = keyboard?.getLayoutMap;
+
+                if (typeof originalGetLayoutMap === 'function' && surfaceEnabled('keyboard')) {
+                    const layoutOverrides: Record<string, string> = declaredOs === 'Windows'
+                        ? { IntlBackslash: '\\', IntlRo: '\\', IntlYen: '\\' }
+                        : { IntlBackslash: '§' };
+
+                    const patchedGetLayoutMap = asNativeMethod('getLayoutMap', originalGetLayoutMap, async function (this: any) {
+                        const layout: any = await originalGetLayoutMap.call(this);
+
+                        try {
+                            for (const [code, value] of Object.entries(layoutOverrides)) {
+                                if (layout.has(code)) layout.set(code, value);
+                            }
+                        } catch {
+                            // Неизменяемая карта — отдаём как есть.
+                        }
+
+                        return layout;
+                    });
+
+                    Object.defineProperty(Object.getPrototypeOf(keyboard) ?? keyboard, 'getLayoutMap', {
+                        configurable: true,
+                        writable: true,
+                        enumerable: Object.getOwnPropertyDescriptor(Object.getPrototypeOf(keyboard) ?? keyboard, 'getLayoutMap')?.enumerable ?? true,
+                        value: patchedGetLayoutMap,
+                    });
+                }
+            } catch {
+                // Недоступный Keyboard API — остальные поверхности всё равно подменены.
+            }
+
+            // ★ СИСТЕМНЫЕ ЦВЕТА CSS. Акцент рабочего стола виден странице через 'SelectedItem' и
+            // родственные ключевые слова: замер при заявленном Windows давал '#3DAEE9' — акцент темы
+            // KDE Breeze, тогда как на Windows по умолчанию '#0078D4'. Читается одним вызовом
+            // getComputedStyle, сверяется с короткой таблицей и потому проверяется тривиально.
+            try {
+                const systemColors: Record<string, string> = !surfaceEnabled('colors')
+                    ? {}
+                    : declaredOs === 'Windows'
+                    ? {
+                        selecteditem: 'rgb(0, 120, 212)',
+                        selecteditemtext: 'rgb(255, 255, 255)',
+                        highlight: 'rgb(0, 120, 212)',
+                        highlighttext: 'rgb(255, 255, 255)',
+                        accentcolor: 'rgb(0, 120, 212)',
+                        accentcolortext: 'rgb(255, 255, 255)',
+                        buttonface: 'rgb(240, 240, 240)',
+                        buttonborder: 'rgb(173, 173, 173)',
+                    }
+                    : {
+                        selecteditem: 'rgb(0, 103, 244)',
+                        selecteditemtext: 'rgb(255, 255, 255)',
+                        highlight: 'rgb(0, 103, 244)',
+                        highlighttext: 'rgb(255, 255, 255)',
+                        accentcolor: 'rgb(0, 103, 244)',
+                        accentcolortext: 'rgb(255, 255, 255)',
+                    };
+
+                const originalGetComputedStyle = globalObject.getComputedStyle;
+
+                if (typeof originalGetComputedStyle === 'function') {
+                    const patchedGetComputedStyle = asNativeMethod(
+                        'getComputedStyle',
+                        originalGetComputedStyle,
+                        function (this: any, element: any, pseudoElement?: string) {
+                            const style = originalGetComputedStyle.call(this ?? globalObject, element, pseudoElement);
+
+                            try {
+                                // Ключевое слово доезжает до вычисленного стиля как есть, поэтому
+                                // подменяется РЕЗУЛЬТАТ чтения цвета, а не сам стиль целиком.
+                                const declared = String(element?.style?.color ?? '').toLowerCase();
+                                const replacement = systemColors[declared];
+
+                                if (replacement !== undefined) {
+                                    return new Proxy(style, {
+                                        get: (target, property, receiver) => property === 'color'
+                                            ? replacement
+                                            : Reflect.get(target, property, receiver),
+                                    });
+                                }
+                            } catch {
+                                // Стиль недоступен — отдаём настоящий.
+                            }
+
+                            return style;
+                        });
+
+                    Object.defineProperty(globalObject, 'getComputedStyle', {
+                        configurable: true,
+                        writable: true,
+                        enumerable: Object.getOwnPropertyDescriptor(globalObject, 'getComputedStyle')?.enumerable ?? true,
+                        value: patchedGetComputedStyle,
+                    });
+                }
+            } catch {
+                // Неподменяемый getComputedStyle — остальные поверхности всё равно встали.
+            }
+        }
+
         // Доступная область экрана. Полное равенство avail и физического размера — почерк среды без
         // оболочки рабочего стола; на Windows край экрана занимает панель задач, на macOS — строка меню.
         //
         // Заявленные значения профиля важнее вычисленных: устройство знает свою доступную область
         // точнее, чем предположение о высоте панели.
-        if (screenObject && typeof screenWidth === 'number' && typeof screenHeight === 'number') {
+        if (!displaySurfacesOff && screenObject && typeof screenWidth === 'number' && typeof screenHeight === 'number') {
+            // Размер окна здесь не участвует: у настоящего устройства доступная область задана
+            // оболочкой рабочего стола, а не тем, насколько широким вышло окно браузера.
             const reservedHeight = declaredOs === 'Windows' ? 40 : (declaredOs === 'macOS' ? 25 : 0);
             const resolveAvailWidth = (): number => Math.min(
                 resolveScreenWidth(),
-                Math.max(declaredScreen?.availWidth ?? resolveScreenWidth(), currentOuterWidth()));
+                declaredScreen?.availWidth ?? resolveScreenWidth());
             const resolveAvailHeight = (): number => Math.min(
                 resolveScreenHeight(),
-                Math.max(declaredScreen?.availHeight ?? (resolveScreenHeight() - reservedHeight), currentOuterHeight()));
+                declaredScreen?.availHeight ?? (resolveScreenHeight() - reservedHeight));
 
             // Доступная область объявляется ВСЕГДА, когда заявлен экран: без неё окно, которое
             // браузер расширил до своей нижней границы, оказывается шире доступной области —
@@ -1956,12 +2866,14 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                         return liveWebGl.unmaskedRenderer ?? liveWebGl.renderer;
                     }
 
+                    // Маскированные слоты — константы движка, одинаковые на любой машине. Имя видеокарты
+                    // здесь выдавало подмену одной сверкой с 'WebKit' — оно отдаётся через UNMASKED_* выше.
                     if (parameter === VENDOR) {
-                        return liveWebGl.vendor;
+                        return 'WebKit';
                     }
 
                     if (parameter === RENDERER) {
-                        return liveWebGl.renderer;
+                        return 'WebKit WebGL';
                     }
                 }
 

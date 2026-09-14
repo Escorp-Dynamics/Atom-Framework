@@ -207,6 +207,31 @@ public sealed class VirtualKeyboard : IAsyncDisposable
         => CreateAsync(new VirtualKeyboardSettings(), cancellationToken);
 
     /// <summary>
+    /// Создаёт клавиатуру для сеанса собственного композитора.
+    /// </summary>
+    /// <remarks>Предпочтительный путь на Linux: не требует ни X-сервера, ни внешних пакетов.</remarks>
+    /// <param name="session">Сеанс дисплея.</param>
+    /// <param name="settings">Настройки клавиатуры.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    [SupportedOSPlatform("linux")]
+#pragma warning disable CA2000 // Владение бэкендом переходит устройству.
+    public static async ValueTask<VirtualKeyboard> CreateForSessionAsync(
+        Atom.Display.WaylandDisplaySession session,
+        VirtualKeyboardSettings? settings = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        var effectiveSettings = settings ?? new VirtualKeyboardSettings();
+        var created = new WaylandKeyboardBackend(session.Input);
+
+        await created.InitializeAsync(effectiveSettings, cancellationToken).ConfigureAwait(false);
+
+        return new VirtualKeyboard(created, effectiveSettings);
+    }
+#pragma warning restore CA2000
+
+    /// <summary>
     /// Создаёт виртуальную клавиатуру для указанного виртуального дисплея.
     /// Использует XTEST для инжекции событий напрямую в X-сервер.
     /// Клавиатура изолирована от физического ввода.

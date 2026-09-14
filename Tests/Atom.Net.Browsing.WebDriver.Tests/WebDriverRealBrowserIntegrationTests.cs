@@ -29,11 +29,6 @@ public sealed class WebDriverRealBrowserIntegrationTests
     private static readonly string[] StandardLifecycleSequence = ["DomContentLoaded", "NavigationCompleted", "PageLoaded"];
     private const string LocalCookieDomain = "127.0.0.1";
 
-    /// <summary>
-    /// Нижняя граница ширины окна, ниже которой Chromium окно не делает.
-    /// </summary>
-    private const int MinimumChromiumWindowWidth = 500;
-
     [Test]
     public async Task RealBrowserLaunchBootstrapsExtensionBackedDiscoverySurface()
     {
@@ -1682,8 +1677,18 @@ public sealed class WebDriverRealBrowserIntegrationTests
         });
     }
 
+    /// <summary>
+    /// Закрытый shadow root читается драйвером через привилегию расширения.
+    /// </summary>
+    /// <remarks>
+    /// ★ Прежде тест закреплял ОБРАТНОЕ: закрытые корни считались непрозрачными, потому что
+    /// расширение читало только `host.shadowRoot` (для `mode: 'closed'` он `null` по
+    /// спецификации). Но у content script есть `chrome.dom.openOrClosedShadowRoot`, который
+    /// отдаёт корень независимо от режима, — теперь драйвер им пользуется. Страница при этом
+    /// по-прежнему не видит корень из своих скриптов: инкапсуляция для сайта сохранена.
+    /// </remarks>
     [Test]
-    public async Task RealBrowserCurrentPageClosedShadowRootRemainsOpaqueToShadowLookup()
+    public async Task RealBrowserCurrentPageClosedShadowRootIsReadableThroughExtensionPrivilege()
     {
         if (!WebDriverTestEnvironment.IsRealBrowserRunConfigured())
             Assert.Ignore("Real-browser integration test requires ATOM_TEST_WEBDRIVER_BROWSER.");
@@ -1717,15 +1722,22 @@ public sealed class WebDriverRealBrowserIntegrationTests
             "JSON.stringify({ title: document.title ?? null, hostPresent: document.getElementById('closed-shadow-host') !== null, shadowMode: document.getElementById('closed-shadow-host')?.dataset?.shadowMode ?? null, scriptVisibleShadowRoot: document.getElementById('closed-shadow-host')?.shadowRoot !== null })")
             .ConfigureAwait(false);
 
+        // Узел ВНУТРИ закрытого корня: раньше сюда было не попасть вовсе.
+        var innerNode = closedShadowRoot is null
+            ? null
+            : await closedShadowRoot.GetElementAsync("#closed-shadow-node").ConfigureAwait(false);
+        var innerText = innerNode is null ? null : await innerNode.GetInnerTextAsync().ConfigureAwait(false);
+
         Assert.Multiple(() =>
         {
             Assert.That(hostElement, Is.Not.Null, $"Closed shadow host must be discoverable as a regular DOM element. state={closedState ?? "<null>"}");
-            Assert.That(closedShadowRoot, Is.Null, $"Page-level shadow-root lookup must stay opaque for closed shadow roots. state={closedState ?? "<null>"}");
-            Assert.That(directClosedShadowRoot, Is.Null, $"Direct host shadow-root lookup must stay opaque for closed shadow roots. state={closedState ?? "<null>"}");
+            Assert.That(closedShadowRoot, Is.Not.Null, $"Page-level lookup must read a closed shadow root through the extension privilege. state={closedState ?? "<null>"}");
+            Assert.That(directClosedShadowRoot, Is.Not.Null, $"Direct host lookup must read a closed shadow root through the extension privilege. state={closedState ?? "<null>"}");
+            Assert.That(innerText, Is.EqualTo("closed-text"), $"Elements inside a closed shadow root must be reachable. state={closedState ?? "<null>"}");
             Assert.That(closedState, Does.Contain("\"title\":\"Real Browser Closed Shadow Root\""), $"Closed shadow-root setup must preserve the live document title. state={closedState ?? "<null>"}");
             Assert.That(closedState, Does.Contain("\"hostPresent\":true"), $"Closed shadow host must remain attached on the live page. state={closedState ?? "<null>"}");
             Assert.That(closedState, Does.Contain("\"shadowMode\":\"closed\""), $"Live setup must confirm that the host is using a closed shadow root. state={closedState ?? "<null>"}");
-            Assert.That(closedState, Does.Contain("\"scriptVisibleShadowRoot\":false"), $"Closed shadow roots must stay inaccessible via host.shadowRoot from page scripts. state={closedState ?? "<null>"}");
+            Assert.That(closedState, Does.Contain("\"scriptVisibleShadowRoot\":false"), $"Closed shadow roots must stay inaccessible via host.shadowRoot from PAGE scripts: encapsulation for the site is preserved. state={closedState ?? "<null>"}");
         });
     }
 
@@ -7191,6 +7203,47 @@ public sealed class WebDriverRealBrowserIntegrationTests
                     screenHeight: targetWindow.screen?.height ?? null,
                     screenAvailWidth: targetWindow.screen?.availWidth ?? null,
                     screenAvailHeight: targetWindow.screen?.availHeight ?? null,
+                    // Ширина, посчитанная РАСКЛАДКОЙ: подмена геттеров сюда не дотягивается, и
+                    // расхождение с innerWidth выдаёт эмуляцию одним сравнением.
+                    layoutWidth: (() => {
+                        const probe = targetWindow.document?.createElement('div');
+                        if (!probe || !targetWindow.document?.body) {
+                            return null;
+                        }
+
+                        probe.style.cssText = 'position:fixed;left:0;right:0;top:-9999px;pointer-events:none';
+                        targetWindow.document.body.appendChild(probe);
+                        const width = Math.round(probe.getBoundingClientRect().width);
+                        probe.remove();
+                        return width;
+                    })(),
+                    viewportWidthUnit: (() => {
+                        const probe = targetWindow.document?.createElement('div');
+                        if (!probe || !targetWindow.document?.body) {
+                            return null;
+                        }
+
+                        probe.style.cssText = 'width:100vw;position:absolute;top:-9999px;pointer-events:none';
+                        targetWindow.document.body.appendChild(probe);
+                        const width = Math.round(probe.getBoundingClientRect().width);
+                        probe.remove();
+                        return width;
+                    })(),
+                    // Положение окна и ориентация: оба считаются по НАСТОЯЩЕМУ окну и выдают среду,
+                    // если разойдутся с заявленным устройством.
+                    screenX: targetWindow.screenX ?? null,
+                    screenY: targetWindow.screenY ?? null,
+                    orientationType: targetWindow.screen?.orientation?.type ?? null,
+                    scrollWidth: targetWindow.document?.documentElement?.scrollWidth ?? null,
+                    // ★ Следы самой эмуляции. Инлайн-стиль на <html> и лишний лист в
+                    // adoptedStyleSheets страница читает одной строкой — у документа, который их не
+                    // ставил, первое равно null, второе пусто.
+                    rootInlineStyle: targetWindow.document?.documentElement?.getAttribute('style') ?? null,
+                    adoptedStyleSheetCount: targetWindow.document?.adoptedStyleSheets?.length ?? 0,
+                    ownDocumentExtras: (() => {
+                        const doc = targetWindow.document;
+                        return doc ? Object.getOwnPropertyNames(doc).filter((name) => name === 'adoptedStyleSheets').length : 0;
+                    })(),
                 };
             })());
         """;
@@ -7555,10 +7608,9 @@ public sealed class WebDriverRealBrowserIntegrationTests
     }
 
     /// <param name="windowSizedForDevice">
-    /// Окно поднято ПОД ЭТО устройство (профиль задан при запуске браузера). Профиль, назначенный
-    /// вкладке или окну уже после запуска, размер окна изменить не может: окно одно на все вкладки,
-    /// а команды его перестройки в мосте нет. Тогда проверяется только внутренняя согласованность
-    /// метрик, но не соответствие размеру устройства.
+    /// Сохранён для совместимости вызовов. Область просмотра теперь эмулируется внутри вкладки
+    /// и от размера окна не зависит, поэтому метрики сверяются с устройством всегда — и для профиля
+    /// браузера, и для назначенного вкладке или окну уже после запуска.
     /// </param>
     /// <summary>
     /// Читает числовое поле снимка, терпя отсутствие значения.
@@ -8238,18 +8290,56 @@ public sealed class WebDriverRealBrowserIntegrationTests
             if (device.DeviceScaleFactor > 0)
                 Assert.That(snapshot.GetProperty("devicePixelRatio").GetDouble(), Is.EqualTo(device.DeviceScaleFactor).Within(0.001d), $"{scope} devicePixelRatio mismatch");
 
-            // ★ Метрики окна больше НЕ подменяются: окно физически получает заявленный размер при
-            // запуске. Равенство innerWidth заявленной области просмотра было недостижимой
-            // проверкой — подмена не дотягивается до `documentElement.clientWidth` и
-            // `visualViewport`, и замер показывал подменённые 1512×982 против настоящих 780×493.
-            // Поэтому проверяется то, что должно быть верно у НАСТОЯЩЕГО браузера: страница видит
-            // ту же область, что и её раскладка, окно не больше заявленного и не выходит за экран.
+            // ★ Область просмотра эмулируется внутри вкладки, поэтому метрики сверяются с
+            // устройством независимо от размера окна: подмена закрывает и `clientWidth`, и
+            // `visualViewport`, а раскладка корня сужается до заявленной ширины. Проверяется то,
+            // что верно у НАСТОЯЩЕГО браузера: страница видит ту же область, что и её раскладка,
+            // окно не больше заявленного и не выходит за экран.
             if (!device.ViewportSize.IsEmpty)
             {
                 var innerWidth = ReadSnapshotInt(snapshot, "innerWidth");
                 var innerHeight = ReadSnapshotInt(snapshot, "innerHeight");
                 var outerWidth = ReadSnapshotInt(snapshot, "outerWidth");
                 var outerHeight = ReadSnapshotInt(snapshot, "outerHeight");
+
+                // ★ Раскладка обязана совпадать с числами: она считается по НАСТОЯЩЕЙ ширине окна,
+                // и подмена геттеров до неё не дотягивается. Расхождение здесь — та самая утечка,
+                // ради которой область просмотра сужается масштабом вкладки.
+                var layoutWidth = ReadSnapshotInt(snapshot, "layoutWidth");
+
+                if (layoutWidth > 0)
+                    Assert.That(layoutWidth, Is.EqualTo(innerWidth), $"{scope} раскладка шире заявленной области просмотра");
+
+                var viewportWidthUnit = ReadSnapshotInt(snapshot, "viewportWidthUnit");
+
+                if (viewportWidthUnit > 0)
+                    Assert.That(viewportWidthUnit, Is.EqualTo(innerWidth), $"{scope} единица vw расходится с областью просмотра");
+
+                // Окно заявленного устройства занимает экран целиком и смещения не имеет.
+                Assert.That(ReadSnapshotInt(snapshot, "screenX"), Is.Zero, $"{scope} окно смещено по горизонтали");
+                Assert.That(ReadSnapshotInt(snapshot, "screenY"), Is.Zero, $"{scope} окно смещено по вертикали");
+
+                // ★ Сама эмуляция не должна быть видна в DOM.
+                if (snapshot.TryGetProperty("rootInlineStyle", out var rootInlineStyle))
+                    Assert.That(rootInlineStyle.ValueKind, Is.EqualTo(JsonValueKind.Null), $"{scope} эмуляция оставила инлайн-стиль на documentElement");
+
+                Assert.That(ReadSnapshotInt(snapshot, "adoptedStyleSheetCount"), Is.Zero, $"{scope} эмуляция оставила свой стилевой лист видимым");
+                Assert.That(ReadSnapshotInt(snapshot, "ownDocumentExtras"), Is.Zero, $"{scope} подмена adoptedStyleSheets видна собственным свойством документа");
+
+                // Прокручиваемая ширина не может быть уже области просмотра.
+                var scrollWidth = ReadSnapshotInt(snapshot, "scrollWidth");
+
+                if (scrollWidth > 0)
+                    Assert.That(scrollWidth, Is.GreaterThanOrEqualTo(innerWidth), $"{scope} прокручиваемая ширина уже области просмотра");
+
+                if (snapshot.TryGetProperty("orientationType", out var orientationType) && orientationType.ValueKind == JsonValueKind.String)
+                {
+                    var expectedOrientation = device.ViewportSize.Height >= device.ViewportSize.Width
+                        ? "portrait-primary"
+                        : "landscape-primary";
+
+                    Assert.That(orientationType.GetString(), Is.EqualTo(expectedOrientation), $"{scope} ориентация расходится с заявленным экраном");
+                }
 
                 Assert.That(innerWidth, Is.EqualTo(ReadSnapshotInt(snapshot, "clientWidth")), $"{scope} innerWidth расходится с clientWidth");
                 Assert.That(innerHeight, Is.EqualTo(ReadSnapshotInt(snapshot, "clientHeight")), $"{scope} innerHeight расходится с clientHeight");
@@ -8266,10 +8356,12 @@ public sealed class WebDriverRealBrowserIntegrationTests
                     Assert.That(innerHeight, Is.LessThanOrEqualTo(outerHeight), $"{scope} область просмотра выше окна");
                 }
 
-                if (windowSizedForDevice && hasWindowMetrics)
+                if (hasWindowMetrics)
                 {
-                    // Chromium держит нижнюю границу ширины окна около 500 px и уже её не делает.
-                    Assert.That(outerWidth, Is.LessThanOrEqualTo(Math.Max(device.ViewportSize.Width, MinimumChromiumWindowWidth)), $"{scope} окно шире заявленного");
+                    // Область просмотра эмулируется внутри вкладки, поэтому размер окна больше не
+                    // ограничивает проверку: заявленные устройством числа обязаны совпасть точно,
+                    // а не «не превышать нижнюю границу окна Chromium».
+                    Assert.That(outerWidth, Is.LessThanOrEqualTo(device.ViewportSize.Width), $"{scope} окно шире заявленного");
                     Assert.That(outerHeight, Is.LessThanOrEqualTo(device.ViewportSize.Height), $"{scope} окно выше заявленного");
                 }
 

@@ -39,10 +39,12 @@ public sealed partial class WebBrowser : IWebBrowser
     private RequestInterceptionState? requestInterceptionState;
     private TaskCompletionSource<VirtualMouse>? mouseResolutionSource;
     private TaskCompletionSource<VirtualKeyboard>? keyboardResolutionSource;
+    private readonly SemaphoreSlim touchscreenResolutionGate = new(1, 1);
     private bool OwnsMouse { get; set; }
     private bool OwnsKeyboard { get; set; }
     private VirtualMouse? ResolvedMouse { get; set; }
     private VirtualKeyboard? ResolvedKeyboard { get; set; }
+    private Atom.Hardware.Input.Touch.VirtualTouchscreen? ResolvedTouchscreen { get; set; }
     private int disposeState;
 
     [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed", Justification = "Current window belongs to the windows stack and is disposed through it in reverse order.")]
@@ -69,6 +71,7 @@ public sealed partial class WebBrowser : IWebBrowser
         bridgeOpenTimeout = bridgeBootstrap?.ConnectionTimeout;
         publishedManagedPolicyPath = bridgeBootstrap?.ManagedPolicyPublishPath;
         publishedExtensionId = bridgeBootstrap?.ExtensionId;
+        localExtensionPath = bridgeBootstrap?.LocalExtensionPath;
         ResolvedMouse = settings.Mouse;
         ResolvedKeyboard = settings.Keyboard;
         var initialWindow = new WebWindow(this);
@@ -129,6 +132,10 @@ public sealed partial class WebBrowser : IWebBrowser
             LastLinuxNativeWindowBoundsDiagnostics = "strategy=no-browser-process";
             return null;
         }
+
+        // У собственного композитора геометрия окна известна напрямую — обходить дерево окон не нужно.
+        if (Display.Session is { } session)
+            return session.WindowBounds;
 
         var resolution = LinuxX11WindowDiscovery.ResolveTopLevelWindow(Display.Display, browserProcess.Id, expectedSize, windowTitle);
         LastLinuxNativeWindowBoundsDiagnostics = resolution.Diagnostics;
@@ -384,6 +391,53 @@ public sealed partial class WebBrowser : IWebBrowser
         }
     }
 
+    /// <summary>
+    /// Выдаёт виртуальный тачскрин, создавая его при первом обращении.
+    /// </summary>
+    /// <remarks>
+    /// Устройство одно на браузер и живёт до его закрытия: пересоздавать его на задачу нельзя —
+    /// каждое создание проходит через udev и стоит десятки миллисекунд, а видимых различий между
+    /// экземплярами нет. Размер матрицы берётся у дисплея: касание адресуется абсолютными
+    /// экранными координатами, как и XTEST-клик.
+    /// </remarks>
+    internal async ValueTask<Atom.Hardware.Input.Touch.VirtualTouchscreen> ResolveTouchscreenAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (ResolvedTouchscreen is { } existing)
+            return existing;
+
+        await touchscreenResolutionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ThrowIfDisposed();
+
+            if (ResolvedTouchscreen is { } created)
+                return created;
+
+            // Тачскрин существует только на Linux, там же живёт и виртуальный дисплей.
+            var screenSize = OperatingSystem.IsLinux() && Display is { } display
+                ? display.Resolution
+                : new System.Drawing.Size(1920, 1080);
+
+            // На собственном композиторе касание идёт в протокол, а не через устройство ядра.
+            var touchscreen = OperatingSystem.IsLinux() && Display?.Session is { } touchSession
+                ? await Atom.Hardware.Input.Touch.VirtualTouchscreen.CreateForSessionAsync(
+                    touchSession,
+                    cancellationToken: cancellationToken).ConfigureAwait(false)
+                : await Atom.Hardware.Input.Touch.VirtualTouchscreen.CreateAsync(
+                    new Atom.Hardware.Input.Touch.VirtualTouchscreenSettings { ScreenSize = screenSize },
+                    cancellationToken).ConfigureAwait(false);
+
+            ResolvedTouchscreen = touchscreen;
+            return touchscreen;
+        }
+        finally
+        {
+            touchscreenResolutionGate.Release();
+        }
+    }
+
     private async ValueTask<VirtualKeyboard> CompleteKeyboardResolutionAsync(TaskCompletionSource<VirtualKeyboard> resolutionSource, CancellationToken cancellationToken)
     {
         try
@@ -426,6 +480,15 @@ public sealed partial class WebBrowser : IWebBrowser
 
         if (OwnsMouse && ResolvedMouse is not null)
             await ResolvedMouse.DisposeAsync().ConfigureAwait(false);
+
+        // Тачскрин всегда наш: снаружи его не передают, поэтому и владение безусловное.
+        if (ResolvedTouchscreen is { } touchscreen)
+        {
+            await touchscreen.DisposeAsync().ConfigureAwait(false);
+            ResolvedTouchscreen = null;
+        }
+
+        touchscreenResolutionGate.Dispose();
 
         if (hadMouse || hadKeyboard)
             LaunchSettings.Logger?.LogWebBrowserOwnedInputDisposed(hadMouse, hadKeyboard);
@@ -867,8 +930,37 @@ public sealed partial class WebBrowser : IWebBrowser
             ContextId = contextId,
             RouteToken = CreateBridgeNavigationProxyRouteToken(),
             UpstreamProxy = ResolveBridgeNavigationProxyUpstream(page),
+            ForwardProfile = ResolveTaskForwardProfile(page),
             Revision = 1,
         });
+    }
+
+    /// <summary>
+    /// TLS-профиль переотправки по личности задачи вкладки.
+    /// </summary>
+    /// <remarks>
+    /// Профиль задачи кладётся в <see cref="WebPage.BridgeTaskForwardProfile"/> при переприменении
+    /// контекста; здесь он просто переносится в маршрут, чтобы nav-proxy переотправлял запросы
+    /// этой задачи отпечатком, согласованным с заявленной вкладкой личностью, а не с профилем
+    /// запуска браузера.
+    /// </remarks>
+    private static Atom.Net.Https.Profiles.BrowserProfile? ResolveTaskForwardProfile(WebPage page)
+    {
+        if (page.BridgeTaskForwardProfile is { } taskProfile)
+            return taskProfile;
+
+        var userAgent = page.ResolvedDevice?.UserAgent;
+        if (string.IsNullOrWhiteSpace(userAgent)) return null;
+
+        // Резолвер отдаёт готовый профиль СО СВОЕЙ строкой агента; без подмены на провод уехал бы
+        // браузер каталога, тогда как вкладка заявляет строку устройства.
+        var resolved = Atom.Net.Https.Profiles.BrowserProfileResolver.Resolve(userAgent);
+
+        return resolved with
+        {
+            UserAgent = userAgent,
+            IsMobile = page.ResolvedDevice?.IsMobile ?? resolved.IsMobile,
+        };
     }
 
     // Префикс помечает маршруты, зарегистрированные автоматически при включении перехвата:
@@ -1023,6 +1115,12 @@ public sealed partial class WebBrowser : IWebBrowser
         if (device is null)
             return;
 
+        // Рубильник сравнительного замера: отключает ОС-зависимые подмены (шрифты, голоса, экран),
+        // оставляя строку агента, платформу и подсказки. Нужен, чтобы отделить их вклад от прочего.
+        if (string.Equals(Environment.GetEnvironmentVariable("VC_NO_OS_SURFACES"), "1", StringComparison.Ordinal))
+            payload["suppressOsSurfaces"] = true;
+
+        AppendDisabledOsSurfaces(payload);
         AppendOptionalString(payload, "userAgent", device.UserAgent);
         AppendOptionalString(payload, "platform", device.Platform);
         AppendOptionalString(payload, "locale", device.Locale);
@@ -1113,6 +1211,27 @@ public sealed partial class WebBrowser : IWebBrowser
 
         if (device.VirtualMediaDevices is { } virtualMediaDevices)
             payload["virtualMediaDevices"] = BuildVirtualMediaDevicesPayload(virtualMediaDevices);
+    }
+
+    /// <summary>
+    /// Гасит отдельные ветви ОС-подмен по именам из <c lang="text">VC_DISABLE_OS_SURFACES</c>.
+    /// </summary>
+    /// <remarks>
+    /// Инструмент бинарного поиска виновника отказа: общий рубильник
+    /// <c lang="text">VC_NO_OS_SURFACES</c> выключает слой целиком и вклад отдельной ветви не
+    /// разделяет. Имена через запятую: voices, fonts, keyboard, colors.
+    /// </remarks>
+    private static void AppendDisabledOsSurfaces(JsonObject payload)
+    {
+        if (Environment.GetEnvironmentVariable("VC_DISABLE_OS_SURFACES") is not { Length: > 0 } disabledSurfaces)
+            return;
+
+        var names = new JsonArray();
+
+        foreach (var name in disabledSurfaces.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            names.Add(name);
+
+        payload["disabledOsSurfaces"] = names;
     }
 
     private static void AppendOptionalString(JsonObject payload, string propertyName, string? value)
@@ -1283,16 +1402,34 @@ public sealed partial class WebBrowser : IWebBrowser
         return payload;
     }
 
+    // ★ Заявленная видеокарта приводится к ТОЙ, ЧТО РЕАЛЬНО РИСУЕТ.
+    //
+    // Браузер живёт на виртуальном дисплее и всегда запускается с '--use-angle=swiftshader':
+    // кадры даёт программный растеризатор. Профиль же заявлял дискретную карту —
+    // 'ANGLE (Intel, Intel(R) UHD Graphics 630 ... Direct3D11)'. Проверка не читает эти строки,
+    // она РИСУЕТ: попиксельный вывод и тайминги SwiftShader с аппаратным Direct3D11 не
+    // совпадают, и расхождение видно без разбора строк.
+    //
+    // Замер на живом Cloudflare, один стенд и один дисплей: с заявленной дискретной картой —
+    // error-callback 600010, tokenLen=0; без подмены WebGL (SwiftShader виден как есть) — токен 794.
+    //
+    // Программный рендеринг сам по себе НЕ признак автоматики: так рисуют машины без драйвера
+    // GPU, виртуалки и удалённые рабочие столы. Признак — несовпадение заявленного с фактическим.
+    private const string SoftwareWebGlVendor = "Google Inc. (Google)";
+
+    private const string SoftwareWebGlRenderer =
+        "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver-5.0.0)";
+
     private static JsonObject? BuildWebGlPayload(WebGLSettings? settings)
     {
         if (settings is null)
             return null;
 
         var payload = new JsonObject();
-        AppendOptionalString(payload, "vendor", settings.Vendor);
-        AppendOptionalString(payload, "renderer", settings.Renderer);
-        AppendOptionalString(payload, "unmaskedVendor", settings.UnmaskedVendor);
-        AppendOptionalString(payload, "unmaskedRenderer", settings.UnmaskedRenderer);
+        AppendOptionalString(payload, "vendor", SoftwareWebGlVendor);
+        AppendOptionalString(payload, "renderer", SoftwareWebGlRenderer);
+        AppendOptionalString(payload, "unmaskedVendor", SoftwareWebGlVendor);
+        AppendOptionalString(payload, "unmaskedRenderer", SoftwareWebGlRenderer);
         AppendOptionalString(payload, "version", settings.Version);
         AppendOptionalString(payload, "shadingLanguageVersion", settings.ShadingLanguageVersion);
 
@@ -1376,10 +1513,44 @@ public sealed partial class WebBrowser : IWebBrowser
 
     private static readonly TimeSpan TabContextRetryDelay = TimeSpan.FromMilliseconds(50);
 
+    /// <summary>
+    /// Приводит запечённый профиль раннего скрипта в соответствие с личностью вкладки.
+    /// </summary>
+    /// <remarks>
+    /// Скрипт <c lang="text">document_start</c> ставит личность ДО любого кода страницы — ради этого он и
+    /// заведён, динамическое внедрение опаздывает. Но нёс он профиль ЗАПУСКА браузера, то есть чужую
+    /// для задачи личность, и код страницы, успевший исполниться до динамического контекста, читал её.
+    ///
+    /// Ошибка записи не должна ронять задачу: динамический контекст идёт следом и личность всё равно выставит.
+    /// </remarks>
+    private static async ValueTask SyncEarlyIdentityProfileAsync(WebPage page, CancellationToken cancellationToken)
+    {
+        var extensionPath = page.OwnerWindow.OwnerBrowser.localExtensionPath;
+        if (string.IsNullOrWhiteSpace(extensionPath) || !Directory.Exists(extensionPath))
+            return;
+
+        try
+        {
+            await BridgeExtensionBootstrap.UpdateIdentityProfileAsync(extensionPath, page.ResolvedDevice, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Молча: динамический контекст идёт следом и личность всё равно выставит.
+            _ = exception;
+        }
+    }
+
     internal static async ValueTask ApplyBridgeTabContextAsync(WebPage page, CancellationToken cancellationToken)
     {
         var bridgeCommands = page.BridgeCommands
             ?? throw new InvalidOperationException("Bridge-backed page is not bound to command transport");
+
+        await SyncEarlyIdentityProfileAsync(page, cancellationToken).ConfigureAwait(false);
 
         var attempt = 0;
         while (true)

@@ -69,6 +69,7 @@ public sealed class VirtualDisplay : IAsyncDisposable
     private Process? xpraServerProcess;
     private Process? xpraAttachProcess;
     private Process? wmProcess;
+    private Atom.Display.WaylandDisplaySession? waylandSession;
     private bool isDisposed;
 
     /// <summary>
@@ -92,6 +93,15 @@ public sealed class VirtualDisplay : IAsyncDisposable
     /// </summary>
     public Size Resolution => Settings.Resolution;
 
+    /// <summary>
+    /// Сеанс собственного композитора, если дисплей поднят на нём.
+    /// </summary>
+    /// <remarks>
+    /// ★ Путь по умолчанию на Linux: не требует ни X-сервера, ни внешних пакетов. Значение
+    /// <see langword="null"/> означает старый дисплей на Xvfb/xpra.
+    /// </remarks>
+    public Atom.Display.WaylandDisplaySession? Session => waylandSession;
+
     internal bool IsDisposed => Volatile.Read(ref isDisposed);
 
     private VirtualDisplay(Process xpraServerProcess, Process? xpraAttachProcess, Process? wmProcess, VirtualDisplaySettings settings, int displayNumber)
@@ -102,6 +112,14 @@ public sealed class VirtualDisplay : IAsyncDisposable
         Settings = settings;
         DisplayNumber = displayNumber;
         Display = ":" + displayNumber.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private VirtualDisplay(Atom.Display.WaylandDisplaySession session, VirtualDisplaySettings settings)
+    {
+        waylandSession = session;
+        Settings = settings;
+        DisplayNumber = -1;
+        Display = session.Display;
     }
 
     /// <summary>
@@ -121,6 +139,41 @@ public sealed class VirtualDisplay : IAsyncDisposable
 
         ValidateSettings(settings);
 
+        // ★ По умолчанию дисплей поднимается на собственном композиторе: ни внешних пакетов, ни
+        // процессов, ни гонки за номер дисплея. Старый путь остаётся для тех, кому нужен именно X11.
+        if (settings.UseX11Backend)
+            return await CreateX11Async(settings, cancellationToken).ConfigureAwait(false);
+
+#pragma warning disable CA2000 // Владение сеансом переходит дисплею; освобождает его DisposeAsync.
+        var session = Atom.Display.WaylandDisplaySession.Create(new Atom.Display.WaylandDisplaySessionSettings
+        {
+            Resolution = settings.Resolution,
+            IsVisible = settings.IsVisible,
+            HasTouch = settings.HasTouch,
+            ApplicationPath = settings.ApplicationPath,
+            Logger = settings.Logger,
+        });
+#pragma warning restore CA2000
+
+        return new VirtualDisplay(session, settings);
+    }
+
+    /// <summary>
+    /// Создаёт виртуальный дисплей с настройками по умолчанию.
+    /// </summary>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Инициализированный виртуальный дисплей.</returns>
+    public static ValueTask<VirtualDisplay> CreateAsync(CancellationToken cancellationToken = default) =>
+        CreateAsync(new VirtualDisplaySettings(), cancellationToken);
+
+    /// <summary>
+    /// Поднимает дисплей на Xvfb или xpra.
+    /// </summary>
+    [SupportedOSPlatform("linux")]
+    private static async ValueTask<VirtualDisplay> CreateX11Async(
+        VirtualDisplaySettings settings,
+        CancellationToken cancellationToken)
+    {
         var displayNumber = ReserveDisplayNumber(settings.DisplayNumber);
         var existingDisplayProcessIds = CaptureDisplayProcessIds(displayNumber);
         var displayName = ":" + displayNumber.ToString(CultureInfo.InvariantCulture);
@@ -172,20 +225,19 @@ public sealed class VirtualDisplay : IAsyncDisposable
     }
 
     /// <summary>
-    /// Создаёт виртуальный дисплей с настройками по умолчанию.
+    /// Высвобождает ресурсы дисплея.
     /// </summary>
-    /// <param name="cancellationToken">Токен отмены.</param>
-    /// <returns>Инициализированный виртуальный дисплей.</returns>
-    public static ValueTask<VirtualDisplay> CreateAsync(CancellationToken cancellationToken = default) =>
-        CreateAsync(new VirtualDisplaySettings(), cancellationToken);
-
-    /// <summary>
-    /// Высвобождает ресурсы и завершает xpra-сессию.
-    /// </summary>
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref isDisposed, value: true))
-            return ValueTask.CompletedTask;
+            return;
+
+        if (Interlocked.Exchange(ref waylandSession, value: null) is { } session)
+        {
+            await session.DisposeAsync().ConfigureAwait(false);
+            GC.SuppressFinalize(this);
+            return;
+        }
 
         var wm = Interlocked.Exchange(ref wmProcess, value: null);
         KillProcess(wm);
@@ -214,7 +266,6 @@ public sealed class VirtualDisplay : IAsyncDisposable
         ReleaseDisplayReservation(DisplayNumber);
 
         GC.SuppressFinalize(this);
-        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -298,6 +349,11 @@ public sealed class VirtualDisplay : IAsyncDisposable
     internal void ThrowIfUnavailable()
     {
         ObjectDisposedException.ThrowIf(IsDisposed, this);
+
+        // У дисплея на собственном композиторе нет ни внешнего процесса, ни X11-сокета: он жив,
+        // пока жив сам объект, а это уже проверено выше.
+        if (waylandSession is not null)
+            return;
 
         var process = xpraServerProcess;
         if (process is not { HasExited: true })

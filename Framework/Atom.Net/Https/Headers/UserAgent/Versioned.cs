@@ -35,11 +35,16 @@ public readonly struct Versioned : IEquatable<Versioned>
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override readonly int GetHashCode() => HashCode.Combine(Name.GetHashCode(StringComparison.Ordinal), Version.GetHashCode());
+    // У default(Versioned) оба поля null: структура достижима через default(UserAgent) внутри профиля,
+    // а вызовы на экземпляре роняли сравнение и хэш NullReferenceException.
+    public override readonly int GetHashCode() => HashCode.Combine(
+        Name is null ? 0 : Name.GetHashCode(StringComparison.Ordinal),
+        Version?.GetHashCode() ?? 0);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public readonly bool Equals(Versioned other) => Name.Equals(other.Name, StringComparison.Ordinal) && Version.Equals(other.Version);
+    public readonly bool Equals(Versioned other)
+        => string.Equals(Name, other.Name, StringComparison.Ordinal) && Equals(Version, other.Version);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

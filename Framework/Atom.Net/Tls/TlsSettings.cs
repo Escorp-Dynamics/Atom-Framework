@@ -1,7 +1,7 @@
 ﻿#pragma warning disable CA5398
 
-using System.Runtime.CompilerServices;
 using System.Net.Security;
+using System.Runtime.CompilerServices;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using Atom.Net.Tls.Extensions;
@@ -122,8 +122,12 @@ public readonly struct TlsSettings() : IEquatable<TlsSettings>
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    // Наборы сравниваются статическим Equals, как ссылки ниже: инициализаторы `= []` работают только
+    // через конструктор, а у default(TlsSettings) — в частности у вложенного Http2.Tls, который никто
+    // не задавал явно, — оба поля остаются null. Вызов на экземпляре ронял сравнение любых двух
+    // профилей каталога NullReferenceException, включая самосравнение profile.Equals(profile).
     public bool Equals(TlsSettings other) => MinVersion.Equals(other.MinVersion) && MaxVersion.Equals(other.MaxVersion)
-        && CipherSuites.Equals(other.CipherSuites) && Extensions.Equals(other.Extensions)
+        && Equals(CipherSuites, other.CipherSuites) && Equals(Extensions, other.Extensions)
         && CheckCertificateRevocationList.Equals(other.CheckCertificateRevocationList)
         && Equals(ServerCertificateValidationCallback, other.ServerCertificateValidationCallback)
         && SessionIdPolicy.Equals(other.SessionIdPolicy) && Delay.Equals(other.Delay)

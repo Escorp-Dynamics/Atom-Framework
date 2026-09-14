@@ -855,7 +855,31 @@ public sealed class WebDriverBridgeLifecycleTests
     }
 
     [Test]
-    public async Task PageGetShadowRootReturnsNullWhenBridgeReportsNonOpenMode()
+    public async Task PageGetShadowRootReturnsNullWhenBridgeReportsNoShadowRoot()
+    {
+        await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
+        var page = (WebPage)browser.CurrentPage;
+        await using var server = await StartBoundBridgeAsync(page).ConfigureAwait(false);
+        using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
+
+        var shadowTask = page.GetShadowRootAsync("#plain-host").AsTask();
+        var findRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.FindElement, page.TabId, "\"plain-host-element\"").ConfigureAwait(false);
+        var checkRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.CheckShadowRoot, page.TabId, "\"false\"").ConfigureAwait(false);
+        var shadow = await shadowTask.ConfigureAwait(false);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(findRequest.Payload?.GetProperty("strategy").GetString(), Is.EqualTo("Css"));
+            Assert.That(findRequest.Payload?.GetProperty("value").GetString(), Is.EqualTo("#plain-host"));
+            Assert.That(checkRequest.Payload?.GetProperty("elementId").GetString(), Is.EqualTo("plain-host-element"));
+            Assert.That(shadow, Is.Null);
+        });
+    }
+
+    // Закрытый корень читается расширением через chrome.dom.openOrClosedShadowRoot и приходит как
+    // "closed" — для драйвера это полноценный корень, а не отказ.
+    [Test]
+    public async Task PageGetShadowRootReturnsRootWhenBridgeReportsClosedMode()
     {
         await using var browser = await RuntimeWebBrowser.LaunchAsync(new WebBrowserSettings()).ConfigureAwait(false);
         var page = (WebPage)browser.CurrentPage;
@@ -863,17 +887,11 @@ public sealed class WebDriverBridgeLifecycleTests
         using var socket = await ConnectBridgeSocketAsync(server, page.TabId).ConfigureAwait(false);
 
         var shadowTask = page.GetShadowRootAsync("#closed-host").AsTask();
-        var findRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.FindElement, page.TabId, "\"closed-host-element\"").ConfigureAwait(false);
-        var checkRequest = await RespondToBridgeCommandAsync(socket, BridgeCommand.CheckShadowRoot, page.TabId, "\"false\"").ConfigureAwait(false);
+        _ = await RespondToBridgeCommandAsync(socket, BridgeCommand.FindElement, page.TabId, "\"closed-host-element\"").ConfigureAwait(false);
+        _ = await RespondToBridgeCommandAsync(socket, BridgeCommand.CheckShadowRoot, page.TabId, "\"closed\"").ConfigureAwait(false);
         var shadow = await shadowTask.ConfigureAwait(false);
 
-        Assert.Multiple(() =>
-        {
-            Assert.That(findRequest.Payload?.GetProperty("strategy").GetString(), Is.EqualTo("Css"));
-            Assert.That(findRequest.Payload?.GetProperty("value").GetString(), Is.EqualTo("#closed-host"));
-            Assert.That(checkRequest.Payload?.GetProperty("elementId").GetString(), Is.EqualTo("closed-host-element"));
-            Assert.That(shadow, Is.Null);
-        });
+        Assert.That(shadow, Is.Not.Null);
     }
 
     [Test]

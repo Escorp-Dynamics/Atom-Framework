@@ -65,6 +65,25 @@ export function setHeaderValue(headers: MutableHeaderLike[], name: string, value
         return;
     }
 
+    // ★ Новый заголовок встаёт РЯДОМ С ОДНОРОДНЫМИ, а не в конец списка.
+    //
+    // Порядок заголовков — наблюдаемый признак: браузер шлёт их в фиксированной
+    // последовательности, и сайт видит её раньше любого скрипта. Дописывание в хвост ломало её
+    // ровно на тех подсказках, которых браузер сам не прислал: замер показывал
+    // 'sec-ch-ua-full-version-list' и 'sec-ch-ua-platform-version' ПОСЛЕ 'Accept-Language',
+    // тогда как настоящий Chrome держит все 'sec-ch-ua*' одной группой в начале.
+    const prefixEnd = name.lastIndexOf('-');
+    const family = prefixEnd > 0 ? name.slice(0, prefixEnd).toLowerCase() : name.toLowerCase();
+
+    for (let scan = headers.length - 1; scan >= 0; scan--) {
+        const candidate = headers[scan]?.name;
+
+        if (typeof candidate === 'string' && candidate.toLowerCase().startsWith(family)) {
+            headers.splice(scan + 1, 0, { name, value });
+            return;
+        }
+    }
+
     headers.push({ name, value });
 }
 

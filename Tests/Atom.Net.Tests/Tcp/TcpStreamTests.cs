@@ -96,6 +96,68 @@ public sealed class TcpStreamTests
         }
     }
 
+    /// <summary>
+    /// Недостижимое семейство отбрасывается целиком, а не проверяется адрес за адресом.
+    /// </summary>
+    /// <remarks>
+    /// Отказ «сеть недостижима» относится к МАРШРУТУ, а не к узлу: следующий адрес того же
+    /// семейства ответит тем же, только потратив ещё один бюджет попытки. Проверяется по времени,
+    /// потому что наблюдаемое следствие здесь — именно оно: при переборе всех адресов время
+    /// растёт кратно их числу.
+    ///
+    /// Адреса взяты из документационного диапазона 2001:db8::/32 (RFC 3849) — он не маршрутизуем
+    /// нигде, поэтому результат не зависит от того, есть ли у машины связность по IPv6.
+    /// </remarks>
+    [Test]
+    public async Task UnreachableAddressFamilyIsSkippedAfterFirstRefusal()
+    {
+        // На машине СО связностью по IPv6 отказ придёт иным кодом, и проверять нечего.
+        if (HasGlobalIpv6Connectivity())
+            Assert.Ignore("У машины есть связность по IPv6 — сценарий недостижимого семейства не воспроизводится");
+
+        using var stream = new Net.Tcp.TcpStream(new Net.Tcp.TcpSettings
+        {
+            AttemptTimeout = TimeSpan.FromSeconds(2),
+            UseHappyEyeballsAlternating = false,
+        });
+
+        var started = System.Diagnostics.Stopwatch.StartNew();
+
+        try
+        {
+            await stream.ConnectAsync("2001:db8::1", 443).ConfigureAwait(false);
+            Assert.Fail("Соединение с документационным адресом не должно устанавливаться");
+        }
+        catch (SocketException)
+        {
+            // Ожидаемо: маршрута к документационному диапазону нет.
+        }
+
+        started.Stop();
+
+        // Одна попытка укладывается в свой бюджет; перебор нескольких адресов занял бы кратно больше.
+        Assert.That(started.Elapsed, Is.LessThan(TimeSpan.FromSeconds(3)));
+    }
+
+    /// <remarks>
+    /// Проверяется именно попыткой ПОДКЛЮЧЕНИЯ: UDP-сокету <c lang="text">Connect</c> лишь
+    /// запоминает адресата и не отправляет ни байта, поэтому успех такой пробы не говорит о
+    /// связности вовсе — она проходила и на машине, где IPv6 наружу мёртв.
+    /// </remarks>
+    private static bool HasGlobalIpv6Connectivity()
+    {
+        try
+        {
+            using var probe = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp);
+            return probe.ConnectAsync(new IPEndPoint(IPAddress.Parse("2606:4700::1111"), 53))
+                .Wait(TimeSpan.FromSeconds(2));
+        }
+        catch (Exception exception) when (exception is SocketException or AggregateException)
+        {
+            return false;
+        }
+    }
+
     [Test]
     public void ConnectAsyncHonorsPreCanceledToken()
     {

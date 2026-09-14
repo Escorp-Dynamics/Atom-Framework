@@ -155,6 +155,12 @@ public class WebDriverBrowserProfileTests
                     Assert.That(document.RootElement.GetProperty("browser").GetProperty("channel").GetString(), Is.EqualTo(WebBrowserChannel.Beta.ToString()));
                     Assert.That(document.RootElement.GetProperty("browser").GetProperty("automation").GetProperty("seedFiles").EnumerateArray().Select(static item => item.GetString()).ToArray(), Is.EqualTo(ChromiumSeedFiles));
                     Assert.That(document.RootElement.GetProperty("browser").GetProperty("automation").GetProperty("defaultArguments").EnumerateArray().Select(static item => item.GetString()).ToArray(), Does.Not.Contain("--disable-background-networking"));
+
+                    // Обновление компонентов гасится и под мостом: оно ходит за многомегабайтными
+                    // дельтами через тот же прокси, что и полезный трафик страницы, и в замере давало
+                    // большинство отклонений прокси. Расширению Component Updater не нужен — оно
+                    // ставится в профиль напрямую.
+                    Assert.That(document.RootElement.GetProperty("browser").GetProperty("automation").GetProperty("defaultArguments").EnumerateArray().Select(static item => item.GetString()).ToArray(), Does.Contain("--disable-component-update"));
                     Assert.That(document.RootElement.GetProperty("browser").GetProperty("automation").GetProperty("defaultArguments").EnumerateArray().Select(static item => item.GetString()).ToArray(), Does.Contain("--password-store=basic"));
                     Assert.That(effectiveArguments, Does.Contain($"--user-data-dir={materializedPath}"));
                     Assert.That(effectiveArguments, Does.Contain("--headless=new"));
@@ -222,7 +228,11 @@ public class WebDriverBrowserProfileTests
                     Assert.That(document.RootElement.GetProperty("device").GetProperty("clientHints").GetProperty("platform").GetString(), Is.EqualTo(device.ClientHints!.Platform));
                     Assert.That(document.RootElement.GetProperty("device").GetProperty("network").GetProperty("effectiveType").GetString(), Is.EqualTo(device.NetworkInfo!.EffectiveType));
                     Assert.That(document.RootElement.GetProperty("device").GetProperty("geolocation").GetProperty("accuracy").GetDouble(), Is.EqualTo(device.Geolocation!.Accuracy));
-                    Assert.That(document.RootElement.GetProperty("device").GetProperty("webGl").GetProperty("unmaskedRenderer").GetString(), Is.EqualTo(device.WebGL!.UnmaskedRenderer));
+
+                    // Отрисовщик WebGL заявляется НАСТОЯЩИЙ (SwiftShader), а не заявленный профилем:
+                    // подменённый расходится с поведением реального контекста, и замер на живом
+                    // Cloudflare дал 600010 на всех попытках против выданного токена без подмены.
+                    Assert.That(document.RootElement.GetProperty("device").GetProperty("webGl").GetProperty("unmaskedRenderer").GetString(), Does.Contain("SwiftShader"));
                     Assert.That(document.RootElement.GetProperty("device").GetProperty("webGlParameters").GetProperty("maxTextureSize").GetInt32(), Is.EqualTo(device.WebGLParams!.MaxTextureSize));
                     Assert.That(document.RootElement.GetProperty("device").GetProperty("speech").GetProperty("voices")[0].GetProperty("name").GetString(), Is.EqualTo(device.SpeechVoices!.First().Name));
                     Assert.That(document.RootElement.GetProperty("device").GetProperty("mediaDevices").GetProperty("groupId").GetString(), Is.EqualTo(device.VirtualMediaDevices.GroupId));

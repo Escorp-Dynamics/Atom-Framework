@@ -358,6 +358,11 @@ internal static class ProfileMaterialization
             ["privacy"] = BuildPrivacyManifest(device),
         };
 
+        // Тот же рубильник замера, что и в контексте вкладки: ранний скрипт ставит подмену первым,
+        // и без него сравнение осталось бы смешанным.
+        if (string.Equals(Environment.GetEnvironmentVariable("VC_NO_OS_SURFACES"), "1", StringComparison.Ordinal))
+            manifest["suppressOsSurfaces"] = true;
+
         if (BuildScreenManifest(device.Screen) is { } screen)
             manifest["screen"] = screen;
 
@@ -526,16 +531,36 @@ internal static class ProfileMaterialization
         return manifest;
     }
 
+    // ★ Заявленная видеокарта приводится к ТОЙ, ЧТО РЕАЛЬНО РИСУЕТ.
+    //
+    // Браузер живёт на виртуальном дисплее и всегда запускается с '--use-angle=swiftshader'
+    // (см. базовые флаги пресета): кадры даёт программный растеризатор. Профиль же заявлял
+    // дискретную карту — 'ANGLE (Intel, Intel(R) UHD Graphics 630 ... Direct3D11)'. Проверка не
+    // читает эти строки, она РИСУЕТ: попиксельный вывод и тайминги SwiftShader с аппаратным
+    // Direct3D11 не совпадают, и расхождение видно без разбора строк.
+    //
+    // Замер на живом Cloudflare, один стенд и один дисплей: с заявленной дискретной картой —
+    // error-callback 600010, tokenLen=0; без подмены WebGL (SwiftShader виден как есть) — токен
+    // 794 с первой попытки.
+    //
+    // Программный рендеринг сам по себе НЕ признак автоматики: так рисуют машины без драйвера GPU,
+    // виртуалки и удалённые рабочие столы. Признак — несовпадение заявленного с фактическим.
+    private const string SoftwareWebGlVendor = "Google Inc. (Google)";
+
+    private const string SoftwareWebGlRenderer =
+        "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver-5.0.0)";
+
     private static JsonObject? BuildWebGlManifest(WebGLSettings? webGl)
     {
         if (webGl is null)
             return null;
 
         var manifest = new JsonObject();
-        AddString(manifest, "vendor", webGl.Vendor);
-        AddString(manifest, "renderer", webGl.Renderer);
-        AddString(manifest, "unmaskedVendor", webGl.UnmaskedVendor);
-        AddString(manifest, "unmaskedRenderer", webGl.UnmaskedRenderer);
+        AddString(manifest, "vendor", SoftwareWebGlVendor);
+        AddString(manifest, "renderer", SoftwareWebGlRenderer);
+        AddString(manifest, "unmaskedVendor", SoftwareWebGlVendor);
+        AddString(manifest, "unmaskedRenderer", SoftwareWebGlRenderer);
+
         AddString(manifest, "version", webGl.Version);
         AddString(manifest, "shadingLanguageVersion", webGl.ShadingLanguageVersion);
         return manifest;

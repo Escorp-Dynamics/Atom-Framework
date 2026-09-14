@@ -505,7 +505,9 @@ public class Device
         ClientHints = new ClientHintsSettings
         {
             Platform = "Windows",
-            PlatformVersion = "10.0.0",
+            // 13.0.0 и выше означает Windows 11; 10.0.0 — снятая с поддержки Windows 10 21H2,
+            // на которой современный Chrome не запускается (таблица версий Microsoft).
+            PlatformVersion = "15.0.0",
             Mobile = false,
             Architecture = "x86",
             Bitness = "64",
@@ -572,9 +574,21 @@ public class Device
     /// </summary>
     public Size ViewportSize
     {
-        get => screen is { Width: > 0, Height: > 0 }
-            ? new Size(screen.Width.Value, screen.Height.Value)
-            : viewportSize;
+        // ★ Область просмотра выводится из ДОСТУПНОЙ области экрана, а не из полного размера.
+        //
+        // Полный размер означал окно во весь экран, поверх панели задач Windows и строки меню
+        // macOS, — такого окна у настольной системы не бывает. Доступная область для того и
+        // заявляется, чтобы окно в неё вписывалось; при незаявленной — остаётся полный размер.
+        get
+        {
+            if (screen is not { Width: > 0, Height: > 0 })
+                return viewportSize;
+
+            var width = screen.AvailWidth is > 0 and var availWidth ? availWidth : screen.Width.Value;
+            var height = screen.AvailHeight is > 0 and var availHeight ? availHeight : screen.Height.Value;
+
+            return new Size(width, height);
+        }
         set
         {
             viewportSize = value;

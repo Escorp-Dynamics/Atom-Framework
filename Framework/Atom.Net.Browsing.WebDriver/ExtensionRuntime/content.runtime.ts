@@ -3,6 +3,7 @@ import { validateTabContextEnvelope } from './Shared/Protocol/TabContextEnvelope
 import { deriveResidentChannelName } from './Shared/Protocol/ResidentChannel';
 import { loadRuntimeConfig, validateRuntimeConfig, type RuntimeConfig } from './Shared/Config';
 import { BrowserRuntimePortChannel, DeferredContentReadySignal } from './Content/Channel';
+import { describeShadowRootMode, getShadowRootOfAnyMode } from './Content/Dom';
 
 type ConsoleMethodName = 'debug' | 'info' | 'log' | 'warn' | 'error';
 
@@ -448,13 +449,13 @@ class ContentRuntimeHost {
                 return;
             }
 
-            const shadowRoot = host.shadowRoot;
+            const shadowRoot = getShadowRootOfAnyMode(host);
             if (shadowRoot === null) {
                 await this.channel.sendResponse({
                     id: message.id,
                     type: 'Response',
                     status: 'Error',
-                    error: 'Open shadow root not found.',
+                    error: 'Shadow root not found.',
                 });
                 return;
             }
@@ -463,12 +464,19 @@ class ContentRuntimeHost {
             host.setAttribute('data-atom-sr', markerId);
 
             try {
-                const result = await executeScriptWithFallback(
-                    this.channel,
-                    buildShadowRootExecuteScriptSource(markerId, payload.script),
-                    payload.preferPageContextOnNull === true,
-                    payload.forcePageContextExecution === true,
-                );
+                // ★ Закрытый корень виден ТОЛЬКО из мира расширения: `host.shadowRoot` в основном
+                // мире страницы отдаёт null по спецификации, и исполняемый там скрипт корень не
+                // найдёт. Поэтому для closed-режима исполняем здесь, в изолированном мире, где
+                // корень уже получен через chrome.dom.openOrClosedShadowRoot. Открытый корень идёт
+                // прежним путём — через основной мир, чтобы скрипт видел глобалы страницы.
+                const result = host.shadowRoot === null
+                    ? await executeScriptInClosedShadowRoot(shadowRoot, payload.script)
+                    : await executeScriptWithFallback(
+                        this.channel,
+                        buildShadowRootExecuteScriptSource(markerId, payload.script),
+                        payload.preferPageContextOnNull === true,
+                        payload.forcePageContextExecution === true,
+                    );
                 await this.channel.sendResponse({
                     id: message.id,
                     type: 'Response',
@@ -810,7 +818,7 @@ class ContentRuntimeHost {
             id: message.id,
             type: 'Response',
             status: 'Ok',
-            payload: element.shadowRoot !== null ? 'open' : 'false',
+            payload: describeShadowRootMode(element),
         });
     }
 
@@ -1342,13 +1350,17 @@ export function buildStorageIsolationScript(): string {
     let storageIsolationInstalled = false;
 
     if (!storageIsolationInstalled) {
+        const patchedStoragePrototypes = new WeakSet();
         const installStorageIsolation = (storage) => {
             if (!storage) {
                 return;
             }
 
             const proto = Object.getPrototypeOf(storage);
-            if (!proto || proto.__atomStorageIsolationPatched) {
+            // ★ Сторож живёт в WeakSet, а НЕ свойством прототипа. Имени '__atomStorageIsolationPatched'
+            // в браузере не существует, и оно находилось обычным getOwnPropertyNames(Storage.prototype) —
+            // визитка автоматики, заметнее всего, что она прячет.
+            if (!proto || patchedStoragePrototypes.has(proto)) {
                 return;
             }
 
@@ -1382,10 +1394,7 @@ export function buildStorageIsolationScript(): string {
                 return keys;
             };
 
-            Object.defineProperty(proto, '__atomStorageIsolationPatched', {
-                configurable: true,
-                value: true,
-            });
+            patchedStoragePrototypes.add(proto);
 
             Object.defineProperty(proto, 'getItem', {
                 configurable: true,
@@ -1895,6 +1904,10 @@ const readContext = () => currentContext;
     const asNativeGetter = (property, original, getter) => {
         const holder = {
             get [property]() {
+                // Чужой получатель обязан ронять геттер так же, как родной атрибут WebIDL:
+                // 'Screen.prototype.width.get.call({})' у настоящего браузера бросает TypeError.
+                if (typeof original === 'function') original.call(this);
+
                 return getter.call(this);
             },
         };
@@ -2069,6 +2082,388 @@ const readContext = () => currentContext;
     };
 
     /**
+     * Эмулирует область просмотра заявленного устройства внутри вкладки.
+     *
+     * Размер окна для этого не годится: вкладки одного окна несут разные профили, а окно одно на
+     * всех. Поэтому вьюпорт воссоздаётся здесь, и закрыты все пути, которыми страница его читает:
+     * innerWidth/innerHeight, documentElement.clientWidth/clientHeight, visualViewport и
+     * медиазапросы о ширине. Замер показал, что каждый из них подменяем и что раскладку корня
+     * можно сузить до заявленной ширины, иначе width:100% выдаёт настоящие 500 против 412.
+     *
+     * Метрики окна равны области просмотра: у настоящего телефона отдельного окна нет вовсе.
+     */
+    const installViewportOverride = () => {
+        const resolveViewport = () => {
+            const context = readContext();
+            const declared = context.viewport ?? context.screen;
+
+            const width = declared?.width;
+            const height = declared?.height;
+
+            if (typeof width !== 'number' || width <= 0 || typeof height !== 'number' || height <= 0) {
+                return null;
+            }
+
+            // Область просмотра не больше доступной области экрана: профиль рабочего стола заявляет
+            // вьюпорт 1920x1080 при доступных 1920x1040, а окно вместе с рамкой браузера за экран не
+            // выходит. Экран вкладки важнее живого: последний несёт профиль БРАУЗЕРА и для вкладки
+            // со своим профилем дал бы чужую доступную область.
+            const screen = context.screen ?? globalObject.screen;
+
+            const limit = (value, available) => typeof available === 'number' && available > 0
+                ? Math.min(value, available)
+                : value;
+
+            return {
+                width: limit(width, screen?.availWidth),
+                height: limit(height, screen?.availHeight),
+            };
+        };
+
+        if (resolveViewport() === null) {
+            return;
+        }
+
+        const elementPrototype = globalObject.Element?.prototype;
+
+        // Экран вкладки: ранний скрипт знает только профиль браузера, и вкладка со своим профилем
+        // отдавала бы его экран — то же расхождение, что прежде исправили для видеокарты.
+        const screenPrototype = globalObject.Screen?.prototype;
+
+        if (screenPrototype) {
+            for (const property of ['width', 'height', 'availWidth', 'availHeight', 'colorDepth', 'pixelDepth']) {
+                const original = Object.getOwnPropertyDescriptor(screenPrototype, property)?.get;
+
+                if (original) {
+                    defineGetter(screenPrototype, property, function () {
+                        return readContext().screen?.[property] ?? original.call(this);
+                    });
+                }
+            }
+        }
+
+        // ★ Размеры подменяются ТОЛЬКО в главном документе. У встроенного фрейма своя область
+        // просмотра — размер самого фрейма, а не устройства; подмена там ломает его раскладку и
+        // выдаёт себя расхождением с размером элемента iframe у родителя. Экран же общий на все
+        // фреймы, поэтому его подмена выше остаётся безусловной.
+        const isTopLevelDocument = (() => {
+            try {
+                return globalObject.top === globalObject.self;
+            } catch {
+                return false;
+            }
+        })();
+
+        if (!isTopLevelDocument) {
+            return;
+        }
+
+        // Запасное значение берётся из снимка, а НЕ из самого свойства: читая globalObject.innerWidth
+        // внутри его же геттера, подмена вызывала бы саму себя.
+        defineWindowGetter('innerWidth', () => resolveViewport()?.width ?? state.originalInnerWidth);
+
+        // Высота области просмотра — окно минус рамка браузера: она совпадает с тем, что заявляет
+        // ранний скрипт, иначе два пути подмены разойдутся между собой.
+        defineWindowGetter('innerHeight', () => {
+            const viewport = resolveViewport();
+
+            return viewport === null
+                ? state.originalInnerHeight
+                : Math.max(1, viewport.height - (readContext().isMobile === true ? 0 : 87));
+        });
+
+        // ★ У НАСТОЛЬНОГО окна между outer и inner всегда стоит рамка браузера: вкладки, адресная
+        // строка и полоса прокрутки. Замер показывал out=in=1280x720 — окно ровно по содержимому,
+        // чего не бывает ни у одного настоящего браузера, и это читается одним вычитанием.
+        // У телефона рамки нет — там окно и область просмотра совпадают честно.
+        // Рамка браузера съедает область просмотра ВНУТРИ окна: само окно за экран не выходит.
+        const chromeHeight = readContext().isMobile === true ? 0 : 87;
+
+        defineWindowGetter('outerWidth', () => resolveViewport()?.width ?? state.originalOuterWidth);
+        defineWindowGetter('outerHeight', () => resolveViewport()?.height ?? state.originalOuterHeight);
+
+        // Размеры элементов объявлены на Element.prototype и читаются ВСЕМИ элементами сразу,
+        // поэтому подменяем ровно корневой: у прочих размер обязан остаться настоящим.
+        for (const [property, axis] of [['clientWidth', 'width'], ['clientHeight', 'height']]) {
+            const original = Object.getOwnPropertyDescriptor(elementPrototype, property)?.get;
+
+            if (!original) {
+                continue;
+            }
+
+            // Корень сверяется с ЖИВЫМ документом элемента: захваченная ссылка устаревает при
+            // смене документа, а у элемента из встроенного фрейма корень вообще другой.
+            defineGetter(elementPrototype, property, function () {
+                if (this !== this?.ownerDocument?.documentElement || this?.ownerDocument !== globalObject.document) {
+                    return original.call(this);
+                }
+
+                const viewport = resolveViewport();
+
+                if (viewport === null) {
+                    return original.call(this);
+                }
+
+                // Раскладка равна области просмотра, а та по высоте — окно минус рамка браузера.
+                return axis === 'height'
+                    ? Math.max(1, viewport.height - (readContext().isMobile === true ? 0 : 87))
+                    : viewport.width;
+            });
+        }
+
+        // Прокручиваемый размер корня: замер показывал 500 при заявленных 412 — то есть настоящую
+        // ширину окна, прочитанную в обход всех подмен выше.
+        for (const [property, axis] of [['scrollWidth', 'width'], ['scrollHeight', 'height']]) {
+            const original = Object.getOwnPropertyDescriptor(elementPrototype, property)?.get;
+
+            if (!original) {
+                continue;
+            }
+
+            defineGetter(elementPrototype, property, function () {
+                if (this !== this?.ownerDocument?.documentElement || this?.ownerDocument !== globalObject.document) {
+                    return original.call(this);
+                }
+
+                const declared = resolveViewport()?.[axis];
+                const real = original.call(this);
+
+                // Длинная страница прокручивается по-настоящему: занижать её высоту нельзя, иначе
+                // прокрутка противоречит содержимому. Заявленный размер — только нижняя граница.
+                return typeof declared === 'number' ? Math.max(declared, real) : real;
+            });
+        }
+
+        const visualViewportPrototype = globalObject.VisualViewport?.prototype;
+
+        if (visualViewportPrototype) {
+            for (const [property, axis] of [['width', 'width'], ['height', 'height']]) {
+                const original = Object.getOwnPropertyDescriptor(visualViewportPrototype, property)?.get;
+
+                if (original) {
+                    defineGetter(visualViewportPrototype, property, function () {
+                        return resolveViewport()?.[axis] ?? original.call(this);
+                    });
+                }
+            }
+        }
+
+        installWindowPositionOverride();
+        installScreenOrientationOverride();
+        installViewportMediaOverride(resolveViewport);
+        applyViewportLayout(resolveViewport);
+    };
+
+    /**
+     * Ставит окно в начало экрана.
+     *
+     * Замер видел screenX и screenLeft равными 20 — смещение окна на рабочем столе. У телефона,
+     * который мы заявляем, окно занимает экран целиком и смещения не имеет вовсе.
+     */
+    const installWindowPositionOverride = () => {
+        for (const property of ['screenX', 'screenLeft', 'screenY', 'screenTop']) {
+            if (Object.getOwnPropertyDescriptor(globalObject, property) !== undefined) {
+                defineGetter(globalObject, property, () => 0);
+            }
+        }
+
+        const screenObject = globalObject.screen;
+
+        for (const property of ['availLeft', 'availTop']) {
+            if (screenObject && property in screenObject) {
+                defineGetter(globalObject.Screen?.prototype ?? screenObject, property, () => 0);
+            }
+        }
+    };
+
+    /**
+     * Согласует ориентацию с заявленным экраном.
+     *
+     * Замер на телефонном профиле показывал 'landscape-primary': ориентация считается по НАСТОЯЩЕМУ
+     * окну, и вертикальный экран 412x915 сочетался с горизонтальной ориентацией — сочетание,
+     * невозможное ни на одном устройстве.
+     */
+    const installScreenOrientationOverride = () => {
+        const prototype = globalObject.ScreenOrientation?.prototype;
+
+        if (!prototype) {
+            return;
+        }
+
+        const resolveOrientation = () => {
+            const screen = readContext().screen;
+
+            if (typeof screen?.width !== 'number' || typeof screen?.height !== 'number') {
+                return null;
+            }
+
+            return screen.height >= screen.width ? 'portrait-primary' : 'landscape-primary';
+        };
+
+        const originalType = Object.getOwnPropertyDescriptor(prototype, 'type')?.get;
+
+        if (originalType) {
+            defineGetter(prototype, 'type', function () {
+                return resolveOrientation() ?? originalType.call(this);
+            });
+        }
+
+        const originalAngle = Object.getOwnPropertyDescriptor(prototype, 'angle')?.get;
+
+        if (originalAngle) {
+            // Основная ориентация устройства — всегда угол 0, независимо от того, книжная она
+            // или альбомная: угол отсчитывается от собственной основной ориентации экрана.
+            defineGetter(prototype, 'angle', function () {
+                return resolveOrientation() === null ? originalAngle.call(this) : 0;
+            });
+        }
+    };
+
+    /**
+     * Согласует медиазапросы о размере с заявленной областью просмотра.
+     *
+     * Без этого запрос (max-width: 500px) отвечает по настоящему окну, и адаптивная вёрстка
+     * расходится с числами, которые страница читает из innerWidth — расхождение виднее самих
+     * чисел. Разбирается текст запроса, а matchMedia и объект результата остаются родными.
+     */
+    const installViewportMediaOverride = (resolveViewport) => {
+        const prototype = globalObject.MediaQueryList?.prototype;
+        const originalMatches = Object.getOwnPropertyDescriptor(prototype, 'matches')?.get;
+
+        if (!originalMatches) {
+            return;
+        }
+
+        // 'device-width' у телефона равен ширине области просмотра: отдельного окна там нет.
+        const resolveFeature = (part) => {
+            const separator = part.indexOf(':');
+
+            if (separator < 0) {
+                return undefined;
+            }
+
+            const feature = part.slice(part.indexOf('(') + 1, separator).trim();
+            const rawValue = part.slice(separator + 1).replace(')', '').trim();
+            const match = /^(-?\d+(?:\.\d+)?)px$/.exec(rawValue);
+            const viewport = resolveViewport();
+
+            if (!match || viewport === null) {
+                return undefined;
+            }
+
+            const requested = Number.parseFloat(match[1]);
+
+            switch (feature) {
+                case 'width':
+                case 'device-width':
+                    return viewport.width === requested;
+                case 'min-width':
+                case 'min-device-width':
+                    return viewport.width >= requested;
+                case 'max-width':
+                case 'max-device-width':
+                    return viewport.width <= requested;
+                case 'height':
+                case 'device-height':
+                    return viewport.height === requested;
+                case 'min-height':
+                case 'min-device-height':
+                    return viewport.height >= requested;
+                case 'max-height':
+                case 'max-device-height':
+                    return viewport.height <= requested;
+                default:
+                    return undefined;
+            }
+        };
+
+        defineGetter(prototype, 'matches', function () {
+            const media = typeof this.media === 'string' ? this.media.trim().toLowerCase() : '';
+
+            if (media.length === 0 || media.indexOf(',') >= 0 || media.indexOf('not ') === 0) {
+                return originalMatches.call(this);
+            }
+
+            let overridden = false;
+            let result = true;
+
+            for (const part of media.split(' and ')) {
+                const override = resolveFeature(part);
+
+                if (override === undefined) {
+                    continue;
+                }
+
+                overridden = true;
+                result = result && override;
+            }
+
+            return overridden ? result : originalMatches.call(this);
+        });
+    };
+
+    /**
+     * Сужает раскладку страницы до заявленной ширины.
+     *
+     * ★ Ширина задаётся МАСШТАБОМ ВКЛАДКИ (chrome.tabs.setZoom), а здесь остаётся лишь страховка на
+     * случай, когда масштаб не встал: браузер отверг множитель или вкладка ещё не получила его.
+     * Правка делается СТИЛЕВЫМ ЛИСТОМ, а не инлайном на <html>: замер показал, что инлайн виден
+     * странице напрямую — 'documentElement.getAttribute("style")' печатал
+     * 'width: 412px !important; overflow-x: hidden !important', то есть подмена объявляла о себе
+     * сама. Лист вставляется в конец head и снимается с documentElement сразу после применения,
+     * поэтому в DOM не остаётся ни атрибута, ни узла с нашими правилами.
+     */
+    const applyViewportLayout = (resolveViewport) => {
+        const document = globalObject.document;
+
+        const apply = () => {
+            const viewport = resolveViewport();
+            const root = document?.documentElement;
+
+            if (viewport === null || !root) {
+                return;
+            }
+
+            // Раскладка уже сужена масштабом вкладки — вмешиваться незачем.
+            if (Math.abs(root.clientWidth - viewport.width) < 2) {
+                return;
+            }
+
+            try {
+                const width = viewport.width + 'px';
+                const sheet = new globalObject.CSSStyleSheet();
+                sheet.replaceSync(':root{width:' + width + ' !important;max-width:' + width + ' !important;overflow-x:hidden !important}');
+
+                const own = [...document.adoptedStyleSheets, sheet];
+                document.adoptedStyleSheets = own;
+
+                // Свой лист прячется из перечисления: иначе он виден странице лишним элементом
+                // 'document.adoptedStyleSheets'. Подмена ставится на ПРОТОТИПЕ — там свойство и
+                // объявлено; на самом документе она дала бы собственное свойство, которого у
+                // настоящего документа нет, и выдала бы себя одним getOwnPropertyNames.
+                const visible = own.slice(0, own.length - 1);
+                const documentPrototype = globalObject.Document?.prototype;
+                const originalAdopted = Object.getOwnPropertyDescriptor(documentPrototype, 'adoptedStyleSheets')?.get;
+
+                if (originalAdopted) {
+                    defineGetter(documentPrototype, 'adoptedStyleSheets', function () {
+                        return this === document ? visible : originalAdopted.call(this);
+                    });
+                }
+            } catch {
+                // Конструируемые листы недоступны — правка не ставится вовсе: инлайн на <html>
+                // выдал бы автоматику вернее, чем помогла бы сама правка.
+            }
+        };
+
+        apply();
+
+        if (document?.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', apply, { once: true });
+        }
+    };
+
+    /**
      * Подменяет вендора и renderer, которые WebGL сообщает странице.
      *
      * Значения читаются двумя разными путями: обычными VENDOR/RENDERER и немаскированными через
@@ -2140,10 +2535,12 @@ const readContext = () => currentContext;
                     return webGl.unmaskedVendor ?? webGl.vendor;
                 case UNMASKED_RENDERER:
                     return webGl.unmaskedRenderer ?? webGl.renderer;
+                // Маскированные слоты — константы движка, одинаковые на любой машине: имя видеокарты
+                // здесь выдавало подмену одной сверкой с 'WebKit'.
                 case VENDOR:
-                    return webGl.vendor;
+                    return 'WebKit';
                 case RENDERER:
-                    return webGl.renderer;
+                    return 'WebKit WebGL';
                 case VERSION:
                     return webGl.version;
                 case SHADING_LANGUAGE_VERSION:
@@ -2299,10 +2696,17 @@ ${identityOnly ? '' : buildCacheIsolationScript()}
     defineNavigatorGetter('globalPrivacyControl', () => readContext().globalPrivacyControl ?? state.originalGlobalPrivacyControl);
     defineNavigatorGetter('maxTouchPoints', () => readContext().maxTouchPoints ?? state.originalMaxTouchPoints);
 
-    defineWindowGetter('devicePixelRatio', () => readContext().deviceScaleFactor ?? state.originalDevicePixelRatio);
-    // ★ Метрики окна НЕ подменяются: окно физически получает заявленный размер при запуске
-    // браузера. Подмена дотягивалась только до inner*, а 'documentElement.clientHeight' и
-    // 'visualViewport' оставались настоящими — замер показывал 1512x982 против 780x493.
+    // ★ Подмена ставится БЕЗУСЛОВНО, минуя сверку «уже совпадает». Масштаб вкладки, которым
+    // сужается область просмотра, ДЕЛИТ devicePixelRatio: замер при заявленном dpr=1 показывал
+    // 0.4755 — значение, невозможное ни у одного устройства. Сверка же видела совпадение ДО
+    // масштабирования и подмену пропускала, оставляя странице расхождение.
+    defineGetter(globalObject, 'devicePixelRatio', () => readContext().deviceScaleFactor ?? state.originalDevicePixelRatio);
+
+    // ★ Область просмотра эмулируется ЗДЕСЬ, на уровне вкладки, а не размером окна. Размером окна
+    // это нерешаемо в принципе: вкладки одного окна несут разные профили, а Chromium вдобавок не
+    // сужает окно ниже примерно 500 точек — мобильный профиль в 412 недостижим физически.
+    installViewportOverride();
+
     // ★ Подмена WebGL ставится ЗДЕСЬ, а не только ранним скриптом личности. Ранний скрипт несёт
     // профиль БРАУЗЕРА, запечённый при его запуске, и для вкладки со своим профилем отдавал чужую
     // видеокарту: замер показывал 'NVIDIA GeForce RTX 3070' во вкладке, заявляющей Apple M1 Pro.
@@ -3042,6 +3446,19 @@ function buildElementExecuteScriptSource(markerId: string, script: string | unde
 
     return `(() => {
 const markerId = ${serializedMarkerId};
+// Исходник исполняется в МИРЕ СТРАНИЦЫ: импорты модуля сюда не доезжают, а 'chrome.dom' доступен
+// только изолированному миру. Поэтому чтение корня объявлено здесь и полагается на то, что видно
+// странице; вызов импортированной функции давал ReferenceError и обрывал весь поиск.
+const getShadowRootOfAnyMode = (host) => {
+    const open = host.shadowRoot;
+    if (open) {
+        return open;
+    }
+
+    // Firefox отдаёт закрытый корень свойством самого узла.
+    const viaGecko = host.openOrClosedShadowRoot;
+    return viaGecko ?? null;
+};
 const findElementInRoot = (root) => {
     if (!root || typeof root.querySelector !== 'function' || typeof root.querySelectorAll !== 'function') {
         return null;
@@ -3057,8 +3474,9 @@ const findElementInRoot = (root) => {
             continue;
         }
 
-        if (candidate.shadowRoot) {
-            const shadowMatch = findElementInRoot(candidate.shadowRoot);
+        const candidateShadow = getShadowRootOfAnyMode(candidate);
+        if (candidateShadow) {
+            const shadowMatch = findElementInRoot(candidateShadow);
             if (shadowMatch) {
                 return shadowMatch;
             }
@@ -3534,6 +3952,22 @@ async function executeScriptInContentWorld(script: string): Promise<string> {
     return result !== null && result !== undefined ? String(result) : 'null';
 }
 
+/**
+ * Исполняет скрипт над ЗАКРЫТЫМ shadow root прямо в изолированном мире расширения.
+ *
+ * Такой корень недостижим из основного мира страницы, поэтому обычный путь через маркер
+ * `data-atom-sr` и `host.shadowRoot` там вернул бы null. Здесь корень уже получен через
+ * `chrome.dom.openOrClosedShadowRoot` и передаётся скрипту переменной `shadowRoot` — тот же
+ * контракт, что у открытого пути (см. `buildShadowRootExecuteScriptSource`).
+ */
+async function executeScriptInClosedShadowRoot(shadowRoot: ShadowRoot, script: string | undefined): Promise<string> {
+    const body = normalizeScriptBody(script);
+    const runner = new Function('shadowRoot', `return (async () => {${body}})();`) as (root: ShadowRoot) => Promise<unknown>;
+
+    const result = await runner(shadowRoot);
+    return result !== null && result !== undefined ? String(result) : 'null';
+}
+
 function isJsonRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -3736,7 +4170,7 @@ function resolveSearchRoot(payload: {
             return undefined;
         }
 
-        return host.shadowRoot ?? undefined;
+        return getShadowRootOfAnyMode(host) ?? undefined;
     }
 
     if (payload.frameHostElementId !== undefined) {
@@ -3849,16 +4283,24 @@ function findMultipleWithOpenShadowRootDiscovery(strategy: string, value: string
     const visit = (currentRoot: Document | ShadowRoot | Element): void => {
         appendMatches(currentRoot);
 
-        if (currentRoot instanceof Element && currentRoot.shadowRoot !== null) {
-            visit(currentRoot.shadowRoot);
+        if (currentRoot instanceof Element) {
+            const ownShadow = getShadowRootOfAnyMode(currentRoot);
+            if (ownShadow !== null) {
+                visit(ownShadow);
+            }
         }
 
         for (const candidate of currentRoot.querySelectorAll('*')) {
-            if (!(candidate instanceof Element) || candidate.shadowRoot === null) {
+            if (!(candidate instanceof Element)) {
                 continue;
             }
 
-            visit(candidate.shadowRoot);
+            const candidateShadow = getShadowRootOfAnyMode(candidate);
+            if (candidateShadow === null) {
+                continue;
+            }
+
+            visit(candidateShadow);
         }
     };
 

@@ -115,12 +115,35 @@ internal static partial class BridgeServerLogs
     [LoggerMessage(EventId = 1848, Level = LogLevel.Warning, Message = "Фоновый HTTP/WebSocket обработчик мостового сервера завершился непредвиденной ошибкой")]
     public static partial void LogBridgeServerConnectionFailed(this ILogger logger, Exception exception);
 
-    [LoggerMessage(EventId = 1850, Level = LogLevel.Warning, Message = "Navigation proxy обработчик соединения завершился непредвиденной ошибкой")]
-    public static partial void LogBridgeServerNavigationProxyConnectionFailed(this ILogger logger, Exception exception);
+    [LoggerMessage(EventId = 1850, Level = LogLevel.Warning, Message = "Navigation proxy обработчик соединения завершился непредвиденной ошибкой, цель: {Target}")]
+    public static partial void LogBridgeServerNavigationProxyConnectionFailed(this ILogger logger, string target, Exception exception);
 
     [LoggerMessage(EventId = 1851, Level = LogLevel.Warning, Message = "Navigation proxy не смог перенаправить upstream-запрос {Method} {Url}, маршрут: {RouteToken}, апстрим-прокси задан: {HasUpstreamProxy}")]
     public static partial void LogBridgeServerNavigationProxyForwardFailed(this ILogger logger, string method, string url, string routeToken, bool hasUpstreamProxy, Exception exception);
 
     [LoggerMessage(EventId = 1852, Level = LogLevel.Debug, Message = "Navigation proxy отменил стрелый запрос {Method} {Url} со снятым драйверным маршрутом (token={RouteToken}) вместо форварда на origin")]
     public static partial void LogBridgeServerNavigationProxyStaleRouteAborted(this ILogger logger, string method, string url, string routeToken);
+
+    // Источник профиля пересылки виден только здесь: расхождение «JS заявляет одно, TLS уходит
+    // другим» иначе читается лишь по ответу таргета. Origin — task (профиль задачи), inherited
+    // (унаследован для запроса без токена, в т.ч. из закрытого фрейма challenges.cloudflare.com),
+    // launch (откат на профиль запуска браузера), none (клиент без профиля вовсе).
+    [LoggerMessage(EventId = 1915, Level = LogLevel.Debug, Message = "Navigation proxy пересылает {Method} {Url}: профиль {ProfileOrigin}, агент {UserAgent}, token={RouteToken}, апстрим={HasUpstreamProxy}")]
+    public static partial void LogBridgeServerNavigationProxyForwardProfile(this ILogger logger, string method, string url, string profileOrigin, string userAgent, string routeToken, bool hasUpstreamProxy);
+
+    // Отклонение от нормы — на Warning: пересылка профилем ЗАПУСКА или вовсе без профиля означает,
+    // что личность на проводе разошлась с личностью задачи. На Debug это терялось: поштучный лог
+    // пересылки нельзя держать включённым, а знать о расхождении надо всегда.
+    [LoggerMessage(EventId = 1916, Level = LogLevel.Warning, Message = "Navigation proxy пересылает {Method} {Url} НЕ профилем задачи: источник {ProfileOrigin}, агент {UserAgent}, token={RouteToken}")]
+    public static partial void LogBridgeServerNavigationProxyForwardProfileMismatch(this ILogger logger, string method, string url, string profileOrigin, string userAgent, string routeToken);
+
+    // Общение с challenge-платформой целиком: отказ виджета читается только по ответу самой
+    // платформы, а его иначе не видно — тело идёт внутри TLS и в лог браузера не попадает.
+    [LoggerMessage(EventId = 1917, Level = LogLevel.Information, Message = "CF-обмен: {Method} {Url} → {StatusCode}, профиль {ProfileOrigin}, тело[{BodyLength}]={BodyPreview}")]
+    public static partial void LogBridgeServerChallengeExchange(this ILogger logger, string method, string url, int statusCode, string profileOrigin, int bodyLength, string bodyPreview);
+
+    // Заголовки запроса к challenge-платформе: набор и ПОРЯДОК видны проверке до исполнения любого
+    // скрипта, а иначе их не снять — запрос уходит внутри TLS.
+    [LoggerMessage(EventId = 1918, Level = LogLevel.Information, Message = "CF-заголовки: {Method} {Url} :: {Headers}")]
+    public static partial void LogBridgeServerChallengeRequestHeaders(this ILogger logger, string method, string url, string headers);
 }

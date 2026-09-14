@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http;
 using System.Reflection;
 using Atom.Net.Https;
@@ -137,13 +137,30 @@ public sealed class HttpsConnectionPoolTests
         Assert.DoesNotThrow(() => InvokePool(poolState, "SweepRetired"));
     }
 
-    private static Version InvokeResolvePreferredVersion(HttpRequestMessage request, BrowserProfile? profile, Uri? upstreamProxy = null)
+    private static Version InvokeResolvePreferredVersion(HttpRequestMessage request, BrowserProfile? profile, Uri? upstreamProxy = null, bool isHttps = true)
     {
         var method = typeof(HttpsClientHandler).GetMethod("ResolvePreferredVersion", BindingFlags.Static | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("ResolvePreferredVersion not found.");
 
-        return (Version)(method.Invoke(obj: null, [request, profile, upstreamProxy])
+        return (Version)(method.Invoke(obj: null, [request, profile, upstreamProxy, isHttps])
             ?? throw new InvalidOperationException("ResolvePreferredVersion invocation returned null."));
+    }
+
+    [Test]
+    public void PlainSchemeRulesOutHttp3BecauseQuicIsAlwaysSecure()
+    {
+        // QUIC защищён всегда, поэтому по http:// HTTP/3 невозможен в принципе. Без понижения
+        // запрос с Version30 и политикой RequestVersionOrLower доходил до Https3Connection и
+        // падал там, хотя политика прямо разрешает откат.
+        using var request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:8080/probe")
+        {
+            Version = HttpVersion.Version30,
+            VersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
+        };
+
+        var resolved = InvokeResolvePreferredVersion(request, BrowserProfileCatalog.CreateChromeDesktopWindowsTls13(), isHttps: false);
+
+        Assert.That(resolved, Is.EqualTo(HttpVersion.Version20));
     }
 
     [Test]

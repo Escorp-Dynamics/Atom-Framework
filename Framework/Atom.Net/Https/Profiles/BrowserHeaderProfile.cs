@@ -46,6 +46,17 @@ public readonly record struct BrowserHeaderProfile
     public bool UseClientHints { get; init; }
 
     /// <summary>
+    /// Нужно ли отдавать подсказки высокой энтропии (arch, bitness, model, полные версии).
+    /// </summary>
+    /// <remarks>
+    /// Браузер отдаёт их не всем, а тем узлам, которые попросили через <c lang="text">Accept-CH</c> — и
+    /// дальше шлёт на каждый запрос к такому узлу. Постоянного знания о том, кто просил, у нас
+    /// нет, поэтому решение остаётся за вызывающей стороной: для узлов вроде Cloudflare, которые
+    /// просят их всегда, флаг включается, для остальных остаётся выключенным.
+    /// </remarks>
+    public bool UseHighEntropyClientHints { get; init; }
+
+    /// <summary>
     /// Нужно ли автоматически эмитить Accept-Encoding.
     /// </summary>
     public bool EmitAcceptEncoding { get; init; } = true;

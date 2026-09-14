@@ -237,12 +237,23 @@ public static class BrowserProfileCatalog
     /// другой строкой агента. Транспортный отпечаток берётся от Safari, а не от Chromium: взяв
     /// хромиумовский, мы получили бы сочетание, которого на устройстве не бывает.
     /// </remarks>
+    /// <remarks>
+    /// Транспорт берётся у Safari: своего движка на iOS сторонним браузерам не разрешено, там у
+    /// всех WebKit. А вот подсказки клиента Chrome на iOS ШЛЁТ — их отдаёт его собственный сетевой
+    /// слой, и Safari-профиль, у которого они выключены, здесь не годится: строка агента заявляет
+    /// CriOS, а sec-ch-ua не приходит ни одного.
+    /// </remarks>
     public static BrowserProfile CreateChromeIos()
-        => CreateSafariIos() with
+    {
+        var safari = CreateSafariIos();
+
+        return safari with
         {
             DisplayName = "Chrome iOS",
             UserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/151.0.0.0 Mobile/15E148 Safari/604.1",
+            Headers = safari.Headers with { UseClientHints = true },
         };
+    }
 
     /// <summary>
     /// Переставляет наборы шифров под устройство без аппаратного ускорения AES.

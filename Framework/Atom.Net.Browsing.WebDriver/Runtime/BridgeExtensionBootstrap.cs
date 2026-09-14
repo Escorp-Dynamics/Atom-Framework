@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO.Compression;
@@ -212,7 +212,11 @@ internal static class BridgeExtensionBootstrap
         if (browserProfile is FirefoxProfile
             && !Atom.Net.Https.Profiles.BrowserProfileResolver.Resolve(userAgent).DisplayName.Contains("Firefox", StringComparison.OrdinalIgnoreCase))
         {
-            return Atom.Net.Https.Profiles.BrowserProfileCatalog.CreateFirefoxDesktop();
+            // Строка агента переносится и здесь: каталожный профиль несёт СВОЮ, и без переноса
+            // на провод уезжал бы браузер каталога при другой строке у страницы.
+            var firefox = Atom.Net.Https.Profiles.BrowserProfileCatalog.CreateFirefoxDesktop();
+
+            return firefox with { UserAgent = userAgent, IsMobile = device.IsMobile };
         }
 
         // ★ Профиль подбирается ОБЩИМ резолвером, а не собственной веткой.
@@ -224,7 +228,13 @@ internal static class BridgeExtensionBootstrap
         //
         // Резолвер уже различает iOS (включая CriOS/FxiOS), Android, Edge, Firefox и Safari на
         // macOS, поэтому дублировать разбор строки агента здесь незачем: источник истины один.
-        return Atom.Net.Https.Profiles.BrowserProfileResolver.Resolve(userAgent);
+        //
+        // ★ Строка агента берётся ОТ УСТРОЙСТВА, а не из каталога: резолвер возвращает готовый
+        // профиль со своей строкой, и без подмены на провод уходил бы браузер каталога, тогда как
+        // страница заявляет строку устройства. Замер: «Android 14; SM-S911B» → «Android 15; Pixel 9».
+        var resolved = Atom.Net.Https.Profiles.BrowserProfileResolver.Resolve(userAgent);
+
+        return resolved with { UserAgent = userAgent, IsMobile = device.IsMobile };
     }
 
     internal static async ValueTask<BridgeBootstrapPlan> MaterializeAsync(
@@ -482,7 +492,25 @@ internal static class BridgeExtensionBootstrap
     /// настоящее окружение машины. Контент-скрипт же браузер внедряет сам, до любого кода
     /// документа и в каждый фрейм, включая ещё не созданные.
     /// </remarks>
-    private static async ValueTask WriteIdentityProfileAsync(
+    private static ValueTask WriteIdentityProfileAsync(
+        string localExtensionPath,
+        Device? device,
+        CancellationToken cancellationToken)
+        => UpdateIdentityProfileAsync(localExtensionPath, device, cancellationToken);
+
+    /// <summary>
+    /// Перезаписывает запечённый профиль раннего скрипта под новую личность.
+    /// </summary>
+    /// <remarks>
+    /// ★ Файл создавался ОДИН раз, при материализации расширения, и нёс профиль ЗАПУСКА браузера.
+    /// На каждой новой навигации он первым ставил его — то есть чужую для задачи личность, — а
+    /// динамический контекст перекрывал это уже после. Между этими двумя моментами документ
+    /// заявлял профиль запуска, и код страницы, исполненный в этом окне, читал именно его.
+    ///
+    /// Браузер читает файл контент-скрипта с диска на каждую навигацию, поэтому перезаписи
+    /// достаточно: перезагружать расширение не нужно.
+    /// </remarks>
+    internal static async ValueTask UpdateIdentityProfileAsync(
         string localExtensionPath,
         Device? device,
         CancellationToken cancellationToken)
@@ -492,11 +520,13 @@ internal static class BridgeExtensionBootstrap
 
         var serialized = payload.Count == 0 ? "null" : payload.ToJsonString();
         var contents = $"globalThis.__ATOM_IDENTITY_PROFILE = {serialized};\n";
+        var path = Path.Combine(localExtensionPath, "identity.profile.js");
 
-        await File.WriteAllTextAsync(
-            Path.Combine(localExtensionPath, "identity.profile.js"),
-            contents,
-            cancellationToken).ConfigureAwait(false);
+        // Запись через временный файл с переименованием: браузер может читать этот файл в любой
+        // момент, и увидеть его наполовину записанным — значит остаться вообще без личности.
+        var temporaryPath = path + ".tmp";
+        await File.WriteAllTextAsync(temporaryPath, contents, cancellationToken).ConfigureAwait(false);
+        File.Move(temporaryPath, path, overwrite: true);
     }
 
     private static async ValueTask<JsonObject> ReadMaterializedManifestAsync(string manifestPath, CancellationToken cancellationToken)

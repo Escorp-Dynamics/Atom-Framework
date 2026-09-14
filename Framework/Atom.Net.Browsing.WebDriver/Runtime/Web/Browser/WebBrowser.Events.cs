@@ -202,7 +202,7 @@ public sealed partial class WebBrowser
         // webRequest-пути их применяет расширение, а здесь фильтровать может только драйвер.
         // Без этого перехват срабатывал бы на запросах, которые вызывающий не выбирал.
         if (request.DecidedByNavigationProxy
-            && page.GetEffectiveRequestInterceptionState()?.Matches(request.Url) != true)
+            && page.GetEffectiveRequestInterceptionState()?.Matches(request.Url, request.Method) != true)
         {
             return BridgeInterceptHttpResponse.Continue();
         }
@@ -257,7 +257,7 @@ public sealed partial class WebBrowser
 
         // Как и на стороне запроса: прокси видит весь трафик вкладки и о шаблонах не знает.
         if (responsePayload.DecidedByNavigationProxy
-            && page.GetEffectiveRequestInterceptionState()?.Matches(responsePayload.Url) != true)
+            && page.GetEffectiveRequestInterceptionState()?.Matches(responsePayload.Url, responsePayload.Method) != true)
         {
             return BridgeInterceptHttpResponse.Continue();
         }

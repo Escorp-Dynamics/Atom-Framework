@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Atom.Text;
 
@@ -124,17 +124,19 @@ public readonly struct OsInfo() : IParsable<OsInfo>, IEquatable<OsInfo>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override int GetHashCode()
     {
+        // Компаратор не принимает null, а у default(OsInfo) строковые поля именно такие —
+        // инициализаторы `= string.Empty` срабатывают только через конструктор.
         var hash = new HashCode();
-        hash.Add(Platform, StringComparer.Ordinal);
-        hash.Add(Version, StringComparer.Ordinal);
-        hash.Add(Device, StringComparer.Ordinal);
-        hash.Add(Locale, StringComparer.Ordinal);
-        hash.Add(Security, StringComparer.Ordinal);
-        hash.Add(Architecture, StringComparer.Ordinal);
+        hash.Add(Platform ?? string.Empty, StringComparer.Ordinal);
+        hash.Add(Version ?? string.Empty, StringComparer.Ordinal);
+        hash.Add(Device ?? string.Empty, StringComparer.Ordinal);
+        hash.Add(Locale ?? string.Empty, StringComparer.Ordinal);
+        hash.Add(Security ?? string.Empty, StringComparer.Ordinal);
+        hash.Add(Architecture ?? string.Empty, StringComparer.Ordinal);
         hash.Add(IsDeviceFirst);
         hash.Add(ArchitecturePlacement);
 
-        if (Tokens.Any())
+        if (Tokens is not null)
         {
             foreach (var token in Tokens) hash.Add(token, StringComparer.Ordinal);
         }
@@ -144,16 +146,19 @@ public readonly struct OsInfo() : IParsable<OsInfo>, IEquatable<OsInfo>
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    // Строки и набор сравниваются статически: инициализаторы `= string.Empty` и `= []` работают только
+    // через конструктор, а у default(OsInfo) все эти поля null. Вызов на экземпляре ронял сравнение
+    // NullReferenceException и уводил за собой UserAgent.Equals и BrowserProfile.Equals.
     public bool Equals(OsInfo other)
-        => Platform.Equals(other.Platform, StringComparison.Ordinal)
-        && Version.Equals(other.Version, StringComparison.Ordinal)
-        && Device.Equals(other.Device, StringComparison.Ordinal)
-        && Locale.Equals(other.Locale, StringComparison.Ordinal)
-        && Security.Equals(other.Security, StringComparison.Ordinal)
-        && Architecture.Equals(other.Architecture, StringComparison.Ordinal)
+        => string.Equals(Platform, other.Platform, StringComparison.Ordinal)
+        && string.Equals(Version, other.Version, StringComparison.Ordinal)
+        && string.Equals(Device, other.Device, StringComparison.Ordinal)
+        && string.Equals(Locale, other.Locale, StringComparison.Ordinal)
+        && string.Equals(Security, other.Security, StringComparison.Ordinal)
+        && string.Equals(Architecture, other.Architecture, StringComparison.Ordinal)
         && ArchitecturePlacement.Equals(other.ArchitecturePlacement)
         && IsDeviceFirst.Equals(other.IsDeviceFirst)
-        && TokensEquals(Tokens, other.Tokens);
+        && TokensEquals(Tokens ?? [], other.Tokens ?? []);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

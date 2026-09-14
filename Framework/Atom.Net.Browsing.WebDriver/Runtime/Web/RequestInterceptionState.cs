@@ -14,7 +14,24 @@ internal sealed class RequestInterceptionState
 
     internal string[]? UrlPatterns { get; }
 
-    internal bool Matches(string? url)
+    internal bool Matches(string? url) => Matches(url, method: null);
+
+    /// <summary>
+    /// Сопоставляет запрос с шаблонами перехвата.
+    /// </summary>
+    /// <param name="url">Адрес запроса.</param>
+    /// <param name="method">Метод запроса; <see langword="null"/>, когда он неизвестен.</param>
+    /// <returns><see langword="true"/>, если запрос подпадает под перехват.</returns>
+    /// <remarks>
+    /// Шаблон может начинаться с метода: <c lang="text">"POST https://.../c/*"</c>. Так один
+    /// адрес удаётся сузить до нужного обмена, не расширяя перехват на соседние запросы того же
+    /// пути. Это не косметика: каждый лишний перехваченный запрос идёт раунд-трипом через мост и
+    /// переотправляется нашим стеком, а замер показал, что для потока телеметрии Cloudflare такая
+    /// задержка означает отказ решения — «Bot behavior detected» на КАЖДОЙ задаче.
+    ///
+    /// Шаблон без метода ведёт себя как прежде и совпадает с любым.
+    /// </remarks>
+    internal bool Matches(string? url, string? method)
     {
         if (!Enabled)
             return false;
@@ -27,11 +44,44 @@ internal sealed class RequestInterceptionState
 
         foreach (var pattern in UrlPatterns)
         {
-            if (UrlPatternMatcher.IsMatch(pattern, url))
+            var (patternMethod, urlPattern) = SplitMethodPrefix(pattern);
+
+            if (patternMethod is not null
+                && !string.Equals(patternMethod, method, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (UrlPatternMatcher.IsMatch(urlPattern, url))
                 return true;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Отделяет необязательный префикс метода от шаблона адреса.
+    /// </summary>
+    /// <remarks>
+    /// Схема адреса содержит <c lang="text">"://"</c>, а метод — только буквы, поэтому граница
+    /// определяется однозначно: пробел до первого двоеточия.
+    /// </remarks>
+    private static (string? Method, string UrlPattern) SplitMethodPrefix(string pattern)
+    {
+        var space = pattern.IndexOf(' ', StringComparison.Ordinal);
+
+        if (space <= 0)
+            return (null, pattern);
+
+        var head = pattern[..space];
+
+        foreach (var character in head)
+        {
+            if (!char.IsAsciiLetter(character))
+                return (null, pattern);
+        }
+
+        return (head, pattern[(space + 1)..]);
     }
 
     internal static RequestInterceptionState Create(bool enabled, IEnumerable<string>? urlPatterns)

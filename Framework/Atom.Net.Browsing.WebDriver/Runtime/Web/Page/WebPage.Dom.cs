@@ -268,13 +268,30 @@ public sealed partial class WebPage
         // Шлюз держится только на время «активация + фокус + один клик» (см. AcquireTrustedInputScopeAsync).
         using var trustedInput = await OwnerWindow.AcquireTrustedInputScopeAsync(this, cancellationToken).ConfigureAwait(false);
 
-        // Резолвим точку viewport→screen и бьём реальным виртуальным курсором НАПРЯМУЮ, минуя
+        // Резолвим точку viewport→screen и бьём реальным виртуальным устройством НАПРЯМУЮ, минуя
         // Element.ClickAsync/CalibrateInteractionPointAsync (та пере-центрирует по элементу и съела бы
         // смещение до чекбокса). Для кросс-доменного iframe DOM-доступа нет — координата единственный путь.
-        var mouse = await ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         var screenPoint = await ResolveViewportToScreenAsync((float)viewportX, (float)viewportY, cancellationToken).ConfigureAwait(false);
+
+        // ★ Способ ввода следует за ЗАЯВЛЕННЫМ устройством. Профиль вправе описывать телефон, и
+        // тогда мышиный клик по такому документу невозможен физически: курсора у телефона нет, а
+        // pointerType у настоящего касания — «touch». Пока выбора не было, мобильная личность
+        // обслуживалась мышью, и это противоречие видно в каждом событии указателя.
+        LastResolvedInputPoint = screenPoint;
+
+        if (ResolvedDevice?.HasTouch == true)
+        {
+            var touchscreen = await OwnerWindow.OwnerBrowser.ResolveTouchscreenAsync(cancellationToken).ConfigureAwait(false);
+            await touchscreen.TapAsync(screenPoint, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var mouse = await ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         await mouse.ClickAtAsync(screenPoint, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>Точка, в которую ушёл последний координатный ввод — для диагностики.</summary>
+    internal Point? LastResolvedInputPoint { get; private set; }
 
     internal async ValueTask<Point> ResolveViewportToScreenAsync(float viewportX, float viewportY, CancellationToken cancellationToken)
     {
@@ -361,6 +378,10 @@ public sealed partial class WebPage
                 : Number.isFinite(screenTop)
                     ? screenTop
                     : chromeTop;
+            // Масштаб вкладки здесь неизвестен и вычислен быть не может: 'outerWidth' и
+            // 'devicePixelRatio' подменены под заявленное устройство, а настоящей ширины окна
+            // странице не видно. Пересчёт делает вызывающий по границам окна — этот путь остаётся
+            // запасным на случай, когда границы недоступны.
             const resolvedScreenX = contentLeft + vx;
             const resolvedScreenY = contentTop + vy;
             return JSON.stringify({
@@ -455,16 +476,42 @@ public sealed partial class WebPage
     private async ValueTask<Point?> ResolveViewportToScreenFromBoundsAsync(Rectangle bounds, float viewportX, float viewportY, CancellationToken cancellationToken)
     {
         var viewportSize = await GetViewportSizeAsync(cancellationToken).ConfigureAwait(false);
+
+        // ★ Масштаб вкладки разводит CSS-пиксели и пиксели ОКНА. Область просмотра сужается
+        // масштабом под заявленное устройство, а курсор бьёт по экранным координатам, поэтому
+        // координату из getBoundingClientRect надо умножить на этот масштаб. Без пересчёта клик
+        // промахивался тем сильнее, чем дальше точка от левого верхнего угла: при вьюпорте 412 в
+        // окне 500 точка 300 уходила в 300 вместо 364.
+        var scale = ResolveViewportScale(bounds, viewportSize);
+
         var chromeLeft = viewportSize is { Width: > 0 }
-            ? Math.Max(0, (bounds.Width - viewportSize.Value.Width) / 2f)
+            ? Math.Max(0, (bounds.Width - (viewportSize.Value.Width * scale)) / 2f)
             : 0f;
         var chromeTop = viewportSize is { Height: > 0 }
-            ? Math.Max(0, bounds.Height - viewportSize.Value.Height)
+            ? Math.Max(0, bounds.Height - (viewportSize.Value.Height * scale))
             : 0f;
 
         return new Point(
-            (int)Math.Round(bounds.X + chromeLeft + viewportX),
-            (int)Math.Round(bounds.Y + chromeTop + viewportY));
+            (int)Math.Round(bounds.X + chromeLeft + (viewportX * scale)),
+            (int)Math.Round(bounds.Y + chromeTop + (viewportY * scale)));
+    }
+
+    /// <summary>
+    /// Во сколько раз пиксели окна крупнее CSS-пикселей области просмотра.
+    /// </summary>
+    /// <remarks>
+    /// Берётся по ШИРИНЕ: по высоте в окне ещё живёт рамка браузера, и её нельзя отличить от
+    /// масштаба. Когда масштаб не применён, отношение равно единице и пересчёт ничего не меняет.
+    /// Заведомо неправдоподобные значения отбрасываются — лучше клик без пересчёта, чем в пустоту.
+    /// </remarks>
+    private static float ResolveViewportScale(Rectangle bounds, Size? viewportSize)
+    {
+        if (viewportSize is not { Width: > 0 } size || bounds.Width <= 0)
+            return 1f;
+
+        var scale = bounds.Width / (float)size.Width;
+
+        return scale is > 0.2f and < 5f ? scale : 1f;
     }
 
     public ValueTask ActivateAsync(CancellationToken cancellationToken)

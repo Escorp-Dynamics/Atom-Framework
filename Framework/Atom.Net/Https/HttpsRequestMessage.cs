@@ -36,6 +36,19 @@ public class HttpsRequestMessage : HttpRequestMessage
     /// </summary>
     public ReferrerPolicyMode? ReferrerPolicy { get; init; }
 
+    /// <summary>
+    /// Заголовки, которые не следует подставлять по умолчанию.
+    /// </summary>
+    /// <remarks>
+    /// Профиль описывает браузер целиком, но отдельные запросы в нём ведут себя иначе: у POST к
+    /// <c lang="text">/cdn-cgi/challenge-platform/h/g/c/</c> в записанном обмене нет ни <c lang="text">Origin</c>,
+    /// ни <c lang="text">Accept-Language</c>, хотя соседние запросы их шлют. Отключать ради этого весь механизм
+    /// умолчаний нельзя — остальные заголовки должны остаться согласованными с профилем.
+    ///
+    /// Отличается от пустого значения тем, что заголовок не уходит на провод вовсе, а не уходит пустым.
+    /// </remarks>
+    public IReadOnlyCollection<string>? SuppressedDefaultHeaders { get; init; }
+
     internal IHeadersFormattingPolicy? HeadersFormattingPolicy { get; set; }
 
     internal bool UseCookieCrumbling { get; set; }

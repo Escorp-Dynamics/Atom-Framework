@@ -338,6 +338,15 @@ function toJsonContext(context: TabContextEnvelope): JsonValue {
         };
     }
 
+    // Без экрана вкладка со своим профилем берёт доступную область от профиля БРАУЗЕРА.
+    if (context.screen !== undefined) {
+        const screen = toJsonScreen(context.screen);
+
+        if (screen !== undefined) {
+            jsonContext.screen = screen;
+        }
+    }
+
     if (context.deviceScaleFactor !== undefined) {
         jsonContext.deviceScaleFactor = context.deviceScaleFactor;
     }
@@ -388,6 +397,27 @@ function toJsonContext(context: TabContextEnvelope): JsonValue {
     }
 
     return jsonContext;
+}
+
+function toJsonScreen(screen: TabContextEnvelope['screen']): JsonValue | undefined {
+    if (screen === undefined) {
+        return undefined;
+    }
+
+    const jsonScreen: Record<string, JsonValue> = {
+        width: screen.width,
+        height: screen.height,
+    };
+
+    for (const property of ['availWidth', 'availHeight', 'colorDepth', 'pixelDepth'] as const) {
+        const value = screen[property];
+
+        if (value !== undefined) {
+            jsonScreen[property] = value;
+        }
+    }
+
+    return jsonScreen;
 }
 
 function toJsonClientHints(clientHints: TabContextEnvelope['clientHints']): JsonValue | undefined {

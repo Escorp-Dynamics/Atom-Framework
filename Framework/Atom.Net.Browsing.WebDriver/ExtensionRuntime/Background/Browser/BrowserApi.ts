@@ -203,6 +203,38 @@ export async function reloadTab(runtime: any, tabsApi: any, tabId: number, bypas
     await invokeBrowserCall(runtime, tabsApi.reload, tabsApi, tabId, { bypassCache });
 }
 
+/**
+ * Задаёт масштаб вкладки, сужая её область просмотра до размера заявленного устройства.
+ *
+ * Единственный путь получить НАСТОЯЩИЙ вьюпорт без отладочного протокола: масштаб меняет размер
+ * CSS-пикселя, поэтому вместе с `innerWidth` честно съезжают `100vw`, `position: fixed`,
+ * `getBoundingClientRect` и медиазапросы — то, что подменой геттеров недостижимо.
+ *
+ * Область действия принудительно переводится на вкладку: по умолчанию масштаб общий для источника,
+ * и вкладки с разными профилями перетирали бы масштаб друг другу.
+ */
+export async function getTabZoom(runtime: any, tabsApi: any, tabId: number): Promise<number> {
+    if (tabsApi?.getZoom === undefined) {
+        return 1;
+    }
+
+    const zoom = await invokeBrowserCall<number>(runtime, tabsApi.getZoom, tabsApi, tabId);
+
+    return typeof zoom === 'number' && zoom > 0 ? zoom : 1;
+}
+
+export async function setTabZoom(runtime: any, tabsApi: any, tabId: number, zoomFactor: number): Promise<void> {
+    if (tabsApi?.setZoom === undefined) {
+        throw new Error('API масштаба вкладок недоступен');
+    }
+
+    if (tabsApi.setZoomSettings !== undefined) {
+        await invokeBrowserCall(runtime, tabsApi.setZoomSettings, tabsApi, tabId, { mode: 'automatic', scope: 'per-tab' });
+    }
+
+    await invokeBrowserCall(runtime, tabsApi.setZoom, tabsApi, tabId, zoomFactor);
+}
+
 export async function removeTab(runtime: any, tabsApi: any, tabId: number): Promise<void> {
     if (tabsApi === undefined) {
         throw new Error('API вкладок недоступен');

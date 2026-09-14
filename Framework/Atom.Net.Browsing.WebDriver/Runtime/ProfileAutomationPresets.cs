@@ -269,11 +269,17 @@ internal static class ProfileAutomationPresets
             "--use-angle=swiftshader",
         ];
 
+        // Обновление компонентов гасим всегда. Оно ходит на update.googleapis.com и edgedl.me.gvt1.com
+        // за многомегабайтными дельтами, причём через тот же прокси, что и полезный трафик страницы:
+        // в замере на 92 отклонения прокси 65 приходились именно на эту служебную докачку, к решению
+        // задачи отношения не имеющую. Мостовому расширению оно не нужно — оно ставится в профиль
+        // напрямую, а не через Component Updater.
+        arguments.Add("--disable-component-update");
+
+        // А вот фоновую сеть при поднятом мосте глушить НЕЛЬЗЯ: этот флаг выключает и служебные
+        // соединения, на которых держится жизненный цикл service worker'а расширения.
         if (!enableManagedChromiumBootstrap)
-        {
             arguments.Add("--disable-background-networking");
-            arguments.Add("--disable-component-update");
-        }
 
         MergeCsvArgument(arguments, "--disable-features=", [
             "AutofillServerCommunication",
@@ -378,6 +384,8 @@ internal static class ProfileAutomationPresets
 
         return arguments;
     }
+
+
 
     private static JsonObject BuildFirefoxPreferences(WebBrowserSettings settings)
     {
