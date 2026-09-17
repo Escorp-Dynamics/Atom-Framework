@@ -574,9 +574,12 @@ public sealed partial class ProxyNovaProvider : NetworkProxyProvider, IProxyPage
         return match.Success ? match.Value : null;
     }
 
-    [GeneratedRegex(@"\b(?:\d{1,3}\.){3}\d{1,3}\b", RegexOptions.CultureInvariant)]
+    // Ограничивает разбор недоверенных ответов proxynova.
+    private const int MatchTimeoutMilliseconds = 2000;
+
+    [GeneratedRegex(@"\b(?:\d{1,3}\.){3}\d{1,3}\b", RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex IpRegex();
 
-    [GeneratedRegex(@"/proxy-server-list/country-([a-z]{2})/", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"/proxy-server-list/country-([a-z]{2})/", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, MatchTimeoutMilliseconds)]
     private static partial Regex PublishedCountryRegex();
 }

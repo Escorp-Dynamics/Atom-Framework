@@ -68,6 +68,9 @@ public sealed partial class InboxesProvider : FixedDomainTemporaryEmailProvider<
         }
     }
 
-    [GeneratedRegex("<tr\\s+data-id=\"(?<id>[^\"]+)\"\\s+data-from=\"(?<from>[^\"]*)\"\\s+data-subject=\"(?<subject>[^\"]*)\"[^>]*>.*?<td\\s+class=\"body\">(?<body>.*?)</td>.*?</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    // HTML приходит с внешнего сайта, поэтому сопоставление ограничено по времени.
+    private const int MatchTimeoutMilliseconds = 2000;
+
+    [GeneratedRegex("<tr\\s+data-id=\"(?<id>[^\"]+)\"\\s+data-from=\"(?<from>[^\"]*)\"\\s+data-subject=\"(?<subject>[^\"]*)\"[^>]*>.*?<td\\s+class=\"body\">(?<body>.*?)</td>.*?</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline, MatchTimeoutMilliseconds)]
     private static partial Regex MessagePattern();
 }

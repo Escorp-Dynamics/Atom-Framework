@@ -68,6 +68,9 @@ public sealed partial class YopmailProvider : FixedDomainTemporaryEmailProvider<
         }
     }
 
-    [GeneratedRegex("<li\\s+data-id=\"(?<id>[^\"]+)\"\\s+data-from=\"(?<from>[^\"]*)\"\\s+data-subject=\"(?<subject>[^\"]*)\"[^>]*>\\s*<p\\s+class=\"body\">(?<body>.*?)</p>\\s*</li>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    // HTML приходит с внешнего сайта, поэтому сопоставление ограничено по времени.
+    private const int MatchTimeoutMilliseconds = 2000;
+
+    [GeneratedRegex("<li\\s+data-id=\"(?<id>[^\"]+)\"\\s+data-from=\"(?<from>[^\"]*)\"\\s+data-subject=\"(?<subject>[^\"]*)\"[^>]*>\\s*<p\\s+class=\"body\">(?<body>.*?)</p>\\s*</li>", RegexOptions.IgnoreCase | RegexOptions.Singleline, MatchTimeoutMilliseconds)]
     private static partial Regex MessagePattern();
 }

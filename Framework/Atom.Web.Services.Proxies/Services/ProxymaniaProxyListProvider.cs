@@ -336,27 +336,30 @@ public sealed partial class ProxymaniaProxyListProvider : NetworkProxyProvider, 
             _ => "all",
         };
 
-    [GeneratedRegex("<tbody\\b[^>]*id=[\"']resultTable[\"'][^>]*>(?<body>.*?)</tbody>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    // Ограничивает разбор недоверенного HTML: паттерны с .*? уязвимы к ReDoS.
+    private const int MatchTimeoutMilliseconds = 2000;
+
+    [GeneratedRegex("<tbody\\b[^>]*id=[\"']resultTable[\"'][^>]*>(?<body>.*?)</tbody>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex ResultTableRegex();
 
-    [GeneratedRegex("<tr\\b[^>]*>(?<row>.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("<tr\\b[^>]*>(?<row>.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex RowRegex();
 
-    [GeneratedRegex("<td\\b[^>]*>(?<cell>.*?)</td>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("<td\\b[^>]*>(?<cell>.*?)</td>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex CellRegex();
 
-    [GeneratedRegex("<a\\b[^>]*href=(?<quote>[\"'])(?<href>.*?)(?:\\k<quote>)[^>]*>\\s*Next\\s*</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("<a\\b[^>]*href=(?<quote>[\"'])(?<href>.*?)(?:\\k<quote>)[^>]*>\\s*Next\\s*</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex NextPageRegex();
 
-    [GeneratedRegex("/img/flags/(?<country>[a-z]{2})\\.svg", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("/img/flags/(?<country>[a-z]{2})\\.svg", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex FlagCountryRegex();
 
-    [GeneratedRegex("data-timestamp=(?<quote>[\"'])(?<timestamp>\\d+)(?:\\k<quote>)", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("data-timestamp=(?<quote>[\"'])(?<timestamp>\\d+)(?:\\k<quote>)", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex TimestampRegex();
 
-    [GeneratedRegex("<[^>]+>", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("<[^>]+>", RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex StripTagsRegex();
 
-    [GeneratedRegex("\\s+", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("\\s+", RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex WhitespaceRegex();
 }

@@ -419,30 +419,33 @@ public sealed partial class HideMyNameProxyListProvider : NetworkProxyProvider, 
             _ => "all",
         };
 
-    [GeneratedRegex("<tbody\\b[^>]*>(?<body>.*?)</tbody>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    // Ограничивает разбор недоверенного HTML: паттерны с .*? уязвимы к ReDoS.
+    private const int MatchTimeoutMilliseconds = 2000;
+
+    [GeneratedRegex("<tbody\\b[^>]*>(?<body>.*?)</tbody>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex ResultTableRegex();
 
-    [GeneratedRegex("<tr\\b[^>]*>(?<row>.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("<tr\\b[^>]*>(?<row>.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex RowRegex();
 
-    [GeneratedRegex("<td\\b[^>]*>(?<cell>.*?)</td>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("<td\\b[^>]*>(?<cell>.*?)</td>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex CellRegex();
 
-    [GeneratedRegex("[?&]start=(?<start>\\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("[?&]start=(?<start>\\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex StartValueRegex();
 
-    [GeneratedRegex("flag-icon-(?<country>[a-z]{2})", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("flag-icon-(?<country>[a-z]{2})", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex FlagCountryRegex();
 
-    [GeneratedRegex("<span\\b[^>]*class=\"city\"[^>]*>(?<city>.*?)</span>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("<span\\b[^>]*class=\"city\"[^>]*>(?<city>.*?)</span>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex CityRegex();
 
-    [GeneratedRegex("(?<value>\\d+)\\s*(?<unit>секунда|секунды|секунд|минута|минуты|минут|час|часа|часов|день|дня|дней)", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("(?<value>\\d+)\\s*(?<unit>секунда|секунды|секунд|минута|минуты|минут|час|часа|часов|день|дня|дней)", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex RelativeTimeRegex();
 
-    [GeneratedRegex("<[^>]+>", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("<[^>]+>", RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex StripTagsRegex();
 
-    [GeneratedRegex("\\s+", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("\\s+", RegexOptions.Singleline | RegexOptions.CultureInvariant, MatchTimeoutMilliseconds)]
     private static partial Regex WhitespaceRegex();
 }

@@ -68,6 +68,9 @@ public sealed partial class MoaktProvider : FixedDomainTemporaryEmailProvider<Mo
         }
     }
 
-    [GeneratedRegex("<section\\s+data-id=\"(?<id>[^\"]+)\"\\s+data-from=\"(?<from>[^\"]*)\"\\s+data-subject=\"(?<subject>[^\"]*)\"[^>]*>\\s*<div\\s+class=\"body\">(?<body>.*?)</div>\\s*</section>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    // HTML приходит с внешнего сайта, поэтому сопоставление ограничено по времени.
+    private const int MatchTimeoutMilliseconds = 2000;
+
+    [GeneratedRegex("<section\\s+data-id=\"(?<id>[^\"]+)\"\\s+data-from=\"(?<from>[^\"]*)\"\\s+data-subject=\"(?<subject>[^\"]*)\"[^>]*>\\s*<div\\s+class=\"body\">(?<body>.*?)</div>\\s*</section>", RegexOptions.IgnoreCase | RegexOptions.Singleline, MatchTimeoutMilliseconds)]
     private static partial Regex MessagePattern();
 }

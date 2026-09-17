@@ -72,6 +72,9 @@ public sealed partial class MohmalProvider : FixedDomainTemporaryEmailProvider<M
         }
     }
 
-    [GeneratedRegex("<article\\s+data-id=\"(?<id>[^\"]+)\"\\s+data-from=\"(?<from>[^\"]*)\"\\s+data-subject=\"(?<subject>[^\"]*)\"[^>]*>\\s*<div\\s+class=\"body\">(?<body>.*?)</div>\\s*</article>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    // HTML приходит с внешнего сайта, поэтому сопоставление ограничено по времени.
+    private const int MatchTimeoutMilliseconds = 2000;
+
+    [GeneratedRegex("<article\\s+data-id=\"(?<id>[^\"]+)\"\\s+data-from=\"(?<from>[^\"]*)\"\\s+data-subject=\"(?<subject>[^\"]*)\"[^>]*>\\s*<div\\s+class=\"body\">(?<body>.*?)</div>\\s*</article>", RegexOptions.IgnoreCase | RegexOptions.Singleline, MatchTimeoutMilliseconds)]
     private static partial Regex MessagePattern();
 }
