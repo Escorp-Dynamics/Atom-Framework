@@ -477,6 +477,8 @@ public sealed class PolymarketClient : IMarketClient, IAsyncDisposable, IDisposa
     /// <summary>
     /// Цикл отправки ping-кадров для поддержания WebSocket-соединения.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1508",
+        Justification = "socket.State меняется извне за время await — повторная проверка не избыточна.")]
     private async Task PingLoopAsync(ClientWebSocket socket, CancellationToken cancellationToken)
     {
         try

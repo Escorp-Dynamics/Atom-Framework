@@ -155,10 +155,39 @@ public sealed class PolymarketPnLHistory : IMarketPnLHistory, IAsyncDisposable, 
     /// <summary>
     /// Записывает один снимок P&amp;L прямо сейчас.
     /// </summary>
+    /// <remarks>
+    /// Не дожидается обработчиков <see cref="SnapshotRecorded"/>.
+    /// Для наблюдаемых ошибок обработчиков используйте <see cref="TakeSnapshotAsync"/>.
+    /// </remarks>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2012",
+        Justification = "Синхронная перегрузка не ждёт обработчиков по контракту; см. TakeSnapshotAsync.")]
     public PolymarketPnLSnapshot TakeSnapshot()
     {
+        var snapshot = BuildSnapshot();
+        EnqueueCore(snapshot);
+
+        _ = SnapshotRecorded?.Invoke(this, new PolymarketPnLSnapshotEventArgs(snapshot));
+        return snapshot;
+    }
+
+    /// <summary>
+    /// Записывает снимок P&amp;L и дожидается обработчиков <see cref="SnapshotRecorded"/>.
+    /// </summary>
+    public async ValueTask<PolymarketPnLSnapshot> TakeSnapshotAsync()
+    {
+        var snapshot = BuildSnapshot();
+        EnqueueCore(snapshot);
+
+        if (SnapshotRecorded is { } handler)
+            await handler(this, new PolymarketPnLSnapshotEventArgs(snapshot)).ConfigureAwait(false);
+
+        return snapshot;
+    }
+
+    private PolymarketPnLSnapshot BuildSnapshot()
+    {
         var summary = tracker.GetSummary();
-        var snapshot = new PolymarketPnLSnapshot
+        return new PolymarketPnLSnapshot
         {
             TimestampTicks = Environment.TickCount64,
             Timestamp = DateTimeOffset.UtcNow,
@@ -169,9 +198,6 @@ public sealed class PolymarketPnLHistory : IMarketPnLHistory, IAsyncDisposable, 
             TotalFees = summary.TotalFees,
             OpenPositions = summary.OpenPositions
         };
-
-        Enqueue(snapshot);
-        return snapshot;
     }
 
     /// <summary>
@@ -227,14 +253,14 @@ public sealed class PolymarketPnLHistory : IMarketPnLHistory, IAsyncDisposable, 
     private async Task SnapshotLoopAsync(CancellationToken cancellationToken)
     {
         // Первый снимок сразу
-        TakeSnapshot();
+        await TakeSnapshotAsync().ConfigureAwait(false);
 
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
                 await Task.Delay(snapshotInterval, cancellationToken).ConfigureAwait(false);
-                TakeSnapshot();
+                await TakeSnapshotAsync().ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -243,15 +269,13 @@ public sealed class PolymarketPnLHistory : IMarketPnLHistory, IAsyncDisposable, 
         }
     }
 
-    private void Enqueue(PolymarketPnLSnapshot snapshot)
+    private void EnqueueCore(PolymarketPnLSnapshot snapshot)
     {
         history.Enqueue(snapshot);
 
         // Удаление старых снимков при превышении лимита
         while (history.Count > maxSnapshots)
             history.TryDequeue(out _);
-
-        SnapshotRecorded?.Invoke(this, new PolymarketPnLSnapshotEventArgs(snapshot));
     }
 
     #endregion

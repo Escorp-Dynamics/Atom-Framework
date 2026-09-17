@@ -82,7 +82,7 @@ public sealed class PolymarketAlertDefinition
         PolymarketAlertCondition.PortfolioPnLThreshold => AlertCondition.PortfolioPnLThreshold,
         PolymarketAlertCondition.MarketClosed => AlertCondition.MarketClosed,
         PolymarketAlertCondition.MarketResolved => AlertCondition.MarketResolved,
-        _ => throw new ArgumentOutOfRangeException(nameof(Condition), Condition, null)
+        _ => throw new InvalidOperationException($"Неподдерживаемое условие алерта: {Condition}")
     };
     AlertDirection IMarketAlertDefinition.Direction => (AlertDirection)(byte)Direction;
 
@@ -265,7 +265,7 @@ public sealed class PolymarketAlertSystem : IMarketAlertSystem, IDisposable
 
     #region Обработчики событий
 
-    private ValueTask OnPositionChanged(PolymarketPortfolioTracker sender, PolymarketPositionChangedEventArgs e)
+    private async ValueTask OnPositionChanged(PolymarketPortfolioTracker sender, PolymarketPositionChangedEventArgs e)
     {
         var position = e.Position;
 
@@ -277,24 +277,22 @@ public sealed class PolymarketAlertSystem : IMarketAlertSystem, IDisposable
             switch (alert.Condition)
             {
                 case PolymarketAlertCondition.PnLThreshold when alert.AssetId == position.AssetId:
-                    CheckThreshold(alert, position.UnrealizedPnL);
+                    await CheckThresholdAsync(alert, position.UnrealizedPnL).ConfigureAwait(false);
                     break;
 
                 case PolymarketAlertCondition.PriceThreshold when alert.AssetId == position.AssetId:
-                    CheckThreshold(alert, position.CurrentPrice);
+                    await CheckThresholdAsync(alert, position.CurrentPrice).ConfigureAwait(false);
                     break;
 
                 case PolymarketAlertCondition.PortfolioPnLThreshold when connectedTracker is not null:
                     var summary = connectedTracker.GetSummary();
-                    CheckThreshold(alert, summary.NetPnL);
+                    await CheckThresholdAsync(alert, summary.NetPnL).ConfigureAwait(false);
                     break;
             }
         }
-
-        return default;
     }
 
-    private ValueTask OnMarketClosed(PolymarketEventResolver sender, PolymarketMarketClosedEventArgs e)
+    private async ValueTask OnMarketClosed(PolymarketEventResolver sender, PolymarketMarketClosedEventArgs e)
     {
         foreach (var alert in alerts.Values)
         {
@@ -304,14 +302,12 @@ public sealed class PolymarketAlertSystem : IMarketAlertSystem, IDisposable
             if (alert.Condition == PolymarketAlertCondition.MarketClosed &&
                 alert.ConditionId == e.Market.ConditionId)
             {
-                TriggerAlert(alert, 0);
+                await TriggerAlertAsync(alert, 0).ConfigureAwait(false);
             }
         }
-
-        return default;
     }
 
-    private ValueTask OnMarketResolved(PolymarketEventResolver sender, PolymarketMarketResolvedEventArgs e)
+    private async ValueTask OnMarketResolved(PolymarketEventResolver sender, PolymarketMarketResolvedEventArgs e)
     {
         foreach (var alert in alerts.Values)
         {
@@ -321,35 +317,33 @@ public sealed class PolymarketAlertSystem : IMarketAlertSystem, IDisposable
             if (alert.Condition == PolymarketAlertCondition.MarketResolved &&
                 alert.ConditionId == e.Resolution.ConditionId)
             {
-                TriggerAlert(alert, 0);
+                await TriggerAlertAsync(alert, 0).ConfigureAwait(false);
             }
         }
-
-        return default;
     }
 
     #endregion
 
     #region Вспомогательные методы
 
-    private void CheckThreshold(PolymarketAlertDefinition alert, double currentValue)
+    private ValueTask CheckThresholdAsync(PolymarketAlertDefinition alert, double currentValue)
     {
         var triggered = alert.Direction == PolymarketAlertDirection.Above
             ? currentValue >= alert.Threshold
             : currentValue <= alert.Threshold;
 
-        if (triggered)
-            TriggerAlert(alert, currentValue);
+        return triggered ? TriggerAlertAsync(alert, currentValue) : default;
     }
 
-    private void TriggerAlert(PolymarketAlertDefinition alert, double currentValue)
+    private async ValueTask TriggerAlertAsync(PolymarketAlertDefinition alert, double currentValue)
     {
         alert.HasTriggered = true;
 
         if (alert.OneShot)
             alert.IsEnabled = false;
 
-        AlertTriggered?.Invoke(this, new PolymarketAlertTriggeredEventArgs(alert, currentValue));
+        if (AlertTriggered is { } handler)
+            await handler(this, new PolymarketAlertTriggeredEventArgs(alert, currentValue)).ConfigureAwait(false);
     }
 
     #endregion

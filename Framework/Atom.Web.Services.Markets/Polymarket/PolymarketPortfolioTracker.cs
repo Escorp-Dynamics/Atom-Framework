@@ -18,7 +18,7 @@ public sealed class PolymarketPortfolioTracker : IMarketPortfolioTracker, IAsync
     private readonly PolymarketPriceStream priceStream;
     private readonly bool disposeClient;
     private readonly bool disposePriceStream;
-    private readonly ConcurrentDictionary<string, PolymarketPosition> positions = new();
+    private readonly ConcurrentDictionary<string, PolymarketPosition> positions = new(StringComparer.OrdinalIgnoreCase);
     private bool isDisposed;
 
     /// <summary>
@@ -169,17 +169,39 @@ public sealed class PolymarketPortfolioTracker : IMarketPortfolioTracker, IAsync
     /// <param name="isWinner">Является ли этот токен победителем (выплата = Quantity × 1.0).</param>
     public void ApplyResolution(string assetId, bool isWinner)
     {
-        if (!positions.TryGetValue(assetId, out var position) || position.IsClosed)
+        if (!TryApplyResolutionCore(assetId, isWinner, out var position))
             return;
 
-        // Победитель: получает $1 за каждый токен. Проигравший: получает $0.
-        var payout = isWinner ? position.Quantity * 1.0 : 0;
-        position.RealizedPnL += payout - position.TotalCost;
-        position.Quantity = 0;
-        position.CurrentPrice = isWinner ? 1.0 : 0;
-        position.LastUpdateTicks = Environment.TickCount64;
-
         NotifyPositionChanged(position, PolymarketPositionChangeReason.MarketResolved);
+    }
+
+    /// <summary>
+    /// Записывает выплату и дожидается обработчиков <see cref="PositionChanged"/>.
+    /// </summary>
+    /// <param name="assetId">Идентификатор токена.</param>
+    /// <param name="isWinner">Является ли этот токен победителем (выплата = Quantity × 1.0).</param>
+    public ValueTask ApplyResolutionAsync(string assetId, bool isWinner)
+        => TryApplyResolutionCore(assetId, isWinner, out var position)
+            ? NotifyPositionChangedAsync(position, PolymarketPositionChangeReason.MarketResolved)
+            : default;
+
+    private bool TryApplyResolutionCore(string assetId, bool isWinner, out PolymarketPosition position)
+    {
+        if (!positions.TryGetValue(assetId, out var existing) || existing.IsClosed)
+        {
+            position = null!;
+            return false;
+        }
+
+        // Победитель: получает $1 за каждый токен. Проигравший: получает $0.
+        var payout = isWinner ? existing.Quantity * 1.0 : 0;
+        existing.RealizedPnL += payout - existing.TotalCost;
+        existing.Quantity = 0;
+        existing.CurrentPrice = isWinner ? 1.0 : 0;
+        existing.LastUpdateTicks = Environment.TickCount64;
+
+        position = existing;
+        return true;
     }
 
     /// <summary>
@@ -227,19 +249,17 @@ public sealed class PolymarketPortfolioTracker : IMarketPortfolioTracker, IAsync
     /// <summary>
     /// Обработка разрешения рынка из EventResolver.
     /// </summary>
-    private ValueTask OnMarketResolved(PolymarketEventResolver sender, PolymarketMarketResolvedEventArgs e)
+    private async ValueTask OnMarketResolved(PolymarketEventResolver sender, PolymarketMarketResolvedEventArgs e)
     {
         var resolution = e.Resolution;
 
         // Применяем результат к победителю
         if (resolution.WinnerTokenId is not null)
-            ApplyResolution(resolution.WinnerTokenId, isWinner: true);
+            await ApplyResolutionAsync(resolution.WinnerTokenId, isWinner: true).ConfigureAwait(false);
 
         // Применяем результат к проигравшему
         if (resolution.LoserTokenId is not null)
-            ApplyResolution(resolution.LoserTokenId, isWinner: false);
-
-        return default;
+            await ApplyResolutionAsync(resolution.LoserTokenId, isWinner: false).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -302,8 +322,7 @@ public sealed class PolymarketPortfolioTracker : IMarketPortfolioTracker, IAsync
         position.CurrentPrice = newPrice;
         position.LastUpdateTicks = Environment.TickCount64;
 
-        NotifyPositionChanged(position, PolymarketPositionChangeReason.PriceUpdate);
-        return default;
+        return NotifyPositionChangedAsync(position, PolymarketPositionChangeReason.PriceUpdate);
     }
 
     #endregion
@@ -365,9 +384,17 @@ public sealed class PolymarketPortfolioTracker : IMarketPortfolioTracker, IAsync
         NotifyPositionChanged(position, reason);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2012",
+        Justification = "Синхронные перегрузки не ждут обработчиков по контракту; см. ApplyResolutionAsync.")]
     private void NotifyPositionChanged(PolymarketPosition position, PolymarketPositionChangeReason reason)
     {
-        PositionChanged?.Invoke(this, new PolymarketPositionChangedEventArgs(position, reason));
+        _ = PositionChanged?.Invoke(this, new PolymarketPositionChangedEventArgs(position, reason));
+    }
+
+    private async ValueTask NotifyPositionChangedAsync(PolymarketPosition position, PolymarketPositionChangeReason reason)
+    {
+        if (PositionChanged is { } handler)
+            await handler(this, new PolymarketPositionChangedEventArgs(position, reason)).ConfigureAwait(false);
     }
 
     private static double ParseDouble(string? value) =>

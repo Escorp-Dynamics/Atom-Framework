@@ -14,7 +14,7 @@ public sealed class MarketOrderExecutor : IMarketOrderExecutor
     private readonly IMarketPriceStream priceStream;
     private readonly IMarketRestClient restClient;
     private readonly ConcurrentDictionary<string, StrategyBinding> bindings = new();
-    private readonly ConcurrentDictionary<string, DateTimeOffset> lastOrderTime = new();
+    private readonly ConcurrentDictionary<string, DateTimeOffset> lastOrderTime = new(StringComparer.OrdinalIgnoreCase);
     private Timer? evaluationTimer;
     private int evaluationInProgress;
     private bool isDisposed;
@@ -24,6 +24,9 @@ public sealed class MarketOrderExecutor : IMarketOrderExecutor
 
     /// <summary>Событие: ордер исполнен.</summary>
     public event Action<string, string?>? OnOrderExecuted; // assetId, orderId
+
+    /// <summary>Событие: ошибка в фоновом цикле оценки, запущенном <see cref="Start"/>.</summary>
+    public event Action<Exception>? OnEvaluationFailed;
 
     /// <summary>
     /// Создаёт исполнитель ордеров.
@@ -50,6 +53,7 @@ public sealed class MarketOrderExecutor : IMarketOrderExecutor
     public void AddStrategy(IMarketStrategy strategy, string[] assetIds)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
+        ArgumentNullException.ThrowIfNull(strategy);
         bindings[strategy.Name] = new StrategyBinding(strategy, assetIds);
     }
 
@@ -61,8 +65,25 @@ public sealed class MarketOrderExecutor : IMarketOrderExecutor
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
         evaluationTimer ??= new Timer(
-            _ => _ = EvaluateOnceAsync(),
+            _ => _ = SafeEvaluateOnceAsync(),
             null, TimeSpan.Zero, EvaluationInterval);
+    }
+
+    // Без этой обёртки отказы исполнения в callback таймера терялись бесследно.
+    private async Task SafeEvaluateOnceAsync()
+    {
+        try
+        {
+            await EvaluateOnceAsync().ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Гонка с Dispose — цикл уже не нужен.
+        }
+        catch (Exception ex)
+        {
+            OnEvaluationFailed?.Invoke(ex);
+        }
     }
 
     /// <inheritdoc />

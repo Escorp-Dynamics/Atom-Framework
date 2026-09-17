@@ -213,6 +213,12 @@ public sealed class PolymarketPortfolioManager : IAsyncDisposable, IDisposable
     /// <param name="enablePnLHistory">Включить запись P&amp;L истории.</param>
     /// <param name="pnlSnapshotInterval">Интервал записи P&amp;L снимков (по умолчанию 5 минут).</param>
     /// <returns>Созданный профиль портфеля.</returns>
+    /// <remarks>
+    /// Не дожидается обработчиков <see cref="PortfolioAdded"/>.
+    /// Для наблюдаемых ошибок обработчиков используйте <see cref="CreatePortfolioAsync"/>.
+    /// </remarks>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2012",
+        Justification = "Синхронная перегрузка не ждёт обработчиков по контракту; см. CreatePortfolioAsync.")]
     public PolymarketPortfolioProfile CreatePortfolio(
         string id,
         string name,
@@ -220,6 +226,46 @@ public sealed class PolymarketPortfolioManager : IAsyncDisposable, IDisposable
         string[]? tags = null,
         bool enablePnLHistory = false,
         TimeSpan pnlSnapshotInterval = default)
+    {
+        var profile = CreatePortfolioCore(id, name, strategy, tags, enablePnLHistory, pnlSnapshotInterval);
+
+        _ = PortfolioAdded?.Invoke(this, new PolymarketPortfolioEventArgs(profile));
+        return profile;
+    }
+
+    /// <summary>
+    /// Создаёт портфель и дожидается обработчиков <see cref="PortfolioAdded"/>.
+    /// </summary>
+    /// <param name="id">Уникальный идентификатор портфеля.</param>
+    /// <param name="name">Отображаемое имя.</param>
+    /// <param name="strategy">Название стратегии (необязательно).</param>
+    /// <param name="tags">Теги для группировки (необязательно).</param>
+    /// <param name="enablePnLHistory">Включить запись P&amp;L истории.</param>
+    /// <param name="pnlSnapshotInterval">Интервал записи P&amp;L снимков (по умолчанию 5 минут).</param>
+    /// <returns>Созданный профиль портфеля.</returns>
+    public async ValueTask<PolymarketPortfolioProfile> CreatePortfolioAsync(
+        string id,
+        string name,
+        string? strategy = null,
+        string[]? tags = null,
+        bool enablePnLHistory = false,
+        TimeSpan pnlSnapshotInterval = default)
+    {
+        var profile = CreatePortfolioCore(id, name, strategy, tags, enablePnLHistory, pnlSnapshotInterval);
+
+        if (PortfolioAdded is { } handler)
+            await handler(this, new PolymarketPortfolioEventArgs(profile)).ConfigureAwait(false);
+
+        return profile;
+    }
+
+    private PolymarketPortfolioProfile CreatePortfolioCore(
+        string id,
+        string name,
+        string? strategy,
+        string[]? tags,
+        bool enablePnLHistory,
+        TimeSpan pnlSnapshotInterval)
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
         ArgumentException.ThrowIfNullOrEmpty(name);
@@ -249,7 +295,6 @@ public sealed class PolymarketPortfolioManager : IAsyncDisposable, IDisposable
         if (!portfolios.TryAdd(id, profile))
             throw new InvalidOperationException($"Портфель с ID '{id}' уже существует.");
 
-        PortfolioAdded?.Invoke(this, new PolymarketPortfolioEventArgs(profile));
         return profile;
     }
 
@@ -268,7 +313,8 @@ public sealed class PolymarketPortfolioManager : IAsyncDisposable, IDisposable
         profile.Tracker.DisconnectResolver(resolver);
         await profile.Tracker.DisposeAsync().ConfigureAwait(false);
 
-        PortfolioRemoved?.Invoke(this, new PolymarketPortfolioEventArgs(profile));
+        if (PortfolioRemoved is { } handler)
+            await handler(this, new PolymarketPortfolioEventArgs(profile)).ConfigureAwait(false);
     }
 
     /// <summary>
