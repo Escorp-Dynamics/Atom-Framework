@@ -25,6 +25,10 @@ public sealed class WaylandInput
     private readonly HashSet<(Protocol.WaylandClient Client, uint SurfaceId)> focusedSurfaces = [];
     private int nextTouchId;
 
+    // Цель активного касания: поверхность, получившая down, со своим каскадным смещением —
+    // motion и up обязаны прийти в ту же поверхность, куда пришёл down.
+    private readonly Dictionary<int, (Protocol.WaylandClient Client, uint SurfaceId, double LocalX, double LocalY, int OffsetX, int OffsetY)> touchTargets = [];
+
     internal WaylandInput(WaylandCompositor compositor) => this.compositor = compositor;
 
     /// <summary>
@@ -107,17 +111,72 @@ public sealed class WaylandInput
         lastPointerX = x;
         lastPointerY = y;
 
-        foreach (var (client, surfaceId) in EnumerateFocusTargets())
+        var delivered = new HashSet<(Protocol.WaylandClient Client, uint SurfaceId)>();
+
+        foreach (var (client, surfaceId, localX, localY, _, _) in ResolvePointerTargets(x, y))
         {
+            delivered.Add((client, surfaceId));
+
             foreach (var pointer in client.OfType<WaylandPointer>())
             {
-                EnsureEntered(client, pointer, surfaceId, x, y);
-                pointer.SendMotion(timestamp, x, y);
+                EnsureEntered(client, pointer, surfaceId, localX, localY);
+                pointer.SendMotion(timestamp, localX, localY);
                 pointer.SendFrame();
                 ++DeliveredPointerEvents;
             }
         }
+
+        // Уход с поверхностей, которые указатель покинул: без leave окно держит подсветку
+        // под курсором навсегда и не отпускает перетаскивание при переходе в соседнее окно.
+        var stale = enteredSurfaces.Where(key => !delivered.Contains(key)).ToList();
+        if (stale.Count == 0)
+            return;
+
+        var leaveSerial = compositor.NextSerial();
+
+        foreach (var (client, surfaceId) in stale)
+        {
+            enteredSurfaces.Remove((client, surfaceId));
+
+            foreach (var pointer in client.OfType<WaylandPointer>())
+            {
+                pointer.SendLeave(leaveSerial, surfaceId);
+                pointer.SendFrame();
+            }
+        }
     });
+
+    /// <summary>
+    /// Маршрутизирует точку дисплея в корневые окна, которые её содержат.
+    /// </summary>
+    /// <remarks>
+    /// ★ Общее пространство дисплея — каскад: окна сдвинуты на смещение своего индекса, а xdg-клиент
+    /// считает координаты от своего (0,0), поэтому при доставке смещение вычитается. Событие получает
+    /// ТОЛЬКО окно под точкой: широковещательная доставка доезжала до обоих окон, и второе окно
+    /// реагировало на чужой клик. Окно без известной геометрии (ещё не сконфигурировано) принимает
+    /// точки лишь пока оно первое — иначе оно перехватило бы ввод, адресованный соседям.
+    /// </remarks>
+    private IEnumerable<(Protocol.WaylandClient Client, uint SurfaceId, double LocalX, double LocalY, int OffsetX, int OffsetY)> ResolvePointerTargets(
+        double x, double y)
+    {
+        foreach (var (client, surfaceId, _, offsetX, offsetY) in EnumerateRootTargets())
+        {
+            var rootSurface = client.Find<Objects.WaylandSurface>(surfaceId);
+
+            // ★ До первого set_window_geometry размер окна неизвестен — берём разрешение дисплея.
+            // Безусловный захват любой точки вернул бы тот же дефект с обратным знаком: окно без геометрии
+            // перехватывало бы клики, адресованные соседям.
+            var geometry = rootSurface?.WindowGeometry;
+            var width = geometry is { Width: > 0 } ? geometry.Value.Width : compositor.Settings.Resolution.Width;
+            var height = geometry is { Height: > 0 } ? geometry.Value.Height : compositor.Settings.Resolution.Height;
+
+            var contains = x >= offsetX && y >= offsetY
+                && x < offsetX + width && y < offsetY + height;
+
+            if (contains)
+                yield return (client, surfaceId, x - offsetX, y - offsetY, offsetX, offsetY);
+        }
+    }
 
     private double lastPointerX;
     private double lastPointerY;
@@ -145,12 +204,14 @@ public sealed class WaylandInput
         if (pressed)
             LastButtonSerial = serial;
 
-        foreach (var (client, surfaceId) in EnumerateFocusTargets())
+        // Кнопка уходит ТОЛЬКО клиенту, в чьём окне находится указатель: широковещательное
+        // нажатие заставляло второе окно реагировать на чужой клик.
+        foreach (var (client, surfaceId, localX, localY, _, _) in ResolvePointerTargets(lastPointerX, lastPointerY))
         {
             foreach (var pointer in client.OfType<WaylandPointer>())
             {
                 // Нажатие без предварительного входа клиент отбрасывает: он не знает целевой поверхности.
-                EnsureEntered(client, pointer, surfaceId, lastPointerX, lastPointerY);
+                EnsureEntered(client, pointer, surfaceId, localX, localY);
 
                 pointer.SendButton(serial, timestamp, (uint)button, pressed);
                 pointer.SendFrame();
@@ -167,10 +228,13 @@ public sealed class WaylandInput
     {
         var timestamp = Timestamp();
 
-        foreach (var (client, _) in EnumerateFocusTargets())
+        // Прокрутка уходит окну под указателем: соседнее окно колесо не касается.
+        foreach (var (client, surfaceId, localX, localY, _, _) in ResolvePointerTargets(lastPointerX, lastPointerY))
         {
             foreach (var pointer in client.OfType<WaylandPointer>())
             {
+                EnsureEntered(client, pointer, surfaceId, localX, localY);
+
                 // ★ Без источника и числа щелчков браузер считает прокрутку тачпадной и отдаёт
                 // странице плавные дробные дельты — при заявленном настольном оборудовании это расхождение.
                 pointer.SendAxisSource(AxisSourceWheel);
@@ -187,14 +251,11 @@ public sealed class WaylandInput
     /// <remarks>
     /// Без <c lang="text">leave</c> браузер держит подсветку кнопки под курсором навсегда.
     /// </remarks>
-    internal void SendPointerLeave() => compositor.Post(() =>
+    internal void SendPointerLeave(int windowIndex) => compositor.Post(() =>
     {
-        if (enteredSurfaces.Count == 0)
-            return;
-
         var serial = compositor.NextSerial();
 
-        foreach (var (client, surfaceId) in EnumerateFocusTargets())
+        foreach (var (client, surfaceId, _, _, _) in EnumerateRootTargets().Where(target => target.WindowIndex == windowIndex))
         {
             if (!enteredSurfaces.Remove((client, surfaceId)))
                 continue;
@@ -214,10 +275,16 @@ public sealed class WaylandInput
     /// ★ Без <c lang="text">keyboard.enter</c> браузер считает окно неактивным: поля ввода не берут
     /// фокус, каретка не мигает, а часть событий отбрасывается как фоновые.
     /// </remarks>
-    public void SetKeyboardFocus(bool hasFocus) => compositor.Post(() =>
+    public void SetKeyboardFocus(bool hasFocus, int? windowIndex = null) => compositor.Post(() =>
     {
         // Фокус — состояние, а не разовое событие: окно могло ещё не появиться к этому моменту.
         wantsKeyboardFocus = hasFocus;
+
+        // ★ Окно называет только оболочка хоста. Драйвер запрашивает фокус без номера, и молчаливый
+        // ноль перебивал бы выбор хоста: печать во второе окно уходила бы в первое.
+        if (windowIndex is { } requested)
+            keyboardFocusIndex = requested;
+
         ApplyKeyboardFocus();
     });
 
@@ -225,11 +292,17 @@ public sealed class WaylandInput
     {
         var hasFocus = wantsKeyboardFocus;
 
-        foreach (var (client, surfaceId) in EnumerateFocusTargets())
+        // Клавиатура одна на сеанс: фокус получает окно с заданным номером — события с чужих
+        // окон клавиатуру не переключают.
+        foreach (var (client, surfaceId, _, _, _) in EnumerateRootTargets().Where(target => target.WindowIndex == keyboardFocusIndex))
         {
             // Отметка ставится на поверхность, а не на устройство: клавиатур у клиента бывает несколько.
-            if (hasFocus ? !focusedSurfaces.Add((client, surfaceId)) : !focusedSurfaces.Remove((client, surfaceId)))
+            if (hasFocus
+                ? !focusedSurfaces.Add((client, surfaceId))
+                : !focusedSurfaces.Remove((client, surfaceId)))
+            {
                 continue;
+            }
 
             foreach (var keyboard in client.OfType<WaylandKeyboard>())
             {
@@ -249,6 +322,7 @@ public sealed class WaylandInput
     }
 
     private bool wantsKeyboardFocus;
+    private int keyboardFocusIndex;
 
     /// <summary>
     /// Передаёт нажатие или отпускание клавиши.
@@ -279,12 +353,57 @@ public sealed class WaylandInput
     {
         var serial = compositor.NextSerial();
 
-        foreach (var (client, _) in EnumerateFocusTargets())
+        // Модификаторы — часть клавиатурного состояния и идут только окну с фокусом: рассылка всем
+        // оставляла бы в соседнем окне зажатыми Shift и Ctrl, которых там никто не нажимал.
+        foreach (var (client, surfaceId) in EnumerateFocusTargets())
         {
+            if (!focusedSurfaces.Contains((client, surfaceId)))
+                continue;
+
             foreach (var keyboard in client.OfType<WaylandKeyboard>())
                 keyboard.SendModifiers(serial, depressed, latched, locked, group);
         }
     });
+
+    /// <summary>
+    /// Забывает состояние ввода отключившегося клиента.
+    /// </summary>
+    /// <remarks>
+    /// Записи о входе и фокусе держат ссылку на клиента: без очистки они пережили бы соединение,
+    /// а новый клиент с теми же номерами поверхностей не получил бы ни входа, ни фокуса.
+    /// </remarks>
+    internal void ForgetClient(Protocol.WaylandClient client)
+    {
+        _ = enteredSurfaces.RemoveWhere(key => key.Client == client);
+        _ = focusedSurfaces.RemoveWhere(key => key.Client == client);
+
+        foreach (var touchId in touchTargets.Where(pair => pair.Value.Client == client).Select(pair => pair.Key).ToList())
+            _ = touchTargets.Remove(touchId);
+    }
+
+    /// <summary>
+    /// Забывает состояние ввода уничтоженной поверхности.
+    /// </summary>
+    /// <remarks>
+    /// Клиент переиспользует освободившиеся номера объектов: без забвения вход в новую поверхность
+    /// с тем же номером считался бы уже состоявшимся, и указатель молчал бы.
+    /// </remarks>
+    internal void ForgetSurface(Protocol.WaylandClient client, uint surfaceId)
+    {
+        _ = enteredSurfaces.Remove((client, surfaceId));
+
+        // Фокус возвращается первому окну: указатель на закрытое окно оставил бы клавиатуру без цели.
+        if (focusedSurfaces.Remove((client, surfaceId)))
+            keyboardFocusIndex = 0;
+
+        foreach (var touchId in touchTargets
+            .Where(pair => pair.Value.Client == client && pair.Value.SurfaceId == surfaceId)
+            .Select(pair => pair.Key)
+            .ToList())
+        {
+            _ = touchTargets.Remove(touchId);
+        }
+    }
 
     private void EnsureEntered(Protocol.WaylandClient client, WaylandPointer pointer, uint surfaceId, double x, double y)
     {
@@ -303,11 +422,14 @@ public sealed class WaylandInput
         var timestamp = Timestamp();
         var serial = compositor.NextSerial();
 
-        foreach (var (client, surfaceId) in EnumerateFocusTargets())
+        // Касание адресуется окну под точкой и запоминается: motion и up идут в ту же поверхность.
+        foreach (var target in ResolvePointerTargets(x, y).Take(1))
         {
-            foreach (var touch in client.OfType<WaylandTouch>())
+            touchTargets[touchId] = target;
+
+            foreach (var touch in target.Client.OfType<WaylandTouch>())
             {
-                touch.SendDown(serial, timestamp, surfaceId, touchId, x, y);
+                touch.SendDown(serial, timestamp, target.SurfaceId, touchId, target.LocalX, target.LocalY);
                 touch.SendFrame();
             }
         }
@@ -315,30 +437,32 @@ public sealed class WaylandInput
 
     private void SendTouchMotion(int touchId, double x, double y) => compositor.Post(() =>
     {
+        if (!touchTargets.TryGetValue(touchId, out var target))
+            return;
+
         var timestamp = Timestamp();
 
-        foreach (var (client, _) in EnumerateFocusTargets())
+        foreach (var touch in target.Client.OfType<WaylandTouch>())
         {
-            foreach (var touch in client.OfType<WaylandTouch>())
-            {
-                touch.SendMotion(timestamp, touchId, x, y);
-                touch.SendFrame();
-            }
+            touch.SendMotion(timestamp, touchId, x - target.OffsetX, y - target.OffsetY);
+            touch.SendFrame();
         }
     });
 
     private void SendTouchUp(int touchId) => compositor.Post(() =>
     {
+        if (!touchTargets.TryGetValue(touchId, out var target))
+            return;
+
+        touchTargets.Remove(touchId);
+
         var timestamp = Timestamp();
         var serial = compositor.NextSerial();
 
-        foreach (var (client, _) in EnumerateFocusTargets())
+        foreach (var touch in target.Client.OfType<WaylandTouch>())
         {
-            foreach (var touch in client.OfType<WaylandTouch>())
-            {
-                touch.SendUp(serial, timestamp, touchId);
-                touch.SendFrame();
-            }
+            touch.SendUp(serial, timestamp, touchId);
+            touch.SendFrame();
         }
     });
 
@@ -373,14 +497,41 @@ public sealed class WaylandInput
             // ★ Ввод адресуется САМОМУ ОКНУ, а не подповерхности, в которой рисуется содержимое:
             // клиент сам разводит события по вложенным поверхностям. Подповерхность здесь — чужая
             // роль, и событие с ней клиент считает нарушением протокола.
-            var surfaceId = client.OfType<XdgToplevel>()
-                .Select(toplevel => toplevel.OwnerSurfaceId)
-                .FirstOrDefault(candidate => client.Find<WaylandSurface>(candidate) is not null);
-
-            if (surfaceId != 0)
-                yield return (client, surfaceId);
+            //
+            // ★ Окон у одного клиента бывает несколько: второе окно браузера — второй toplevel того
+            // же соединения. Перечисляются ВСЕ корневые окна: выбор первого доставлял бы ввод
+            // второго окна всегда первому.
+            foreach (var toplevel in client.OfType<XdgToplevel>())
+            {
+                if (client.Find<WaylandSurface>(toplevel.OwnerSurfaceId) is not null)
+                    yield return (client, toplevel.OwnerSurfaceId);
+            }
         }
     }
+
+    /// <summary>
+    /// Корневые окна с их номерами и каскадными смещениями.
+    /// </summary>
+    /// <remarks>
+    /// ★ Номер берётся у самого окна, а не из порядка обхода: таблица объектов клиента — словарь,
+    /// её порядок произволен и меняется при удалении объектов. Нумерация по месту в обходе
+    /// переставляла окна местами, и ввод уходил не в то окно.
+    /// </remarks>
+    private IEnumerable<(Protocol.WaylandClient Client, uint SurfaceId, int WindowIndex, int OffsetX, int OffsetY)> EnumerateRootTargets()
+    {
+        foreach (var client in compositor.Clients)
+        {
+            foreach (var toplevel in client.OfType<XdgToplevel>().OrderBy(candidate => candidate.WindowIndex))
+            {
+                if (client.Find<WaylandSurface>(toplevel.OwnerSurfaceId) is null)
+                    continue;
+
+                var (offsetX, offsetY) = compositor.GetWindowOffset(toplevel.WindowIndex);
+                yield return (client, toplevel.OwnerSurfaceId, toplevel.WindowIndex, offsetX, offsetY);
+            }
+        }
+    }
+
 
     /// <summary>
     /// Отметка времени события.

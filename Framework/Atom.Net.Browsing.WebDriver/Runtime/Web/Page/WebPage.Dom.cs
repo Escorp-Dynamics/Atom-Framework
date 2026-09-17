@@ -295,6 +295,7 @@ public sealed partial class WebPage
 
     internal async ValueTask<Point> ResolveViewportToScreenAsync(float viewportX, float viewportY, CancellationToken cancellationToken)
     {
+        // Границы от композитора уже заданы в координатах сцены — каскад в них учтён.
         var nativeWindowPoint = await TryResolveViewportToScreenFromNativeWindowBoundsAsync(viewportX, viewportY, cancellationToken).ConfigureAwait(false);
         if (nativeWindowPoint is { } nativePoint)
             return nativePoint;
@@ -303,16 +304,40 @@ public sealed partial class WebPage
 
         try
         {
-            return ParseViewportToScreenPoint(screenPoint);
+            return await ApplyCascadeOffsetAsync(ParseViewportToScreenPoint(screenPoint), cancellationToken).ConfigureAwait(false);
         }
         catch (InvalidOperationException)
         {
             var fallbackPoint = await TryResolveViewportToScreenFromWindowBoundsAsync(viewportX, viewportY, cancellationToken).ConfigureAwait(false);
             if (fallbackPoint is { } point)
-                return point;
+                return await ApplyCascadeOffsetAsync(point, cancellationToken).ConfigureAwait(false);
 
             throw;
         }
+    }
+
+    /// <summary>
+    /// Прибавляет каскадное смещение окна в сцене виртуального дисплея.
+    /// </summary>
+    /// <remarks>
+    /// ★ Chrome на Wayland не знает позицию своего окна (протокол её не сообщает) и считает
+    /// screenX/screenY от (0,0). При каскадной раскладке второго и дальнейших окон клик иначе
+    /// уходит в первое окно: обе вкладки думают, что они в углу дисплея.
+    /// </remarks>
+    private async ValueTask<Point> ApplyCascadeOffsetAsync(Point screenPoint, CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsLinux())
+            return screenPoint;
+
+        if (OwnerWindow.OwnerBrowser.LaunchSettings.Display?.Session is not { } session)
+            return screenPoint;
+
+        // Счётчик драйвера — догадка; заголовок называет окно композитора точно.
+        var title = await GetTitleAsync(cancellationToken).ConfigureAwait(false);
+        var windowIndex = session.TryResolveWindowIndexByTitle(title) ?? OwnerWindow.WindowIndex;
+
+        var (offsetX, offsetY) = session.GetWindowOffset(windowIndex);
+        return new Point(screenPoint.X + offsetX, screenPoint.Y + offsetY);
     }
 
     private async ValueTask<Point?> TryResolveViewportToScreenFromNativeWindowBoundsAsync(float viewportX, float viewportY, CancellationToken cancellationToken)
@@ -331,7 +356,7 @@ public sealed partial class WebPage
         }
 
         var title = await GetTitleAsync(cancellationToken).ConfigureAwait(false);
-        if (OwnerWindow.OwnerBrowser.TryGetLinuxNativeWindowBounds(expectedWindowSize, title) is not Rectangle nativeBounds)
+        if (OwnerWindow.OwnerBrowser.TryGetLinuxNativeWindowBounds(expectedWindowSize, title, OwnerWindow.WindowIndex) is not Rectangle nativeBounds)
             return null;
 
         return await ResolveViewportToScreenFromBoundsAsync(nativeBounds, viewportX, viewportY, cancellationToken).ConfigureAwait(false);
@@ -467,7 +492,13 @@ public sealed partial class WebPage
 
     private async ValueTask<Point?> TryResolveViewportToScreenFromWindowBoundsAsync(float viewportX, float viewportY, CancellationToken cancellationToken)
     {
-        if (await OwnerWindow.GetBoundingBoxAsync(cancellationToken).ConfigureAwait(false) is not Rectangle bounds)
+        // ★ Границы берутся у моста, а не через GetBoundingBoxAsync: тот отдаёт нативные границы,
+        // в которых каскад уже учтён, и вызывающий прибавил бы смещение второй раз.
+        var bounds = BridgeCommands is { } bridge
+            ? await bridge.GetWindowBoundsAsync(cancellationToken).ConfigureAwait(false)
+            : new Rectangle(OwnerWindow.ResolvedWindowPosition, OwnerWindow.ResolvedWindowSize);
+
+        if (bounds.Width <= 0 || bounds.Height <= 0)
             return null;
 
         return await ResolveViewportToScreenFromBoundsAsync(bounds, viewportX, viewportY, cancellationToken).ConfigureAwait(false);

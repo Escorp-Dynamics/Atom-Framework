@@ -30,7 +30,21 @@ public sealed class WaylandCompositor : IAsyncDisposable
     private uint nextSerial = 1;
     private uint nextGlobalName = 1;
     private Task? eventLoop;
-    private WaylandPresentationWindow? presentation;
+
+
+    /// <summary>Первое хост-окно: используется диагностикой, курсором и захватом кадров.</summary>
+    private WaylandPresentationWindow? PrimaryPresentation
+        => presentations.TryGetValue(PrimaryWindowIndex, out var window) ? window : null;
+
+    private const int PrimaryWindowIndex = 0;
+
+    /// <summary>Хост-окна по числу окон браузера: каждое — запись в таскбаре системы.</summary>
+    // ★ Ключ — НОМЕР окна браузера, а не позиция: номера монотонны и не переиспользуются, поэтому
+    // список после закрытия хвостовых окон заставлял открывать окна под все пропущенные номера.
+    private readonly Dictionary<int, WaylandPresentationWindow> presentations = [];
+
+    // Снимок окон на время опроса: Pump может открыть новое окно, а менять коллекцию в обходе нельзя.
+    private readonly List<WaylandPresentationWindow> pumpBuffer = [];
     private int presentedFrames;
     private int committedFrames;
     private string? lastPresentIssue;
@@ -52,6 +66,67 @@ public sealed class WaylandCompositor : IAsyncDisposable
     /// <summary>Параметры композитора.</summary>
     public WaylandCompositorSettings Settings { get; }
 
+    /// <summary>
+    /// Каскадное смещение окна по его индексу: Chrome считает себя в (0,0), реальная позиция — здесь.
+    /// </summary>
+    /// <remarks>
+    /// Шаг — четверть разрешения дисплея: окна укладываются «лесенкой», каждое видно целиком,
+    /// даже когда размеры окон Chrome отличаются от разрешения дисплея.
+    /// </remarks>
+    public (int X, int Y) GetWindowOffset(int windowIndex)
+    {
+        var stepX = Settings.Resolution.Width / 4;
+        var stepY = Settings.Resolution.Height / 4;
+        return (windowIndex * stepX, windowIndex * stepY);
+    }
+
+    /// <summary>Выдаёт порядковый номер новому окну браузера.</summary>
+    internal int AllocateWindowIndex() => windowIndexCounter++;
+
+    private int windowIndexCounter;
+
+    /// <summary>
+    /// Находит номер окна по его заголовку.
+    /// </summary>
+    /// <remarks>
+    /// ★ Драйвер нумерует свои окна сам и о номерах композитора не знает. Заголовок — единственное,
+    /// что видят обе стороны: драйвер задаёт его странице, клиент передаёт <c lang="text">set_title</c>.
+    /// Пока заголовок не совпал, номер драйвера остаётся разумной догадкой — он расходится лишь
+    /// тогда, когда браузер заводит служебное окно.
+    /// </remarks>
+    /// <param name="windowTitle">Заголовок искомого окна.</param>
+    /// <returns>Номер окна либо <see langword="null"/>, если заголовок не найден или неоднозначен.</returns>
+    public int? TryResolveWindowIndexByTitle(string? windowTitle)
+    {
+        if (string.IsNullOrEmpty(windowTitle))
+            return null;
+
+        int? resolved = null;
+
+        Invoke(() =>
+        {
+            foreach (var client in clients)
+            {
+                foreach (var toplevel in client.OfType<XdgToplevel>())
+                {
+                    if (!string.Equals(toplevel.Title, windowTitle, StringComparison.Ordinal))
+                        continue;
+
+                    // Два окна с одним заголовком различить нечем — пусть решает счётчик драйвера.
+                    if (resolved is not null)
+                    {
+                        resolved = null;
+                        return;
+                    }
+
+                    resolved = toplevel.WindowIndex;
+                }
+            }
+        });
+
+        return resolved;
+    }
+
     /// <summary>Объявленные клиенту интерфейсы.</summary>
     internal IReadOnlyList<WaylandGlobal> Globals => globals;
 
@@ -69,14 +144,40 @@ public sealed class WaylandCompositor : IAsyncDisposable
     /// </remarks>
     public int PresentedFrameCount => presentedFrames;
 
+    /// <summary>Сколько хост-окон открыто: каждое стоит буфера кадра и связи с оболочкой.</summary>
+    public int PresentationCount
+    {
+        get
+        {
+            var count = 0;
+            Invoke(() => count = presentations.Count);
+            return count;
+        }
+    }
+
     /// <summary>Окно вывода живо и связь с сессией разработчика цела.</summary>
-    public bool IsPresentationAlive => presentation?.IsAlive ?? false;
+    /// <remarks>Читается из чужого потока, а коллекцию окон меняет цикл событий — отсюда Invoke.</remarks>
+    public bool IsPresentationAlive
+    {
+        get
+        {
+            var isAlive = false;
+            Invoke(() => isAlive = PrimaryPresentation?.IsAlive ?? false);
+            return isAlive;
+        }
+    }
 
     /// <summary>Состояние окна вывода для диагностики.</summary>
     public string DescribePresentation()
-        => presentation is null
+    {
+        var description = "";
+
+        Invoke(() => description = PrimaryPresentation is null
             ? "вывод выключен"
-            : presentation.Describe() + " | помеха: " + (lastPresentIssue ?? "нет");
+            : PrimaryPresentation.Describe() + " | помеха: " + (lastPresentIssue ?? "нет"));
+
+        return description;
+    }
 
     /// <summary>Сколько раз клиент прислал кадр.</summary>
     public int CommittedFrameCount => committedFrames;
@@ -108,18 +209,9 @@ public sealed class WaylandCompositor : IAsyncDisposable
 
         if (effectiveSettings.EnablePresentation)
         {
-            // Имя выхода — внутреннее понятие композитора и в заголовке окна выдавало прослойку.
-            compositor.presentation = WaylandPresentationWindow.TryOpen(
-                effectiveSettings.Resolution,
-                effectiveSettings.WindowTitle ?? string.Empty,
-                effectiveSettings.ApplicationId);
-
-            if (compositor.presentation is { } window)
-            {
-                window.HostInputReceived += compositor.ForwardHostInput;
-                window.HostWindowEvent += compositor.ForwardHostWindowEvent;
-                window.SceneRefreshRequested += () => compositor.Post(compositor.PresentScene);
-            }
+            // Первое хост-окно открывается сразу; следующие создаются лениво по числу окон
+            // браузера — каждое становится самостоятельной записью в таскбаре системы.
+            compositor.EnsurePresentationWindow(effectiveSettings, PrimaryWindowIndex);
         }
 
         compositor.eventLoop = Task.Run(() => compositor.RunEventLoopAsync(compositor.lifetime.Token));
@@ -140,32 +232,45 @@ public sealed class WaylandCompositor : IAsyncDisposable
     {
         isSceneDirty = false;
 
-        if (presentation is not { } window)
+        if (presentations.Count == 0)
             return;
 
-        // Список переиспользуется: сборка идёт сотни раз в секунду и новый список каждый раз — мусор.
-        layers.Clear();
+        var started = Stopwatch.GetTimestamp();
+
+        // ★ Группируем слои по КОРНЕВОЙ поверхности: каждый root Chrome-окна обслуживается
+        // СВОИМ хост-окном — отдельная запись в таскбаре системы, независимый фокус и заголовок.
+        var groupByWindow = new Dictionary<int, List<Presentation.WaylandSceneLayer>>();
 
         foreach (var client in clients)
         {
             foreach (var surface in client.OfType<WaylandSurface>())
             {
-                if (TryBuildLayer(client, surface) is { } layer)
-                    layers.Add(layer);
+                if (TryBuildLayer(client, surface) is not { } layer || layer.WindowIndex < 0)
+                    continue;
+
+                if (!groupByWindow.TryGetValue(layer.WindowIndex, out var group))
+                {
+                    group = [];
+                    groupByWindow[layer.WindowIndex] = group;
+                }
+
+                group.Add(layer);
             }
         }
 
-        if (layers.Count == 0)
+        if (groupByWindow.Count == 0)
             return;
+
+        // Окно с номером N показывается в хост-окне N: создаются ровно те окна, которым есть что показывать.
+        foreach (var windowIndex in groupByWindow.Keys)
+            EnsurePresentationWindow(Settings, windowIndex);
 
         // ★ Порядок обхода таблицы объектов произволен, а слои обязаны идти снизу вверх: окно,
         // затем вложенные поверхности, затем всплывающие. Firefox рисует содержимое в
         // подповерхность и оставляет само окно пустым — при обратном порядке оно затирало бы кадр.
-        layers.Sort(static (first, second) => first.Depth.CompareTo(second.Depth));
+        var presentedAny = PresentGroups(groupByWindow);
 
-        var started = Stopwatch.GetTimestamp();
-
-        if (window.PresentScene(layers))
+        if (presentedAny)
         {
             _ = Interlocked.Increment(ref presentedFrames);
             sceneTicks += Stopwatch.GetTimestamp() - started;
@@ -174,7 +279,61 @@ public sealed class WaylandCompositor : IAsyncDisposable
 
         // Сцена не показана (буфер занят или окно не готово) — повторить на следующем обороте.
         isSceneDirty = true;
-        lastPresentIssue = window.Describe();
+        lastPresentIssue = PrimaryPresentation?.Describe();
+    }
+
+    /// <summary>
+    /// Показывает группы слоёв в хост-окнах с теми же номерами; лишние окна прячет.
+    /// </summary>
+    /// <returns><see langword="true"/>, если хотя бы одна сцена показана.</returns>
+    private bool PresentGroups(Dictionary<int, List<Presentation.WaylandSceneLayer>> layerGroups)
+    {
+        var presentedAny = false;
+
+        foreach (var (windowIndex, window) in presentations)
+        {
+            if (!layerGroups.TryGetValue(windowIndex, out var group))
+            {
+                window.SetVisible(isVisible: false);
+                continue;
+            }
+
+            // Свёрнутое окно возвращается, как только его слои снова есть: клиент мог пропустить
+            // кадр при ресайзе, и без возврата вкладка навсегда пропадала бы из таскбара.
+            window.SetVisible(isVisible: true);
+
+            group.Sort(static (first, second) => first.Depth.CompareTo(second.Depth));
+
+            if (window.PresentScene(group))
+                presentedAny = true;
+        }
+
+        return presentedAny;
+    }
+
+    /// <summary>
+    /// Держит число хост-окон не меньше числа активных корневых окон браузера: каждое —
+    /// самостоятельная запись в таскбаре системы.
+    /// </summary>
+    private void EnsurePresentationWindow(WaylandCompositorSettings settings, int windowIndex)
+    {
+        if (presentations.ContainsKey(windowIndex))
+            return;
+
+        // CA2000: владение окном переходит presentations; Dispose вызывается в Dispose композитора.
+#pragma warning disable CA2000
+        var window = WaylandPresentationWindow.TryOpen(
+            settings.Resolution,
+            settings.WindowTitle ?? string.Empty,
+            settings.ApplicationId);
+#pragma warning restore CA2000
+        if (window is null)
+            return;
+
+        window.HostInputReceived += hostEvent => ForwardHostInput(hostEvent, windowIndex);
+        window.HostWindowEvent += hostEvent => ForwardHostWindowEvent(hostEvent, windowIndex);
+        window.SceneRefreshRequested += () => Post(PresentScene);
+        presentations[windowIndex] = window;
     }
 
     /// <summary>Собирает слой сцены для поверхности, если её есть чем показать.</summary>
@@ -192,9 +351,14 @@ public sealed class WaylandCompositor : IAsyncDisposable
 
         var isRoot = surface.Role == WaylandSurfaceRole.Window;
         var (x, y) = ResolveOrigin(client, surface);
+        var rootSurfaceId = isRoot ? surface.Id : ResolveRootSurfaceId(client, surface);
 
         return new Presentation.WaylandSceneLayer
         {
+            RootSurfaceId = rootSurfaceId,
+            WindowIndex = isRoot
+                ? surface.WindowIndex
+                : client.Find<WaylandSurface>(rootSurfaceId)?.WindowIndex ?? -1,
             Memory = pool.MappedMemory + buffer.Offset,
             Stride = buffer.Stride,
             Width = buffer.Width,
@@ -239,9 +403,28 @@ public sealed class WaylandCompositor : IAsyncDisposable
     }
 
     private const int MaxSurfaceDepth = 16;
+
+    /// <summary>
+    /// Поднимается по цепочке родителей до корневой поверхности (окна).
+    /// </summary>
+    private static uint ResolveRootSurfaceId(WaylandClient client, WaylandSurface surface)
+    {
+        var parentId = surface.ParentSurfaceId;
+        for (var depth = 0; depth < MaxSurfaceDepth && parentId != 0; ++depth)
+        {
+            if (client.Find<WaylandSurface>(parentId) is not { } parent)
+                break;
+
+            if (parent.Role == WaylandSurfaceRole.Window)
+                return parent.Id;
+
+            parentId = parent.ParentSurfaceId;
+        }
+
+        return surface.Id;
+    }
     private const uint FormatWithoutAlpha = 1;
 
-    private readonly List<Presentation.WaylandSceneLayer> layers = [];
     private bool isSceneDirty;
 
     /// <summary>
@@ -249,7 +432,7 @@ public sealed class WaylandCompositor : IAsyncDisposable
     /// </summary>
     internal unsafe void PresentCursor(WaylandBuffer buffer, int hotspotX, int hotspotY)
     {
-        if (presentation is not { } window || buffer.Pool is not { MappedMemory: not 0 } pool)
+        if (presentations.Count == 0 || buffer.Pool is not { MappedMemory: not 0 } pool)
             return;
 
         var frameBytes = buffer.Stride * buffer.Height;
@@ -264,7 +447,11 @@ public sealed class WaylandCompositor : IAsyncDisposable
             Height = buffer.Height,
         };
 
-        window.PresentCursor(frame, hotspotX, hotspotY);
+        // Курсор назначается каждому хост-окну: браузер задаёт его один раз на сеанс, и окно без
+        // назначения показывало бы стрелку оболочки вместо курсора страницы.
+        foreach (var window in presentations.Values)
+            window.PresentCursor(frame, hotspotX, hotspotY);
+
         _ = Interlocked.Increment(ref cursorUpdates);
     }
 
@@ -317,7 +504,7 @@ public sealed class WaylandCompositor : IAsyncDisposable
     public bool TryCaptureFrame(string path)
     {
         var captured = false;
-        Invoke(() => captured = presentation?.TryCaptureFrame(path) ?? false);
+        Invoke(() => captured = PrimaryPresentation?.TryCaptureFrame(path) ?? false);
 
         return captured;
     }
@@ -326,7 +513,7 @@ public sealed class WaylandCompositor : IAsyncDisposable
     public string DescribeCornerAlpha()
     {
         var description = "вывод выключен";
-        Invoke(() => description = presentation?.DescribeCornerAlpha() ?? "вывод выключен");
+        Invoke(() => description = PrimaryPresentation?.DescribeCornerAlpha() ?? "вывод выключен");
 
         return description;
     }
@@ -337,7 +524,11 @@ public sealed class WaylandCompositor : IAsyncDisposable
     private int cursorUpdates;
 
     /// <summary>Прячет курсор в сессии разработчика.</summary>
-    internal void HideCursor() => presentation?.HideCursor();
+    internal void HideCursor()
+    {
+        foreach (var window in presentations.Values)
+            window.HideCursor();
+    }
 
     /// <summary>
     /// Переадресует запрос окна оболочке сессии разработчика.
@@ -347,9 +538,10 @@ public sealed class WaylandCompositor : IAsyncDisposable
     /// Оболочке хоста он неизвестен, поэтому запрос имеет смысл только тогда, когда наше нажатие
     /// порождено живым нажатием в сессии — тогда окно подставляет СВОЙ номер.
     /// </remarks>
-    internal void ForwardWindowCommand(Presentation.WaylandWindowCommand command)
+    internal void ForwardWindowCommand(Presentation.WaylandWindowCommand command, int windowIndex)
     {
-        if (presentation is not { } window)
+        // Команда идёт СВОЕМУ хост-окну: адресация на первое делала второе окно неперетаскиваемым.
+        if (!presentations.TryGetValue(windowIndex, out var window))
             return;
 
         if (command.RequiresGestureSerial && command.Serial != Input.LastButtonSerial)
@@ -407,30 +599,39 @@ public sealed class WaylandCompositor : IAsyncDisposable
         }
     }
 
-    /// <summary>Границы окна внутри поверхности клиента.</summary>
-    public (int X, int Y, int Width, int Height) WindowGeometry
+    /// <summary>
+    /// Геометрия окна по его ПОРЯДКОВОМУ индексу (порядок создания окон браузера):
+    /// surface-id композитора наружу не торчит, а индекс устойчив — окна создаются последовательно.
+    /// </summary>
+    public (int X, int Y, int Width, int Height) GetWindowGeometryByIndex(int windowIndex)
     {
-        get
+        // ★ Смещение прибавляется В ЛЮБОМ случае: до первого set_window_geometry размер окна
+        // неизвестен, но место в каскаде — известно. Без него клик во второе окно уходил бы
+        // в координаты первого, а вызывающий считал бы ответ достоверным.
+        var (offsetX, offsetY) = GetWindowOffset(windowIndex);
+        var resolution = Settings.Resolution;
+        var result = (X: offsetX, Y: offsetY, resolution.Width, resolution.Height);
+
+        Invoke(() =>
         {
-            var resolution = Settings.Resolution;
-            var result = (X: 0, Y: 0, resolution.Width, resolution.Height);
+            var root = EnumerateRootSurfaces().FirstOrDefault(surface => surface.WindowIndex == windowIndex);
+            if (root?.WindowGeometry is { } box)
+                result = (box.X + offsetX, box.Y + offsetY, box.Width, box.Height);
+        });
 
-            Invoke(() =>
+        return result;
+    }
+
+    /// <summary>Корневые поверхности (окна) всех клиентов в порядке обнаружения.</summary>
+    private IEnumerable<WaylandSurface> EnumerateRootSurfaces()
+    {
+        foreach (var client in clients)
+        {
+            foreach (var surface in client.OfType<WaylandSurface>())
             {
-                foreach (var client in clients)
-                {
-                    foreach (var surface in client.OfType<WaylandSurface>())
-                    {
-                        if (surface.Role == WaylandSurfaceRole.Window && surface.WindowGeometry is { } box)
-                        {
-                            result = (box.X, box.Y, box.Width, box.Height);
-                            return;
-                        }
-                    }
-                }
-            });
-
-            return result;
+                if (surface.Role == WaylandSurfaceRole.Window)
+                    yield return surface;
+            }
         }
     }
 
@@ -455,13 +656,15 @@ public sealed class WaylandCompositor : IAsyncDisposable
     /// <summary>
     /// Принимает решение оболочки хоста и передаёт его браузеру.
     /// </summary>
-    private void ForwardHostWindowEvent(Presentation.WaylandHostWindowEvent hostEvent)
+    private void ForwardHostWindowEvent(Presentation.WaylandHostWindowEvent hostEvent, int windowIndex)
     {
         foreach (var client in clients)
         {
             foreach (var surface in client.OfType<XdgSurface>())
             {
-                if (surface.Toplevel is not { } toplevel)
+                // Решение оболочки касается только своего окна: иначе закрытие или ресайз одного
+                // разойдётся по всем окнам браузера.
+                if (surface.Toplevel is not { } toplevel || toplevel.WindowIndex != windowIndex)
                     continue;
 
                 if (hostEvent.Kind == Presentation.WaylandHostWindowEventKind.Close)
@@ -506,30 +709,38 @@ public sealed class WaylandCompositor : IAsyncDisposable
     /// <summary>
     /// Переводит системный ввод разработчика в события для браузера.
     /// </summary>
-    private void ForwardHostInput(WaylandHostInputEvent hostEvent)
+    private void ForwardHostInput(WaylandHostInputEvent hostEvent, int windowIndex = 0)
     {
+        // ★ Координаты хост-события локальны для СВОЕГО окна; общее пространство ввода — каскад:
+        // прибавляем смещение окна-источника, маршрутизация по точке потом вычтет его обратно.
+        var (offsetX, offsetY) = GetWindowOffset(windowIndex);
+
         switch (hostEvent.Kind)
         {
             case WaylandHostInputKind.PointerMotion:
-                Input.MoveTo(hostEvent.X, hostEvent.Y);
+                Input.MoveTo(hostEvent.X + offsetX, hostEvent.Y + offsetY);
                 break;
 
             case WaylandHostInputKind.PointerButton:
                 // ★ Нажатие и отпускание передаются как есть. Синтез щелчка с собственной паузой
                 // сделал бы невозможным удержание кнопки: перетаскивание и выделение текста не работали бы.
+                // Кнопка адресуется окну под текущим указателем: сначала подводим его в окно-источник.
+                Input.MoveTo(hostEvent.X + offsetX, hostEvent.Y + offsetY);
                 Input.SendPointerButton((WaylandPointerButton)hostEvent.Code, hostEvent.IsPressed);
                 break;
 
             case WaylandHostInputKind.PointerAxis:
+                // ★ Событие оси не несёт координат: подводка указателя увела бы его в угол окна.
+                // Позиция уже актуальна от последнего движения.
                 Input.SendPointerAxis(hostEvent.Code, hostEvent.Value);
                 break;
 
             case WaylandHostInputKind.PointerLeave:
-                Input.SendPointerLeave();
+                Input.SendPointerLeave(windowIndex);
                 break;
 
             case WaylandHostInputKind.KeyboardFocus:
-                Input.SetKeyboardFocus(hostEvent.IsPressed);
+                Input.SetKeyboardFocus(hostEvent.IsPressed, windowIndex);
                 break;
 
             case WaylandHostInputKind.Key:
@@ -684,7 +895,16 @@ public sealed class WaylandCompositor : IAsyncDisposable
         {
             AcceptPendingClients();
             ServeClients();
-            presentation?.Pump();
+
+            // ★ Обход по снимку, а не по живой коллекции: ответ хоста внутри Pump доходит до
+            // PresentScene, а тот открывает новое хост-окно — изменённая коллекция рвала цикл
+            // событий исключением, и композитор замирал целиком при появлении второго окна.
+            pumpBuffer.Clear();
+            pumpBuffer.AddRange(presentations.Values);
+
+            foreach (var window in pumpBuffer)
+                window.Pump();
+
             DrainPendingActions();
 
             if (isSceneDirty)
@@ -722,8 +942,41 @@ public sealed class WaylandCompositor : IAsyncDisposable
             if (!client.IsClosed)
                 continue;
 
+            // Ввод помнит поверхности клиента: без забвения они держали бы фокус и вход указателя
+            // за уже отключённым соединением.
+            Input.ForgetClient(client);
             client.Dispose();
             clients.RemoveAt(index);
+        }
+
+        ReleaseUnusedPresentations();
+    }
+
+    /// <summary>
+    /// Закрывает хост-окна, которым больше не отвечает ни одно окно браузера.
+    /// </summary>
+    /// <remarks>
+    /// Окна адресуются номером, а не позицией, поэтому закрыть можно любое — соседи сохраняют
+    /// свои номера, и ввод остаётся связанным с выводом.
+    /// </remarks>
+    private void ReleaseUnusedPresentations()
+    {
+        if (presentations.Count <= 1)
+            return;
+
+        var liveWindows = new HashSet<int>();
+
+        foreach (var client in clients)
+        {
+            foreach (var toplevel in client.OfType<XdgToplevel>())
+                _ = liveWindows.Add(toplevel.WindowIndex);
+        }
+
+        // Первое окно живёт до конца сеанса: оно держит связь с оболочкой хоста.
+        foreach (var windowIndex in presentations.Keys.Where(key => key != PrimaryWindowIndex && !liveWindows.Contains(key)).ToList())
+        {
+            presentations[windowIndex].Dispose();
+            _ = presentations.Remove(windowIndex);
         }
     }
 
@@ -802,7 +1055,9 @@ public sealed class WaylandCompositor : IAsyncDisposable
             client.Dispose();
 
         clients.Clear();
-        presentation?.Dispose();
+        foreach (var window in presentations.Values)
+            window.Dispose();
+        presentations.Clear();
         listener.Dispose();
         lifetime.Dispose();
 

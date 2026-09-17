@@ -78,6 +78,24 @@ internal sealed partial class WaylandPresentationWindow : IDisposable
     public bool IsAlive => !host.IsClosed;
 
     /// <summary>
+    /// Показано ли окно в системе: скрытые хост-окна исчезают из таскбара.
+    /// </summary>
+    public bool IsWindowVisible { get; private set; } = true;
+
+    /// <summary>Скрывает или показывает хост-окно (сворачивание через оболочку).</summary>
+    public void SetVisible(bool isVisible)
+    {
+        if (IsWindowVisible == isVisible || toplevel == 0)
+            return;
+
+        IsWindowVisible = isVisible;
+
+        // Оболочка умеет только сворачивать: разворачивает окно сам пользователь через таскбар.
+        if (!isVisible)
+            host.Send(toplevel, XdgToplevelSetMinimized);
+    }
+
+    /// <summary>
     /// Прозрачность четырёх углов сцены.
     /// </summary>
     /// <remarks>
@@ -196,13 +214,31 @@ internal sealed partial class WaylandPresentationWindow : IDisposable
         if (isBufferBusy[activeBuffer])
             return false;
 
+        if (!PrepareSceneForRoot(layers))
+            return false;
+
+        var targetStride = surfaceSize.Width * BytesPerPixel;
+
+        foreach (var layer in layers)
+            BlitLayer(layer, layer.IsRoot ? 0 : layer.X, layer.IsRoot ? 0 : layer.Y, targetStride);
+
+        isLastFrameStale = true;
+        CommitSurface();
+
+        return true;
+    }
+
+    /// <summary>
+    /// Подготавливает сцену под корневой слой: подгоняет буфер и очищает фон при неполном покрытии.
+    /// </summary>
+    private bool PrepareSceneForRoot(IReadOnlyList<WaylandSceneLayer> layers)
+    {
         var root = layers.FirstOrDefault(layer => layer.IsRoot);
         if (root.Width <= 0 || root.Height <= 0)
             return false;
 
-        // ★ Поверхность клиента показывается ЦЕЛИКОМ, вместе с полями вокруг окна. В них браузер
-        // рисует тень и держит зону изменения размера; обрезка по геометрии отрезала угол для тяги
-        // и делала скруглённые углы квадратными.
+        // ★ Поверхность клиента показывается ЦЕЛИКОМ, вместе с полями вокруг окна: в них браузер
+        // рисует тень и держит зону изменения размера.
         if (!TryResizeScene(root))
             return false;
 
@@ -213,12 +249,6 @@ internal sealed partial class WaylandPresentationWindow : IDisposable
 
         if (!isRootFullCover)
             ClearScene(targetStride);
-
-        foreach (var layer in layers)
-            BlitLayer(layer, layer.IsRoot ? 0 : layer.X, layer.IsRoot ? 0 : layer.Y, targetStride);
-
-        isLastFrameStale = true;
-        CommitSurface();
 
         return true;
     }
@@ -663,6 +693,23 @@ internal sealed partial class WaylandPresentationWindow : IDisposable
     /// Перетаскивание и изменение размера требуют порядкового номера НАСТОЯЩЕГО нажатия в сессии
     /// хоста: оболочка проверяет, что жест начат живым вводом, и на выдуманный номер не ответит.
     /// </remarks>
+
+
+    // ★ move принимает только (seat, serial): лишний аргумент оболочка считает нарушением и рвёт связь.
+    private void SendToplevelMove(uint serial)
+        => host.Send(toplevel, XdgToplevelMove, writer => writer
+            .WriteUInt(seatGlobal)
+            .WriteUInt(serial));
+
+    private void SendToplevelResize(uint serial, uint edge)
+        => host.Send(toplevel, XdgToplevelResize, writer => writer
+            .WriteUInt(seatGlobal)
+            .WriteUInt(serial)
+            .WriteUInt(edge));
+
+    private void SendToplevelString(ushort request, string text)
+        => host.Send(toplevel, request, writer => writer.WriteString(text));
+
     public void ApplyWindowCommand(WaylandWindowCommand command)
     {
         if (toplevel == 0)
@@ -671,25 +718,20 @@ internal sealed partial class WaylandPresentationWindow : IDisposable
         switch (command.Kind)
         {
             case WaylandWindowCommandKind.SetTitle when command.Text is { Length: > 0 } windowTitle:
-                host.Send(toplevel, XdgToplevelSetTitle, writer => writer.WriteString(windowTitle));
+                SendToplevelString(XdgToplevelSetTitle, windowTitle);
                 break;
 
             case WaylandWindowCommandKind.SetAppId when command.Text is { Length: > 0 } appId:
-                host.Send(toplevel, XdgToplevelSetAppId, writer => writer.WriteString(appId));
+                SendToplevelString(XdgToplevelSetAppId, appId);
                 break;
 
             case WaylandWindowCommandKind.Move when lastButtonSerial != 0:
                 // Номер подставляется наш: у хоста своя нумерация, и номер браузера ему ничего не говорит.
-                host.Send(toplevel, XdgToplevelMove, writer => writer
-                    .WriteUInt(seatGlobal)
-                    .WriteUInt(lastButtonSerial));
+                SendToplevelMove(lastButtonSerial);
                 break;
 
             case WaylandWindowCommandKind.Resize when lastButtonSerial != 0:
-                host.Send(toplevel, XdgToplevelResize, writer => writer
-                    .WriteUInt(seatGlobal)
-                    .WriteUInt(lastButtonSerial)
-                    .WriteUInt(command.Edge));
+                SendToplevelResize(lastButtonSerial, command.Edge);
                 break;
 
             case WaylandWindowCommandKind.Maximize:
@@ -1279,6 +1321,12 @@ internal sealed partial class WaylandPresentationWindow : IDisposable
 [StructLayout(LayoutKind.Auto)]
 internal readonly record struct WaylandSceneLayer
 {
+    /// <summary>Идентификатор корневой поверхности, к которой относится слой.</summary>
+    public required uint RootSurfaceId { get; init; }
+
+    /// <summary>Номер окна, которому принадлежит слой: он же номер хост-окна вывода.</summary>
+    public required int WindowIndex { get; init; }
+
     /// <summary>Адрес пикселей в памяти клиента.</summary>
     public required nint Memory { get; init; }
 

@@ -57,6 +57,9 @@ internal sealed class WaylandSurface : WaylandObject
     /// <remarks>За ними клиент рисует тень своих декораций — её показывать не надо.</remarks>
     public Presentation.WaylandWindowGeometry? WindowGeometry { get; set; }
 
+    /// <summary>Порядковый номер окна, если поверхность — корень; иначе −1.</summary>
+    public int WindowIndex { get; set; } = -1;
+
     /// <summary>
     /// Роль поверхности.
     /// </summary>
@@ -74,6 +77,7 @@ internal sealed class WaylandSurface : WaylandObject
 
     /// <summary>Смещение относительно родительской поверхности.</summary>
     public (int X, int Y) Position { get; set; }
+
 
     /// <summary>Родительская поверхность, если эта вложена.</summary>
     public uint ParentSurfaceId { get; set; }

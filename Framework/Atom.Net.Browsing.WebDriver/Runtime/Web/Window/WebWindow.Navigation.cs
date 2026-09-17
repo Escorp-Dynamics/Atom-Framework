@@ -439,7 +439,7 @@ public sealed partial class WebWindow
         {
             var bridgeBounds = await bridge.GetWindowBoundsAsync(cancellationToken).ConfigureAwait(false);
             if (OperatingSystem.IsLinux()
-                && OwnerBrowser.TryGetLinuxNativeWindowBounds(bridgeBounds.Size, page.CurrentTitle) is Rectangle nativeBounds)
+                && OwnerBrowser.TryGetLinuxNativeWindowBounds(bridgeBounds.Size, page.CurrentTitle, WindowIndex) is Rectangle nativeBounds)
             {
                 return nativeBounds;
             }

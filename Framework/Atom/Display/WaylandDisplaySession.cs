@@ -38,7 +38,24 @@ public sealed class WaylandDisplaySession : IAsyncDisposable
     }
 
     /// <summary>Настройки сеанса.</summary>
-    public WaylandDisplaySessionSettings Settings { get; }
+    public WaylandDisplaySessionSettings Settings { get; init; }
+
+    /// <summary>
+    /// Смещения корневых окон последнего кадра каскадной раскладки, по порядку корней.
+    /// </summary>
+    /// <remarks>
+    /// xdg-протокол не сообщает клиенту позицию окна; раскладку ведёт композитор. Потребитель —
+    /// драйвер: экранные координаты кликов считаются с учётом каскадного сдвига окна.
+    /// </remarks>
+    /// <summary>
+    /// Каскадное смещение окна с указанным индексом в сцене дисплея.
+    /// </summary>
+    /// <remarks>
+    /// Chrome на Wayland не знает позицию своего окна; смещение ведёт композитор и сообщает его
+    /// драйверу для пересчёта экранных координат кликов.
+    /// </remarks>
+    public (int X, int Y) GetWindowOffset(int windowIndex)
+        => compositor.GetWindowOffset(windowIndex);
 
     /// <summary>Имя дисплея для переменной <c lang="text">WAYLAND_DISPLAY</c>.</summary>
     public string Display => compositor.DisplayName;
@@ -228,16 +245,30 @@ public sealed class WaylandDisplaySession : IAsyncDisposable
     /// ★ Заменяет поиск окна через X11. Клиент рисует поверхность больше окна — по краям идёт
     /// тень, и координаты ввода считаются от поверхности, а не от окна.
     /// </remarks>
-    public Rectangle WindowBounds
+    public Rectangle WindowBounds => GetWindowBoundsByIndex(0);
+
+    /// <summary>
+    /// Границы окна по его ПОРЯДКОВОМУ индексу (порядок создания окон браузера): при N окнах
+    /// каждое имеет свою позицию в сцене, и клики второго окна резолвятся в его геометрию.
+    /// </summary>
+    /// <param name="windowIndex">Индекс окна: 0 — первое созданное.</param>
+    public Rectangle GetWindowBoundsByIndex(int windowIndex)
     {
-        get
-        {
-            var (x, y, width, height) = compositor.WindowGeometry;
-            return new Rectangle(x, y, width, height);
-        }
+        var (x, y, width, height) = compositor.GetWindowGeometryByIndex(windowIndex);
+        return new Rectangle(x, y, width, height);
     }
 
-
+    /// <summary>
+    /// Находит номер окна композитора по заголовку.
+    /// </summary>
+    /// <remarks>
+    /// Драйвер нумерует окна своим счётчиком; заголовок связывает эту нумерацию с настоящими
+    /// окнами композитора и переживает появление служебных окон браузера.
+    /// </remarks>
+    /// <param name="windowTitle">Заголовок искомого окна.</param>
+    /// <returns>Номер окна либо <see langword="null"/>, если заголовок не найден или неоднозначен.</returns>
+    public int? TryResolveWindowIndexByTitle(string? windowTitle)
+        => compositor.TryResolveWindowIndexByTitle(windowTitle);
 
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()

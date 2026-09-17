@@ -29,6 +29,7 @@ internal sealed class WaylandClient : IDisposable
     /// <summary>Композитор, обслуживающий клиента.</summary>
     internal WaylandCompositor Compositor { get; }
 
+
     /// <summary>Запрос клиента: имя интерфейса и код операции. Для отладки протокола.</summary>
     public event Action<string, ushort>? RequestObserved;
 

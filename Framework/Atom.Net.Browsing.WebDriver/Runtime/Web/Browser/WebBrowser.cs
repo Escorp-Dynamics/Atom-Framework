@@ -28,6 +28,12 @@ public sealed partial class WebBrowser : IWebBrowser
     private const int MaxBufferedBridgeEvents = 4096;
 
     private readonly ConcurrentStack<WebWindow> windows = [];
+
+    /// <summary>Счётчик созданных окон: индекс назначается окну при создании.</summary>
+    private int windowIndexCounter;
+
+    /// <summary>Выдаёт порядковый индекс нового окна — он же индекс в каскадной раскладке.</summary>
+    internal int AllocateWindowIndex() => Interlocked.Increment(ref windowIndexCounter) - 1;
     private readonly ConcurrentQueue<BridgeMessage> bridgeEvents = [];
     private readonly Lock windowGate = new();
     private readonly bool ownsDisplay;
@@ -113,7 +119,7 @@ public sealed partial class WebBrowser : IWebBrowser
     internal string? LastLinuxNativeWindowBoundsDiagnostics { get; private set; }
 
     [SupportedOSPlatform("linux")]
-    internal Rectangle? TryGetLinuxNativeWindowBounds(Size? expectedSize = null, string? windowTitle = null)
+    internal Rectangle? TryGetLinuxNativeWindowBounds(Size? expectedSize = null, string? windowTitle = null, int windowIndex = 0)
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -134,12 +140,34 @@ public sealed partial class WebBrowser : IWebBrowser
         }
 
         // У собственного композитора геометрия окна известна напрямую — обходить дерево окон не нужно.
+        // При N окнах каждое имеет СВОЮ позицию: индекс окна — ключ к его геометрии.
         if (Display.Session is { } session)
-            return session.WindowBounds;
+            return session.GetWindowBoundsByIndex(ResolveCompositorWindowIndex(session, windowTitle, windowIndex));
 
         var resolution = LinuxX11WindowDiscovery.ResolveTopLevelWindow(Display.Display, browserProcess.Id, expectedSize, windowTitle);
         LastLinuxNativeWindowBoundsDiagnostics = resolution.Diagnostics;
         return resolution.Bounds;
+    }
+
+    /// <summary>
+    /// Переводит номер окна драйвера в номер окна композитора.
+    /// </summary>
+    /// <remarks>
+    /// ★ Счётчики у драйвера и композитора свои, и совпадают они лишь пока каждому окну драйвера
+    /// отвечает ровно одно окно на экране. Заголовок известен обеим сторонам и разрешает номер
+    /// точно; счётчик остаётся запасным вариантом, пока заголовок ещё не заявлен клиентом.
+    /// </remarks>
+    [SupportedOSPlatform("linux")]
+    private int ResolveCompositorWindowIndex(Atom.Display.WaylandDisplaySession session, string? windowTitle, int windowIndex)
+    {
+        if (session.TryResolveWindowIndexByTitle(windowTitle) is { } resolved)
+        {
+            LastLinuxNativeWindowBoundsDiagnostics = "strategy=compositor-title";
+            return resolved;
+        }
+
+        LastLinuxNativeWindowBoundsDiagnostics = "strategy=compositor-counter";
+        return windowIndex;
     }
 
     internal event Action<BridgeMessage>? BridgeEventReceived;

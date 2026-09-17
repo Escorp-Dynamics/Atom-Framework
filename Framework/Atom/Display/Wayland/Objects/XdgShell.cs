@@ -177,6 +177,7 @@ internal sealed class XdgSurface : WaylandObject
             Version = Version,
             Client = Client,
             OwnerSurfaceId = SurfaceId,
+            WindowIndex = Client.Compositor.AllocateWindowIndex(),
         };
 
         Client.Register(toplevel);
@@ -186,6 +187,7 @@ internal sealed class XdgSurface : WaylandObject
         if (Client.Find<WaylandSurface>(SurfaceId) is { } surface)
         {
             surface.Role = WaylandSurfaceRole.Window;
+            surface.WindowIndex = toplevel.WindowIndex;
 
             foreach (var output in Client.OfType<WaylandOutput>())
                 surface.SendEnter(output.Id);
@@ -198,6 +200,9 @@ internal sealed class XdgSurface : WaylandObject
 
     /// <summary>Роль окна, если она уже назначена.</summary>
     public XdgToplevel? Toplevel { get; private set; }
+
+    /// <summary>Снимает роль окна: сам объект уже уничтожен клиентом.</summary>
+    public void DetachToplevel() => Toplevel = null;
 
     /// <summary>
     /// Отвечает на первый commit поверхности размером окна.
@@ -275,11 +280,47 @@ internal sealed class XdgToplevel : WaylandObject
     /// <summary>Поверхность окна.</summary>
     public required uint OwnerSurfaceId { get; init; }
 
+    /// <summary>
+    /// Порядковый номер окна в композиторе: он же индекс хост-окна и каскадной раскладки.
+    /// </summary>
+    /// <remarks>
+    /// ★ Таблица объектов клиента — словарь, порядок обхода произволен и меняется при удалении
+    /// объектов. Номер выдаётся один раз при назначении роли, поэтому окно, ввод и презентация
+    /// всегда говорят об одном и том же окне.
+    /// </remarks>
+    public required int WindowIndex { get; init; }
+
+    /// <summary>Заголовок окна, последний заявленный клиентом.</summary>
+    public string? Title { get; private set; }
+
     /// <inheritdoc/>
     public override string InterfaceName => "xdg_toplevel";
 
     /// <summary>Окно развёрнуто на весь экран.</summary>
     public bool IsMaximized { get; private set; }
+
+    /// <inheritdoc/>
+    public override void OnDestroyed()
+    {
+        // Поверхность переживает свою роль: без сброса она осталась бы окном в сцене и в маршруте
+        // ввода, и закрытая вкладка продолжала бы получать клики.
+        if (Client.Find<WaylandSurface>(OwnerSurfaceId) is { } surface)
+        {
+            surface.Role = WaylandSurfaceRole.None;
+            surface.WindowIndex = -1;
+        }
+
+        // ★ xdg_surface переживает свою роль. Висячая ссылка отправила бы событие объекту, номер
+        // которого уже возвращён клиенту, — тот считает это нарушением протокола и рвёт связь.
+        foreach (var owner in Client.OfType<XdgSurface>())
+        {
+            if (owner.Toplevel == this)
+                owner.DetachToplevel();
+        }
+
+        Client.Compositor.Input.ForgetSurface(Client, OwnerSurfaceId);
+        Client.Compositor.InvalidateScene();
+    }
 
     /// <inheritdoc/>
     public override void HandleRequest(in WaylandMessage message)
@@ -293,12 +334,13 @@ internal sealed class XdgToplevel : WaylandObject
                 break;
 
             case RequestSetTitle:
-                Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.SetTitle(message.ReadString(ref offset)));
+                Title = message.ReadString(ref offset);
+                Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.SetTitle(Title), WindowIndex);
                 break;
 
             case RequestSetAppId:
                 // ★ По этому идентификатору панель задач находит .desktop и берёт иконку приложения.
-                Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.SetAppId(message.ReadString(ref offset)));
+                Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.SetAppId(message.ReadString(ref offset)), WindowIndex);
                 break;
 
             case RequestShowWindowMenu:
@@ -330,7 +372,7 @@ internal sealed class XdgToplevel : WaylandObject
                 break;
 
             case RequestSetMinimized:
-                Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.Minimize());
+                Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.Minimize(), WindowIndex);
                 break;
         }
     }
@@ -338,7 +380,7 @@ internal sealed class XdgToplevel : WaylandObject
     private void ApplyFullscreen(bool isFullscreen)
     {
         IsFullscreen = isFullscreen;
-        Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.Fullscreen(isFullscreen));
+        Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.Fullscreen(isFullscreen), WindowIndex);
         NotifyStateChanged();
     }
 
@@ -360,7 +402,7 @@ internal sealed class XdgToplevel : WaylandObject
         _ = message.ReadUInt(ref offset);
         var serial = message.ReadUInt(ref offset);
 
-        Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.Move(serial));
+        Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.Move(serial), WindowIndex);
     }
 
     private void HandleShowWindowMenu(ref int offset, in WaylandMessage message)
@@ -370,7 +412,7 @@ internal sealed class XdgToplevel : WaylandObject
         var x = message.ReadInt(ref offset);
         var y = message.ReadInt(ref offset);
 
-        Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.ShowMenu(serial, x, y));
+        Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.ShowMenu(serial, x, y), WindowIndex);
     }
 
     private void HandleResize(ref int offset, in WaylandMessage message)
@@ -379,13 +421,13 @@ internal sealed class XdgToplevel : WaylandObject
         var serial = message.ReadUInt(ref offset);
         var edge = message.ReadUInt(ref offset);
 
-        Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.Resize(serial, edge));
+        Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.Resize(serial, edge), WindowIndex);
     }
 
     private void ApplyMaximized(bool isMaximized)
     {
         IsMaximized = isMaximized;
-        Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.Maximize(isMaximized));
+        Client.Compositor.ForwardWindowCommand(WaylandWindowCommand.Maximize(isMaximized), WindowIndex);
         NotifyStateChanged();
     }
 

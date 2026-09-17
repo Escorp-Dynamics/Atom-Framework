@@ -34,6 +34,7 @@ public sealed partial class WebWindow : IWebWindow
 
         WindowId = Guid.NewGuid().ToString("N");
         OwnerBrowser = browser;
+        WindowIndex = browser.AllocateWindowIndex();
         Settings = settings.Clone();
         ResolvedDevice = browser.LaunchSettings.Device.ResolveDevice(Settings?.Device);
         ResolvedWindowSize = browser.LaunchSettings.ResolveWindowSize(Settings);
@@ -47,6 +48,11 @@ public sealed partial class WebWindow : IWebWindow
     internal WebBrowser OwnerBrowser { get; }
 
     internal string WindowId { get; }
+
+    /// <summary>
+    /// Порядковый индекс окна: он же индекс в каскадной раскладке виртуального дисплея.
+    /// </summary>
+    internal int WindowIndex { get; }
 
     internal string EffectiveWindowId => BridgeWindowId ?? WindowId;
 
