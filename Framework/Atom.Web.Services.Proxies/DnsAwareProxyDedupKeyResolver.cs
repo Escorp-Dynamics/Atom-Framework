@@ -109,12 +109,12 @@ public sealed class DnsAwareProxyDedupKeyResolver : IProxyDedupKeyResolver
                 continue;
             }
 
-            CompleteInflightTaskAsync(host, completion);
+            _ = CompleteInflightTaskAsync(host, completion);
             return completion.Task;
         }
     }
 
-    private async void CompleteInflightTaskAsync(string host, TaskCompletionSource<CacheEntry> completion)
+    private async Task CompleteInflightTaskAsync(string host, TaskCompletionSource<CacheEntry> completion)
     {
         try
         {

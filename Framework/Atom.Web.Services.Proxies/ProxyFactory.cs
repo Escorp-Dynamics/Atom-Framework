@@ -554,24 +554,32 @@ public partial class ProxyFactory : IProxyFactory<IProxyProvider, ProxyFactory>
         bool includeBlocked,
         CancellationToken cancellationToken)
     {
-        var keyTasks = new Dictionary<string, Task<string>>(StringComparer.OrdinalIgnoreCase);
+        var pendingHosts = new List<string>();
+        var keyTasks = new List<Task<string>>();
         for (var index = 0; index < candidates.Count; index++)
         {
             var host = candidates[index].Proxy.Host ?? string.Empty;
-            if (!keyTasks.ContainsKey(host))
+            if (!pendingHosts.Contains(host, StringComparer.OrdinalIgnoreCase))
             {
-                keyTasks.Add(host, DedupKeyResolver.GetKeyAsync(candidates[index].Proxy, cancellationToken).AsTask());
+                pendingHosts.Add(host);
+                keyTasks.Add(DedupKeyResolver.GetKeyAsync(candidates[index].Proxy, cancellationToken).AsTask());
             }
         }
 
-        await Task.WhenAll(keyTasks.Values).ConfigureAwait(false);
+        var resolvedKeys = await Task.WhenAll(keyTasks).ConfigureAwait(false);
+
+        var keysByHost = new Dictionary<string, string>(pendingHosts.Count, StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < pendingHosts.Count; index++)
+        {
+            keysByHost[pendingHosts[index]] = resolvedKeys[index];
+        }
 
         var result = new List<ServiceProxy>(candidates.Count);
         var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < candidates.Count; index++)
         {
             var candidate = candidates[index];
-            var key = keyTasks[candidate.Proxy.Host ?? string.Empty].Result;
+            var key = keysByHost[candidate.Proxy.Host ?? string.Empty];
             if (!seenKeys.Add(key))
             {
                 continue;

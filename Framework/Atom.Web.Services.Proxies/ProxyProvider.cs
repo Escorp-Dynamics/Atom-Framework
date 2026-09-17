@@ -244,7 +244,8 @@ public abstract partial class ProxyProvider : IProxyProvider, IProxyPoolSnapshot
         CancellationToken cancellationToken = default)
     {
         var candidates = new List<ServiceProxy>(capacity);
-        var keyTasks = new Dictionary<string, Task<string>>(StringComparer.OrdinalIgnoreCase);
+        var pendingHosts = new List<string>();
+        var keyTasks = new List<Task<string>>();
         foreach (var proxy in source)
         {
             if (proxy is null)
@@ -254,13 +255,20 @@ public abstract partial class ProxyProvider : IProxyProvider, IProxyPoolSnapshot
 
             candidates.Add(proxy);
             var host = proxy.Host ?? string.Empty;
-            if (!keyTasks.ContainsKey(host))
+            if (!pendingHosts.Contains(host, StringComparer.OrdinalIgnoreCase))
             {
-                keyTasks.Add(host, DedupKeyResolver.GetKeyAsync(proxy, cancellationToken).AsTask());
+                pendingHosts.Add(host);
+                keyTasks.Add(DedupKeyResolver.GetKeyAsync(proxy, cancellationToken).AsTask());
             }
         }
 
-        await Task.WhenAll(keyTasks.Values).ConfigureAwait(false);
+        var resolvedKeys = await Task.WhenAll(keyTasks).ConfigureAwait(false);
+
+        var keysByHost = new Dictionary<string, string>(pendingHosts.Count, StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < pendingHosts.Count; index++)
+        {
+            keysByHost[pendingHosts[index]] = resolvedKeys[index];
+        }
 
         var result = new List<ServiceProxy>(candidates.Count);
         var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -268,7 +276,7 @@ public abstract partial class ProxyProvider : IProxyProvider, IProxyPoolSnapshot
         {
             var proxy = candidates[index];
             var host = proxy.Host ?? string.Empty;
-            if (seenKeys.Add(keyTasks[host].Result))
+            if (seenKeys.Add(keysByHost[host]))
             {
                 result.Add(proxy);
             }
