@@ -37,6 +37,7 @@ public sealed class MarketAlertSystem : IMarketAlertSystem
     public void AddAlert(IMarketAlertDefinition alert)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
+        ArgumentNullException.ThrowIfNull(alert);
         alerts[alert.Id] = alert;
     }
 

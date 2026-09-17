@@ -21,6 +21,8 @@ public sealed class PolymarketLoggingMiddleware(Action<string> log) : IPolymarke
     /// <inheritdoc/>
     public ValueTask<bool> OnRequestAsync(PolymarketRequestContext context, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(context);
+
         log($"[Polymarket] → {context.Method} {context.Path}");
         return new(true);
     }
@@ -28,6 +30,8 @@ public sealed class PolymarketLoggingMiddleware(Action<string> log) : IPolymarke
     /// <inheritdoc/>
     public ValueTask OnResponseAsync(PolymarketResponseContext context, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(context);
+
         if (context.Exception is not null)
             log($"[Polymarket] ✗ {context.Request.Method} {context.Request.Path} — {context.Exception.Message} ({context.ElapsedMs:F1}ms)");
         else
@@ -83,6 +87,8 @@ public sealed class PolymarketMetricsMiddleware : IPolymarketMiddleware
     /// <inheritdoc/>
     public ValueTask OnResponseAsync(PolymarketResponseContext context, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(context);
+
         Interlocked.Increment(ref totalRequests);
         Interlocked.Add(ref totalElapsedTicks, (long)(context.ElapsedMs * TimeSpan.TicksPerMillisecond));
 
@@ -134,6 +140,8 @@ public sealed class PolymarketHeadersMiddleware : IPolymarketMiddleware
     /// <inheritdoc/>
     public ValueTask<bool> OnRequestAsync(PolymarketRequestContext context, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(context);
+
         // Заголовки сохраняются в Properties для применения в RestClient
         context.Properties["CustomHeaders"] = headers;
         return new(true);

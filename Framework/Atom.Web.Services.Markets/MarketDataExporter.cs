@@ -14,13 +14,17 @@ namespace Atom.Web.Services.Markets;
 public sealed class MarketDataExporter : IMarketDataExporter
 {
     /// <inheritdoc />
-    public string ExportPositions(IEnumerable<IMarketPosition> positions, ExportFormat format) =>
-        format switch
+    public string ExportPositions(IEnumerable<IMarketPosition> positions, ExportFormat format)
+    {
+        ArgumentNullException.ThrowIfNull(positions);
+
+        return format switch
         {
             ExportFormat.Csv => ExportPositionsCsv(positions),
             ExportFormat.Json => ExportPositionsJson(positions),
             _ => throw new ArgumentOutOfRangeException(nameof(format))
         };
+    }
 
     /// <inheritdoc />
     public void ExportPositionsToFile(IEnumerable<IMarketPosition> positions, ExportFormat format, string filePath)
@@ -30,13 +34,17 @@ public sealed class MarketDataExporter : IMarketDataExporter
     }
 
     /// <inheritdoc />
-    public string ExportPnLHistory(IEnumerable<IMarketPnLSnapshot> snapshots, ExportFormat format) =>
-        format switch
+    public string ExportPnLHistory(IEnumerable<IMarketPnLSnapshot> snapshots, ExportFormat format)
+    {
+        ArgumentNullException.ThrowIfNull(snapshots);
+
+        return format switch
         {
             ExportFormat.Csv => ExportPnLCsv(snapshots),
             ExportFormat.Json => ExportPnLJson(snapshots),
             _ => throw new ArgumentOutOfRangeException(nameof(format))
         };
+    }
 
     /// <inheritdoc />
     public void ExportPnLHistoryToFile(IEnumerable<IMarketPnLSnapshot> snapshots, ExportFormat format, string filePath)

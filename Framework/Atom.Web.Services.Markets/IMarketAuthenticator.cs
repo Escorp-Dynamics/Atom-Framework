@@ -160,6 +160,9 @@ public sealed class HmacAuthenticator : IMarketAuthenticator
         SignatureStringBuilder buildSignatureString,
         Action<HttpRequestMessage, HmacAuthenticatorConfig, string, string>? addExtraHeaders = null)
     {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(buildSignatureString);
+
         hashAlgorithm = algorithm;
         this.config = config;
         this.buildSignatureString = buildSignatureString;
@@ -173,6 +176,7 @@ public sealed class HmacAuthenticator : IMarketAuthenticator
     /// <inheritdoc />
     public void SignRequest(HttpRequestMessage request, string body = "")
     {
+        ArgumentNullException.ThrowIfNull(request);
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
         var uri = request.RequestUri ?? throw new MarketException("RequestUri is null");
@@ -272,6 +276,7 @@ public sealed class KrakenAuthenticator : IMarketAuthenticator
     /// <inheritdoc />
     public void SignRequest(HttpRequestMessage request, string body = "")
     {
+        ArgumentNullException.ThrowIfNull(request);
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
         var path = request.RequestUri?.AbsolutePath ?? throw new MarketException("RequestUri is null");
@@ -334,6 +339,7 @@ public sealed class HtxAuthenticator : IMarketAuthenticator
     /// <inheritdoc />
     public void SignRequest(HttpRequestMessage request, string body = "")
     {
+        ArgumentNullException.ThrowIfNull(request);
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
         var uri = request.RequestUri ?? throw new MarketException("RequestUri is null");
@@ -394,6 +400,8 @@ public sealed class BitstampAuthenticator : IMarketAuthenticator
     /// <inheritdoc />
     public void SignRequest(HttpRequestMessage request, string body = "")
     {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(body);
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
         var uri = request.RequestUri ?? throw new MarketException("RequestUri is null");
@@ -450,6 +458,7 @@ public sealed class CryptoComAuthenticator : IMarketAuthenticator
     /// <inheritdoc />
     public void SignRequest(HttpRequestMessage request, string body = "")
     {
+        ArgumentNullException.ThrowIfNull(request);
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
         var node = System.Text.Json.Nodes.JsonNode.Parse(body)?.AsObject()

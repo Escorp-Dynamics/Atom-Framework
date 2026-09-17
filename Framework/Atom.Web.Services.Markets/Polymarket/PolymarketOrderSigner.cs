@@ -89,6 +89,8 @@ public static class PolymarketOrderSigner
     /// <returns>32-байтный digest для подписи.</returns>
     public static byte[] ComputeOrderDigest(PolymarketSignedOrder order, bool negRisk = false)
     {
+        ArgumentNullException.ThrowIfNull(order);
+
         var exchangeAddr = negRisk ? NegRiskExchangeAddress : ExchangeAddress;
         var domainSeparator = ComputeDomainSeparator("Exchange", "1", PolygonChainId, exchangeAddr);
         var structHash = ComputeOrderStructHash(order);

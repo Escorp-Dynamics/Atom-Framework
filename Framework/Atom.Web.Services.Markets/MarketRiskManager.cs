@@ -56,6 +56,7 @@ public sealed class MarketRiskManager : IMarketRiskManager
     public void AddRule(IMarketRiskRule rule)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
+        ArgumentNullException.ThrowIfNull(rule);
         rules[rule.AssetId] = rule;
     }
 

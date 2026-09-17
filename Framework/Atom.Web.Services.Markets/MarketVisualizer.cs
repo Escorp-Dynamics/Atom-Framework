@@ -21,6 +21,9 @@ public sealed class MarketVisualizer : IMarketVisualizer
     /// <inheritdoc />
     public string RenderChart(double[] values, string title = "")
     {
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(title);
+
         if (values.Length == 0)
             return title.Length > 0 ? $"  {title}\n  (нет данных)" : "  (нет данных)";
 
@@ -64,12 +67,18 @@ public sealed class MarketVisualizer : IMarketVisualizer
     }
 
     /// <inheritdoc />
-    public string RenderEquityCurve(IMarketBacktestResult result) =>
-        RenderChart(result.EquityCurve, $"Equity Curve — {result.StrategyName}");
+    public string RenderEquityCurve(IMarketBacktestResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        return RenderChart(result.EquityCurve, $"Equity Curve — {result.StrategyName}");
+    }
 
     /// <inheritdoc />
     public string RenderPnLHistory(IMarketPnLSnapshot[] snapshots)
     {
+        ArgumentNullException.ThrowIfNull(snapshots);
+
         if (snapshots.Length == 0)
             return "  P&L History\n  (нет данных)";
 
@@ -83,6 +92,8 @@ public sealed class MarketVisualizer : IMarketVisualizer
     /// <inheritdoc />
     public string RenderPositionsTable(IEnumerable<IMarketPosition> positions)
     {
+        ArgumentNullException.ThrowIfNull(positions);
+
         using var sb = new ValueStringBuilder();
         sb.AppendLine("  ┌──────────────┬──────────┬──────────────┬──────────────┬──────────────┬────────┐");
         sb.AppendLine("  │ Asset        │ Quantity │ Avg Cost     │ Current      │ Unrealized   │ Status │");
@@ -115,6 +126,8 @@ public sealed class MarketVisualizer : IMarketVisualizer
     /// <inheritdoc />
     public string RenderBacktestSummary(IMarketBacktestResult result)
     {
+        ArgumentNullException.ThrowIfNull(result);
+
         using var sb = new ValueStringBuilder();
         sb.AppendFormat(CultureInfo.InvariantCulture, "  ═══ Backtest: {0} ═══", result.StrategyName).AppendLine();
         sb.AppendFormat(CultureInfo.InvariantCulture, "  Initial Balance:   {0,12:F2}", result.InitialBalance).AppendLine();
@@ -131,6 +144,8 @@ public sealed class MarketVisualizer : IMarketVisualizer
     /// <inheritdoc />
     public string RenderPortfolioSummary(IMarketPortfolioSummary summary)
     {
+        ArgumentNullException.ThrowIfNull(summary);
+
         using var sb = new ValueStringBuilder();
         sb.AppendLine("  ═══ Portfolio Summary ═══");
         sb.AppendFormat(CultureInfo.InvariantCulture, "  Open Positions:    {0,12}", summary.OpenPositions).AppendLine();

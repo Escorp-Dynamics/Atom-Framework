@@ -19,6 +19,9 @@ dotnet_analyzer_diagnostic.category-Performance.severity = error
 dotnet_analyzer_diagnostic.category-Interoperability.severity = error
 dotnet_analyzer_diagnostic.category-Formatting.severity = error
 
+# CA1062 по умолчанию не распознаёт современные хелперы как проверку на null.
+dotnet_code_quality.CA1062.null_check_validation_methods = ThrowIfNull|ThrowIfNullOrEmpty|ThrowIfNullOrWhiteSpace
+
 # Правила форматирования скобок и пробелов
 csharp_prefer_braces = all:error
 csharp_space_after_keywords_in_control_flow_statements = always:error

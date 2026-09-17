@@ -824,6 +824,9 @@ public sealed class MarketRuntimePriceStreamBridge : IDisposable
     /// </summary>
     public MarketRuntimePriceStreamBridge(ExchangeClientBase client, IWritableMarketPriceStream priceStream)
     {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(priceStream);
+
         this.client = client;
         this.priceStream = priceStream;
         client.MarketUpdateReceived += OnMarketUpdateReceivedAsync;
