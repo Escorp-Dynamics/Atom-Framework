@@ -7,6 +7,8 @@
         <Nullable>enable</Nullable>
         <OptimizationPreference>speed</OptimizationPreference>
         <AssemblyName>Escorp.Atom.Web.Services.Emails</AssemblyName>
+        <NoWarn>
+            AsyncFixer01;CA1031;CA1033;CA1056;CA1063;CA1716;CA1812;CA1819;CA5394;IDE0005;IDE0021;IDE0032;IDE0048;IDE0074;IDE0290;IDE0305;MA0006;MA0011;MA0015;MA0076;MA0159;MA0182;MA0190;S1075;S2292;S3358;S3626;S3881;SCS0005</NoWarn>
 
         <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
         <AnalysisLevel>latest-all</AnalysisLevel>

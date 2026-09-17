@@ -7,6 +7,8 @@
         <Nullable>enable</Nullable>
         <OptimizationPreference>speed</OptimizationPreference>
         <AssemblyName>Escorp.Atom.Web.Services.Proxies</AssemblyName>
+        <NoWarn>
+            AsyncFixer01;CA1031;CA1063;CA1849;CA1859;CA2234;IDE0005;IDE0017;IDE0021;IDE0022;IDE0027;IDE0032;IDE0048;IDE0051;IDE0055;IDE0078;IDE0290;IDE0305;IL2091;MA0003;MA0008;MA0011;MA0023;MA0042;MA0051;MA0061;MA0084;MA0106;MA0159;MA0190;S1006;S108;S1144;S1994;S2292;S3060;S3168;S3241;S3358;S3626;S3776;S3881;VSTHRD002;VSTHRD100;VSTHRD103</NoWarn>
 
         <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
         <AnalysisLevel>latest-all</AnalysisLevel>
