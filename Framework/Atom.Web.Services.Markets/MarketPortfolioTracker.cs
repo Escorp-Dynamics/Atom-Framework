@@ -11,7 +11,7 @@ namespace Atom.Web.Services.Markets;
 /// </summary>
 public sealed class MarketPortfolioTracker : IMarketPortfolioTracker
 {
-    private readonly ConcurrentDictionary<string, MarketPosition> positions = new();
+    private readonly ConcurrentDictionary<string, MarketPosition> positions = new(StringComparer.OrdinalIgnoreCase);
     private readonly IMarketPriceStream priceStream;
     private bool isDisposed;
 

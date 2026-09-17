@@ -85,7 +85,7 @@ public sealed class PolymarketPriceStream : IMarketPriceStream, IAsyncDisposable
 {
     private readonly PolymarketClient client;
     private readonly bool disposeClient;
-    private readonly ConcurrentDictionary<string, PolymarketPriceSnapshot> priceCache = new();
+    private readonly ConcurrentDictionary<string, PolymarketPriceSnapshot> priceCache = new(StringComparer.OrdinalIgnoreCase);
     private bool isDisposed;
 
     /// <summary>

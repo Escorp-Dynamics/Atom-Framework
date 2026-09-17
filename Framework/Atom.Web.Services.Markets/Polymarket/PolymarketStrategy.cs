@@ -139,6 +139,8 @@ public abstract class PolymarketStrategyBase : IPolymarketStrategy
     /// <inheritdoc />
     public virtual void OnPriceUpdated(PolymarketPriceSnapshot snapshot)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
         if (snapshot.Midpoint is null) return;
 
         if (!double.TryParse(snapshot.Midpoint, System.Globalization.NumberStyles.Float,
@@ -476,7 +478,7 @@ public sealed class PolymarketArbitrageStrategy : PolymarketStrategyBase
     /// <summary>
     /// Реестр комплементарных пар (tokenA ↔ tokenB).
     /// </summary>
-    private readonly ConcurrentDictionary<string, string> complementaryPairs = new();
+    private readonly ConcurrentDictionary<string, string> complementaryPairs = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Инициализирует Arbitrage-стратегию.

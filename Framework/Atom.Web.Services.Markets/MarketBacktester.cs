@@ -25,6 +25,8 @@ public sealed class MarketBacktester : IMarketBacktester
     /// <inheritdoc />
     public IMarketBacktestResult Run(IMarketStrategy strategy, string assetId, IMarketPricePoint[] priceData)
     {
+        ArgumentNullException.ThrowIfNull(strategy);
+        ArgumentNullException.ThrowIfNull(priceData);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(priceData.Length);
 
         var balance = InitialBalance;
@@ -217,7 +219,7 @@ public sealed class MarketBacktester : IMarketBacktester
 
     private sealed class BacktestPriceStream : IWritableMarketPriceStream
     {
-        private readonly ConcurrentDictionary<string, IMarketPriceSnapshot> cache = new();
+        private readonly ConcurrentDictionary<string, IMarketPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
 
         public int TokenCount => cache.Count;
         public IMarketPriceSnapshot? GetPrice(string assetId) =>

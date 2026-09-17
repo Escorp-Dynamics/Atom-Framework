@@ -57,7 +57,7 @@ public sealed class MarketTradeSignal : IMarketTradeSignal
 /// </remarks>
 public sealed class MomentumStrategy : IMarketStrategy
 {
-    private readonly ConcurrentDictionary<string, PriceWindow> windows = new();
+    private readonly ConcurrentDictionary<string, PriceWindow> windows = new(StringComparer.OrdinalIgnoreCase);
     private bool isDisposed;
 
     /// <summary>Имя стратегии.</summary>
@@ -78,6 +78,8 @@ public sealed class MomentumStrategy : IMarketStrategy
     /// <inheritdoc />
     public IMarketTradeSignal Evaluate(IMarketPriceStream priceStream, string assetId)
     {
+        ArgumentNullException.ThrowIfNull(priceStream);
+
         var snapshot = priceStream.GetPrice(assetId);
         if (snapshot is null) return MarketTradeSignal.Hold(assetId, "Нет данных");
 
@@ -124,6 +126,8 @@ public sealed class MomentumStrategy : IMarketStrategy
     /// <inheritdoc />
     public void OnPriceUpdated(IMarketPriceSnapshot snapshot)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
         var price = snapshot.Midpoint ?? snapshot.LastTradePrice;
         if (price is null) return;
 
@@ -156,7 +160,7 @@ public sealed class MomentumStrategy : IMarketStrategy
 /// </remarks>
 public sealed class MeanReversionStrategy : IMarketStrategy
 {
-    private readonly ConcurrentDictionary<string, PriceWindow> windows = new();
+    private readonly ConcurrentDictionary<string, PriceWindow> windows = new(StringComparer.OrdinalIgnoreCase);
     private bool isDisposed;
 
     /// <summary>Имя стратегии.</summary>
@@ -174,6 +178,8 @@ public sealed class MeanReversionStrategy : IMarketStrategy
     /// <inheritdoc />
     public IMarketTradeSignal Evaluate(IMarketPriceStream priceStream, string assetId)
     {
+        ArgumentNullException.ThrowIfNull(priceStream);
+
         var snapshot = priceStream.GetPrice(assetId);
         if (snapshot is null) return MarketTradeSignal.Hold(assetId, "Нет данных");
 
@@ -224,6 +230,8 @@ public sealed class MeanReversionStrategy : IMarketStrategy
     /// <inheritdoc />
     public void OnPriceUpdated(IMarketPriceSnapshot snapshot)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
         var price = snapshot.Midpoint ?? snapshot.LastTradePrice;
         if (price is null) return;
 
@@ -272,12 +280,15 @@ public sealed class ArbitrageStrategy : IMarketStrategy
     /// <param name="secondaryStream">Вторичный источник цен (вторая биржа).</param>
     public ArbitrageStrategy(IMarketPriceStream secondaryStream)
     {
+        ArgumentNullException.ThrowIfNull(secondaryStream);
         this.secondaryStream = secondaryStream;
     }
 
     /// <inheritdoc />
     public IMarketTradeSignal Evaluate(IMarketPriceStream priceStream, string assetId)
     {
+        ArgumentNullException.ThrowIfNull(priceStream);
+
         var primary = priceStream.GetPrice(assetId);
         var secondary = secondaryStream.GetPrice(assetId);
 
@@ -345,7 +356,7 @@ public sealed class ArbitrageStrategy : IMarketStrategy
 /// </summary>
 public sealed class VwapStrategy : IMarketStrategy
 {
-    private readonly ConcurrentDictionary<string, VwapAccumulator> accumulators = new();
+    private readonly ConcurrentDictionary<string, VwapAccumulator> accumulators = new(StringComparer.OrdinalIgnoreCase);
     private readonly double thresholdPercent;
     private readonly double defaultQuantity;
     private bool isDisposed;
@@ -369,6 +380,7 @@ public sealed class VwapStrategy : IMarketStrategy
     public IMarketTradeSignal Evaluate(IMarketPriceStream priceStream, string assetId)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
+        ArgumentNullException.ThrowIfNull(priceStream);
 
         var snapshot = priceStream.GetPrice(assetId);
         if (snapshot?.LastTradePrice is not { } price || price <= 0)
@@ -414,6 +426,8 @@ public sealed class VwapStrategy : IMarketStrategy
     /// <inheritdoc />
     public void OnPriceUpdated(IMarketPriceSnapshot snapshot)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
         if (isDisposed || snapshot.LastTradePrice is not { } price || price <= 0)
             return;
         accumulators.GetOrAdd(snapshot.AssetId, static _ => new VwapAccumulator()).Add(price);
@@ -439,7 +453,7 @@ public sealed class VwapStrategy : IMarketStrategy
 /// </summary>
 public sealed class RsiStrategy : IMarketStrategy
 {
-    private readonly ConcurrentDictionary<string, RsiState> states = new();
+    private readonly ConcurrentDictionary<string, RsiState> states = new(StringComparer.OrdinalIgnoreCase);
     private readonly int period;
     private readonly double oversoldLevel;
     private readonly double overboughtLevel;
@@ -469,6 +483,7 @@ public sealed class RsiStrategy : IMarketStrategy
     public IMarketTradeSignal Evaluate(IMarketPriceStream priceStream, string assetId)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
+        ArgumentNullException.ThrowIfNull(priceStream);
 
         var snapshot = priceStream.GetPrice(assetId);
         if (snapshot?.LastTradePrice is not { } price || price <= 0)
@@ -513,6 +528,8 @@ public sealed class RsiStrategy : IMarketStrategy
     /// <inheritdoc />
     public void OnPriceUpdated(IMarketPriceSnapshot snapshot)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
         if (isDisposed || snapshot.LastTradePrice is not { } price || price <= 0)
             return;
         states.GetOrAdd(snapshot.AssetId, _ => new RsiState(period)).Add(price);
@@ -538,7 +555,7 @@ public sealed class RsiStrategy : IMarketStrategy
 /// </summary>
 public sealed class MacdCrossoverStrategy : IMarketStrategy
 {
-    private readonly ConcurrentDictionary<string, MacdState> states = new();
+    private readonly ConcurrentDictionary<string, MacdState> states = new(StringComparer.OrdinalIgnoreCase);
     private readonly int fastPeriod;
     private readonly int slowPeriod;
     private readonly int signalPeriod;
@@ -569,6 +586,7 @@ public sealed class MacdCrossoverStrategy : IMarketStrategy
     public IMarketTradeSignal Evaluate(IMarketPriceStream priceStream, string assetId)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
+        ArgumentNullException.ThrowIfNull(priceStream);
 
         var snapshot = priceStream.GetPrice(assetId);
         if (snapshot?.LastTradePrice is not { } price || price <= 0)
@@ -619,6 +637,8 @@ public sealed class MacdCrossoverStrategy : IMarketStrategy
     /// <inheritdoc />
     public void OnPriceUpdated(IMarketPriceSnapshot snapshot)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
         if (isDisposed || snapshot.LastTradePrice is not { } price || price <= 0)
             return;
         states.GetOrAdd(snapshot.AssetId, _ => new MacdState(fastPeriod, slowPeriod, signalPeriod)).Add(price);
@@ -661,6 +681,7 @@ public sealed class CompositeStrategy : IMarketStrategy
     /// <param name="defaultQuantity">Объём ордера по умолчанию.</param>
     public CompositeStrategy(IMarketStrategy[] strategies, int? quorum = null, double defaultQuantity = 1.0)
     {
+        ArgumentNullException.ThrowIfNull(strategies);
         ArgumentOutOfRangeException.ThrowIfZero(strategies.Length);
         this.strategies = strategies;
         this.quorum = quorum ?? (strategies.Length / 2 + 1);
@@ -674,6 +695,7 @@ public sealed class CompositeStrategy : IMarketStrategy
     public IMarketTradeSignal Evaluate(IMarketPriceStream priceStream, string assetId)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
+        ArgumentNullException.ThrowIfNull(priceStream);
 
         var buyVotes = 0;
         var sellVotes = 0;
@@ -740,6 +762,8 @@ public sealed class CompositeStrategy : IMarketStrategy
     /// <inheritdoc />
     public void OnPriceUpdated(IMarketPriceSnapshot snapshot)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
         if (isDisposed) return;
         foreach (var strategy in strategies)
             strategy.OnPriceUpdated(snapshot);
