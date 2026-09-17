@@ -142,6 +142,9 @@ public sealed class MarketStreamingPipeline : IMarketStreamingPipeline
         IMarketRestClient? restClient = null,
         StreamingPipelineConfig? config = null)
     {
+        ArgumentNullException.ThrowIfNull(wsClient);
+        ArgumentNullException.ThrowIfNull(priceStream);
+
         this.wsClient = wsClient;
         this.priceStream = priceStream;
         this.restClient = restClient;
@@ -255,6 +258,9 @@ public sealed class MarketStreamingPipeline : IMarketStreamingPipeline
     /// <inheritdoc />
     public void AddStrategy(IMarketStrategy strategy, string[] assetIds)
     {
+        ArgumentNullException.ThrowIfNull(strategy);
+        ArgumentNullException.ThrowIfNull(assetIds);
+
         lock (strategiesLock)
             strategies.Add((strategy, assetIds));
     }
@@ -262,8 +268,21 @@ public sealed class MarketStreamingPipeline : IMarketStreamingPipeline
     /// <inheritdoc />
     public void RemoveStrategy(string strategyName)
     {
+        List<IMarketStrategy> removed = [];
         lock (strategiesLock)
+        {
+            foreach (var entry in strategies)
+            {
+                if (entry.Strategy.Name == strategyName)
+                    removed.Add(entry.Strategy);
+            }
+
             strategies.RemoveAll(s => s.Strategy.Name == strategyName);
+        }
+
+        // Владение стратегией переходит конвейеру в AddStrategy — освобождаем при удалении.
+        foreach (var strategy in removed)
+            strategy.Dispose();
     }
 
     /// <summary>
@@ -367,13 +386,25 @@ public sealed class MarketStreamingPipeline : IMarketStreamingPipeline
         isDisposed = true;
 
         await StopAsync().ConfigureAwait(false);
+
+        // Владение стратегиями перешло конвейеру в AddStrategy.
+        IMarketStrategy[] owned;
+        lock (strategiesLock)
+        {
+            owned = [.. strategies.Select(s => s.Strategy)];
+            strategies.Clear();
+        }
+
+        foreach (var strategy in owned)
+            strategy.Dispose();
+
         if (ownsEvaluationPriceStream)
             evaluationPriceStream.Dispose();
     }
 
     private sealed class PipelinePriceStream : IWritableMarketPriceStream
     {
-        private readonly ConcurrentDictionary<string, IMarketPriceSnapshot> cache = new();
+        private readonly ConcurrentDictionary<string, IMarketPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
 
         public int TokenCount => cache.Count;
 
@@ -392,11 +423,16 @@ public sealed class MarketStreamingPipeline : IMarketStreamingPipeline
 /// <summary>
 /// Расширения для удобной регистрации стандартных стратегий в конвейере.
 /// </summary>
+// CA2000: владение созданной стратегией переходит конвейеру в AddStrategy, он освобождает её в DisposeAsync.
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2000",
+    Justification = "Владение стратегией передаётся конвейеру через AddStrategy.")]
 public static class MarketPipelineStrategyExtensions
 {
     /// <summary>Добавляет Momentum-стратегию (SMA + порог).</summary>
     public static void AddMomentum(this IMarketStreamingPipeline pipeline, string[] assetIds,
-        int windowSize = 20, double threshold = 0.02, double quantity = 1.0) =>
+        int windowSize = 20, double threshold = 0.02, double quantity = 1.0)
+    {
+        ArgumentNullException.ThrowIfNull(pipeline);
         pipeline.AddStrategy(new MomentumStrategy
         {
             WindowSize = windowSize,
@@ -404,35 +440,49 @@ public static class MarketPipelineStrategyExtensions
             SellThresholdPercent = threshold,
             DefaultQuantity = quantity
         }, assetIds);
+    }
 
     /// <summary>Добавляет MeanReversion-стратегию (Bollinger Bands).</summary>
     public static void AddMeanReversion(this IMarketStreamingPipeline pipeline, string[] assetIds,
-        int windowSize = 20, double multiplier = 2.0, double quantity = 1.0) =>
+        int windowSize = 20, double multiplier = 2.0, double quantity = 1.0)
+    {
+        ArgumentNullException.ThrowIfNull(pipeline);
         pipeline.AddStrategy(new MeanReversionStrategy
         {
             WindowSize = windowSize,
             BollingerMultiplier = multiplier,
             DefaultQuantity = quantity
         }, assetIds);
+    }
 
     /// <summary>Добавляет VWAP-стратегию (тиковый VWAP).</summary>
     public static void AddVwap(this IMarketStreamingPipeline pipeline, string[] assetIds,
-        double thresholdPercent = 0.005, double quantity = 1.0) =>
+        double thresholdPercent = 0.005, double quantity = 1.0)
+    {
+        ArgumentNullException.ThrowIfNull(pipeline);
         pipeline.AddStrategy(new VwapStrategy(thresholdPercent, quantity), assetIds);
+    }
 
     /// <summary>Добавляет RSI-стратегию (перепроданность / перекупленность).</summary>
     public static void AddRsi(this IMarketStreamingPipeline pipeline, string[] assetIds,
-        int period = 14, double oversold = 30, double overbought = 70, double quantity = 1.0) =>
+        int period = 14, double oversold = 30, double overbought = 70, double quantity = 1.0)
+    {
+        ArgumentNullException.ThrowIfNull(pipeline);
         pipeline.AddStrategy(new RsiStrategy(period, oversold, overbought, quantity), assetIds);
+    }
 
     /// <summary>Добавляет MACD Crossover стратегию.</summary>
     public static void AddMacd(this IMarketStreamingPipeline pipeline, string[] assetIds,
-        int fast = 12, int slow = 26, int signal = 9, double quantity = 1.0) =>
+        int fast = 12, int slow = 26, int signal = 9, double quantity = 1.0)
+    {
+        ArgumentNullException.ThrowIfNull(pipeline);
         pipeline.AddStrategy(new MacdCrossoverStrategy(fast, slow, signal, quantity), assetIds);
+    }
 
     /// <summary>Добавляет стандартный набор индикаторных стратегий (Momentum + RSI + MACD).</summary>
     public static void AddStandardIndicators(this IMarketStreamingPipeline pipeline, string[] assetIds)
     {
+        ArgumentNullException.ThrowIfNull(pipeline);
         pipeline.AddMomentum(assetIds);
         pipeline.AddRsi(assetIds);
         pipeline.AddMacd(assetIds);
@@ -440,8 +490,11 @@ public static class MarketPipelineStrategyExtensions
 
     /// <summary>Добавляет композитную стратегию из заданных индикаторов.</summary>
     public static void AddComposite(this IMarketStreamingPipeline pipeline, string[] assetIds,
-        IMarketStrategy[] strategies, int? quorum = null, double quantity = 1.0) =>
+        IMarketStrategy[] strategies, int? quorum = null, double quantity = 1.0)
+    {
+        ArgumentNullException.ThrowIfNull(pipeline);
         pipeline.AddStrategy(new CompositeStrategy(strategies, quorum, quantity), assetIds);
+    }
 }
 
 /// <summary>
