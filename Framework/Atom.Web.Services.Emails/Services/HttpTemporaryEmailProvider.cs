@@ -86,7 +86,12 @@ public abstract class HttpTemporaryEmailProvider<TOptions> : TemporaryEmailProvi
     /// </summary>
     protected static async ValueTask<T?> ReadFromJsonAsync<T>(HttpContent content, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken)
     {
-        await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+
+        var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        // Отдельный scope — чтобы неявный DisposeAsync тоже шёл с ConfigureAwait(false).
+        await using var streamScope = stream.ConfigureAwait(false);
         return await JsonSerializer.DeserializeAsync(stream, typeInfo, cancellationToken).ConfigureAwait(false);
     }
 

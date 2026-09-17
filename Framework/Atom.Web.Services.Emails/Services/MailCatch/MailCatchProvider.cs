@@ -38,7 +38,8 @@ public sealed class MailCatchProvider : FixedDomainTemporaryEmailProvider<MailCa
         using var response = await HttpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using var streamScope = stream.ConfigureAwait(false);
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
         if (document.RootElement.ValueKind is not JsonValueKind.Array)
         {
