@@ -387,7 +387,7 @@ public sealed class BitstampRestClient : IMarketRestClient, IDisposable
         var content = new FormUrlEncodedContent(formData);
         var body = await content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
         authenticator.SignRequest(request, body);
 
         var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -415,7 +415,7 @@ public sealed class BitstampRestClient : IMarketRestClient, IDisposable
         var content = new FormUrlEncodedContent(formData);
         var body = await content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
         authenticator.SignRequest(request, body);
 
         var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -488,7 +488,7 @@ public sealed class BitstampRestClient : IMarketRestClient, IDisposable
 /// <summary>Кеш цен Bitstamp.</summary>
 public sealed class BitstampPriceStream : IWritableMarketPriceStream
 {
-    private readonly ConcurrentDictionary<string, BitstampPriceSnapshot> cache = new();
+    private readonly ConcurrentDictionary<string, BitstampPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly MarketRuntimePriceStreamBridge? runtimeBridge;
     private bool isDisposed;
 

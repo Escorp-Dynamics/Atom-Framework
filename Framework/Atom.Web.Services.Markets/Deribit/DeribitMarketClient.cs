@@ -417,7 +417,7 @@ public sealed class DeribitRestClient : IMarketRestClient, IDisposable
         var orderType = price.HasValue ? "limit" : "market";
 
         var requestPath = BuildCreateOrderPath(method, assetId, quantity, orderType, price);
-        var request = new HttpRequestMessage(HttpMethod.Get, requestPath);
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestPath);
         request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {accessToken}");
 
         var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -455,7 +455,7 @@ public sealed class DeribitRestClient : IMarketRestClient, IDisposable
     {
         await EnsureAuthenticatedAsync(cancellationToken).ConfigureAwait(false);
 
-        var request = new HttpRequestMessage(HttpMethod.Get,
+        using var request = new HttpRequestMessage(HttpMethod.Get,
             $"/api/v2/private/cancel?order_id={Uri.EscapeDataString(orderId)}");
         request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {accessToken}");
 
@@ -532,7 +532,7 @@ public sealed class DeribitRestClient : IMarketRestClient, IDisposable
 /// <summary>Кеш цен Deribit.</summary>
 public sealed class DeribitPriceStream : IWritableMarketPriceStream
 {
-    private readonly ConcurrentDictionary<string, DeribitPriceSnapshot> cache = new();
+    private readonly ConcurrentDictionary<string, DeribitPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly MarketRuntimePriceStreamBridge? runtimeBridge;
     private bool isDisposed;
 

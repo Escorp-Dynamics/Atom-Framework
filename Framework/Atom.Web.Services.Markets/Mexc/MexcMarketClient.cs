@@ -623,7 +623,7 @@ public sealed class MexcRestClient : IMarketRestClient, IDisposable
         var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
 
         var queryString = BuildCreateOrderQueryString(assetId, sideStr, orderType, quantity, price, ts);
-        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v3/order?{queryString}");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v3/order?{queryString}");
         authenticator.SignRequest(request, queryString);
 
         var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -661,6 +661,8 @@ public sealed class MexcRestClient : IMarketRestClient, IDisposable
     /// <inheritdoc />
     public async ValueTask<bool> CancelOrderAsync(string orderId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(orderId);
+
         if (authenticator is null)
             throw new MexcException("Аутентификация не настроена. Передайте apiKey/apiSecret или IMarketAuthenticator.");
 
@@ -675,7 +677,7 @@ public sealed class MexcRestClient : IMarketRestClient, IDisposable
 
         var queryString = $"symbol={Uri.EscapeDataString(symbol)}&orderId={Uri.EscapeDataString(oid)}&timestamp={ts}";
 
-        var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v3/order?{queryString}");
+        using var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v3/order?{queryString}");
         authenticator.SignRequest(request, queryString);
 
         var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -748,7 +750,7 @@ public sealed class MexcRestClient : IMarketRestClient, IDisposable
 /// <summary>Кеш цен MEXC.</summary>
 public sealed class MexcPriceStream : IWritableMarketPriceStream
 {
-    private readonly ConcurrentDictionary<string, MexcPriceSnapshot> cache = new();
+    private readonly ConcurrentDictionary<string, MexcPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly MarketRuntimePriceStreamBridge? runtimeBridge;
     private bool isDisposed;
 

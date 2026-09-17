@@ -237,7 +237,7 @@ public class CoinbaseClient : ExchangeClientBase
                     ?? MarketJsonParsingHelpers.TryGetString(root, "reason")
                     ?? "Unknown Coinbase runtime error.";
 
-                await PublishRuntimeErrorAsync(new CoinbaseException(message ?? "Unknown Coinbase runtime error.")).ConfigureAwait(false);
+                await PublishRuntimeErrorAsync(new CoinbaseException(message)).ConfigureAwait(false);
                 return;
             }
         }
@@ -429,7 +429,7 @@ public sealed class CoinbaseRestClient : IMarketRestClient, IDisposable
 
         var bodyJson = JsonSerializer.Serialize(bodyObj);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
         };
@@ -461,7 +461,7 @@ public sealed class CoinbaseRestClient : IMarketRestClient, IDisposable
         var bodyObj = new Dictionary<string, object> { ["order_ids"] = new[] { orderId } };
         var bodyJson = JsonSerializer.Serialize(bodyObj);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
         };
@@ -550,7 +550,7 @@ public sealed class CoinbaseRestClient : IMarketRestClient, IDisposable
 /// </summary>
 public sealed class CoinbasePriceStream : IWritableMarketPriceStream
 {
-    private readonly ConcurrentDictionary<string, CoinbasePriceSnapshot> cache = new();
+    private readonly ConcurrentDictionary<string, CoinbasePriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly MarketRuntimePriceStreamBridge? runtimeBridge;
     private bool isDisposed;
 

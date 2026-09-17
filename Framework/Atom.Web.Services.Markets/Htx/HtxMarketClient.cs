@@ -428,6 +428,8 @@ public sealed class HtxRestClient : IMarketRestClient, IDisposable
         string assetId, TradeSide side, double quantity, double? price = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(assetId);
+
         // 1) Получаем account-id (упрощённо — в реальном коде кешируется)
         if (authenticator is null)
             throw new HtxException("Аутентификация не настроена. Передайте apiKey/apiSecret или IMarketAuthenticator.");
@@ -454,7 +456,7 @@ public sealed class HtxRestClient : IMarketRestClient, IDisposable
 
         var bodyJson = JsonSerializer.Serialize(bodyObj);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
         };
@@ -482,7 +484,7 @@ public sealed class HtxRestClient : IMarketRestClient, IDisposable
 
         var path = $"/v1/order/orders/{Uri.EscapeDataString(orderId)}/submitcancel";
 
-        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = new StringContent("{}", Encoding.UTF8, "application/json")
         };
@@ -497,7 +499,7 @@ public sealed class HtxRestClient : IMarketRestClient, IDisposable
     {
         const string path = "/v1/account/accounts";
 
-        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
         authenticator!.SignRequest(request);
 
         var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -521,6 +523,8 @@ public sealed class HtxRestClient : IMarketRestClient, IDisposable
     /// <inheritdoc />
     public async ValueTask<double?> GetPriceAsync(string assetId, TradeSide side, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(assetId);
+
         var response = await httpClient.GetAsync(
             $"/market/detail/merged?symbol={Uri.EscapeDataString(assetId.ToLowerInvariant())}",
             cancellationToken).ConfigureAwait(false);
@@ -541,6 +545,8 @@ public sealed class HtxRestClient : IMarketRestClient, IDisposable
     /// <inheritdoc />
     public async ValueTask<IMarketOrderBookSnapshot?> GetOrderBookAsync(string assetId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(assetId);
+
         var response = await httpClient.GetAsync(
             $"/market/depth?symbol={Uri.EscapeDataString(assetId.ToLowerInvariant())}&type=step0&depth=20",
             cancellationToken).ConfigureAwait(false);
@@ -591,7 +597,7 @@ public sealed class HtxRestClient : IMarketRestClient, IDisposable
 /// <summary>Кеш цен HTX.</summary>
 public sealed class HtxPriceStream : IWritableMarketPriceStream
 {
-    private readonly ConcurrentDictionary<string, HtxPriceSnapshot> cache = new();
+    private readonly ConcurrentDictionary<string, HtxPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly MarketRuntimePriceStreamBridge? runtimeBridge;
     private bool isDisposed;
 

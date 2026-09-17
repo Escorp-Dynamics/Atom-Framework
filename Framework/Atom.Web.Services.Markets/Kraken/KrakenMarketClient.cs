@@ -409,7 +409,7 @@ public sealed class KrakenRestClient : IMarketRestClient, IDisposable
         if (price.HasValue)
             postData += $"&price={price.Value.ToString("G", CultureInfo.InvariantCulture)}";
 
-        var request = new HttpRequestMessage(HttpMethod.Post, urlPath);
+        using var request = new HttpRequestMessage(HttpMethod.Post, urlPath);
         authenticator.SignRequest(request, postData);
 
         var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -441,7 +441,7 @@ public sealed class KrakenRestClient : IMarketRestClient, IDisposable
         const string urlPath = "/0/private/CancelOrder";
         var postData = $"txid={Uri.EscapeDataString(orderId)}";
 
-        var request = new HttpRequestMessage(HttpMethod.Post, urlPath);
+        using var request = new HttpRequestMessage(HttpMethod.Post, urlPath);
         authenticator.SignRequest(request, postData);
 
         var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -536,7 +536,7 @@ public sealed class KrakenRestClient : IMarketRestClient, IDisposable
 /// </summary>
 public sealed class KrakenPriceStream : IWritableMarketPriceStream
 {
-    private readonly ConcurrentDictionary<string, KrakenPriceSnapshot> cache = new();
+    private readonly ConcurrentDictionary<string, KrakenPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly MarketRuntimePriceStreamBridge? runtimeBridge;
     private bool isDisposed;
 

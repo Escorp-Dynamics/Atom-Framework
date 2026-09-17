@@ -393,7 +393,7 @@ public sealed class BybitRestClient : IMarketRestClient, IDisposable
 
         var bodyJson = JsonSerializer.Serialize(bodyObj);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "/v5/order/create")
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v5/order/create")
         {
             Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
         };
@@ -421,6 +421,8 @@ public sealed class BybitRestClient : IMarketRestClient, IDisposable
     /// <inheritdoc />
     public async ValueTask<bool> CancelOrderAsync(string orderId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(orderId);
+
         // POST /v5/order/cancel
         // orderId в формате "SYMBOL:ORDER_ID"
         var parts = orderId.Split(':', 2);
@@ -436,7 +438,7 @@ public sealed class BybitRestClient : IMarketRestClient, IDisposable
         };
         var bodyJson = JsonSerializer.Serialize(bodyObj);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "/v5/order/cancel")
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v5/order/cancel")
         {
             Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
         };
@@ -526,7 +528,7 @@ public sealed class BybitRestClient : IMarketRestClient, IDisposable
 /// </summary>
 public sealed class BybitPriceStream : IWritableMarketPriceStream
 {
-    private readonly ConcurrentDictionary<string, BybitPriceSnapshot> cache = new();
+    private readonly ConcurrentDictionary<string, BybitPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly MarketRuntimePriceStreamBridge? runtimeBridge;
     private bool isDisposed;
 

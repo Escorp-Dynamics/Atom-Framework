@@ -395,7 +395,7 @@ public sealed class OkxRestClient : IMarketRestClient, IDisposable
 
         var bodyJson = JsonSerializer.Serialize(bodyObj);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
         };
@@ -424,6 +424,8 @@ public sealed class OkxRestClient : IMarketRestClient, IDisposable
     /// <inheritdoc />
     public async ValueTask<bool> CancelOrderAsync(string orderId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(orderId);
+
         // POST /api/v5/trade/cancel-order
         // orderId в формате "INST_ID:ORDER_ID"
         const string path = "/api/v5/trade/cancel-order";
@@ -435,7 +437,7 @@ public sealed class OkxRestClient : IMarketRestClient, IDisposable
         var bodyObj = new Dictionary<string, string> { ["instId"] = instId, ["ordId"] = oid };
         var bodyJson = JsonSerializer.Serialize(bodyObj);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
         };
@@ -525,7 +527,7 @@ public sealed class OkxRestClient : IMarketRestClient, IDisposable
 /// </summary>
 public sealed class OkxPriceStream : IWritableMarketPriceStream
 {
-    private readonly ConcurrentDictionary<string, OkxPriceSnapshot> cache = new();
+    private readonly ConcurrentDictionary<string, OkxPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly MarketRuntimePriceStreamBridge? runtimeBridge;
     private bool isDisposed;
 

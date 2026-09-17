@@ -437,7 +437,7 @@ public sealed class BitfinexRestClient : IMarketRestClient, IDisposable
 
         var bodyJson = JsonSerializer.Serialize(bodyObj);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
         };
@@ -481,7 +481,7 @@ public sealed class BitfinexRestClient : IMarketRestClient, IDisposable
         var bodyObj = new Dictionary<string, long> { ["id"] = id };
         var bodyJson = JsonSerializer.Serialize(bodyObj);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
         };
@@ -570,7 +570,7 @@ public sealed class BitfinexRestClient : IMarketRestClient, IDisposable
 /// </summary>
 public sealed class BitfinexPriceStream : IWritableMarketPriceStream
 {
-    private readonly ConcurrentDictionary<string, BitfinexPriceSnapshot> cache = new();
+    private readonly ConcurrentDictionary<string, BitfinexPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly MarketRuntimePriceStreamBridge? runtimeBridge;
     private bool isDisposed;
 

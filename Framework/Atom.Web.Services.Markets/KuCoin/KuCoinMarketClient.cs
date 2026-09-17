@@ -465,7 +465,7 @@ public sealed class KuCoinRestClient : IMarketRestClient, IDisposable
 
         var bodyJson = JsonSerializer.Serialize(bodyObj);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
             Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
         };
@@ -495,7 +495,7 @@ public sealed class KuCoinRestClient : IMarketRestClient, IDisposable
     {
         var endpoint = $"/api/v1/orders/{Uri.EscapeDataString(orderId)}";
 
-        var request = new HttpRequestMessage(HttpMethod.Delete, endpoint);
+        using var request = new HttpRequestMessage(HttpMethod.Delete, endpoint);
 
         if (authenticator is null)
             throw new KuCoinException("Аутентификация не настроена. Укажите apiKey/apiSecret или IMarketAuthenticator.");
@@ -575,7 +575,7 @@ public sealed class KuCoinRestClient : IMarketRestClient, IDisposable
 /// <summary>Кеш цен KuCoin.</summary>
 public sealed class KuCoinPriceStream : IWritableMarketPriceStream
 {
-    private readonly ConcurrentDictionary<string, KuCoinPriceSnapshot> cache = new();
+    private readonly ConcurrentDictionary<string, KuCoinPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly MarketRuntimePriceStreamBridge? runtimeBridge;
     private bool isDisposed;
 

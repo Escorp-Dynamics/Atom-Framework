@@ -489,6 +489,8 @@ public sealed class BinanceRestClient : IMarketRestClient, IDisposable
         string assetId, TradeSide side, double quantity, double? price = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(assetId);
+
         // POST /api/v3/order
         if (authenticator is null)
             throw new BinanceException("Аутентификация не настроена. Передайте apiKey/apiSecret или IMarketAuthenticator.");
@@ -510,7 +512,7 @@ public sealed class BinanceRestClient : IMarketRestClient, IDisposable
             query += $"&timeInForce=GTC&price={priceStr}";
         }
 
-        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v3/order?{query}");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v3/order?{query}");
         authenticator.SignRequest(request, query);
 
         var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -531,6 +533,8 @@ public sealed class BinanceRestClient : IMarketRestClient, IDisposable
     /// <inheritdoc />
     public async ValueTask<bool> CancelOrderAsync(string orderId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(orderId);
+
         // DELETE /api/v3/order — требуется symbol, но orderId глобально уникален в Binance.
         // Допущение: orderId передаётся в формате "SYMBOL:ORDER_ID" (напр. "BTCUSDT:12345").
         if (authenticator is null)
@@ -546,7 +550,7 @@ public sealed class BinanceRestClient : IMarketRestClient, IDisposable
                     $"&orderId={Uri.EscapeDataString(oid)}" +
                     $"&timestamp={ts}";
 
-        var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v3/order?{query}");
+        using var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v3/order?{query}");
         authenticator.SignRequest(request, query);
         var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
@@ -556,6 +560,8 @@ public sealed class BinanceRestClient : IMarketRestClient, IDisposable
     /// <inheritdoc />
     public async ValueTask<double?> GetPriceAsync(string assetId, TradeSide side, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(assetId);
+
         // GET /api/v3/ticker/price?symbol=BTCUSDT
         var response = await httpClient.GetAsync(
             $"/api/v3/ticker/price?symbol={Uri.EscapeDataString(assetId.ToUpperInvariant())}",
@@ -574,6 +580,8 @@ public sealed class BinanceRestClient : IMarketRestClient, IDisposable
     /// <inheritdoc />
     public async ValueTask<IMarketOrderBookSnapshot?> GetOrderBookAsync(string assetId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(assetId);
+
         // GET /api/v3/depth?symbol=BTCUSDT&limit=20
         var response = await httpClient.GetAsync(
             $"/api/v3/depth?symbol={Uri.EscapeDataString(assetId.ToUpperInvariant())}&limit=20",
@@ -624,7 +632,7 @@ public sealed class BinanceRestClient : IMarketRestClient, IDisposable
 /// </summary>
 public sealed class BinancePriceStream : IWritableMarketPriceStream
 {
-    private readonly ConcurrentDictionary<string, BinancePriceSnapshot> cache = new();
+    private readonly ConcurrentDictionary<string, BinancePriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly MarketRuntimePriceStreamBridge? runtimeBridge;
     private bool isDisposed;
 

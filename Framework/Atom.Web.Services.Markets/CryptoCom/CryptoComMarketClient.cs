@@ -432,7 +432,7 @@ public sealed class CryptoComRestClient : IMarketRestClient, IDisposable
         };
 
         var bodyJson = bodyObj.ToJsonString();
-        var request = new HttpRequestMessage(HttpMethod.Post, $"/exchange/v1/{method}");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/exchange/v1/{method}");
         authenticator.SignRequest(request, bodyJson);
 
         var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -454,6 +454,8 @@ public sealed class CryptoComRestClient : IMarketRestClient, IDisposable
     /// <inheritdoc />
     public async ValueTask<bool> CancelOrderAsync(string orderId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(orderId);
+
         // Формат orderId: "INSTRUMENT:ORDER_ID"
         var parts = orderId.Split(':', 2);
         if (parts.Length != 2)
@@ -478,7 +480,7 @@ public sealed class CryptoComRestClient : IMarketRestClient, IDisposable
         };
 
         var bodyJson = bodyObj.ToJsonString();
-        var request = new HttpRequestMessage(HttpMethod.Post, $"/exchange/v1/{method}");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/exchange/v1/{method}");
         authenticator!.SignRequest(request, bodyJson);
 
         var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -565,7 +567,7 @@ public sealed class CryptoComRestClient : IMarketRestClient, IDisposable
 /// <summary>Кеш цен Crypto.com.</summary>
 public sealed class CryptoComPriceStream : IWritableMarketPriceStream
 {
-    private readonly ConcurrentDictionary<string, CryptoComPriceSnapshot> cache = new();
+    private readonly ConcurrentDictionary<string, CryptoComPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly MarketRuntimePriceStreamBridge? runtimeBridge;
     private bool isDisposed;
 

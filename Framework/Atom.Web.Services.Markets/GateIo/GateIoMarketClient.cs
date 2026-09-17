@@ -425,7 +425,7 @@ public sealed class GateIoRestClient : IMarketRestClient, IDisposable
 
         var bodyJson = JsonSerializer.Serialize(bodyObj);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
         };
@@ -452,6 +452,8 @@ public sealed class GateIoRestClient : IMarketRestClient, IDisposable
     /// <inheritdoc />
     public async ValueTask<bool> CancelOrderAsync(string orderId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(orderId);
+
         // DELETE /api/v4/spot/orders/{order_id}?currency_pair=...
         // orderId в формате "PAIR:ORDER_ID" (BTC_USDT:12345)
         var parts = orderId.Split(':', 2);
@@ -462,7 +464,7 @@ public sealed class GateIoRestClient : IMarketRestClient, IDisposable
         var path = $"/api/v4/spot/orders/{Uri.EscapeDataString(oid)}";
         var query = $"currency_pair={Uri.EscapeDataString(pair)}";
 
-        var request = new HttpRequestMessage(HttpMethod.Delete, $"{path}?{query}");
+        using var request = new HttpRequestMessage(HttpMethod.Delete, $"{path}?{query}");
 
         if (authenticator is null)
             throw new GateIoException("Аутентификация не настроена. Укажите apiKey/apiSecret или IMarketAuthenticator.");
@@ -548,7 +550,7 @@ public sealed class GateIoRestClient : IMarketRestClient, IDisposable
 /// </summary>
 public sealed class GateIoPriceStream : IWritableMarketPriceStream
 {
-    private readonly ConcurrentDictionary<string, GateIoPriceSnapshot> cache = new();
+    private readonly ConcurrentDictionary<string, GateIoPriceSnapshot> cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly MarketRuntimePriceStreamBridge? runtimeBridge;
     private bool isDisposed;
 
