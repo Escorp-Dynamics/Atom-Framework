@@ -651,6 +651,34 @@ public sealed class WaylandCompositor : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Размер, который композитор предлагает новому окну в первом configure.
+    /// </summary>
+    /// <remarks>
+    /// ★ Пустое значение (по умолчанию) — прежнее «решай сам»: Chrome на ноль берёт размер из
+    /// своего <c lang="text">--window-size</c>. Firefox на Wayland так не умеет: <c lang="text">-width/-height</c>
+    /// у него работают только под X11, а на configure(0, 0) окно встаёт в свой минимум — замер
+    /// показал <c lang="text">set_window_geometry(26, 23, 500, 200)</c> и область просмотра 500×127 при
+    /// запуске с <c lang="text">-width 1440 -height 900</c>. Размер ему обязан назвать композитор.
+    /// </remarks>
+    public System.Drawing.Size PreferredWindowSize
+    {
+        get
+        {
+            var result = System.Drawing.Size.Empty;
+            Invoke(() => result = preferredWindowSize);
+            return result;
+        }
+
+        set => Invoke(() => preferredWindowSize = value);
+    }
+
+    // Читается только циклом событий при первом configure; пишется через Invoke.
+    private System.Drawing.Size preferredWindowSize;
+
+    /// <summary>Размер для первого configure — без маршалинга, для вызова из цикла событий.</summary>
+    internal System.Drawing.Size InitialWindowSize => preferredWindowSize;
+
     private readonly List<string> windowCommandLog = [];
 
     /// <summary>

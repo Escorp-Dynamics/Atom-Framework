@@ -67,6 +67,24 @@ public sealed class WaylandDisplaySession : IAsyncDisposable
     public WaylandInput Input => compositor.Input;
 
     /// <summary>
+    /// Размер, который получит новое окно приложения в первом configure.
+    /// </summary>
+    /// <remarks>
+    /// ★ По умолчанию пуст: окно выбирает размер само, как это делает Chrome по
+    /// <c lang="text">--window-size</c>. Задаётся для приложений, которые на Wayland свой размер из
+    /// командной строки применить не могут, — Firefox без него открывается окном 500×200.
+    ///
+    /// Значение общее для всего сеанса и касается ВСЕХ новых окон на нём. Драйвер по умолчанию
+    /// поднимает дисплей на каждый браузер, и соседей с другим размером там нет; на дисплее,
+    /// переданном нескольким браузерам сразу, заданный размер получат и их окна.
+    /// </remarks>
+    public Size PreferredWindowSize
+    {
+        get => compositor.PreferredWindowSize;
+        set => compositor.PreferredWindowSize = value;
+    }
+
+    /// <summary>
     /// Поднимает сеанс дисплея.
     /// </summary>
     public static WaylandDisplaySession Create(WaylandDisplaySessionSettings? settings = null)

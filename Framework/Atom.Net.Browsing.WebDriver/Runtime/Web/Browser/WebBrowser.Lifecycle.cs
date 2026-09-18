@@ -639,6 +639,9 @@ public sealed partial class WebBrowser
         AddPresetLaunchArguments(startInfo, preset.EffectiveArguments.Select(static node => node?.GetValue<string>()), stripProcessHeadlessArgument);
         AddBridgeLaunchArguments(startInfo, profile, bridgeBootstrap);
 
+        if (OperatingSystem.IsLinux() && isFirefox)
+            DeclareFirefoxWindowSize(startInfo, settings.Display);
+
         var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Не удалось запустить браузер '{browserBinaryPath}'");
         settings.Logger?.LogWebBrowserProcessStarted(browserBinaryPath);
         return process;
@@ -871,6 +874,79 @@ public sealed partial class WebBrowser
             return;
         }
     }
+
+    /// <summary>
+    /// Называет композитору размер окна, с которым запускается Firefox.
+    /// </summary>
+    /// <remarks>
+    /// ★ <c lang="text">-width/-height</c> Firefox применяет только под X11. На собственном композиторе
+    /// Wayland (путь по умолчанию с 7f3f292) размер окна задаёт configure композитора, а тот слал
+    /// ноль — и окно вставало в минимум Firefox 500×200: область просмотра 500×127 (а то и 500×25),
+    /// виджет Cloudflare 300×70 уезжал за верх страницы, и координатный клик по чекбоксу мазал.
+    ///
+    /// Размер берётся из итоговых аргументов процесса — ровно тех, что увидел бы Firefox под X11:
+    /// туда уже сведены и размер профиля устройства, и аргументы вызывающего.
+    ///
+    /// Chromium сюда не попадает: его <c lang="text">--window-size</c> на Wayland действует сам, и
+    /// поведение композитора для него не меняется.
+    /// </remarks>
+    [SupportedOSPlatform("linux")]
+    private static void DeclareFirefoxWindowSize(ProcessStartInfo startInfo, VirtualDisplay? display)
+    {
+        if (display?.Session is not { } session)
+            return;
+
+        session.PreferredWindowSize = ResolveFirefoxWindowSize(startInfo.ArgumentList, session.Resolution);
+    }
+
+    /// <summary>
+    /// Размер окна Firefox: из аргументов <c lang="text">-width</c> и <c lang="text">-height</c>, а
+    /// незаданная сторона — по правилу нового профиля самого Firefox.
+    /// </summary>
+    /// <remarks>
+    /// ★ Без размера окно на Wayland так же встаёт в минимум 500×200 — замер с профилем устройства,
+    /// не задающим размер окна, дал ту же область просмотра 500×127. Под X11 Firefox в этом случае
+    /// берёт 90% доступной области экрана, но не больше 1280×1040 (<c lang="text">browser-init.js</c>);
+    /// то же правило повторяется здесь, чтобы окно было таким, каким его открыл бы сам браузер.
+    /// </remarks>
+    /// <param name="arguments">Итоговые аргументы процесса.</param>
+    /// <param name="screen">Разрешение дисплея.</param>
+    internal static Size ResolveFirefoxWindowSize(IReadOnlyList<string> arguments, Size screen)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+
+        var width = 0;
+        var height = 0;
+
+        for (var index = 0; index < arguments.Count - 1; ++index)
+        {
+            if (!int.TryParse(arguments[index + 1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var value) || value <= 0)
+                continue;
+
+            // Firefox принимает флаг и с одним, и с двумя дефисами.
+            switch (arguments[index])
+            {
+                case "-width" or "--width":
+                    width = value;
+                    break;
+
+                case "-height" or "--height":
+                    height = value;
+                    break;
+            }
+        }
+
+        if (width <= 0)
+            width = Math.Min(screen.Width * 9 / 10, FirefoxDefaultWindowWidth);
+
+        if (height <= 0)
+            height = Math.Min(screen.Height * 9 / 10, FirefoxDefaultWindowHeight);
+
+        return new Size(width, height);
+    }
+
+    private const int FirefoxDefaultWindowWidth = 1280;
+    private const int FirefoxDefaultWindowHeight = 1040;
 
     private static bool IsHeadlessLaunchArgument(string argument)
         => string.Equals(argument, "-headless", StringComparison.Ordinal)
