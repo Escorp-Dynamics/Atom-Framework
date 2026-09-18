@@ -93,16 +93,35 @@ public abstract partial class NetworkStream
         }
     }
 
+    /// <summary>Системный резолвер, обёрнутый под интерфейс кэша; хранится полем, чтобы не плодить делегат на каждый вызов.</summary>
+    private static readonly Func<string, CancellationToken, ValueTask<IPAddress[]>> SystemResolver = SystemResolveAsync;
+
     /// <summary>
     /// Асинхронно разрешает DNS-имя хоста в набор IP-адресов.
     /// </summary>
     /// <param name="host">Хост для разрешения. Допускается как доменное имя, так и строковое представление IP-адреса.</param>
     /// <param name="cancellationToken">Токен отмены операции. При отмене будет выброшено исключение <see cref="OperationCanceledException"/>.</param>
-    /// <returns>Массив IP-адресов, возвращённый системным резолвером.</returns>
+    /// <returns>Массив IP-адресов, возвращённый системным резолвером либо взятый из <see cref="DnsCache.Shared"/>.</returns>
     /// <exception cref="OperationCanceledException">Операция была отменена через <paramref name="cancellationToken"/>.</exception>
     /// <exception cref="SocketException">Не удалось разрешить <paramref name="host"/>.</exception>
+    /// <remarks>
+    /// Литеральный адрес до резолвера не доходит вовсе: разбирать строку в <see cref="IPAddress"/>
+    /// дешевле, чем спрашивать о ней ОС, а кэшировать тут нечего.
+    ///
+    /// Всё остальное идёт через общий кэш — см. <see cref="DnsCache"/> о том, зачем он нужен и как
+    /// его выключить.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected static async ValueTask<IPAddress[]> ResolveHostAsync(string host, CancellationToken cancellationToken)
+    protected static ValueTask<IPAddress[]> ResolveHostAsync(string host, CancellationToken cancellationToken)
+        => IPAddress.TryParse(host, out var literal)
+            ? new ValueTask<IPAddress[]>([literal])
+            : DnsCache.Shared.ResolveAsync(host, SystemResolver, cancellationToken);
+
+    /// <summary>
+    /// Обращается к системному резолверу, приводя любой его отказ к <see cref="SocketException"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static async ValueTask<IPAddress[]> SystemResolveAsync(string host, CancellationToken cancellationToken)
     {
         try
         {
