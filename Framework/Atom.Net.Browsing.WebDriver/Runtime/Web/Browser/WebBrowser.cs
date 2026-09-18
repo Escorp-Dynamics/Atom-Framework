@@ -1175,13 +1175,7 @@ public sealed partial class WebBrowser : IWebBrowser
         // подтверждаться и здесь. Настоящий десктопный браузер всегда отдаёт vendor/renderer, и
         // расхождение с User-Agent (или пустые значения) выделяет клиента не хуже прямого признака
         // автоматизации.
-        AppendOptionalObject(payload, "webGl", BuildWebGlPayload(device.WebGL));
-
-        // ★ Числовые пределы идут ВМЕСТЕ с именем видеокарты. Подменять одно без другого хуже,
-        // чем не подменять вовсе: пара «карта — её пределы» известна и сверяется таблицей, а
-        // замер показывал Apple M1 Pro с максимальным размером текстуры 8192 вместо 16384 —
-        // то есть карту, которой не бывает.
-        AppendOptionalObject(payload, "webGlParameters", BuildWebGlParametersPayload(device.WebGLParams));
+        AppendChromiumOnlySurfaces(payload, device);
 
         if (!device.ViewportSize.IsEmpty)
         {
@@ -1203,8 +1197,6 @@ public sealed partial class WebBrowser : IWebBrowser
         if (device.HardwareConcurrency is { } hardwareConcurrency)
             payload["hardwareConcurrency"] = hardwareConcurrency;
 
-        if (device.DeviceMemory is { } deviceMemory)
-            payload["deviceMemory"] = deviceMemory;
 
         if (device.Geolocation is { } geolocation)
             payload["geolocation"] = BuildGeolocationPayload(geolocation);
@@ -1393,6 +1385,24 @@ public sealed partial class WebBrowser : IWebBrowser
     /// фаерфоксовом <c lang="text">Accept</c> — Cloudflare отвечал на это 600010 («среда слишком ограничена»),
     /// 0 задач из 14, тогда как тот же Firefox без профиля решал 3 из 3.
     /// </remarks>
+    /// <summary>
+    /// Заявляет ли строка агента ИЗВЕСТНЫЙ движок, отличный от Chromium (Gecko или WebKit).
+    /// </summary>
+    /// <remarks>
+    /// Не то же самое, что <c lang="text">!DeclaresChromiumEngine</c>: строка без явного движка
+    /// (пустая, тестовая, нестандартная) сюда не попадает. Гейт поверхностей «только Chromium»
+    /// должен срезать их лишь там, где движок ТОЧНО другой, а не ломать неизвестные строки.
+    /// </remarks>
+    internal static bool DeclaresNonChromiumEngine(string? userAgent)
+    {
+        if (string.IsNullOrEmpty(userAgent))
+            return false;
+
+        return DeclaresWebKitEngine(userAgent)
+            || userAgent.Contains("Firefox/", StringComparison.Ordinal)
+            || userAgent.Contains("Gecko/", StringComparison.Ordinal);
+    }
+
     internal static bool DeclaresChromiumEngine(string? userAgent)
     {
         if (string.IsNullOrEmpty(userAgent))
@@ -1447,6 +1457,34 @@ public sealed partial class WebBrowser : IWebBrowser
 
     private const string SoftwareWebGlRenderer =
         "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver-5.0.0)";
+
+    /// <summary>
+    /// Поверхности личности, которые существуют только у Chromium.
+    /// </summary>
+    /// <remarks>
+    /// ★ Строки WebGL — ANGLE/SwiftShader, программный рендерер ИМЕННО Chromium; Firefox на программном
+    /// рендеринге отвечает «Mozilla» и Mesa/llvmpipe. <c lang="text">navigator.deviceMemory</c> у Firefox
+    /// и Safari нет вовсе, и само появление свойства выдаёт подмену одной проверкой
+    /// <c lang="text">'deviceMemory' in navigator</c>. Профиль Firefox получал и то и другое — хромовую
+    /// видеокарту на Gecko, которой не бывает в природе, — и Cloudflare отвергал клик по чекбоксу.
+    /// Прочие движки отдают СВОИ настоящие значения: они согласованы с движком по построению.
+    /// </remarks>
+    private static void AppendChromiumOnlySurfaces(JsonObject payload, Device device)
+    {
+        if (DeclaresNonChromiumEngine(device.UserAgent))
+            return;
+
+        AppendOptionalObject(payload, "webGl", BuildWebGlPayload(device.WebGL));
+
+        // ★ Числовые пределы идут ВМЕСТЕ с именем видеокарты. Подменять одно без другого хуже,
+        // чем не подменять вовсе: пара «карта — её пределы» известна и сверяется таблицей, а
+        // замер показывал Apple M1 Pro с максимальным размером текстуры 8192 вместо 16384 —
+        // то есть карту, которой не бывает.
+        AppendOptionalObject(payload, "webGlParameters", BuildWebGlParametersPayload(device.WebGLParams));
+
+        if (device.DeviceMemory is { } deviceMemory)
+            payload["deviceMemory"] = deviceMemory;
+    }
 
     private static JsonObject? BuildWebGlPayload(WebGLSettings? settings)
     {
