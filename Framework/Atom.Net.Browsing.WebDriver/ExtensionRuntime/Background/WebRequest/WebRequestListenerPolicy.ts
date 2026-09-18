@@ -2,6 +2,8 @@ import type { HeaderLike, MutableHeaderLike } from '../Cookies/VirtualCookies';
 
 export interface WebRequestDetails {
     readonly tabId?: number;
+    /** Фрейм запроса: 0 — верхний документ вкладки, иначе подчинённый фрейм. */
+    readonly frameId?: number;
     readonly url?: string;
     readonly method?: string;
     readonly requestId?: string;
