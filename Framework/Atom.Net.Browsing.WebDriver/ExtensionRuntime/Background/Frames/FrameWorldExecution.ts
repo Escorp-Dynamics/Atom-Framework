@@ -124,9 +124,41 @@ async function evalInWorld(
     world: ExecutionWorld = 'MAIN',
     frameId: number | null = null,
 ): Promise<ScriptExecutionResult[]> {
-    const preferLegacyTabsExecution = world === 'MAIN' && browserHost.tabs?.executeScript !== undefined;
+    // ★ Основной мир — через scripting.executeScript({ world: 'MAIN' }) ВЕЗДЕ, где он есть, включая
+    // Firefox (поддерживает с версии 128). Раньше при наличии tabs.executeScript (то есть на Firefox
+    // MV2) выбирался обходной путь ниже: в DOM страницы вставлялся скрытый <span id="__ab…"> с кодом
+    // в атрибуте и встроенный <script>. Каждый вызов оставлял след, видимый коду страницы — а на
+    // странице с виджетом Turnstile это api.js Cloudflare, который работает в том же документе, —
+    // и нарушал CSP там, где встроенные скрипты запрещены. Солвер опрашивает страницу каждые 150 мс,
+    // так что вставки шли непрерывно, и Firefox получал интерактивную проверку вместо тихого пропуска,
+    // тогда как Chrome (MV3, без tabs.executeScript) шёл чистым путём. Обходной путь остаётся
+    // запасным — для браузеров, где scripting не умеет основной мир.
+    const scriptingAvailable = browserHost.scripting?.executeScript !== undefined;
+    const legacyTabsAvailable = world === 'MAIN' && browserHost.tabs?.executeScript !== undefined;
 
-    if (!preferLegacyTabsExecution && browserHost.scripting?.executeScript !== undefined) {
+    if (scriptingAvailable) {
+        try {
+            return await evalViaScripting(browserHost, runtime, tabId, code, allFrames, world, frameId);
+        } catch (error) {
+            if (!legacyTabsAvailable) {
+                throw error;
+            }
+        }
+    }
+
+    return await evalViaLegacyTabs(browserHost, runtime, tabId, code, allFrames, frameId);
+}
+
+async function evalViaScripting(
+    browserHost: BrowserHost,
+    runtime: any,
+    tabId: number,
+    code: string,
+    allFrames: boolean,
+    world: ExecutionWorld,
+    frameId: number | null,
+): Promise<ScriptExecutionResult[]> {
+    {
         const target = typeof frameId === 'number'
             ? { tabId, frameIds: [frameId] }
             : (allFrames ? { tabId, allFrames: true } : { tabId });
@@ -166,7 +198,16 @@ async function evalInWorld(
 
         return (results ?? []).map((result) => normalizeExecutionResult(result?.result));
     }
+}
 
+async function evalViaLegacyTabs(
+    browserHost: BrowserHost,
+    runtime: any,
+    tabId: number,
+    code: string,
+    allFrames: boolean,
+    frameId: number | null,
+): Promise<ScriptExecutionResult[]> {
     if (browserHost.tabs?.executeScript === undefined) {
         throw new Error('API выполнения скриптов по вкладкам недоступен');
     }
