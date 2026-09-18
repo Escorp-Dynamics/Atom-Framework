@@ -790,6 +790,13 @@ public class Tls12Stream([NotNull] NetworkStream stream, in TlsSettings settings
             Tls12Prf(premasterSecret.Span, "master secret"u8, seed, masterSecret, prfHash);
         }
 
+        // В TLS 1.2 весь трафик восстанавливается из ОДНОГО master secret, поэтому журналу NSS
+        // хватает единственной строки — и она пишется здесь, до расхода key_block: дальше по
+        // тексту master secret уже разложен по ключам, а Wireshark ждёт именно его.
+        // Расширенный master secret (RFC 7627) на формат не влияет: метка та же, меняется лишь
+        // способ вывода, который разборщику знать не нужно.
+        TlsKeyLog.Write(TlsKeyLog.ClientRandomLabel, clientRandom.Span, masterSecret);
+
         // key_block. Длины берутся из общей таблицы: ChaCha20 — 32-байтовый ключ и 12-байтовый
         // фиксированный IV, AES-GCM — 16/32 байта ключа и 4 байта соли, CBC — 16/32 байта ключа,
         // 20-байтовый MAC-ключ и НОЛЬ байт фиксированного вектора (он явный и случайный).

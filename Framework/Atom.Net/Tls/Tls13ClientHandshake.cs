@@ -229,6 +229,10 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
             {
                 var earlySecret = Tls13KeySchedule.DeriveEarlySecret(pskOffer!.Hash, pskOffer.PreSharedKey.Span);
                 ClientEarlyTrafficSecret = Tls13KeySchedule.DeriveSecret(pskOffer.Hash, earlySecret, "c e traffic", transcript.ComputeHash(pskOffer.Hash));
+
+                // Ранние данные шифруются ЭТИМ секретом и никаким другим: без него 0-RTT остаётся
+                // в дампе нерасшифрованным, даже когда всё остальное рукопожатие прочитано.
+                WriteKeyLog(TlsKeyLog.ClientEarlyTrafficSecretLabel, ClientEarlyTrafficSecret);
             }
             NeedsRetryPending = false;
             sniHost = ReadServerName(extensions);
@@ -711,6 +715,9 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
 
         ClientApplicationSecret = Tls13KeySchedule.DeriveSecret(HashAlgorithm, master, "c ap traffic", transcriptHash);
         ServerApplicationSecret = Tls13KeySchedule.DeriveSecret(HashAlgorithm, master, "s ap traffic", transcriptHash);
+
+        WriteKeyLog(TlsKeyLog.ClientTrafficSecretLabel, ClientApplicationSecret);
+        WriteKeyLog(TlsKeyLog.ServerTrafficSecretLabel, ServerApplicationSecret);
     }
 
     /// <summary>
@@ -746,6 +753,33 @@ public sealed class Tls13ClientHandshake(in TlsSettings settings) : IDisposable
 
         ClientHandshakeSecret = Tls13KeySchedule.DeriveSecret(HashAlgorithm, handshakeSecret, "c hs traffic", transcriptHash);
         ServerHandshakeSecret = Tls13KeySchedule.DeriveSecret(HashAlgorithm, handshakeSecret, "s hs traffic", transcriptHash);
+
+        // Секреты рукопожатия отдаются журналу здесь, а не у транспорта: под ними едут
+        // EncryptedExtensions, Certificate и оба Finished — а именно на них и приходятся отказы,
+        // которые без дампа выглядят как «сервер оборвал соединение».
+        WriteKeyLog(TlsKeyLog.ClientHandshakeTrafficSecretLabel, ClientHandshakeSecret);
+        WriteKeyLog(TlsKeyLog.ServerHandshakeTrafficSecretLabel, ServerHandshakeSecret);
+    }
+
+    /// <summary>
+    /// Отдаёт секрет журналу NSS key log, если тот включён.
+    /// </summary>
+    /// <param name="label">Метка секрета в формате NSS.</param>
+    /// <param name="secret">Секрет; пустой пропускается журналом.</param>
+    /// <remarks>
+    /// ★ Вызовы стоят ЗДЕСЬ, а не в <see cref="Tls13Stream"/>, намеренно: то же рукопожатие
+    /// обслуживает QUIC, и вынос записи к транспорту означал бы вторую копию — с ровно одним
+    /// исходом, при котором HTTP/3-трафик однажды перестанет расшифровываться и никто этого не
+    /// заметит, пока он не понадобится.
+    ///
+    /// Секреты не копируются и не удерживаются: журнал получает их тем же экземпляром, который
+    /// класс и так хранит в свойствах, и время их жизни не меняется.
+    /// </remarks>
+    private void WriteKeyLog(string label, ReadOnlyMemory<byte> secret)
+    {
+        if (helloRandom is null) return;
+
+        TlsKeyLog.Write(label, helloRandom, secret.Span);
     }
 
     private void ParseServerHello(ReadOnlySpan<byte> body)
