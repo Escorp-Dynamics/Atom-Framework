@@ -844,6 +844,12 @@ public sealed class WaylandCompositor : IAsyncDisposable
     private static WaylandCompositor? servingCompositor;
 
     private bool IsOnEventLoop => ReferenceEquals(servingCompositor, this);
+
+    private static void MarkServing(WaylandCompositor? compositor) => servingCompositor = compositor;
+
+    /// <summary>Ошибка, на которой остановился цикл событий, если он упал.</summary>
+    /// <remarks>Браузер без цикла событий не рисует и не получает ввод — владельцу пора его перезапускать.</remarks>
+    public Exception? EventLoopFault { get; private set; }
     private static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(2);
 
     /// <summary>Выдаёт следующий порядковый номер события.</summary>
@@ -931,7 +937,7 @@ public sealed class WaylandCompositor : IAsyncDisposable
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            servingCompositor = this;
+            MarkServing(this);
 
             try
             {
@@ -939,7 +945,7 @@ public sealed class WaylandCompositor : IAsyncDisposable
             }
             finally
             {
-                servingCompositor = null;
+                MarkServing(compositor: null);
             }
 
             // Опрос вместо ожидания на сокете: клиентов единицы, а задержка в миллисекунду
@@ -1102,11 +1108,12 @@ public sealed class WaylandCompositor : IAsyncDisposable
             {
                 // Штатная остановка цикла событий.
             }
-            catch (Exception)
+            catch (Exception exception)
             {
                 // ★ Сбой цикла уже случился, и браузер без композитора всё равно мёртв. Проброс
                 // отсюда обрывал освобождение: сокет, окна и клиенты оставались, а владелец
                 // браузера не доходил до перезапуска.
+                EventLoopFault = exception;
             }
         }
 
