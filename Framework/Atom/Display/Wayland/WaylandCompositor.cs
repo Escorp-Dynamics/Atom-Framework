@@ -794,14 +794,14 @@ public sealed class WaylandCompositor : IAsyncDisposable
         pendingActions.Enqueue(action);
 
         // Вызов из самого цикла выполнится на ближайшем обороте, рекурсии не будет.
-        if (Environment.CurrentManagedThreadId == eventLoopThreadId)
+        if (IsOnEventLoop)
             DrainPendingActions();
     }
 
     /// <summary>Ждёт выполнения действия в цикле событий.</summary>
     internal void Invoke(Action action)
     {
-        if (Environment.CurrentManagedThreadId == eventLoopThreadId)
+        if (IsOnEventLoop)
         {
             action();
             return;
@@ -831,7 +831,19 @@ public sealed class WaylandCompositor : IAsyncDisposable
     }
 
     private readonly System.Collections.Concurrent.ConcurrentQueue<Action> pendingActions = new();
-    private int eventLoopThreadId;
+
+    /// <summary>Композитор, чей оборот цикла событий сейчас выполняет этот поток.</summary>
+    /// <remarks>
+    /// ★ Не номер потока: после await Task.Delay цикл продолжается на ЛЮБОМ потоке пула, а
+    /// запомненный при старте номер достаётся чужой работе — клику, движению мыши. Такой поток
+    /// выполнял очередь параллельно с настоящим циклом, общий писатель сообщений ломался, и цикл
+    /// падал с ArgumentOutOfRangeException в WaylandMessageWriter.Build (2026-09-19, после пяти
+    /// часов работы). Метка же стоит только на синхронной части оборота.
+    /// </remarks>
+    [ThreadStatic]
+    private static WaylandCompositor? servingCompositor;
+
+    private bool IsOnEventLoop => ReferenceEquals(servingCompositor, this);
     private static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(2);
 
     /// <summary>Выдаёт следующий порядковый номер события.</summary>
@@ -917,31 +929,44 @@ public sealed class WaylandCompositor : IAsyncDisposable
 
     private async Task RunEventLoopAsync(CancellationToken cancellationToken)
     {
-        eventLoopThreadId = Environment.CurrentManagedThreadId;
-
         while (!cancellationToken.IsCancellationRequested)
         {
-            AcceptPendingClients();
-            ServeClients();
+            servingCompositor = this;
 
-            // ★ Обход по снимку, а не по живой коллекции: ответ хоста внутри Pump доходит до
-            // PresentScene, а тот открывает новое хост-окно — изменённая коллекция рвала цикл
-            // событий исключением, и композитор замирал целиком при появлении второго окна.
-            pumpBuffer.Clear();
-            pumpBuffer.AddRange(presentations.Values);
-
-            foreach (var window in pumpBuffer)
-                window.Pump();
-
-            DrainPendingActions();
-
-            if (isSceneDirty)
-                PresentScene();
+            try
+            {
+                ServeOnce();
+            }
+            finally
+            {
+                servingCompositor = null;
+            }
 
             // Опрос вместо ожидания на сокете: клиентов единицы, а задержка в миллисекунду
             // незаметна на фоне частоты кадров браузера.
             await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Один оборот цикла событий: только синхронная работа.</summary>
+    private void ServeOnce()
+    {
+        AcceptPendingClients();
+        ServeClients();
+
+        // ★ Обход по снимку, а не по живой коллекции: ответ хоста внутри Pump доходит до
+        // PresentScene, а тот открывает новое хост-окно — изменённая коллекция рвала цикл
+        // событий исключением, и композитор замирал целиком при появлении второго окна.
+        pumpBuffer.Clear();
+        pumpBuffer.AddRange(presentations.Values);
+
+        foreach (var window in pumpBuffer)
+            window.Pump();
+
+        DrainPendingActions();
+
+        if (isSceneDirty)
+            PresentScene();
     }
 
     private void AcceptPendingClients()
@@ -1076,6 +1101,12 @@ public sealed class WaylandCompositor : IAsyncDisposable
             catch (OperationCanceledException)
             {
                 // Штатная остановка цикла событий.
+            }
+            catch (Exception)
+            {
+                // ★ Сбой цикла уже случился, и браузер без композитора всё равно мёртв. Проброс
+                // отсюда обрывал освобождение: сокет, окна и клиенты оставались, а владелец
+                // браузера не доходил до перезапуска.
             }
         }
 
