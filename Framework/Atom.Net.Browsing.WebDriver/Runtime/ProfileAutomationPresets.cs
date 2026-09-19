@@ -434,6 +434,15 @@ internal static class ProfileAutomationPresets
             ["startup.homepage_welcome_url"] = string.Empty,
             ["startup.homepage_welcome_url.additional"] = string.Empty,
             ["browser.aboutwelcome.enabled"] = false,
+            // ★ Окно «Welcome to Firefox» с условиями использования — НЕ то же самое, что about:welcome
+            // выше, и прошлым выключателем не гасится. Свежие Firefox (Developer Edition 157, ESR 153)
+            // показывают его модальным поверх страницы при первом запуске профиля, а профиль у нас
+            // всегда свежий. Окно затемняет документ и перехватывает клики: координатный клик по
+            // чекбоксу Turnstile уходил в подложку, и на Firefox не решалось ни одной задачи (0 из
+            // десятков), хотя виджет, страница, TLS и ввод были в порядке. С этими двумя флагами —
+            // 46 из 46 на той же машине.
+            ["termsofuse.bypassNotification"] = true,
+            ["datareporting.policy.dataSubmissionPolicyBypassNotification"] = true,
             // Многовкладочный солвер: фоновые (неактивные) вкладки НЕ должны тормозиться/замораживаться,
             // иначе таймеры и колбэки виджета в них не идут — Turnstile не решается (chromium-аналог
             // уже стоит: --disable-background-timer-throttling). Отключаем throttling таймеров, бюджетное

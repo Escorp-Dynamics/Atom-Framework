@@ -23,6 +23,27 @@ public sealed class WebDriverVirtualDisplayLaunchTests
         });
     }
 
+    // ★ Размер окна Firefox на Wayland называет композитор: сам браузер -width/-height там не
+    // применяет и встаёт в минимум 500×200. Разбор аргументов обязан видеть оба написания флага,
+    // а незаданная сторона берётся по правилу нового профиля Firefox: 90% экрана, не больше 1280×1040.
+    [TestCase("-profile /tmp/p -width 1440 -height 900", 1440, 900)]
+    [TestCase("--width 1280 --height 720 -no-remote", 1280, 720)]
+    [TestCase("-height 900 -width 900", 900, 900)]
+    [TestCase("-width 1440", 1440, 972)]
+    [TestCase("-profile /tmp/p -no-remote", 1280, 972)]
+    [TestCase("-width", 1280, 972)]
+    [TestCase("-width abc -height -5", 1280, 972)]
+    public void ResolveFirefoxWindowSizeReadsLaunchArguments(string arguments, int width, int height)
+        => Assert.That(
+            WebBrowser.ResolveFirefoxWindowSize(arguments.Split(' '), new System.Drawing.Size(1920, 1080)),
+            Is.EqualTo(new System.Drawing.Size(width, height)));
+
+    [Test]
+    public void ResolveFirefoxWindowSizeFitsSmallScreen()
+        => Assert.That(
+            WebBrowser.ResolveFirefoxWindowSize([], new System.Drawing.Size(1366, 768)),
+            Is.EqualTo(new System.Drawing.Size(1229, 691)));
+
     [Test]
     [SupportedOSPlatform("linux")]
     public async Task LaunchAsyncAutoCreatesVisibleLinuxDisplayForHeadfulRun()

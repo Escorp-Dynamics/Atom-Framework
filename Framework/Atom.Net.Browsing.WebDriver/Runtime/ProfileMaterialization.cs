@@ -375,7 +375,10 @@ internal static class ProfileMaterialization
         if (BuildNetworkManifest(device.NetworkInfo) is { } network)
             manifest["network"] = network;
 
-        if (BuildWebGlManifest(device.WebGL) is { } webGl)
+        // Строки WebGL — программный рендерер Chromium (ANGLE/SwiftShader); на Gecko такой
+        // видеокарты не бывает. Firefox отдаёт собственные значения (см. тот же гейт в контексте
+        // вкладки, WebBrowser.AppendDeviceContext).
+        if (!WebBrowser.DeclaresNonChromiumEngine(device.UserAgent) && BuildWebGlManifest(device.WebGL) is { } webGl)
             manifest["webGl"] = webGl;
 
         if (BuildWebGlParametersManifest(device.WebGLParams) is { } webGlParameters)
@@ -421,7 +424,10 @@ internal static class ProfileMaterialization
         var manifest = new JsonObject();
 
         AddInt32(manifest, "hardwareConcurrency", device.HardwareConcurrency);
-        AddDouble(manifest, "deviceMemory", device.DeviceMemory);
+
+        // navigator.deviceMemory есть только у Chromium: на Gecko и WebKit само свойство — след подмены.
+        if (!WebBrowser.DeclaresNonChromiumEngine(device.UserAgent))
+            AddDouble(manifest, "deviceMemory", device.DeviceMemory);
 
         if (device.BatteryCharging.HasValue || device.BatteryLevel.HasValue)
         {
