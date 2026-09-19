@@ -1959,6 +1959,16 @@ internal sealed class BridgeNavigationProxyServer(
             + body;
     }
 
+    /// <summary>Дополнительные хосты журнала обмена: ATOM_LOG_EXCHANGE_HOSTS=host1,host2 (диагностика).</summary>
+    private static readonly string[] ExtraLoggedExchangeHosts =
+        (Environment.GetEnvironmentVariable("ATOM_LOG_EXCHANGE_HOSTS") ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static bool IsExtraLoggedExchangeHost(string absoluteTargetUrl)
+        => ExtraLoggedExchangeHosts.Length > 0
+            && Uri.TryCreate(absoluteTargetUrl, UriKind.Absolute, out var uri)
+            && ExtraLoggedExchangeHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Журнал обмена с challenge-платформой Cloudflare.</summary>
     /// <remarks>
     /// ★ И challenge-платформа на хосте САЙТА (/cdn-cgi/challenge-platform/): там завершается управляемый
@@ -1974,7 +1984,8 @@ internal sealed class BridgeNavigationProxyServer(
     {
         if (logger is null
             || (!absoluteTargetUrl.Contains("challenges.cloudflare.com", StringComparison.OrdinalIgnoreCase)
-                && !absoluteTargetUrl.Contains("/cdn-cgi/challenge-platform/", StringComparison.OrdinalIgnoreCase)))
+                && !absoluteTargetUrl.Contains("/cdn-cgi/challenge-platform/", StringComparison.OrdinalIgnoreCase)
+                && !IsExtraLoggedExchangeHost(absoluteTargetUrl)))
         {
             return;
         }
