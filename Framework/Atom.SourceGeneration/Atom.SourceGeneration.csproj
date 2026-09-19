@@ -58,12 +58,12 @@
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 	</PropertyGroup>
 
-	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
+	<ItemGroup Condition="'$(Configuration)' == 'Debug' or '$(UseAtomProjectReferences)' == 'true'">
 		<ProjectReference Include="../Atom/Atom.csproj"
 			AdditionalProperties="DisableAnalyzerDependencyInclusion=$(DisableAnalyzerDependencyInclusion)" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(Configuration)' == 'Release'">
+	<ItemGroup Condition="'$(Configuration)' == 'Release' and '$(UseAtomProjectReferences)' != 'true'">
 		<PackageReference Include="Escorp.Atom" Version="*" GeneratePathProperty="true" />
 	</ItemGroup>
 

@@ -69,13 +69,13 @@
 		<InternalsVisibleTo Include="VC.CaptchaSolver" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
+	<ItemGroup Condition="'$(Configuration)' == 'Debug' or '$(UseAtomProjectReferences)' == 'true'">
 		<ProjectReference Include="../Atom.Net/Atom.Net.csproj" />
 		<ProjectReference Include="../Atom.Media.Video/Atom.Media.Video.csproj" />
 		<ProjectReference Include="../Atom.Media.Audio/Atom.Media.Audio.csproj" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(Configuration)' == 'Release'">
+	<ItemGroup Condition="'$(Configuration)' == 'Release' and '$(UseAtomProjectReferences)' != 'true'">
 		<PackageReference Include="Escorp.Atom.Net" Version="*" />
 		<!--<PackageReference
 		Include="Atom.Net.Browsing" Version="*" />-->

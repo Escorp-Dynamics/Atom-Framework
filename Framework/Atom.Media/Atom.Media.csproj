@@ -27,12 +27,12 @@
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 	</PropertyGroup>
 
-	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
+	<ItemGroup Condition="'$(Configuration)' == 'Debug' or '$(UseAtomProjectReferences)' == 'true'">
 		<ProjectReference Include="../Atom/Atom.csproj" />
 		<ProjectReference Include="../Atom.IO.Compression/Atom.IO.Compression.csproj" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(Configuration)' == 'Release'">
+	<ItemGroup Condition="'$(Configuration)' == 'Release' and '$(UseAtomProjectReferences)' != 'true'">
 		<PackageReference Include="Escorp.Atom" Version="*" />
 		<PackageReference Include="Escorp.Atom.IO.Compression" Version="*" />
 	</ItemGroup>

@@ -1,4 +1,14 @@
 <Project>
+    <!-- ★ Atom подключён исходниками к чужому решению (сборка запущена ВНЕ этого репозитория): проекты
+         ссылаются друг на друга напрямую и в Release. Иначе Release-ветка тянет NuGet-пакет Escorp.Atom,
+         который сталкивается с исходным (NU1107). Сборка и публикация пакетов из самого репозитория
+         не меняются. Флаг задаётся и явно: -p:UseAtomProjectReferences=true|false. -->
+    <PropertyGroup Condition="'$(UseAtomProjectReferences)' == ''">
+        <_AtomRepositoryRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)..').ToLowerInvariant())</_AtomRepositoryRoot>
+        <_AtomStartupDirectory>$([MSBuild]::NormalizeDirectory('$(MSBuildStartupDirectory)').ToLowerInvariant())</_AtomStartupDirectory>
+        <UseAtomProjectReferences Condition="!$(_AtomStartupDirectory.StartsWith('$(_AtomRepositoryRoot)'))">true</UseAtomProjectReferences>
+    </PropertyGroup>
+
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <LangVersion>14</LangVersion>

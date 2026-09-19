@@ -57,11 +57,11 @@
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     </PropertyGroup>
 
-    <ItemGroup Condition="'$(Configuration)' == 'Debug'">
+    <ItemGroup Condition="'$(Configuration)' == 'Debug' or '$(UseAtomProjectReferences)' == 'true'">
         <ProjectReference Include="../Atom.Web.Services/Atom.Web.Services.csproj" />
     </ItemGroup>
 
-    <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <ItemGroup Condition="'$(Configuration)' == 'Release' and '$(UseAtomProjectReferences)' != 'true'">
         <PackageReference Include="Escorp.Atom.Web.Services" Version="*" />
     </ItemGroup>
 

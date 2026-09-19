@@ -2,4 +2,9 @@
     <ItemGroup Condition="'$(IsTestProject)' == 'true'">
         <PackageReference Remove="coverlet.collector" />
     </ItemGroup>
+    <!-- Исходники Atom подключены к чужому решению (UseAtomProjectReferences): пакеты не собираем —
+         это потребитель, а не публикация, и упаковка в его Release падала на путях вывода. -->
+    <PropertyGroup Condition="'$(UseAtomProjectReferences)' == 'true'">
+        <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    </PropertyGroup>
 </Project>

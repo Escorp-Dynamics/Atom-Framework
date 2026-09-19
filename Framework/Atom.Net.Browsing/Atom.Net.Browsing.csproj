@@ -30,12 +30,12 @@
 		<InternalsVisibleTo Include="Atom.Net.Browsing.Tests" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
+	<ItemGroup Condition="'$(Configuration)' == 'Debug' or '$(UseAtomProjectReferences)' == 'true'">
 		<ProjectReference Include="../Atom/Atom.csproj" />
 		<ProjectReference Include="../Atom.Debug/Atom.Debug.csproj" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(Configuration)' == 'Release'">
+	<ItemGroup Condition="'$(Configuration)' == 'Release' and '$(UseAtomProjectReferences)' != 'true'">
 		<PackageReference Include="Escorp.Atom" Version="*" />
 		<PackageReference Include="Escorp.Atom.Debug" Version="*" />
 	</ItemGroup>
