@@ -707,6 +707,17 @@ internal sealed class BridgeNavigationProxyServer(
         }
 
         logger?.LogBridgeServerNavigationProxyMatched(decision.Action.ToString(), tunneledRequest.Method, absoluteTargetUrl);
+
+        // ★ Continue здесь тоже законное решение: перехватчик пропускает запрос к живому серверу.
+        // Раньше его передавали в WriteMatchedDecisionResponseAsync, который Continue не знает, и
+        // навигация получала 502 «decision-action-unsupported» вместо страницы (2026-09-19, WaitRoom
+        // со свежим челленджем: браузер показывал текст ошибки вместо страницы Cloudflare).
+        if (decision.Action is ProxyNavigationDecisionAction.Continue)
+        {
+            await ForwardContinueDecisionAsync(sslStream, tunneledRequest, absoluteTargetUrl, decisionRoute, decision, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+
         await WriteMatchedDecisionResponseAsync(
             sslStream,
             tunneledRequest.Method,
@@ -1601,21 +1612,7 @@ internal sealed class BridgeNavigationProxyServer(
             var statusCode = (int)forwardResponse.StatusCode;
             var reasonPhrase = forwardResponse.ReasonPhrase;
 
-            if (absoluteTargetUrl.Contains("challenges.cloudflare.com", StringComparison.OrdinalIgnoreCase))
-            {
-                logger?.LogBridgeServerChallengeExchange(
-                    clientRequest.Method,
-                    absoluteTargetUrl,
-                    statusCode,
-                    DescribeForwardProfileOrigin(route, route.ForwardProfile ?? forwardProfile),
-                    body.Length,
-                    DescribeChallengeBody(body));
-
-                logger?.LogBridgeServerChallengeRequestHeaders(
-                    clientRequest.Method,
-                    absoluteTargetUrl,
-                    DescribeChallengeRequest(clientRequest));
-            }
+            LogChallengeExchange(clientRequest, absoluteTargetUrl, route, forwardResponse, statusCode, body);
 
             // Ответ получен целиком, поэтому здесь доступна подмена тела — то, чего блокирующий
             // webRequest не даёт ни в одном браузере.
@@ -1960,6 +1957,44 @@ internal sealed class BridgeNavigationProxyServer(
         return headers
             + " :: ТЕЛО[" + (request.Body?.Length ?? 0).ToString(CultureInfo.InvariantCulture) + "]="
             + body;
+    }
+
+    /// <summary>Журнал обмена с challenge-платформой Cloudflare.</summary>
+    /// <remarks>
+    /// ★ И challenge-платформа на хосте САЙТА (/cdn-cgi/challenge-platform/): там завершается управляемый
+    /// челлендж и выставляется cf_clearance — без этого журнала его провал не виден.
+    /// </remarks>
+    private void LogChallengeExchange(
+        ProxyRequest clientRequest,
+        string absoluteTargetUrl,
+        ProxyNavigationRoute route,
+        HttpResponseMessage forwardResponse,
+        int statusCode,
+        byte[] body)
+    {
+        if (logger is null
+            || (!absoluteTargetUrl.Contains("challenges.cloudflare.com", StringComparison.OrdinalIgnoreCase)
+                && !absoluteTargetUrl.Contains("/cdn-cgi/challenge-platform/", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        var setCookies = forwardResponse.Headers.TryGetValues("Set-Cookie", out var cookieValues)
+            ? " set-cookie=" + string.Join(',', cookieValues.Select(static value => value.Split('=', 2)[0]))
+            : string.Empty;
+
+        logger.LogBridgeServerChallengeExchange(
+            clientRequest.Method,
+            absoluteTargetUrl,
+            statusCode,
+            DescribeForwardProfileOrigin(route, route.ForwardProfile ?? forwardProfile),
+            body.Length,
+            DescribeChallengeBody(body) + setCookies);
+
+        logger.LogBridgeServerChallengeRequestHeaders(
+            clientRequest.Method,
+            absoluteTargetUrl,
+            DescribeChallengeRequest(clientRequest));
     }
 
     // Тело ответа challenge-платформы печатаемым куском: оно бывает двоичным, а нужен признак
