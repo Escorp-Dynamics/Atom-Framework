@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Atom.Net.Https.Http;
 using Atom.Net.Https.Http2;
@@ -19,6 +20,9 @@ namespace Atom.Net.Tests.Https;
 public sealed class Http2SessionTests
 {
     private const int TestTimeoutMs = 30000;
+
+    /// <summary>Приметное сообщение: по нему проверка отличает своё исключение от чужих.</summary>
+    private const string UnobservedMarker = "брошенная задача потока HTTP/2";
 
     [Test]
     public async Task ConcurrentRequestsGetIncreasingStreamIdsInWireOrder()
@@ -163,6 +167,86 @@ public sealed class Http2SessionTests
     }
 
     [Test]
+    public async Task RemoteCloseFailsBothStreamTasksWithTheSameError()
+    {
+        // Обрыв keep-alive удалённой стороной — норма, а не сбой: сервер закрывает простаивающее
+        // соединение обычным FIN. Ждущий запрос обязан получить внятную ошибку по ОБЕИМ задачам
+        // потока, а сеанс — запомнить причину, чтобы соединение ушло из пула.
+        await using var peer = new LoopbackPeer();
+        await using var session = new Http2Session(peer.ClientSide, Http2ProfileCatalog.CreateChrome());
+        await session.StartAsync(Http2ProfileCatalog.ChromeConnectionWindowIncrement, TestContext.CurrentContext.CancellationToken);
+        await peer.SkipClientPrefaceAsync();
+
+        var stream = await session.SendRequestAsync(SimpleHeaders(), ReadOnlyMemory<byte>.Empty, TestContext.CurrentContext.CancellationToken);
+        _ = await peer.ReadHeaderStreamIdsAsync(1);
+
+        peer.CloseRemoteSide();
+
+        Assert.That(async () => await stream.Headers.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CurrentContext.CancellationToken), Throws.InstanceOf<IOException>());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(stream.BodyCompleted.IsFaulted, Is.True, "задача тела осталась ждать после обрыва");
+            Assert.That(session.TerminalError, Is.InstanceOf<IOException>(), "сеанс не запомнил причину обрыва");
+        });
+    }
+
+    [Test]
+    public void AbandonedStreamTasksLeaveNoUnobservedTaskException()
+    {
+        // ★ Поток отдаёт ДВЕ задачи — заголовки и конец тела, — а вызывающая сторона ждёт их по
+        // очереди и на первой же ошибке уходит. Вторая оставалась с тем же исключением и без
+        // единого ожидающего: сборщик доводил её до финализатора, тот поднимал
+        // UnobservedTaskException — и у потребителя с ThrowUnobservedTaskExceptions это валило
+        // процесс. Причём на обычном обрыве keep-alive, то есть без всякого сбоя.
+        var unobserved = new List<Exception>();
+        var gate = new Lock();
+
+        void Capture(object? sender, UnobservedTaskExceptionEventArgs args)
+        {
+            // Сюда попадают задачи всего процесса, поэтому отбираем ровно своё исключение.
+            if (args.Exception is not { } aggregate) return;
+
+            lock (gate) unobserved.AddRange(aggregate.InnerExceptions.Where(static error => error is IOException && error.Message.Contains(UnobservedMarker, StringComparison.Ordinal)));
+        }
+
+        TaskScheduler.UnobservedTaskException += Capture;
+
+        try
+        {
+            AbandonFailedStream();
+
+            // Событие поднимает именно финализатор: без принудительной сборки проверять нечего.
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            lock (gate) Assert.That(unobserved, Is.Empty, "исключение брошенной задачи потока осталось ненаблюдённым");
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= Capture;
+        }
+    }
+
+    /// <summary>
+    /// Повторяет поведение вызывающей стороны: ждёт заголовки, получает ошибку и уходит, не
+    /// притрагиваясь к задаче тела.
+    /// </summary>
+    /// <remarks>
+    /// Отдельный метод и запрет встраивания нужны, чтобы состояние потока перестало быть
+    /// достижимым с кадра теста: иначе сборщик до него не доберётся и проверка ничего не покажет.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void AbandonFailedStream()
+    {
+        var state = new Http2StreamState(id: 1, initialWindowSize: 65535);
+        state.Fail(new IOException(UnobservedMarker));
+
+        Assert.That(() => state.Headers.GetAwaiter().GetResult(), Throws.InstanceOf<IOException>(), "ожидающий запрос перестал получать свою ошибку");
+    }
+
+    [Test]
     public void FirefoxStartsRequestsAboveItsPriorityTree()
     {
         // Запрос на потоке, который преамбула уже назвала в дереве приоритетов, сервер не
@@ -260,6 +344,11 @@ public sealed class Http2SessionTests
 
             return [.. ids];
         }
+
+        /// <summary>
+        /// Закрывает канал в сторону клиента, как это делает удалённая сторона обычным FIN.
+        /// </summary>
+        public void CloseRemoteSide() => toClient.Writer.TryComplete();
 
         public async ValueTask WriteFrameAsync(Http2FrameHeader header, ReadOnlyMemory<byte> payload)
         {
