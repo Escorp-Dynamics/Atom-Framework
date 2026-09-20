@@ -170,6 +170,11 @@ public sealed class Http2Session(Stream transport, Http2Settings settings, bool 
         }
 
         readerLoop = Task.Run(() => ReadLoopAsync(lifetime.Token), CancellationToken.None);
+
+        // Цикл сам разбирает свои ошибки, но дожидаются его только в DisposeAsync — а до него
+        // дело доходит не всегда. Непредвиденный сбой цикла не должен всплывать у потребителя
+        // ненаблюдённым исключением из финализатора.
+        BackgroundTask.Forget(readerLoop);
     }
 
     /// <summary>
@@ -711,7 +716,7 @@ public sealed class Http2Session(Stream transport, Http2Settings settings, bool 
             // Блок повреждён: таблица уже разошлась, и притворяться иначе смысла нет.
         }
 
-        _ = Task.Run(() => RefusePromisedStreamAsync(promised), lifetime.Token);
+        BackgroundTask.Forget(Task.Run(() => RefusePromisedStreamAsync(promised), lifetime.Token));
     }
 
     /// <summary>

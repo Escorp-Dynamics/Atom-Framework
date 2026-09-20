@@ -890,6 +890,10 @@ public sealed class QuicConnection : IAsyncDisposable
             terminalError = error;
             handshakeComplete.TrySetException(error);
 
+            // Рукопожатия могли уже не ждать — вызывающая сторона ушла по своему сроку. Тогда
+            // исключение осталось бы ненаблюдённым и всплыло у потребителя из финализатора.
+            BackgroundTask.Observe(handshakeComplete.Task);
+
             foreach (var stream in streams.Values) stream.Fail(error);
         }
     }
@@ -1407,6 +1411,10 @@ public sealed class QuicConnection : IAsyncDisposable
 
         terminalError = error;
         handshakeComplete.TrySetException(error);
+
+        // См. цикл чтения: ожидающего рукопожатия может уже не быть, а ненаблюдённое исключение
+        // всплывает у потребителя из финализатора.
+        BackgroundTask.Observe(handshakeComplete.Task);
 
         foreach (var stream in streams.Values) stream.Fail(error);
     }

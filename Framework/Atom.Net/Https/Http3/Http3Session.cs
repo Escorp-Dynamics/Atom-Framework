@@ -59,6 +59,10 @@ public sealed class Http3Session(QuicConnection connection, IReadOnlyList<(Http3
         // прийти раньше первого ответа, и не применив их, мы не разберём его заголовки.
         serviceLoop = Task.Run(() => ReadServiceStreamsAsync(lifetime.Token), CancellationToken.None);
 
+        // Дожидается цикл только DisposeAsync, а на пути обрыва его вызывают уже без ожидания:
+        // сбой цикла иначе ушёл бы к финализатору ненаблюдённым исключением.
+        BackgroundTask.Forget(serviceLoop);
+
         var control = connection.OpenUnidirectionalStream();
 
         var buffer = new byte[256];
@@ -355,7 +359,10 @@ public sealed class Http3Session(QuicConnection connection, IReadOnlyList<(Http3
             await foreach (var stream in connection.IncomingStreams.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 // Двунаправленные потоки сервер клиенту не открывает; всё, что пришло, — служебное.
-                _ = Task.Run(() => ConsumeServiceStreamAsync(stream, cancellationToken), CancellationToken.None);
+                // Разбор идёт без ожидания, поэтому его ошибку — например, обрыв соединения
+                // посреди чтения — наблюдать больше некому: иначе она всплывёт у потребителя
+                // ненаблюдённым исключением из финализатора.
+                BackgroundTask.Forget(Task.Run(() => ConsumeServiceStreamAsync(stream, cancellationToken), CancellationToken.None));
             }
         }
         catch (OperationCanceledException)

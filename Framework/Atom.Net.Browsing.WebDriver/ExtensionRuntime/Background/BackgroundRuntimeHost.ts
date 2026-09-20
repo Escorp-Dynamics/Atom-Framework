@@ -34,6 +34,7 @@ import {
     ensureVirtualCookieStore,
     ensureDiscoveryTab,
     executeScriptInFrames,
+    probeElementInFrames,
     executeScriptInSingleFrame,
     evaluateMainWorldScript,
     describeIdentity,
@@ -1239,6 +1240,14 @@ export class BackgroundRuntimeHost {
                         payloadLength: screenshot.length,
                     });
                     await this.sendDirectResponse(message, screenshot);
+                    return true;
+                }
+
+                case 'ProbeElementInFrames': {
+                    const tabId = requireTabId(message);
+                    const selector = readPayloadString(message.payload, 'selector', 'Команда опроса фреймов не содержит selector');
+                    const probes = await probeElementInFrames(this.browserHost, this.runtime, tabId, selector);
+                    await this.sendDirectResponse(message, probes);
                     return true;
                 }
 

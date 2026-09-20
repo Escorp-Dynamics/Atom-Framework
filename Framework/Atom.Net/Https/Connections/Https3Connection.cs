@@ -260,8 +260,8 @@ internal sealed class Https3Connection : HttpsConnection
 
         // Синхронный путь обрыва: блокировать поток на асинхронном освобождении нельзя, а циклы
         // чтения завершатся сами, как только закроется сокет.
-        if (currentSession is not null) _ = Task.Run(async () => await currentSession.DisposeAsync().ConfigureAwait(false));
-        if (current is not null) _ = Task.Run(async () => await current.DisposeAsync().ConfigureAwait(false));
+        if (currentSession is not null) BackgroundTask.Forget(Task.Run(async () => await currentSession.DisposeAsync().ConfigureAwait(false)));
+        if (current is not null) BackgroundTask.Forget(Task.Run(async () => await current.DisposeAsync().ConfigureAwait(false)));
     }
 
     /// <inheritdoc/>

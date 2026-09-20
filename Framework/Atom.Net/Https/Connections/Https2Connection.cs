@@ -403,7 +403,10 @@ internal sealed class Https2Connection : HttpsConnection
     {
         if (!current.ReleaseStream(streamId)) return;
 
-        _ = Task.Run(async () =>
+        // Задача наблюдается намеренно: перечисленные ниже ошибки здесь ожидаемы, а всё
+        // остальное (например, SocketException мимо IOException) иначе ушло бы к финализатору и
+        // всплыло у потребителя ненаблюдённым исключением — вместо безобидного служебного кадра.
+        BackgroundTask.Forget(Task.Run(async () =>
         {
             try
             {
@@ -413,7 +416,7 @@ internal sealed class Https2Connection : HttpsConnection
             {
                 // Соединение уже закрылось или закрывается — уведомлять некого и незачем.
             }
-        });
+        }));
     }
 
     /// <inheritdoc/>
@@ -443,7 +446,7 @@ internal sealed class Https2Connection : HttpsConnection
         // Синхронный путь обрыва. Освобождение сеанса запускаем без ожидания: блокировать поток
         // здесь нельзя — это классический источник взаимоблокировок, а цикл чтения всё равно
         // завершится сам, как только закроется транспорт.
-        if (currentSession is not null) _ = Task.Run(async () => await currentSession.DisposeAsync().ConfigureAwait(false));
+        if (currentSession is not null) BackgroundTask.Forget(Task.Run(async () => await currentSession.DisposeAsync().ConfigureAwait(false)));
 
         currentTransport?.Dispose();
         currentSocket?.Dispose();

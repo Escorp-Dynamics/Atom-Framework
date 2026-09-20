@@ -31,6 +31,92 @@ export async function executeScriptInFrames(
 }
 
 /**
+ * Опрашивает КАЖДЫЙ фрейм вкладки про элемент по селектору: есть ли он, отмечен ли и где его центр.
+ *
+ * ★ Нужен там, где `executeScriptInFrames` бессилен: тот передаёт код строкой и исполняет его через
+ * `eval`, а страницы с жёсткой политикой безопасности (страница проверки Cloudflare — как раз такая)
+ * запрещают `unsafe-eval`, и опрос падает ещё до DOM. Здесь в браузер уходит НАСТОЯЩАЯ функция
+ * (`scripting.executeScript({ func })`), которую политика страницы не касается, и работает она в
+ * изолированном мире — то есть видит DOM кросс-доменного фрейма, оставаясь невидимой его скриптам.
+ */
+export async function probeElementInFrames(
+    browserHost: BrowserHost,
+    runtime: any,
+    tabId: number,
+    selector: string,
+): Promise<unknown[]> {
+    const frameInfos = await getAllFramesForTab(browserHost, runtime, tabId).catch(() => null);
+    const targets = Array.isArray(frameInfos) && frameInfos.length > 0
+        ? frameInfos.map((frameInfo) => ({ frameId: frameInfo.frameId ?? 0, url: frameInfo.url ?? '' }))
+        : [{ frameId: 0, url: '' }];
+
+    return Promise.all(targets.map(async (target) => {
+        try {
+            const results = await invokeBrowserCall<any[]>(
+                runtime,
+                browserHost.scripting.executeScript,
+                browserHost.scripting,
+                {
+                    target: { tabId, frameIds: [target.frameId] },
+                    world: 'ISOLATED',
+                    func: probeElement,
+                    args: [selector],
+                },
+            );
+
+            const value = (results ?? [])[0]?.result ?? null;
+            return { frameId: target.frameId, url: target.url, ...(value ?? { found: false }) };
+        } catch (error) {
+            return {
+                frameId: target.frameId,
+                url: target.url,
+                found: false,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }));
+}
+
+/**
+ * Тело зонда. Самодостаточно: браузер переносит функцию во фрейм по значению, без замыканий.
+ */
+function probeElement(selector: string): Record<string, unknown> {
+    // Своя сетевая активность фрейма: запросы проверки Cloudflare идут ИЗНУТРИ его собственного
+    // фрейма, и в журнале ресурсов верхней страницы их не видно вовсе. Отсюда же берётся признак
+    // «нажатие дошло»: на принятый клик проверка отвечает новым запросом.
+    const challengeEntries = performance.getEntriesByType('resource')
+        .filter((entry) => entry.name.indexOf('/cdn-cgi/challenge-platform/') >= 0);
+    const lastEntry = challengeEntries.at(-1);
+
+    const activity = {
+        requests: challengeEntries.length,
+        sinceLast: lastEntry !== undefined ? Math.round(performance.now() - lastEntry.startTime) : -1,
+    };
+
+    const element = document.querySelector(selector);
+    if (element === null) {
+        // Короткий образец разметки: по нему видно, ЧТО во фрейме на самом деле, когда селектор не
+        // подошёл, — иначе «не найдено» неотличимо от «фрейм пустой».
+        const sample = document.body !== null ? document.body.innerHTML.slice(0, 220) : '';
+        return { found: false, sample, ...activity };
+    }
+
+    const box = element.getBoundingClientRect();
+    const input = element as HTMLInputElement;
+
+    return {
+        found: box.width > 0 && box.height > 0,
+        checked: input.checked === true,
+        disabled: input.disabled === true,
+        x: Math.round(box.left + (box.width / 2)),
+        y: Math.round(box.top + (box.height / 2)),
+        width: Math.round(box.width),
+        height: Math.round(box.height),
+        ...activity,
+    };
+}
+
+/**
  * Исполняет код в ОДНОМ конкретном фрейме вкладки.
  *
  * Нужно для до-установки подмены личности во фреймы, которые создаются уже ПОСЛЕ применения

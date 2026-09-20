@@ -188,6 +188,42 @@ public interface IWebPage : IDomContext, IAsyncDisposable
     /// <summary>
     /// Делает скриншот страницы.
     /// </summary>
+    /// <summary>
+    /// Опрашивает КАЖДЫЙ фрейм вкладки про элемент по селектору.
+    /// </summary>
+    /// <remarks>
+    /// ★ Зонд уходит в браузер ФУНКЦИЕЙ, а не строкой кода, поэтому не нарушает политику безопасности
+    /// страницы: выполнение строки через eval запрещено там, где нет unsafe-eval (страница проверки
+    /// Cloudflare — как раз такая). Работает в изолированном мире, то есть видит DOM кросс-доменного
+    /// фрейма и не виден его скриптам. Ответ — массив
+    /// <c lang="text">{ frameId, url, found, checked, disabled, x, y, width, height }</c>, где x и y —
+    /// центр элемента ВНУТРИ его фрейма.
+    /// </remarks>
+    ValueTask<System.Text.Json.JsonElement?> ProbeElementInFramesAsync(string selector, CancellationToken cancellationToken);
+
+    /// <inheritdoc cref="ProbeElementInFramesAsync(string, CancellationToken)"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    ValueTask<System.Text.Json.JsonElement?> ProbeElementInFramesAsync(string selector)
+        => ProbeElementInFramesAsync(selector, CancellationToken.None);
+
+    /// <summary>
+    /// Выполняет сценарий в КАЖДОМ фрейме вкладки и отдаёт результаты вместе с адресами фреймов.
+    /// </summary>
+    /// <remarks>
+    /// ★ Единственный путь в кросс-доменный фрейм: список фреймов берётся у браузера
+    /// (webNavigation.getAllFrames), а не из DOM, поэтому фрейм виден, даже когда его iframe спрятан в
+    /// ЗАКРЫТОМ shadow root — именно так устроен виджет проверки Cloudflare. Ответ — массив объектов
+    /// <c lang="text">{ frameId, url, status, value }</c>.
+    /// </remarks>
+    /// <param name="script">Тело сценария (как в <see cref="IDomContext.EvaluateAsync(string, CancellationToken)"/>).</param>
+    /// <param name="isolatedWorld">Выполнять в изолированном мире расширения, а не в мире страницы.</param>
+    ValueTask<System.Text.Json.JsonElement?> EvaluateInFramesAsync(string script, bool isolatedWorld, CancellationToken cancellationToken);
+
+    /// <inheritdoc cref="EvaluateInFramesAsync(string, bool, CancellationToken)"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    ValueTask<System.Text.Json.JsonElement?> EvaluateInFramesAsync(string script, bool isolatedWorld = false)
+        => EvaluateInFramesAsync(script, isolatedWorld, CancellationToken.None);
+
     ValueTask<Memory<byte>> GetScreenshotAsync(CancellationToken cancellationToken);
 
     /// <inheritdoc cref="GetScreenshotAsync(CancellationToken)"/>

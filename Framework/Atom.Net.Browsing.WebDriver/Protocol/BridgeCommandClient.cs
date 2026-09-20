@@ -67,6 +67,13 @@ internal sealed class BridgeCommandClient(BridgeServer server)
         CancellationToken cancellationToken = default)
         => server.ExecuteScriptInFramesAsync(sessionId, tabId, script, isolatedWorld, includeMetadata, cancellationToken);
 
+    public ValueTask<JsonElement> ProbeElementInFramesAsync(
+        string sessionId,
+        string tabId,
+        string selector,
+        CancellationToken cancellationToken = default)
+        => server.ProbeElementInFramesAsync(sessionId, tabId, selector, cancellationToken);
+
     public ValueTask<(string TabId, string? WindowId)> OpenTabAsync(string sessionId, string tabId, string windowId, CancellationToken cancellationToken = default)
         => server.OpenTabAsync(sessionId, tabId, windowId, cancellationToken);
 

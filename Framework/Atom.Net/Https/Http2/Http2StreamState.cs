@@ -118,6 +118,8 @@ public sealed class Http2StreamState(int id, int initialWindowSize)
         // висящим нельзя: запрос завис бы до общего таймаута вместо внятной ошибки.
         headers.TrySetException(new InvalidOperationException("Поток HTTP/2 завершён без заголовков ответа"));
         bodyCompleted.TrySetResult();
+
+        ObserveFailures();
     }
 
     /// <summary>
@@ -129,6 +131,29 @@ public sealed class Http2StreamState(int id, int initialWindowSize)
     {
         headers.TrySetException(error);
         bodyCompleted.TrySetException(error);
+
+        ObserveFailures();
+    }
+
+    /// <summary>
+    /// Помечает ошибки обеих задач потока наблюдёнными.
+    /// </summary>
+    /// <remarks>
+    /// ★ Поток отдаёт ДВЕ задачи, а вызывающая сторона ждёт их по очереди и на первой же ошибке
+    /// уходит: до второй она не добирается никогда. Между тем ошибка ставится сразу на обе, и
+    /// брошенная задача уносила своё исключение к финализатору — тот поднимал
+    /// <see cref="TaskScheduler.UnobservedTaskException"/>, и у потребителя, настроенного эти
+    /// исключения бросать, процесс падал. Падал на ОБЫЧНОМ обрыве keep-alive: сервер закрывает
+    /// простаивающее соединение штатным FIN, и сбоем это не является вовсе.
+    ///
+    /// Ожидающему это ничего не меняет: пометка касается только финализатора, а
+    /// <see langword="await"/> по-прежнему бросит то же самое исключение.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ObserveFailures()
+    {
+        BackgroundTask.Observe(headers.Task);
+        BackgroundTask.Observe(bodyCompleted.Task);
     }
 
     /// <summary>
