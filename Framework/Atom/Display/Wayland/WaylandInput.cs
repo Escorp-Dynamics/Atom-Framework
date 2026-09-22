@@ -292,9 +292,21 @@ public sealed class WaylandInput
     {
         var hasFocus = wantsKeyboardFocus;
 
-        // Клавиатура одна на сеанс: фокус получает окно с заданным номером — события с чужих
-        // окон клавиатуру не переключают.
-        foreach (var (client, surfaceId, _, _, _) in EnumerateRootTargets().Where(target => target.WindowIndex == keyboardFocusIndex))
+        // ★ Фокус держат ВСЕ окна сразу, а не одно с номером keyboardFocusIndex.
+        //
+        // Почему так. Браузер считает окно фоновым, пока оно не получило keyboard.enter: документ
+        // там отвечает document.hasFocus() === false, а драйвер перед доверенным вводом обязан
+        // дождаться фокуса. При одном фокусе на сеанс окна выстраивались в очередь: пока одно
+        // активируется и ждёт подтверждения, остальные стоят и не решают свою задачу. Замер на
+        // стенде (Turnstile, 10 минут на конфигурацию): одно окно — 73 задачи и ноль отказов,
+        // три окна — 8 задач и 26 отказов, причём два окна из трёх почти всё время простаивали.
+        //
+        // Спецификация отводит seat одну сфокусированную поверхность, и это осознанная вольность
+        // нашего композитора: окна здесь не соперничают за живого пользователя, каждое обслуживает
+        // свою задачу своим виртуальным устройством. Клавиатурный ВВОД по-прежнему адресуется
+        // окном keyboardFocusIndex (см. SendKey), так что печать не размножается по окнам —
+        // разделён только признак «окно активно».
+        foreach (var (client, surfaceId, _, _, _) in EnumerateRootTargets())
         {
             // Отметка ставится на поверхность, а не на устройство: клавиатур у клиента бывает несколько.
             if (hasFocus
@@ -337,7 +349,7 @@ public sealed class WaylandInput
         var timestamp = Timestamp();
         var serial = compositor.NextSerial();
 
-        foreach (var (client, surfaceId) in EnumerateFocusTargets())
+        foreach (var (client, surfaceId) in EnumerateKeyInputTargets())
         {
             // Спецификация запрещает слать нажатия клавиатуре без фокуса.
             if (!focusedSurfaces.Contains((client, surfaceId)))
@@ -355,7 +367,7 @@ public sealed class WaylandInput
 
         // Модификаторы — часть клавиатурного состояния и идут только окну с фокусом: рассылка всем
         // оставляла бы в соседнем окне зажатыми Shift и Ctrl, которых там никто не нажимал.
-        foreach (var (client, surfaceId) in EnumerateFocusTargets())
+        foreach (var (client, surfaceId) in EnumerateKeyInputTargets())
         {
             if (!focusedSurfaces.Contains((client, surfaceId)))
                 continue;
@@ -490,33 +502,23 @@ public sealed class WaylandInput
         return string.Join('/', toplevels) is { Length: > 0 } text ? text : "нет";
     }
 
-    private IEnumerable<(Protocol.WaylandClient Client, uint SurfaceId)> EnumerateFocusTargets()
+    /// <summary>
+    /// Поверхности окна, которому адресован клавиатурный ВВОД.
+    /// </summary>
+    /// <remarks>
+    /// ★ Признак «окно активно» (keyboard.enter) держат ВСЕ окна сразу, иначе они соперничают за
+    /// фокус и простаивают (см. ApplyKeyboardFocus). Но нажатия клавиш обязаны идти в ОДНО окно —
+    /// то, которое последним запросило фокус: иначе набранный текст размножится по всем окнам.
+    /// </remarks>
+    private IEnumerable<(Protocol.WaylandClient Client, uint SurfaceId)> EnumerateKeyInputTargets()
     {
-        foreach (var client in compositor.Clients)
+        foreach (var (client, surfaceId, windowIndex, _, _) in EnumerateRootTargets())
         {
-            // ★ Ввод адресуется САМОМУ ОКНУ, а не подповерхности, в которой рисуется содержимое:
-            // клиент сам разводит события по вложенным поверхностям. Подповерхность здесь — чужая
-            // роль, и событие с ней клиент считает нарушением протокола.
-            //
-            // ★ Окон у одного клиента бывает несколько: второе окно браузера — второй toplevel того
-            // же соединения. Перечисляются ВСЕ корневые окна: выбор первого доставлял бы ввод
-            // второго окна всегда первому.
-            foreach (var toplevel in client.OfType<XdgToplevel>())
-            {
-                if (client.Find<WaylandSurface>(toplevel.OwnerSurfaceId) is not null)
-                    yield return (client, toplevel.OwnerSurfaceId);
-            }
+            if (windowIndex == keyboardFocusIndex)
+                yield return (client, surfaceId);
         }
     }
 
-    /// <summary>
-    /// Корневые окна с их номерами и каскадными смещениями.
-    /// </summary>
-    /// <remarks>
-    /// ★ Номер берётся у самого окна, а не из порядка обхода: таблица объектов клиента — словарь,
-    /// её порядок произволен и меняется при удалении объектов. Нумерация по месту в обходе
-    /// переставляла окна местами, и ввод уходил не в то окно.
-    /// </remarks>
     private IEnumerable<(Protocol.WaylandClient Client, uint SurfaceId, int WindowIndex, int OffsetX, int OffsetY)> EnumerateRootTargets()
     {
         foreach (var client in compositor.Clients)
