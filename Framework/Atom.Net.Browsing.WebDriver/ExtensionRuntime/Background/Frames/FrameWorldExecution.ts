@@ -1,5 +1,18 @@
 import { type BrowserHost, invokeBrowserCall } from '../Browser/BrowserApi';
 
+/** Особый селектор: искать виджет проверки по виду и только в верхнем фрейме. */
+const WIDGET_PROBE_SELECTOR = '@widget';
+
+/**
+ * Особый селектор: вернуть ТОЛЬКО список фреймов вкладки, ничего в них не исполняя.
+ *
+ * ★ Появление фрейма проверки — самый ранний признак того, что виджет смонтирован, и получить его
+ * можно даром: `webNavigation.getAllFrames` работает в фоне расширения и страницы не касается вовсе.
+ * Обычный зонд для этого не годится — он внедряет функцию в каждый фрейм, включая фрейм Cloudflare,
+ * а частые внедрения переворачивают вердикт проверки (замер 25.09).
+ */
+const FRAMES_PROBE_SELECTOR = '@frames';
+
 type ExecutionWorld = 'MAIN' | 'ISOLATED';
 
 type ScriptExecutionResult = {
@@ -28,6 +41,139 @@ export async function executeScriptInFrames(
         : mapFrameExecutionValues(await evalInWorld(browserHost, runtime, tabId, code, true, world).catch((error) => {
             throw new Error(describeFrameExecutionError(error));
         }));
+}
+
+/**
+ * Опрашивает КАЖДЫЙ фрейм вкладки про элемент по селектору: есть ли он, отмечен ли и где его центр.
+ *
+ * ★ Нужен там, где `executeScriptInFrames` бессилен: тот передаёт код строкой и исполняет его через
+ * `eval`, а страницы с жёсткой политикой безопасности (страница проверки Cloudflare — как раз такая)
+ * запрещают `unsafe-eval`, и опрос падает ещё до DOM. Здесь в браузер уходит НАСТОЯЩАЯ функция
+ * (`scripting.executeScript({ func })`), которую политика страницы не касается, и работает она в
+ * изолированном мире — то есть видит DOM кросс-доменного фрейма, оставаясь невидимой его скриптам.
+ */
+export async function probeElementInFrames(
+    browserHost: BrowserHost,
+    runtime: any,
+    tabId: number,
+    selector: string,
+): Promise<unknown[]> {
+    // ★ Поиск виджета идёт ТОЛЬКО в верхнем фрейме: координаты нужны в системе координат вкладки, а
+    // внутри кросс-доменного фрейма Cloudflare смотреть нечего — её галка лежит в закрытом shadow
+    // root, и зонд там всегда отвечает «не найдено». Лишние внедрения в её фрейм не бесплатны: замер
+    // 25.09 показал, что частый зонд переворачивает вердикт проверки.
+    const widgetMode = selector === WIDGET_PROBE_SELECTOR;
+    const frameInfos = widgetMode ? null : await getAllFramesForTab(browserHost, runtime, tabId).catch(() => null);
+
+    // Список фреймов без единого касания страницы.
+    if (selector === FRAMES_PROBE_SELECTOR) {
+        return (frameInfos ?? []).map((frameInfo) => ({
+            frameId: frameInfo.frameId ?? 0,
+            url: frameInfo.url ?? '',
+            found: false,
+        }));
+    }
+    const targets = Array.isArray(frameInfos) && frameInfos.length > 0
+        ? frameInfos.map((frameInfo) => ({ frameId: frameInfo.frameId ?? 0, url: frameInfo.url ?? '' }))
+        : [{ frameId: 0, url: '' }];
+
+    return Promise.all(targets.map(async (target) => {
+        try {
+            const results = await invokeBrowserCall<any[]>(
+                runtime,
+                browserHost.scripting.executeScript,
+                browserHost.scripting,
+                {
+                    target: { tabId, frameIds: [target.frameId] },
+                    world: 'ISOLATED',
+                    func: probeElement,
+                    args: [selector],
+                },
+            );
+
+            const value = (results ?? [])[0]?.result ?? null;
+            return { frameId: target.frameId, url: target.url, ...(value ?? { found: false }) };
+        } catch (error) {
+            return {
+                frameId: target.frameId,
+                url: target.url,
+                found: false,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }));
+}
+
+/**
+ * Тело зонда. Самодостаточно: браузер переносит функцию во фрейм по значению, без замыканий.
+ */
+function probeElement(selector: string): Record<string, unknown> {
+    // Поиск виджета проверки ПО ВИДУ, а не по селектору: устойчивого признака в разметке Cloudflare
+    // нет — в одном варианте страницы скрытое поле ответа есть, в другом его нет вовсе, — зато
+    // размер коробки виджета постоянен, около 300x65.
+    const findWidgetHost = (): Element | null => {
+        const own = document.getElementById('cf-turnstile-container');
+        if (own !== null) {
+            return own;
+        }
+
+        for (const candidate of document.querySelectorAll('div')) {
+            const box = candidate.getBoundingClientRect();
+            if (box.width >= 200 && box.width <= 400 && box.height >= 50 && box.height <= 90) {
+                return candidate;
+            }
+        }
+
+        // Запасной признак: виджет — сосед скрытого поля ответа, которое создаёт сама Cloudflare.
+        const response = document.querySelector("input[name='cf-turnstile-response']");
+        const parent = response !== null ? response.parentElement : null;
+        if (parent !== null) {
+            for (const child of parent.children) {
+                const box = child.getBoundingClientRect();
+                if (child.tagName === 'DIV' && box.width > 0 && box.height >= 40) {
+                    return child;
+                }
+            }
+        }
+
+        return null;
+    };
+
+    // Своя сетевая активность фрейма: запросы проверки Cloudflare идут ИЗНУТРИ его собственного
+    // фрейма, и в журнале ресурсов верхней страницы их не видно вовсе. Отсюда же берётся признак
+    // «нажатие дошло»: на принятый клик проверка отвечает новым запросом.
+    const challengeEntries = performance.getEntriesByType('resource')
+        .filter((entry) => entry.name.indexOf('/cdn-cgi/challenge-platform/') >= 0);
+    const lastEntry = challengeEntries.at(-1);
+
+    const activity = {
+        requests: challengeEntries.length,
+        sinceLast: lastEntry !== undefined ? Math.round(performance.now() - lastEntry.startTime) : -1,
+    };
+
+    const element = selector === '@widget' ? findWidgetHost() : document.querySelector(selector);
+    if (element === null) {
+        // Короткий образец разметки: по нему видно, ЧТО во фрейме на самом деле, когда селектор не
+        // подошёл, — иначе «не найдено» неотличимо от «фрейм пустой».
+        const sample = document.body !== null ? document.body.innerHTML.slice(0, 220) : '';
+        return { found: false, sample, ...activity };
+    }
+
+    const box = element.getBoundingClientRect();
+    const input = element as HTMLInputElement;
+
+    return {
+        found: box.width > 0 && box.height > 0,
+        tag: element.tagName,
+        id: element.id,
+        checked: input.checked === true,
+        disabled: input.disabled === true,
+        x: Math.round(box.left + (box.width / 2)),
+        y: Math.round(box.top + (box.height / 2)),
+        width: Math.round(box.width),
+        height: Math.round(box.height),
+        ...activity,
+    };
 }
 
 /**
