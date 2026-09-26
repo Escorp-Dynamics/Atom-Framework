@@ -32,6 +32,60 @@ public sealed partial class WebBrowser
     }
 
     /// <summary>
+    /// Регистрирует POST-навигацию, ответ на которую отдаётся подменой: вкладка отправляет тело
+    /// сама, а документ получает не от origin, а готовый.
+    /// </summary>
+    /// <remarks>
+    /// ★ Нужно там, где страницу выдал не origin, а мы, но КОНТЕКСТ документа обязан быть
+    /// постовым. Так устроена проверка Cloudflare: её страница привязана к зачелленджженному
+    /// запросу, а он у воркера POST. Открыв ту же страницу обычным GET, вкладка проходит проверку
+    /// в чужом контексте, и скрипт проверки в конце перезагружает адрес вместо отправки формы
+    /// (замеры 23–24.09: восемь прогонов подряд, в эталоне живого браузера на этом месте POST).
+    ///
+    /// Двумя решениями: первичный GET получает самоотправляющуюся форму (иначе POST-навигацию не
+    /// начать — браузер её не инициирует), а её POST на тот же адрес — подменённый документ.
+    /// Наружу не уходит ни один из них.
+    /// </remarks>
+    internal bool TryEnqueuePostNavigationFulfillment(
+        WebPage page,
+        Uri url,
+        ReadOnlyMemory<byte> body,
+        string? contentType,
+        string html)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        ArgumentNullException.ThrowIfNull(url);
+        ArgumentNullException.ThrowIfNull(html);
+
+        if (!BridgePostNavigationForm.TryBuild(url, body, contentType, out var formHtml))
+            return false;
+
+        if (!TryEnqueueNavigationFulfillment(page, url, formHtml))
+            return false;
+
+        var issuedAtUtc = DateTimeOffset.UtcNow;
+        return ProxyNavigationDecisions.EnqueueDecision(
+            page.GetOrCreateBridgeContextId(),
+            new ProxyNavigationPendingDecision
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                Method = HttpMethod.Post.Method,
+                AbsoluteUrl = url.AbsoluteUri,
+                IssuedAtUtc = issuedAtUtc,
+                ExpiresAtUtc = issuedAtUtc + ProxyNavigationDecisionLifetime,
+                Action = ProxyNavigationDecisionAction.Fulfill,
+                StatusCode = (int)HttpStatusCode.Forbidden,
+                ResponseHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Content-Type"] = "text/html; charset=utf-8",
+                    ["Cache-Control"] = "no-store, no-cache, must-revalidate",
+                },
+                ResponseBody = System.Text.Encoding.UTF8.GetBytes(html),
+            },
+            issuedAtUtc);
+    }
+
+    /// <summary>
     /// Регистрирует готовый ответ для предстоящей навигации вкладки: локальный навигационный
     /// прокси отдаст его вместо ответа origin.
     /// </summary>
@@ -45,7 +99,7 @@ public sealed partial class WebBrowser
     /// подменять ответ нечем и вызывающий обязан остаться на прежнем поведении, а не открывать
     /// вместо подготовленного документа настоящий сайт.</para>
     /// </remarks>
-    internal bool TryEnqueueNavigationFulfillment(WebPage page, Uri url, string html)
+    internal bool TryEnqueueNavigationFulfillment(WebPage page, Uri url, string html, bool persistent = false, bool allowPostToOrigin = false, int statusCode = 200)
     {
         ArgumentNullException.ThrowIfNull(page);
         ArgumentNullException.ThrowIfNull(url);
@@ -64,7 +118,7 @@ public sealed partial class WebBrowser
                 IssuedAtUtc = issuedAtUtc,
                 ExpiresAtUtc = issuedAtUtc + ProxyNavigationDecisionLifetime,
                 Action = ProxyNavigationDecisionAction.Fulfill,
-                StatusCode = (int)HttpStatusCode.OK,
+                StatusCode = statusCode,
                 ResponseHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["Content-Type"] = "text/html; charset=utf-8",
@@ -76,6 +130,39 @@ public sealed partial class WebBrowser
                 ResponseBody = System.Text.Encoding.UTF8.GetBytes(html),
             },
             issuedAtUtc);
+
+        // ★ Подстановка одноразовая, а всё, что придёт на тот же адрес после неё, обрывается.
+        // Пройдя проверку, её скрипт снова дёргает этот адрес: переходом и запросом из сценария.
+        // Повторно отдавать страницу проверки нельзя — она пойдёт по кругу; пускать в сеть тоже
+        // нельзя — сгорит свежий клиренс, нужный вызывающему. Решения просматриваются по порядку
+        // добавления, поэтому подстановка срабатывает первой, а обрывы — на всех последующих.
+        if (persistent)
+        {
+            // POST обрывается не всегда: см. NavigationSettings.AllowRepeatedPostToOrigin — в смотровом
+            // режиме запрос страницы уходит на origin, чтобы был виден его настоящий ответ.
+            var abortedMethods = allowPostToOrigin
+                ? new[] { HttpMethod.Get.Method }
+                : new[] { HttpMethod.Get.Method, HttpMethod.Post.Method };
+
+            foreach (var abortedMethod in abortedMethods)
+            {
+                ProxyNavigationDecisions.EnqueueDecision(
+                    enqueueContextId,
+                    new ProxyNavigationPendingDecision
+                    {
+                        RequestId = Guid.NewGuid().ToString("N"),
+                        Method = abortedMethod,
+                        AbsoluteUrl = url.AbsoluteUri,
+                        IssuedAtUtc = issuedAtUtc,
+                        ExpiresAtUtc = issuedAtUtc + ProxyNavigationDecisionLifetime,
+                        Action = ProxyNavigationDecisionAction.Abort,
+                        IsPersistent = true,
+                        StatusCode = (int)HttpStatusCode.NoContent,
+                        ReasonPhrase = "Повторное обращение после проверки оборвано драйвером.",
+                    },
+                    issuedAtUtc);
+            }
+        }
 
         ProxyNavigationDecisions.TryResolveToken(enqueueContextId, out var enqueueDiagToken);
         LaunchSettings.Logger?.LogNavigationFulfillEnqueueDiag(enqueueContextId, enqueueDiagToken, enqueued);

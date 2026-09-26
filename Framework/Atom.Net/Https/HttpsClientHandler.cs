@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
+using System.Globalization;
 using System.Net;
 using System.Net.Security;
 using System.Runtime.CompilerServices;
@@ -1481,6 +1482,7 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
             await connection.OpenAsync(options, cancellationToken).ConfigureAwait(false);
 
         var uri = preparedRequest.RequestUri ?? throw new InvalidOperationException("RequestUri не задан");
+        DumpWireHeaders(preparedRequest);
         var response = await connection.SendAsync(preparedRequest, cancellationToken).ConfigureAwait(false);
         ApplyResponseCookies(uri, response);
 
@@ -1498,6 +1500,60 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         }
 
         return (response, false);
+    }
+
+    /// <summary>Печатать ли в поток ошибок заголовки, которые реально уходят на origin.</summary>
+    /// <remarks>
+    /// ★ Замерная нужда: у драйвера между вкладкой и origin стоит локальный навигационный прокси,
+    /// и он пересобирает запрос — снимает заголовки, которыми владеет профиль (User-Agent и все
+    /// sec-ch-ua*), а сюда их ставит уже профиль. Поэтому HAR из DevTools показывает НЕ то, что
+    /// увидит сайт, и сравнивать его с записью живого браузера бессмысленно. Дамп включается
+    /// переменной ATOM_WIRE_HEADERS=1 и печатает то, что уходит на самом деле.
+    /// </remarks>
+    private static readonly bool WireHeadersDumpEnabled =
+        string.Equals(Environment.GetEnvironmentVariable("ATOM_WIRE_HEADERS"), "1", StringComparison.Ordinal);
+
+    private static void DumpWireHeaders(HttpsRequestMessage request)
+    {
+        if (!WireHeadersDumpEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            var builder = new System.Text.StringBuilder(512)
+                .Append("[WIRE] ")
+                .Append(request.Method.Method)
+                .Append(' ')
+                .Append(request.RequestUri);
+
+            foreach (var header in request.Headers.NonValidated)
+            {
+                var value = string.Join(", ", header.Value);
+                if (value.Length > 200)
+                {
+                    value = value[..200] + "…";
+                }
+
+                builder.Append("\n  ").Append(header.Key).Append(": ").Append(value);
+            }
+
+            if (request.Content is { } content)
+            {
+                foreach (var header in content.Headers.NonValidated)
+                {
+                    builder.Append("\n  ").Append(header.Key).Append(": ").Append(string.Join(", ", header.Value));
+                }
+            }
+
+            Console.Error.WriteLine(builder.ToString());
+        }
+        catch (Exception exception)
+        {
+            // Дамп — вспомогательный: его сбой не должен ронять запрос.
+            Console.Error.WriteLine("[WIRE] дамп не удался: " + exception.Message);
+        }
     }
 
     private static void DisposePreparedRequest(HttpsRequestMessage? preparedRequest, bool ownsPreparedRequest)
@@ -2347,8 +2403,56 @@ public sealed partial class HttpsClientHandler : HttpMessageHandler
         }
 
         var majorVersion = ExtractChromiumMajorVersion(userAgent);
-        value = string.Concat("\"Not_A Brand\";v=\"24\", \"Chromium\";v=\"", majorVersion, "\", \"", brand, "\";v=\"", majorVersion, "\"");
+        value = BuildGreasedBrandList(brand, majorVersion);
         return true;
+    }
+
+    /// <summary>Символы GREASE-бренда в том порядке, в каком их перебирает Chromium.</summary>
+    private static readonly string[] GreaseBrandChars = [" ", "(", ":", "-", ".", "/", ")", ";", "=", "?", "_"];
+
+    /// <summary>Версии GREASE-бренда, которые Chromium выбирает по мажорной версии.</summary>
+    private static readonly string[] GreaseBrandVersions = ["8", "99", "24"];
+
+    /// <summary>Порядок трёх брендов; Chromium выбирает его по мажорной версии.</summary>
+    private static readonly int[][] GreaseBrandOrders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+
+    /// <summary>
+    /// Собирает список брендов так же, как Chromium: GREASE-бренд, его версия и порядок трёх записей
+    /// выводятся из мажорной версии.
+    /// </summary>
+    /// <remarks>
+    /// ★ Прежде здесь стояла константа <c lang="text">"Not_A Brand";v="24"</c> первым элементом — то есть
+    /// один и тот же GREASE-бренд на все версии. У настоящего Chromium он свой у каждой мажорной
+    /// (user_agent_utils.cc, GetGreasedUserAgentBrandVersion): у 152 — <c lang="text">"Not?A_Brand";v="24"</c>
+    /// и порядок «Chromium, GREASE, марка», у 153 — <c lang="text">"Not_A Brand";v="8"</c> и порядок
+    /// «марка, GREASE, Chromium». Совпадение на 152 у прежней константы было случайным (версия угадана,
+    /// символы и порядок — нет), и заявленная версия расходилась с брендом в каждом запросе.
+    ///
+    /// Значения сверены с живым Chrome 152.0.7977.75 (эхо-сервер, VM03 23.09): алгоритм воспроизводит
+    /// его набор посимвольно.
+    /// </remarks>
+    private static string BuildGreasedBrandList(string brand, string majorVersion)
+    {
+        if (!int.TryParse(majorVersion, NumberStyles.None, CultureInfo.InvariantCulture, out var major))
+        {
+            // Мажорную версию разобрать не удалось: оставляем прежнюю форму, врать наугад незачем.
+            return string.Concat("\"Not_A Brand\";v=\"24\", \"Chromium\";v=\"", majorVersion, "\", \"", brand, "\";v=\"", majorVersion, "\"");
+        }
+
+        var grease = string.Concat(
+            "Not",
+            GreaseBrandChars[major % GreaseBrandChars.Length],
+            "A",
+            GreaseBrandChars[(major + 1) % GreaseBrandChars.Length],
+            "Brand");
+
+        var order = GreaseBrandOrders[major % GreaseBrandOrders.Length];
+        var parts = new string[3];
+        parts[order[0]] = string.Concat("\"", grease, "\";v=\"", GreaseBrandVersions[major % GreaseBrandVersions.Length], "\"");
+        parts[order[1]] = string.Concat("\"Chromium\";v=\"", majorVersion, "\"");
+        parts[order[2]] = string.Concat("\"", brand, "\";v=\"", majorVersion, "\"");
+
+        return string.Join(", ", parts);
     }
 
     /// <summary>

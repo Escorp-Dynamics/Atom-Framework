@@ -60,6 +60,21 @@ internal sealed record ProxyNavigationPendingDecision
     public int? StatusCode { get; init; }
 
     public string? ReasonPhrase { get; init; }
+
+    /// <summary>
+    /// Решение не расходуется совпадением и отвечает на КАЖДУЮ навигацию по этому адресу.
+    /// </summary>
+    /// <remarks>
+    /// ★ Обычное решение одноразовое: первая навигация его забирает, а следующая уходит на origin.
+    /// Для подменённого документа это неверно. Скрипт проверки Cloudflare после прохождения сам
+    /// переходит на тот же адрес, и такой переход возвращал настоящий ответ сервера, затирая
+    /// страницу проверки (22.09, WaitRoom: приложение отвечало {"code":"403205"}, и ждать на
+    /// странице становилось нечего). Прежний драйвер держал подмену всё время задачи — здесь то же
+    /// самое, только средствами навигационного прокси.
+    ///
+    /// Снимается вместе с маршрутом вкладки, то есть на границе задач.
+    /// </remarks>
+    public bool IsPersistent { get; init; }
 }
 
 internal sealed class ProxyNavigationDecisionRegistry
@@ -421,8 +436,14 @@ internal sealed class ProxyNavigationDecisionRegistry
                     if (!Matches(candidate, method, absoluteUrl))
                         continue;
 
-                    pendingDecisions.RemoveAt(index);
-                    consumedDecisions.Add(new ConsumedDecision(candidate, nowUtc + ConsumedDecisionReplayWindow));
+                    // Постоянное решение остаётся в очереди: оно обслуживает и следующие навигации
+                    // по этому адресу (см. IsPersistent).
+                    if (!candidate.IsPersistent)
+                    {
+                        pendingDecisions.RemoveAt(index);
+                        consumedDecisions.Add(new ConsumedDecision(candidate, nowUtc + ConsumedDecisionReplayWindow));
+                    }
+
                     decision = candidate;
                     return true;
                 }
@@ -492,8 +513,12 @@ internal sealed class ProxyNavigationDecisionRegistry
         }
 
         private static bool Matches(ProxyNavigationPendingDecision candidate, string method, string absoluteUrl)
-            => string.Equals(candidate.Method, method, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(candidate.AbsoluteUrl, absoluteUrl, StringComparison.Ordinal);
+        {
+            if (!string.Equals(candidate.AbsoluteUrl, absoluteUrl, StringComparison.Ordinal))
+                return false;
+
+            return string.Equals(candidate.Method, method, StringComparison.OrdinalIgnoreCase);
+        }
 
         private void PurgeExpired(DateTimeOffset nowUtc)
         {

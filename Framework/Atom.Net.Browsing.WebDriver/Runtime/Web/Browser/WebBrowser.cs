@@ -891,6 +891,24 @@ public sealed partial class WebBrowser : IWebBrowser
         if (ResolveBridgeNavigationProxyRouteToken(page, contextId) is { } navigationProxyRouteToken)
             payload["navigationProxyRouteToken"] = navigationProxyRouteToken;
 
+        // ★ Заголовки задачи доезжают до НАСТОЯЩЕГО запроса вкладки.
+        //
+        // NavigationSettings.Headers применялись только к синтетическим объектам драйвера, а браузер
+        // уходил в сеть со своим стандартным набором: прикладные origin, referer и route терялись.
+        // Расширение ставит их там же, где метку маршрута — правилом declarativeNetRequest на
+        // Chromium и слушателем на Firefox.
+        if (page.BridgeTaskRequestHeaders is { Count: > 0 } taskRequestHeaders)
+        {
+            var headersPayload = new JsonObject();
+            foreach (var header in taskRequestHeaders)
+                headersPayload[header.Key] = header.Value;
+
+            payload["extraRequestHeaders"] = headersPayload;
+
+            if (page.BridgeTaskRequestHeadersUrl is { Length: > 0 } taskRequestHeadersUrl)
+                payload["extraRequestHeadersUrl"] = taskRequestHeadersUrl;
+        }
+
         if (!string.IsNullOrWhiteSpace(page.OwnerWindow.BoundBridgeWindowId))
             payload["windowId"] = page.OwnerWindow.BoundBridgeWindowId;
 

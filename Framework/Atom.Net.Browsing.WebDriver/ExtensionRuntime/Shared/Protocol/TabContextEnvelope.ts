@@ -74,6 +74,24 @@ export interface TabContextEnvelope {
     proxy?: string | null;
     navigationInterceptionMode?: TabContextNavigationInterceptionMode;
     navigationProxyRouteToken?: string;
+    /**
+     * Заголовки, которые вкладка обязана слать на запросах задачи.
+     *
+     * ★ Настройки навигации драйвера доезжали только до его собственных синтетических объектов, а
+     * реальный запрос браузера уходил с одними лишь его стандартными заголовками: прикладные
+     * origin, referer, route терялись. Теперь они ставятся там же, где метка маршрута.
+     */
+    extraRequestHeaders?: Record<string, string>;
+    /**
+     * Адрес, на запросы к которому ставятся extraRequestHeaders. Пусто — ставить на все запросы вкладки.
+     *
+     * ★ Заголовки задачи прикладные: origin, referer, route, clientsource. Без области действия они
+     * уходили на КАЖДЫЙ запрос вкладки — в том числе на challenges.cloudflare.com, на favicon и на
+     * картинки проверки. Настоящий браузер так не делает: сравнение с записью живого браузера (HAR,
+     * 22.09) показало у нас origin визового сайта на запросах, которые отправляет скрипт внутри
+     * фрейма Cloudflare, и sec-fetch-site=same-site там, где у браузера cross-site.
+     */
+    extraRequestHeadersUrl?: string;
     connectedAt: number;
     readyAt?: number;
     isReady: boolean;
@@ -420,6 +438,24 @@ export function validateTabContextEnvelope(value: unknown): TabContextEnvelope {
     context.navigationInterceptionMode = readOptionalNavigationInterceptionMode(
         value.navigationInterceptionMode,
         'Контекст вкладки содержит неверный navigationInterceptionMode');
+
+    // Заголовки задачи: конверт проверяется полем за полем, и всё непрочитанное здесь теряется.
+    if (isJsonRecord(value.extraRequestHeaders)) {
+        const extraRequestHeaders: Record<string, string> = {};
+        for (const [name, headerValue] of Object.entries(value.extraRequestHeaders)) {
+            if (name.length > 0 && typeof headerValue === 'string') {
+                extraRequestHeaders[name] = headerValue;
+            }
+        }
+
+        if (Object.keys(extraRequestHeaders).length > 0) {
+            context.extraRequestHeaders = extraRequestHeaders;
+        }
+    }
+
+    context.extraRequestHeadersUrl = readOptionalString(
+        value.extraRequestHeadersUrl,
+        'Контекст вкладки содержит неверный extraRequestHeadersUrl');
 
     context.navigationProxyRouteToken = readOptionalString(
         value.navigationProxyRouteToken,

@@ -88,6 +88,7 @@ internal sealed class PageNavigationState : IPageTransport
                 Proxy = effectiveSettings.Proxy,
                 Body = effectiveSettings.Body,
                 Html = effectiveSettings.Html,
+                HtmlStatusCode = effectiveSettings.HtmlStatusCode,
             };
 
         var response = Send(CreateNavigateRequest(fallbackUrl, reloadSettings));

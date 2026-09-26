@@ -233,6 +233,17 @@ internal static class ProfileAutomationPresets
             },
         };
 
+    /// <summary>
+    /// Рисовать через Mesa вместо SwiftShader — <c lang="text">ATOM_GPU_MODE=mesa</c>.
+    /// </summary>
+    /// <remarks>
+    /// Переменная, а не настройка профиля: это замерная развилка одного стенда, и цена ошибки —
+    /// отсутствие WebGL-контекста вовсе, что Cloudflare отвергает кодом 300010. По умолчанию всё
+    /// остаётся как было.
+    /// </remarks>
+    private static readonly bool UseMesaGraphics =
+        string.Equals(Environment.GetEnvironmentVariable("ATOM_GPU_MODE"), "mesa", StringComparison.OrdinalIgnoreCase);
+
     private static List<string> BuildChromiumDefaultArguments(WebBrowserProfile profile, bool enableManagedChromiumBootstrap)
     {
         List<string> arguments =
@@ -257,17 +268,27 @@ internal static class ProfileAutomationPresets
             // Не трогать аппаратную видеоподсистему хоста: браузер живёт на виртуальном дисплее,
             // выводить через GPU некуда, а GPU-процесс всё равно открывал драйвер реальной карты и
             // срывал внешний монитор.
-            "--disable-gpu",
-            "--disable-gpu-compositing",
 
             // ...но WebGL при этом обязан остаться рабочим. Замер показал webgl=НЕТ-КОНТЕКСТА и
             // пустые glVendor/glRenderer — для настоящего десктопного Chrome это невозможно, и
             // Cloudflare отвечал на такой отпечаток error-callback 300010 («bot behavior detected»
             // по его документации). SwiftShader даёт контекст программно, без обращения к железу,
             // поэтому монитор остаётся нетронутым, а страница видит нормальный ANGLE-рендерер.
-            "--enable-unsafe-swiftshader",
-            "--use-angle=swiftshader",
         ];
+
+        // ★ Ветка Mesa (ATOM_GPU_MODE=mesa) — замерная. Программный рендерер задаётся здесь жёстко, и
+        // страница видит «ANGLE (Google, Vulkan … SwiftShader …)». NativeChrome на VM03, где WaitRoom
+        // прошёл, рисует иначе — «ANGLE (Mesa, llvmpipe …)», у него 32 расширения против наших 29 и
+        // MAX_TEXTURE_SIZE 16384 против 8192 (снимки отпечатков 24.09). Своими аргументами это не
+        // перебить: '--disable-gpu' и '--use-angle=swiftshader' стоят раньше и выигрывают, поэтому
+        // выбор вынесен сюда.
+        if (!UseMesaGraphics)
+        {
+            arguments.Add("--disable-gpu");
+            arguments.Add("--disable-gpu-compositing");
+            arguments.Add("--enable-unsafe-swiftshader");
+            arguments.Add("--use-angle=swiftshader");
+        }
 
         // Обновление компонентов гасим всегда. Оно ходит на update.googleapis.com и edgedl.me.gvt1.com
         // за многомегабайтными дельтами, причём через тот же прокси, что и полезный трафик страницы:
@@ -376,7 +397,9 @@ internal static class ProfileAutomationPresets
         if (settings.Device?.WebGL is not null)
         {
             AddChromiumArgument(arguments, "--enable-unsafe-swiftshader");
-            AddChromiumArgument(arguments, "--use-angle=swiftshader", "--use-angle=");
+
+            if (!UseMesaGraphics)
+                AddChromiumArgument(arguments, "--use-angle=swiftshader", "--use-angle=");
         }
 
         foreach (var argument in NormalizeArguments(settings.Args))

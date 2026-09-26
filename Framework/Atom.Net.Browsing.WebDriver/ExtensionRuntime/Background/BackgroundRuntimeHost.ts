@@ -34,6 +34,7 @@ import {
     ensureVirtualCookieStore,
     ensureDiscoveryTab,
     executeScriptInFrames,
+    probeElementInFrames,
     executeScriptInSingleFrame,
     evaluateMainWorldScript,
     describeIdentity,
@@ -395,6 +396,17 @@ export class BackgroundRuntimeHost {
         // CONNECT (HandleConnectTunnelAsync), поэтому корректирует маршрут даже при чужом кэш-токене
         // CONNECT. Прокси срезает заголовок до обращения к origin. На Chromium то же делает
         // declarativeNetRequest; здесь blocking webRequest есть только у Firefox, так что путь Firefox-only.
+        // Заголовки задачи — на тех же запросах, где ставится метка маршрута (см. правило
+        // declarativeNetRequest для Chromium: там это делает одно правило).
+        const taskHeaders = isNavigationProxyRequestCandidate(details) && matchesTaskHeadersScope(details.url, context)
+            ? context?.extraRequestHeaders
+            : undefined;
+        if (taskHeaders !== undefined && Object.keys(taskHeaders).length > 0) {
+            const requestHeaders = toMutableHeaders(mutation?.requestHeaders ?? details.requestHeaders);
+            applyHeaderOverrides(requestHeaders, taskHeaders);
+            mutation = { ...mutation, requestHeaders };
+        }
+
         const navRouteToken = isNavigationProxyRequestCandidate(details)
             ? this.resolveNavigationProxyRouteToken(context)
             : undefined;
@@ -1242,6 +1254,14 @@ export class BackgroundRuntimeHost {
                     return true;
                 }
 
+                case 'ProbeElementInFrames': {
+                    const tabId = requireTabId(message);
+                    const selector = readPayloadString(message.payload, 'selector', 'Команда опроса фреймов не содержит selector');
+                    const probes = await probeElementInFrames(this.browserHost, this.runtime, tabId, selector);
+                    await this.sendDirectResponse(message, probes);
+                    return true;
+                }
+
                 case 'ExecuteScriptInFrames': {
                     const tabId = requireTabId(message);
                     const script = readPayloadString(message.payload, 'script', 'Команда выполнения по фреймам не содержит script');
@@ -1525,6 +1545,9 @@ export class BackgroundRuntimeHost {
             virtualCookies: this.virtualCookies,
             sendDirectResponse: (directMessage: BridgeMessage, payload?: unknown) => this.sendDirectResponse(directMessage, payload),
             mapBrowserCookie: toJsonCookie,
+            // Всё, кроме Firefox: там блокирующего webRequest нет, и виртуальное хранилище само по
+            // себе в сеть не попадает (см. writesThroughToBrowserJar).
+            writesThroughToBrowserJar: this.config?.browserFamily !== 'firefox',
         };
     }
 
@@ -3018,15 +3041,53 @@ export class BackgroundRuntimeHost {
 
         const routeToken = this.resolveNavigationProxyRouteToken(context);
 
+        // ★ Заголовки задачи — ОТДЕЛЬНЫМ правилом, потому что область действия у них иная.
+        // Метка маршрута нужна на всех запросах вкладки (прокси сопоставляет по ней вкладку), а
+        // прикладные заголовки задачи — только на запросах по её адресу. Пока правило было общим,
+        // origin и referer визового сайта уезжали и на challenges.cloudflare.com (см.
+        // extraRequestHeadersUrl). Без адреса поведение прежнее — на все запросы вкладки.
+        const taskHeadersRuleId = toNavigationProxyTaskHeadersRuleId(ruleId);
+        const taskHeadersUrl = context?.extraRequestHeadersUrl;
+        const taskHeadersHost = toRequestDomain(taskHeadersUrl);
+        const scopeTaskHeaders = taskHeadersRuleId !== null
+            && taskHeadersUrl !== undefined
+            && taskHeadersUrl.length > 0
+            && taskHeadersHost !== null;
+        const taskHeaders = context?.extraRequestHeaders ?? undefined;
+        const taskHeaderEntries = taskHeaders === undefined
+            ? []
+            : Object.entries(taskHeaders).filter(([name, value]) => name.length > 0 && typeof value === 'string');
+
+        // Правило с заголовками задачи снимается всегда, когда оно не нужно: иначе прошлая
+        // область действия пережила бы смену задачи на переиспользуемой вкладке.
+        const staleTaskHeadersRuleIds = taskHeadersRuleId === null ? [] : [taskHeadersRuleId];
+
         try {
-            if (routeToken === undefined) {
-                await declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleId] });
+            if (routeToken === undefined && taskHeaderEntries.length === 0) {
+                await declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleId, ...staleTaskHeadersRuleIds] });
                 return;
             }
 
-            await declarativeNetRequest.updateSessionRules({
-                removeRuleIds: [ruleId],
-                addRules: [{
+            const requestHeaders = scopeTaskHeaders
+                ? []
+                : taskHeaderEntries.map(([header, value]) => ({
+                    header,
+                    operation: 'set',
+                    value,
+                }));
+
+            if (routeToken !== undefined) {
+                requestHeaders.push({
+                    header: navigationProxyRouteHeaderName,
+                    operation: 'set',
+                    value: routeToken,
+                });
+            }
+
+            const addRules: unknown[] = [];
+
+            if (requestHeaders.length > 0) {
+                addRules.push({
                     id: ruleId,
                     priority: 1,
                     // resourceTypes перечисляются явно: без него правило не покрывает main_frame,
@@ -3035,22 +3096,85 @@ export class BackgroundRuntimeHost {
                     condition: { tabIds: [ruleId], urlFilter: '*', resourceTypes: navigationProxyRouteResourceTypes },
                     action: {
                         type: 'modifyHeaders',
-                        requestHeaders: [{
-                            header: navigationProxyRouteHeaderName,
-                            operation: 'set',
-                            value: routeToken,
-                        }],
+                        requestHeaders,
                     },
-                }],
+                });
+            }
+
+            if (scopeTaskHeaders && taskHeaderEntries.length > 0) {
+                addRules.push({
+                    id: taskHeadersRuleId,
+                    // Приоритет выше общего правила: наборы заголовков у них разные, и при равном
+                    // приоритете порядок применения двух modifyHeaders одного расширения браузер
+                    // выбирает сам.
+                    priority: 2,
+                    condition: {
+                        tabIds: [ruleId],
+                        // Якорь в начале фильтра — документированная форма «адрес начинается с».
+                        // Без него фильтр считается подстрокой, и совпадение оказалось неустойчивым:
+                        // на навигациях документа правило срабатывало, а на fetch по тому же самому
+                        // адресу (посимвольно тот же — сверено по записи браузера 22.09) — нет, и
+                        // ушедший на провод POST логина остался без route/clientsource.
+                        urlFilter: '|' + taskHeadersUrl,
+                        // Сужение по узлу — страховка: даже если фильтр адреса не совпадёт, заголовки
+                        // задачи не уйдут на чужой узел.
+                        requestDomains: [taskHeadersHost],
+                        resourceTypes: navigationProxyRouteResourceTypes,
+                    },
+                    action: {
+                        type: 'modifyHeaders',
+                        requestHeaders: taskHeaderEntries.map(([header, value]) => ({
+                            header,
+                            operation: 'set',
+                            value,
+                        })),
+                    },
+                });
+            }
+
+            await declarativeNetRequest.updateSessionRules({
+                removeRuleIds: [ruleId, ...staleTaskHeadersRuleIds],
+                addRules,
             });
         } catch (error) {
             emitBackgroundDebugEvent(this.config, 'navigation-proxy-route-rule-failed', {
                 tabId,
                 hasRouteToken: routeToken !== undefined,
+                taskHeaders: taskHeaderEntries.map(([name]) => name).join(','),
                 error: toErrorMessage(error),
             });
 
             console.error('[фоновый вход] Не удалось обновить правило маршрутизации навигационного прокси', error);
+
+            // ★ Заголовки задачи могли быть отвергнуты браузером целиком (часть заголовков он
+            // запрещает менять правилом). Тогда вместе с ними теряется и метка маршрута, без
+            // которой навигационный прокси не сопоставит запрос с вкладкой. Поэтому повторяем
+            // попытку с одной лишь меткой: лучше без заголовков задачи, чем без маршрута.
+            if (routeToken !== undefined && taskHeaderEntries.length > 0) {
+                try {
+                    await declarativeNetRequest.updateSessionRules({
+                        removeRuleIds: [ruleId],
+                        addRules: [{
+                            id: ruleId,
+                            priority: 1,
+                            condition: { tabIds: [ruleId], urlFilter: '*', resourceTypes: navigationProxyRouteResourceTypes },
+                            action: {
+                                type: 'modifyHeaders',
+                                requestHeaders: [{
+                                    header: navigationProxyRouteHeaderName,
+                                    operation: 'set',
+                                    value: routeToken,
+                                }],
+                            },
+                        }],
+                    });
+                } catch (fallbackError) {
+                    emitBackgroundDebugEvent(this.config, 'navigation-proxy-route-rule-fallback-failed', {
+                        tabId,
+                        error: toErrorMessage(fallbackError),
+                    });
+                }
+            }
         }
     }
 
@@ -3573,6 +3697,46 @@ export async function bootstrapBackgroundRuntime(): Promise<BackgroundRuntimeHos
  * Совпадает с числовым tabId: он уникален и служит одновременно условием привязки правила.
  * Диапазон ограничен int32 — идентификаторы правил больше не принимаются.
  */
+/**
+ * Идентификатор второго правила вкладки — под заголовки задачи.
+ *
+ * Идентификатор правила и идентификатор вкладки в первом правиле совпадают, поэтому второе берёт
+ * верхнюю половину диапазона. Если вкладка с таким номером в неё не помещается, второго правила не
+ * будет, и заголовки задачи останутся на общем правиле — как было до появления области действия.
+ */
+/**
+ * Узел адреса задачи — для условия requestDomains.
+ */
+function toRequestDomain(url: string | undefined): string | null {
+    if (url === undefined || url.length === 0) {
+        return null;
+    }
+
+    try {
+        const host = new URL(url).hostname;
+        return host.length > 0 ? host : null;
+    } catch {
+        return null;
+    }
+}
+
+function toNavigationProxyTaskHeadersRuleId(routeRuleId: number): number | null {
+    const shifted = routeRuleId + 1073741824;
+    return shifted <= 2147483647 ? shifted : null;
+}
+
+/**
+ * Относится ли запрос к адресу задачи: заголовки задачи ставятся только на него.
+ */
+function matchesTaskHeadersScope(url: unknown, context: TabContextEnvelope | undefined): boolean {
+    const scope = context?.extraRequestHeadersUrl;
+    if (scope === undefined || scope.length === 0) {
+        return true;
+    }
+
+    return typeof url === 'string' && url.startsWith(scope);
+}
+
 function toNavigationProxyRouteRuleId(tabId: string): number | null {
     const numericTabId = Number(tabId);
     return Number.isInteger(numericTabId) && numericTabId > 0 && numericTabId <= 2147483647

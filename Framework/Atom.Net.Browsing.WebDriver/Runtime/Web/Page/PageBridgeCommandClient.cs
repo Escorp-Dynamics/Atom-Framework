@@ -79,6 +79,11 @@ internal sealed class PageBridgeCommandClient(
         CancellationToken cancellationToken = default)
         => commands.ExecuteScriptInFramesAsync(sessionId, tabId, script, isolatedWorld, includeMetadata, cancellationToken);
 
+    public ValueTask<JsonElement> ProbeElementInFramesAsync(
+        string selector,
+        CancellationToken cancellationToken = default)
+        => commands.ProbeElementInFramesAsync(sessionId, tabId, selector, cancellationToken);
+
     public ValueTask SetCookieAsync(
         string contextId,
         string name,

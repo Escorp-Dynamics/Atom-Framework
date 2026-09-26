@@ -30,6 +30,7 @@ export const bridgeCommands = [
     'GetWindowBounds',
     'SetTabContext',
     'ExecuteScriptInFrames',
+    'ProbeElementInFrames',
     'DebugPortStatus',
     'CheckShadowRoot',
 ] as const;

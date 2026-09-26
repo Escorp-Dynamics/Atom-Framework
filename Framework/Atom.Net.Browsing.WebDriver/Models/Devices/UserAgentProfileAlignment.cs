@@ -186,21 +186,74 @@ public static class UserAgentProfileAlignment
     /// <remarks>
     /// Chromium всегда добавляет «GREASE»-бренд (намеренно бессмысленный) — по нему сайты не должны
     /// строить логику. Его отсутствие само по себе выглядит подозрительно, поэтому воспроизводим.
+    ///
+    /// ★ И сам бренд, и его версия, и порядок трёх записей выводятся ИЗ МАЖОРНОЙ ВЕРСИИ
+    /// (user_agent_utils.cc, GetGreasedUserAgentBrandVersion). Прежде здесь стояла константа
+    /// <c lang="text">"Not;A=Brand";v="99"</c> первой записью: такой бренд шлёт Chrome 139, и на любой
+    /// другой версии вкладка заявляла в <c lang="text">navigator.userAgentData</c> и в заголовках
+    /// личность, которой не существует (замер 23.09: Chrome 153 с брендом 139 — HAR «atom vm01 555»).
+    /// Алгоритм сверен с живым Chrome 152.0.7977.75: воспроизводит его набор посимвольно.
     /// </remarks>
     private static List<ClientHintBrand> BuildBrands(string brandName, string version)
     {
-        var greaseVersion = version.Contains('.', StringComparison.Ordinal) ? "99.0.0.0" : "99";
-        var brands = new List<ClientHintBrand>(3)
+        var major = ParseMajorVersion(version);
+        var isFullVersion = version.Contains('.', StringComparison.Ordinal);
+
+        // Мажорную версию разобрать не удалось — оставляем прежнюю форму: врать наугад незачем.
+        if (major < 0)
         {
-            new("Not;A=Brand", greaseVersion),
-            new("Chromium", version),
-        };
+            var fallback = new List<ClientHintBrand>(3)
+            {
+                new("Not;A=Brand", isFullVersion ? "99.0.0.0" : "99"),
+                new("Chromium", version),
+            };
 
-        if (!string.Equals(brandName, "Chromium", StringComparison.Ordinal))
-            brands.Add(new ClientHintBrand(brandName, version));
+            if (!string.Equals(brandName, "Chromium", StringComparison.Ordinal))
+                fallback.Add(new ClientHintBrand(brandName, version));
 
-        return brands;
+            return fallback;
+        }
+
+        var grease = string.Concat(
+            "Not",
+            GreaseBrandChars[major % GreaseBrandChars.Length],
+            "A",
+            GreaseBrandChars[(major + 1) % GreaseBrandChars.Length],
+            "Brand");
+
+        var greaseVersion = GreaseBrandVersions[major % GreaseBrandVersions.Length];
+        var greaseBrand = new ClientHintBrand(grease, isFullVersion ? greaseVersion + ".0.0.0" : greaseVersion);
+
+        if (string.Equals(brandName, "Chromium", StringComparison.Ordinal))
+            return [greaseBrand, new ClientHintBrand("Chromium", version)];
+
+        var order = GreaseBrandOrders[major % GreaseBrandOrders.Length];
+        var brands = new ClientHintBrand[3];
+        brands[order[0]] = greaseBrand;
+        brands[order[1]] = new ClientHintBrand("Chromium", version);
+        brands[order[2]] = new ClientHintBrand(brandName, version);
+
+        return [.. brands];
     }
+
+    /// <summary>Мажорная версия из «153» или «153.0.0.0»; −1, если разобрать не удалось.</summary>
+    private static int ParseMajorVersion(string version)
+    {
+        var end = 0;
+        while (end < version.Length && char.IsAsciiDigit(version[end]))
+            ++end;
+
+        return end > 0 && int.TryParse(version.AsSpan(0, end), out var major) ? major : -1;
+    }
+
+    /// <summary>Символы GREASE-бренда в том порядке, в каком их перебирает Chromium.</summary>
+    private static readonly string[] GreaseBrandChars = [" ", "(", ":", "-", ".", "/", ")", ";", "=", "?", "_"];
+
+    /// <summary>Версии GREASE-бренда, которые Chromium выбирает по мажорной версии.</summary>
+    private static readonly string[] GreaseBrandVersions = ["8", "99", "24"];
+
+    /// <summary>Порядок трёх брендов; Chromium выбирает его по мажорной версии.</summary>
+    private static readonly int[][] GreaseBrandOrders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
 
     /// <summary>
     /// Определяет бренд и версию Chromium-браузера.

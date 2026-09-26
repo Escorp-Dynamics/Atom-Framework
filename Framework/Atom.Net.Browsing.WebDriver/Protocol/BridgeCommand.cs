@@ -33,6 +33,9 @@ internal enum BridgeCommand
     GetWindowBounds,
     SetTabContext,
     ExecuteScriptInFrames,
+
+    /// <summary>Опрос элемента по селектору во всех фреймах вкладки (без eval).</summary>
+    ProbeElementInFrames,
     DebugPortStatus,
     CheckShadowRoot,
 }

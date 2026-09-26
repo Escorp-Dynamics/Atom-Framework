@@ -353,17 +353,32 @@ public sealed partial class WebPage
         // уходит по прежней синтетической ветке, а не молча искажает POST.
         if (!settings.Body.IsEmpty)
         {
-            return OwnerWindow.OwnerBrowser.TryEnqueueNavigationPostForm(
-                this,
-                url,
-                settings.Body,
-                ResolveContentType(settings.Headers));
+            // Тело И подменённый документ вместе: вкладка отправляет POST сама, а ответ на него
+            // отдаём мы. Так контекст документа остаётся постовым, а страница — нашей.
+            return string.IsNullOrEmpty(settings.Html)
+                ? OwnerWindow.OwnerBrowser.TryEnqueueNavigationPostForm(
+                    this,
+                    url,
+                    settings.Body,
+                    ResolveContentType(settings.Headers))
+                : OwnerWindow.OwnerBrowser.TryEnqueuePostNavigationFulfillment(
+                    this,
+                    url,
+                    settings.Body,
+                    ResolveContentType(settings.Headers),
+                    settings.Html);
         }
 
         if (string.IsNullOrEmpty(settings.Html))
             return true;
 
-        return OwnerWindow.OwnerBrowser.TryEnqueueNavigationFulfillment(this, url, settings.Html);
+        return OwnerWindow.OwnerBrowser.TryEnqueueNavigationFulfillment(
+            this,
+            url,
+            settings.Html,
+            settings.KeepHtmlForRepeatedNavigations,
+            settings.AllowRepeatedPostToOrigin,
+            settings.HtmlStatusCode);
     }
 
     private static string? ResolveContentType(IReadOnlyDictionary<string, string>? headers)
@@ -514,6 +529,9 @@ public sealed partial class WebPage
             Kind = settings.Kind,
             Proxy = settings.Proxy,
             Html = settings.Html,
+            HtmlStatusCode = settings.HtmlStatusCode,
+            KeepHtmlForRepeatedNavigations = settings.KeepHtmlForRepeatedNavigations,
+            AllowRepeatedPostToOrigin = settings.AllowRepeatedPostToOrigin,
             Headers = headers.Count == 0 ? null : headers,
             Body = body,
         };

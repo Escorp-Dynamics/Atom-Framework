@@ -4,6 +4,23 @@ namespace Atom.Net.Browsing.WebDriver;
 
 public sealed partial class WebPage
 {
+    /// <inheritdoc/>
+    public async ValueTask<JsonElement?> ProbeElementInFramesAsync(string selector, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(selector);
+        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfDisposed();
+
+        if (BridgeCommands is not { } bridge)
+            return null;
+
+        return await bridge.ProbeElementInFramesAsync(selector, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public ValueTask<JsonElement?> EvaluateInFramesAsync(string script, bool isolatedWorld, CancellationToken cancellationToken)
+        => ExecuteInAllFramesWithMetadataAsync(script, isolatedWorld, cancellationToken);
+
     internal ValueTask<JsonElement?> ExecuteInAllFramesAsync(string script)
         => ExecuteInAllFramesAsync(script, CancellationToken.None);
 

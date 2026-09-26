@@ -22,6 +22,27 @@ public sealed partial class WebPage
     /// </remarks>
     internal Atom.Net.Https.Profiles.BrowserProfile? BridgeTaskForwardProfile { get; set; }
 
+    /// <summary>
+    /// Заголовки ТЕКУЩЕЙ задачи, которые вкладка обязана слать на своих запросах.
+    /// </summary>
+    /// <remarks>
+    /// Заполняется вызывающим рядом с <see cref="BridgeTaskForwardProfile"/> и уезжает в контекст
+    /// вкладки. Настройки навигации применялись только к синтетическим объектам драйвера, поэтому
+    /// прикладные заголовки задачи (origin, referer, route) до настоящего запроса браузера не
+    /// доходили: расширение ставит их правилом declarativeNetRequest на Chromium и слушателем
+    /// заголовков на Firefox.
+    /// </remarks>
+    internal IReadOnlyDictionary<string, string>? BridgeTaskRequestHeaders { get; set; }
+
+    /// <summary>
+    /// Адрес, на запросы к которому ставятся <see cref="BridgeTaskRequestHeaders"/>; null — на все.
+    /// </summary>
+    /// <remarks>
+    /// Прикладные заголовки задачи не должны уходить на чужие узлы: сравнение с записью живого
+    /// браузера показало у нас origin визового сайта на запросах из фрейма проверки Cloudflare.
+    /// </remarks>
+    internal string? BridgeTaskRequestHeadersUrl { get; set; }
+
     // Навигация/перезагрузка пересоздаёт порт content-скрипта: на это окно вкладка временно
     // «исчезает» из мостового реестра (TabDisconnected приходит раньше повторного TabConnected при
     // переупорядочивании под нагрузкой), и адресованные ей команды отклоняются как surface-disconnect.

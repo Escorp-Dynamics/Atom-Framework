@@ -398,9 +398,22 @@ public sealed partial class WebBrowser
             : VirtualKeyboard.CreateForDisplayAsync(display, cancellationToken: cancellationToken);
     }
 
+    /// <summary>
+    /// Работать на дисплее, заданном снаружи (<c lang="text">ATOM_USE_HOST_DISPLAY=1</c>), не поднимая свой.
+    /// </summary>
+    /// <remarks>
+    /// ★ Замерная развилка. Обычно драйвер поднимает собственный дисплей на встроенном композиторе
+    /// Wayland — это лишний слой, которого нет у эталонного стенда NativeChrome: там браузер живёт
+    /// прямо на X-дисплее. Переменная позволяет сравнить среды, не трогая поведение по умолчанию;
+    /// браузер тогда наследует DISPLAY процесса и рисует на нём (в том числе на экране RDP).
+    /// </remarks>
+    private static readonly bool UseHostDisplay =
+        string.Equals(Environment.GetEnvironmentVariable("ATOM_USE_HOST_DISPLAY"), "1", StringComparison.Ordinal)
+        && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY"));
+
     [SupportedOSPlatform("linux")]
     internal static bool ShouldAutoCreateDisplay(VirtualDisplay? existingDisplay, bool isLinux)
-        => existingDisplay is null && isLinux;
+        => existingDisplay is null && isLinux && !UseHostDisplay;
 
     [SupportedOSPlatform("linux")]
     internal static void ValidateLinuxBrowserDisplayVisibilityCoupling(WebBrowserSettings? launchSettings, VirtualDisplay? display)
@@ -460,6 +473,7 @@ public sealed partial class WebBrowser
             new VirtualDisplaySettings
             {
                 IsVisible = !launchSettings.UseHeadlessMode,
+
                 Logger = launchSettings.Logger,
                 Resolution = ResolveDisplayResolution(launchSettings.Device),
 
@@ -489,6 +503,35 @@ public sealed partial class WebBrowser
     /// Дисплей меньше окна означал бы окно, обрезанное экраном, поэтому берётся именно экран
     /// профиля; когда профиль экрана не заявляет, остаётся разрешение по умолчанию.
     /// </remarks>
+    /// <summary>
+    /// Разрешение виртуального дисплея, когда профиль его не объявляет.
+    /// </summary>
+    /// <remarks>
+    /// ★ Переопределяется переменной <c lang="text">ATOM_DISPLAY_RESOLUTION</c> (формат <c lang="text">ШИРИНАxВЫСОТА</c>).
+    /// Нужна для наблюдения: при показе кадров в чужой сессии (см. EnablePresentation) окно вывода
+    /// повторяет размер дисплея, и выход 1920x1080 не помещается на экран наблюдателя — нижняя
+    /// часть окна остаётся неотрисованной. Размер экрана видят и проверки, поэтому значение по
+    /// умолчанию не меняем: переменная — инструмент наблюдения, а не новая настройка по умолчанию.
+    /// </remarks>
+    private static Size ResolveDefaultDisplayResolution()
+    {
+        var raw = Environment.GetEnvironmentVariable("ATOM_DISPLAY_RESOLUTION");
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+            var parts = raw.Split('x', 'X', ',');
+            if (parts.Length == 2
+                && int.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture, out var width)
+                && int.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out var height)
+                && width >= 800
+                && height >= 600)
+            {
+                return new Size(width, height);
+            }
+        }
+
+        return new Size(1920, 1080);
+    }
+
     private static Size ResolveDisplayResolution(Device? device)
     {
         var declared = device?.Screen switch
@@ -499,7 +542,7 @@ public sealed partial class WebBrowser
         };
 
         if (declared.IsEmpty)
-            return new Size(1920, 1080);
+            return ResolveDefaultDisplayResolution();
 
         // Дисплей не должен быть уже окна: Chromium не делает окно уже своей нижней границы, и
         // мобильный профиль с экраном 412 px получал окно 500 px, торчащее за край дисплея.

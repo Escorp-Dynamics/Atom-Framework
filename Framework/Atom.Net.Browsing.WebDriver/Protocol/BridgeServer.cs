@@ -293,6 +293,27 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         return SendJsonPayloadCommandAsync(sessionId, tabId, BridgeCommand.ExecuteScriptInFrames, payload, cancellationToken);
     }
 
+    /// <summary>
+    /// Опрашивает все фреймы вкладки про элемент по селектору.
+    /// </summary>
+    /// <remarks>
+    /// В отличие от выполнения кода строкой, зонд уходит в браузер функцией и не нарушает политику
+    /// безопасности страницы — только так виден DOM кросс-доменного фрейма проверки Cloudflare.
+    /// </remarks>
+    internal ValueTask<JsonElement> ProbeElementInFramesAsync(
+        string sessionId,
+        string tabId,
+        string selector,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new JsonObject
+        {
+            ["selector"] = selector,
+        };
+
+        return SendJsonPayloadCommandAsync(sessionId, tabId, BridgeCommand.ProbeElementInFrames, payload, cancellationToken);
+    }
+
     internal ValueTask<(string TabId, string? WindowId)> OpenTabAsync(string sessionId, string tabId, string windowId, CancellationToken cancellationToken = default)
         => SendOpenedSurfaceCommandAsync(
             sessionId,

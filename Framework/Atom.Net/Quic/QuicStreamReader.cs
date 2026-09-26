@@ -73,8 +73,19 @@ public sealed class QuicStreamReader
             waiter = null;
         }
 
-        if (error is null) pending?.TrySetResult(false);
-        else pending?.TrySetException(error);
+        if (error is null)
+        {
+            pending?.TrySetResult(false);
+            return;
+        }
+
+        if (pending is null) return;
+
+        pending.TrySetException(error);
+
+        // Ожидание могло сняться по отмене раньше, чем пришла ошибка: тогда исключение осталось
+        // бы ненаблюдённым и всплыло у потребителя из финализатора.
+        BackgroundTask.Observe(pending.Task);
     }
 
     /// <summary>

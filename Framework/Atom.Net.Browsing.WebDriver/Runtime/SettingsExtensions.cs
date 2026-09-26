@@ -16,6 +16,7 @@ internal static class SettingsExtensions
             Proxy = settings.Proxy,
             Body = settings.Body,
             Html = settings.Html,
+            HtmlStatusCode = settings.HtmlStatusCode,
         };
     }
 
