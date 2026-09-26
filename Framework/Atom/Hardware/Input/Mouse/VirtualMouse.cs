@@ -177,6 +177,114 @@ public sealed class VirtualMouse : IAsyncDisposable
     }
 
     /// <summary>
+    /// Подводит курсор к точке живым движением и только потом кликает.
+    /// </summary>
+    /// <param name="position">Позиция на экране.</param>
+    /// <param name="button">Кнопка.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <remarks>
+    /// ★ Проверке Cloudflare мало того, что нажатие пришло по верным координатам: она читает ПОЧЕРК
+    /// указателя. Замер 25.09: мгновенный перенос курсора нажатие не засчитывает вовсе, а ровное
+    /// движение по одной формуле с одинаковыми паузами проверка принимает, но потом перезапускает
+    /// себя по кругу («Verifying…» → страница перерисована → снова «Verifying…»).
+    ///
+    /// Поэтому здесь воспроизводится не «плавность», а свойства живой руки: курсор уже где-то ездит
+    /// до подхода; скорость идёт колоколом — разгон, максимум в середине, торможение к цели; шаг и
+    /// пауза дрожат; к концу рука ПРОМАХИВАЕТСЯ мимо цели и доводит курсор короткими поправками;
+    /// перед нажатием указатель не стоит мёртво, а чуть дышит.
+    /// </remarks>
+    public async ValueTask ApproachAndClickAtAsync(Point position, VirtualMouseButton button = VirtualMouseButton.Left, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref isDisposed), this);
+
+        try
+        {
+            // ★ БЫСТРЫЙ ПОДХОД. Сохранены все свойства живого движения — разгон и торможение,
+            // дрожь, промах с доводкой, короткая задержка наведения, — но выдержки сжаты втрое:
+            // прежняя хореография стоила около 1.1 с на нажатие, и это заметно на глаз. Человек
+            // наводится на видимую цель за доли секунды, а не за полторы.
+            //
+            // Холостая езда курсора убрана: история указателя и так возникает из самого подхода,
+            // который начинается в стороне от цели.
+            var overshoot = new Point(
+                position.X + RandomNumberGenerator.GetInt32(-9, 10),
+                position.Y + RandomNumberGenerator.GetInt32(-7, 8));
+
+            await MoveLikeHandAsync(overshoot, RandomNumberGenerator.GetInt32(10, 15), cancellationToken).ConfigureAwait(false);
+            await Task.Delay(RandomNumberGenerator.GetInt32(15, 45), cancellationToken).ConfigureAwait(false);
+            await MoveLikeHandAsync(position, RandomNumberGenerator.GetInt32(3, 6), cancellationToken).ConfigureAwait(false);
+
+            // Наведение: коротко, но указатель всё же живой.
+            await Task.Delay(RandomNumberGenerator.GetInt32(40, 90), cancellationToken).ConfigureAwait(false);
+
+            if (RandomNumberGenerator.GetInt32(0, 2) == 0)
+            {
+                backend.MoveAbsolute(new Point(
+                    position.X + RandomNumberGenerator.GetInt32(-1, 2),
+                    position.Y + RandomNumberGenerator.GetInt32(-1, 2)));
+
+                await Task.Delay(RandomNumberGenerator.GetInt32(20, 60), cancellationToken).ConfigureAwait(false);
+            }
+
+            backend.MoveAbsolute(position);
+
+            backend.ButtonDown(button);
+            await Task.Delay(RandomNumberGenerator.GetInt32(45, 95), cancellationToken).ConfigureAwait(false);
+            backend.ButtonUp(button);
+        }
+        catch (OperationCanceledException)
+        {
+            TryReleaseButton(button);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Ведёт курсор в точку так, как это делает рука: скорость колоколом, шаг и пауза дрожат.
+    /// </summary>
+    /// <remarks>
+    /// Начало движения неизвестно (устройство не сообщает текущую позицию), поэтому путь строится от
+    /// точки, в которой курсор оказался после предыдущего перемещения этого же метода.
+    /// </remarks>
+    private async ValueTask MoveLikeHandAsync(Point target, int steps, CancellationToken cancellationToken)
+    {
+        var from = lastKnownPoint ?? new Point(
+            target.X - RandomNumberGenerator.GetInt32(120, 260),
+            target.Y - RandomNumberGenerator.GetInt32(80, 200));
+
+        for (var step = 1; step <= steps; ++step)
+        {
+            // Колокол скорости: путь растёт по сглаженной S-кривой, то есть медленно в начале,
+            // быстро в середине и снова медленно у цели.
+            var linear = step / (double)steps;
+            var eased = 0.5 - (Math.Cos(Math.PI * linear) / 2.0);
+
+            // Дрожание руки: поперёк пути, тем меньше, чем ближе цель.
+            var tremor = (int)Math.Round((1.0 - linear) * RandomNumberGenerator.GetInt32(-4, 5));
+
+            var x = (int)Math.Round(from.X + ((target.X - from.X) * eased)) + (step == steps ? 0 : tremor);
+            var y = (int)Math.Round(from.Y + ((target.Y - from.Y) * eased)) + (step == steps ? 0 : tremor);
+
+            backend.MoveAbsolute(new Point(x, y));
+            lastKnownPoint = new Point(x, y);
+
+            // Пауза между событиями неровная, изредка — заметно длиннее. Пределы сжаты: на 60 Гц
+            // экрана события чаще 4 мс всё равно сливаются в один кадр, а верхняя граница била по
+            // общему времени нажатия.
+            var pause = RandomNumberGenerator.GetInt32(0, 11) == 0
+                ? RandomNumberGenerator.GetInt32(14, 34)
+                : RandomNumberGenerator.GetInt32(3, 10);
+
+            await Task.Delay(pause, cancellationToken).ConfigureAwait(false);
+        }
+
+        lastKnownPoint = target;
+    }
+
+    /// <summary>Где курсор оказался после последнего движения этого устройства.</summary>
+    private Point? lastKnownPoint;
+
+    /// <summary>
     /// Прокрутка вертикального колеса.
     /// </summary>
     /// <param name="delta">Дельта прокрутки (положительное — вверх).</param>

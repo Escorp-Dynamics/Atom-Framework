@@ -248,7 +248,10 @@ public sealed partial class WebPage
             : null;
     }
 
-    public async ValueTask ClickViewportPointAsync(double viewportX, double viewportY, CancellationToken cancellationToken)
+    public ValueTask ClickViewportPointAsync(double viewportX, double viewportY, CancellationToken cancellationToken)
+        => ClickViewportPointAsync(viewportX, viewportY, approachCursor: false, cancellationToken);
+
+    public async ValueTask ClickViewportPointAsync(double viewportX, double viewportY, bool approachCursor, CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
@@ -287,11 +290,31 @@ public sealed partial class WebPage
         }
 
         var mouse = await ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
+
+        if (approachCursor)
+        {
+            await mouse.ApproachAndClickAtAsync(screenPoint, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         await mouse.ClickAtAsync(screenPoint, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Точка, в которую ушёл последний координатный ввод — для диагностики.</summary>
     internal Point? LastResolvedInputPoint { get; private set; }
+
+    /// <summary>
+    /// Куда ушёл последний координатный ввод: экранная точка и способ, которым её получили.
+    /// </summary>
+    /// <remarks>
+    /// ★ Без этой строки нельзя отличить «клик сделан, но мимо окна» от «клик сделан по галке, а
+    /// проверка его не приняла»: снаружи оба выглядят одинаково — нажатие в журнале есть, а на
+    /// экране ничего не изменилось. Способ важен не меньше точки: запасной путь перевода координат
+    /// исполняет скрипт В СТРАНИЦЕ, то есть в мире Cloudflare, и сам по себе портит вердикт.
+    /// </remarks>
+    public string? LastInputDiagnostics => LastResolvedInputPoint is { } resolvedPoint
+        ? $"экран={resolvedPoint.X},{resolvedPoint.Y} {OwnerWindow.OwnerBrowser.LastLinuxNativeWindowBoundsDiagnostics}"
+        : null;
 
     internal async ValueTask<Point> ResolveViewportToScreenAsync(float viewportX, float viewportY, CancellationToken cancellationToken)
     {
@@ -515,9 +538,15 @@ public sealed partial class WebPage
         // окне 500 точка 300 уходила в 300 вместо 364.
         var scale = ResolveViewportScale(bounds, viewportSize);
 
-        var chromeLeft = viewportSize is { Width: > 0 }
-            ? Math.Max(0, (bounds.Width - (viewportSize.Value.Width * scale)) / 2f)
+        // ★ Боковая панель (пристыкованный DevTools) по ширине неотличима от рамок окна, но рамки
+        // узкие, а панель — сотни пикселей. Большой зазор означает панель СПРАВА: область просмотра
+        // тогда прижата к левому краю, и делить зазор пополам нельзя — клик уезжает вправо ровно на
+        // половину панели. Замер 25.09: точка страницы (265,338) уходила в (389,485), тогда как галка
+        // была на (283,458), и нажатие попадало в пустое место рядом с надписью виджета.
+        var horizontalGap = viewportSize is { Width: > 0 }
+            ? Math.Max(0, bounds.Width - (viewportSize.Value.Width * scale))
             : 0f;
+        var chromeLeft = horizontalGap > SidePanelGapThreshold ? 0f : horizontalGap / 2f;
         var chromeTop = viewportSize is { Height: > 0 }
             ? Math.Max(0, bounds.Height - (viewportSize.Value.Height * scale))
             : 0f;
@@ -537,13 +566,27 @@ public sealed partial class WebPage
     /// </remarks>
     private static float ResolveViewportScale(Rectangle bounds, Size? viewportSize)
     {
-        if (viewportSize is not { Width: > 0 } size || bounds.Width <= 0)
+        if (viewportSize is not { Width: > 0, Height: > 0 } size || bounds.Width <= 0 || bounds.Height <= 0)
             return 1f;
 
-        var scale = bounds.Width / (float)size.Width;
+        var widthScale = bounds.Width / (float)size.Width;
+        var heightScale = bounds.Height / (float)size.Height;
 
-        return scale is > 0.2f and < 5f ? scale : 1f;
+        // ★ Масштаб сжимает область просмотра в ОБОИХ измерениях согласованно. Если по ширине окно
+        // «крупнее» заметно сильнее, чем по высоте, это не масштаб, а боковая панель: с открытым
+        // DevTools отношение по ширине давало 1.4 при 1.07 по высоте, и координата клика множилась
+        // на 1.4 — промах тем больше, чем правее точка. Рамка сверху (заголовок, вкладки, адресная
+        // строка) всегда делает высотное отношение чуть больше единицы, поэтому сравниваем с запасом.
+        if (widthScale > heightScale * 1.1f)
+            return 1f;
+
+        return widthScale is > 0.2f and < 5f ? widthScale : 1f;
     }
+
+    /// <summary>
+    /// Зазор по ширине, выше которого окно считается имеющим боковую панель, а не рамки.
+    /// </summary>
+    private const float SidePanelGapThreshold = 64f;
 
     public ValueTask ActivateAsync(CancellationToken cancellationToken)
     {
