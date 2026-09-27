@@ -300,8 +300,91 @@ public sealed partial class WebPage
         await mouse.ClickAtAsync(screenPoint, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
+    /// <inheritdoc/>
+    public async ValueTask ClickFramePointAsync(double frameX, double frameY, int frameWidth, int frameHeight, bool approachCursor, CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var gateStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        // ★ Фокус документа НЕ ждём: клик уходит по абсолютным экранным координатам, его получает
+        // окно переднего плана, а его даёт активация. На странице проверки Cloudflare фокус не
+        // подтверждается никогда, и ожидание съедало ровно бюджет — 10 с перед каждым нажатием.
+        using var trustedInput = await OwnerWindow.AcquireTrustedInputScopeAsync(this, waitForDocumentFocus: false, cancellationToken).ConfigureAwait(false);
+        LastInputGateMs = (long)System.Diagnostics.Stopwatch.GetElapsedTime(gateStarted).TotalMilliseconds;
+
+        // ★ Ни одного обращения к странице. Размер области просмотра здесь известен из САМОГО кадра
+        // (он её и есть), положение окна даёт композитор, а обычный путь перевода координат спросил
+        // бы у страницы window.innerWidth — то есть исполнил бы в ней скрипт.
+        var bounds = OwnerWindow.OwnerBrowser.TryGetLinuxNativeWindowBounds(null, await GetTitleAsync(cancellationToken).ConfigureAwait(false), OwnerWindow.WindowIndex);
+
+        if (bounds is not { Width: > 0, Height: > 0 } window || frameWidth <= 0 || frameHeight <= 0)
+        {
+            // Границ нет — отдаём обычному пути, он найдёт координаты как умеет.
+            await ClickViewportPointAsync(frameX, frameY, approachCursor, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // ★ Кадр вкладки МАСШТАБИРОВАН относительно окна, причём по осям по-разному. Замер 26.09
+        // в одном прогоне: окно 1920x1080, кадр 1365x990; тот же виджет — [176,304] в кадре и
+        // [235,304] глазами страницы. По вертикали совпало в точности, значит кадр по высоте один
+        // к одному, а разница 1080-990 = 90 — это заголовок с вкладками и адресной строкой. По
+        // горизонтали кадр сжат: область просмотра занимает всю ширину окна, поэтому масштаб равен
+        // отношению ширины окна к ширине кадра. Без пересчёта клик уезжал на восемь десятков
+        // пикселей влево — мимо галки, в пустое поле виджета.
+        var frameScaleX = window.Width / (double)frameWidth;
+        var chromeTop = Math.Max(0, window.Height - frameHeight);
+
+        var screenPoint = new Point(
+            (int)Math.Round(window.X + (frameX * frameScaleX)),
+            (int)Math.Round(window.Y + chromeTop + frameY));
+
+        LastResolvedInputPoint = screenPoint;
+        LastInputFrameInfo = $"окно=[{window.X},{window.Y},{window.Width}x{window.Height}] кадр={frameWidth}x{frameHeight} масштабX={frameScaleX:0.000} рамкаСверху={chromeTop}";
+
+        if (ResolvedDevice?.HasTouch == true)
+        {
+            var touchscreen = await OwnerWindow.OwnerBrowser.ResolveTouchscreenAsync(cancellationToken).ConfigureAwait(false);
+            await touchscreen.TapAsync(screenPoint, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var mouse = await ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
+
+        if (approachCursor)
+        {
+            await mouse.ApproachAndClickAtAsync(screenPoint, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        await mouse.ClickAtAsync(screenPoint, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Точка, в которую ушёл последний координатный ввод — для диагностики.</summary>
     internal Point? LastResolvedInputPoint { get; private set; }
+
+    /// <summary>
+    /// Сколько миллисекунд ушло на ШЛЮЗ доверенного ввода перед последним кликом.
+    /// </summary>
+    /// <remarks>
+    /// ★ Шлюз выводит окно на передний план, дожидается фокуса документа и удерживает его, чтобы
+    /// соседняя вкладка не перехватила экранный клик. Замер 26.09: нажатие целиком заняло 11 с при
+    /// траектории в полсекунды — значит время ушло сюда, и без отдельной цифры это неотличимо от
+    /// медленного движения курсора.
+    /// </remarks>
+    internal long LastInputGateMs { get; private set; }
+
+    /// <summary>
+    /// Как соотносились окно и кадр при последнем клике по точке снимка.
+    /// </summary>
+    /// <remarks>
+    /// ★ Снимок вкладки может быть МАСШТАБИРОВАН относительно окна, причём по осям по-разному:
+    /// замер 26.09 дал виджет шириной 228 px в кадре при 300 px в разметке страницы, тогда как по
+    /// высоте расхождение было в пределах нескольких процентов. Без этих чисел перевод координат
+    /// кадра в экранные не проверить.
+    /// </remarks>
+    internal string? LastInputFrameInfo { get; private set; }
 
     /// <summary>
     /// Куда ушёл последний координатный ввод: экранная точка и способ, которым её получили.
@@ -313,7 +396,7 @@ public sealed partial class WebPage
     /// исполняет скрипт В СТРАНИЦЕ, то есть в мире Cloudflare, и сам по себе портит вердикт.
     /// </remarks>
     public string? LastInputDiagnostics => LastResolvedInputPoint is { } resolvedPoint
-        ? $"экран={resolvedPoint.X},{resolvedPoint.Y} {OwnerWindow.OwnerBrowser.LastLinuxNativeWindowBoundsDiagnostics}"
+        ? $"экран={resolvedPoint.X},{resolvedPoint.Y} шлюз={LastInputGateMs}мс {LastInputFrameInfo} {OwnerWindow.OwnerBrowser.LastLinuxNativeWindowBoundsDiagnostics}"
         : null;
 
     internal async ValueTask<Point> ResolveViewportToScreenAsync(float viewportX, float viewportY, CancellationToken cancellationToken)

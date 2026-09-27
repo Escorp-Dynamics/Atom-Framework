@@ -63,6 +63,19 @@ public sealed partial class WebWindow
     /// их ждать фокуса — чистые потери. Платит только тот, кто собирается нажимать.
     /// </remarks>
     internal async ValueTask PrepareForTrustedInputAsync(WebPage page, CancellationToken cancellationToken)
+        => await PrepareForTrustedInputAsync(page, waitForDocumentFocus: true, cancellationToken).ConfigureAwait(false);
+
+    /// <param name="waitForDocumentFocus">
+    /// Дожидаться ли подтверждения фокуса документа перед вводом.
+    /// </param>
+    /// <remarks>
+    /// ★ Ожидание фокуса нужно там, где браузер отбрасывает ввод в несфокусированную вкладку
+    /// (Firefox). Для клика по абсолютным экранным координатам оно необязательно: событие получает
+    /// окно переднего плана, а его даёт активация. На странице проверки Cloudflare фокус документа
+    /// не подтверждается НИКОГДА — замер 26.09 показал ровно 10 с ожидания впустую перед каждым
+    /// нажатием, то есть весь бюджет, — поэтому там его ждать нельзя.
+    /// </remarks>
+    internal async ValueTask PrepareForTrustedInputAsync(WebPage page, bool waitForDocumentFocus, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(page);
 
@@ -70,7 +83,9 @@ public sealed partial class WebWindow
         // иначе на передний план выходила чужая вкладка, ожидание фокуса не подтверждалось, а клик по
         // экранным координатам уходил в неё же.
         await ActivateAsync(page, cancellationToken).ConfigureAwait(false);
-        await WaitForDocumentFocusAsync(page, cancellationToken).ConfigureAwait(false);
+
+        if (waitForDocumentFocus)
+            await WaitForDocumentFocusAsync(page, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -131,7 +146,12 @@ public sealed partial class WebWindow
         }
     }
 
-    internal async ValueTask<TrustedInputScope> AcquireTrustedInputScopeAsync(WebPage page, CancellationToken cancellationToken)
+    internal ValueTask<TrustedInputScope> AcquireTrustedInputScopeAsync(WebPage page, CancellationToken cancellationToken)
+        => AcquireTrustedInputScopeAsync(page, waitForDocumentFocus: true, cancellationToken);
+
+    /// <inheritdoc cref="AcquireTrustedInputScopeAsync(WebPage, CancellationToken)"/>
+    /// <param name="waitForDocumentFocus">Дожидаться ли подтверждения фокуса документа.</param>
+    internal async ValueTask<TrustedInputScope> AcquireTrustedInputScopeAsync(WebPage page, bool waitForDocumentFocus, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(page);
 
@@ -141,7 +161,7 @@ public sealed partial class WebWindow
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await PrepareForTrustedInputAsync(page, cancellationToken).ConfigureAwait(false);
+            await PrepareForTrustedInputAsync(page, waitForDocumentFocus, cancellationToken).ConfigureAwait(false);
         }
         catch
         {

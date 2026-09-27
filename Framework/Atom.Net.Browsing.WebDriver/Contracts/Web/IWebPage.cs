@@ -51,6 +51,25 @@ public interface IWebPage : IDomContext, IAsyncDisposable
         => ClickViewportPointAsync(viewportX, viewportY, cancellationToken);
 
     /// <summary>
+    /// Клик по точке СНИМКА вкладки: координаты берутся в пикселях кадра, а не в CSS-пикселях
+    /// страницы.
+    /// </summary>
+    /// <param name="frameX">Точка в кадре по горизонтали.</param>
+    /// <param name="frameY">Точка в кадре по вертикали.</param>
+    /// <param name="frameWidth">Ширина кадра.</param>
+    /// <param name="frameHeight">Высота кадра.</param>
+    /// <param name="approachCursor">Подводить курсор к цели живым движением.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <remarks>
+    /// ★ Нужен там, где страницу нельзя трогать ВООБЩЕ. Обычный координатный клик спрашивает у
+    /// страницы размер области просмотра — то есть исполняет в ней скрипт, а на проверке Cloudflare
+    /// это само по себе меняет вердикт. Здесь размер известен из кадра, положение окна даёт
+    /// композитор, и до страницы дело не доходит.
+    /// </remarks>
+    ValueTask ClickFramePointAsync(double frameX, double frameY, int frameWidth, int frameHeight, bool approachCursor, CancellationToken cancellationToken)
+        => ClickViewportPointAsync(frameX, frameY, approachCursor, cancellationToken);
+
+    /// <summary>
     /// Куда ушёл последний координатный ввод: экранная точка и способ, которым её посчитали.
     /// Диагностика; у реализаций без координатного ввода — <see langword="null"/>.
     /// </summary>
