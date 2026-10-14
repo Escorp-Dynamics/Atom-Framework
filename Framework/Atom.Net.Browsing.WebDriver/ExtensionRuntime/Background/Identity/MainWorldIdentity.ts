@@ -1432,6 +1432,20 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
             : null;
 
         if (mediaQueryListPrototype && originalMatchMedia !== null) {
+            // ★ Признаки, которые подмена не знает, читаются геттером, стоявшим ДО неё, — а не через
+            // '.matches' на прототипе. Прототипный '.matches' после установки — это сама подмена:
+            // она снова разбирала запрос, снова шла в '.matches' и так до переполнения стека, после
+            // чего catch возвращал управление родному геттеру. Каждое чтение такого запроса стоило
+            // десятков тысяч кадров. Замер 14.10.2026: рендерер на 100% CPU больше часа, в памяти
+            // 87585 строк '(resolution: 1dppx)' — запрос самой проверки 'disagrees' при нативном
+            // профиле — и 16 тысяч 'Maximum call stack size exceeded'.
+            const matchesDescriptor = Object.getOwnPropertyDescriptor(mediaQueryListPrototype, 'matches');
+            const previousMatches = matchesDescriptor?.get;
+            const readMatches = (query: string): boolean => {
+                const list = originalMatchMedia(query);
+                return typeof previousMatches === 'function' ? previousMatches.call(list) === true : list.matches === true;
+            };
+
             const coarsePointer = context.isMobile === true || context.hasTouch === true;
             const declaredColorScheme = typeof context.colorScheme === 'string' ? context.colorScheme.toLowerCase() : null;
             const reducedMotion = context.reducedMotion === true;
@@ -1550,7 +1564,7 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                     }
 
                     try {
-                        result = result && originalMatchMedia(part).matches;
+                        result = result && readMatches(part);
                     } catch {
                         return undefined;
                     }
@@ -1572,7 +1586,7 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
                 const desired = resolveMediaOverride(query);
 
                 try {
-                    return desired !== undefined && originalMatchMedia(query).matches !== desired;
+                    return desired !== undefined && readMatches(query) !== desired;
                 } catch {
                     return false;
                 }
@@ -1580,8 +1594,8 @@ export function installIdentityInMainWorld(context: TabContextEnvelope, workerSo
 
             if (disagrees) {
                 try {
-                    const descriptor = Object.getOwnPropertyDescriptor(mediaQueryListPrototype, 'matches');
-                    const originalMatches = descriptor?.get;
+                    const descriptor = matchesDescriptor;
+                    const originalMatches = previousMatches;
 
                     if (typeof originalMatches === 'function') {
                         Object.defineProperty(mediaQueryListPrototype, 'matches', {

@@ -283,9 +283,18 @@ public sealed class WaylandCompositor : IAsyncDisposable
     }
 
     /// <summary>
-    /// Показывает группы слоёв в хост-окнах с теми же номерами; лишние окна прячет.
+    /// Показывает группы слоёв в хост-окнах с теми же номерами.
     /// </summary>
     /// <returns><see langword="true"/>, если хотя бы одна сцена показана.</returns>
+    /// <remarks>
+    /// ★ Хост-окно без слоёв в этом кадре НЕ сворачивается — оно держит последний показанный кадр.
+    /// Прежде такое окно сворачивалось, а вернуть его не мог никто: в xdg-shell у клиента нет
+    /// запроса «развернуть», это делает пользователь через таскбар, а у weston таскбара нет.
+    /// Хватало одного кадра без слоёв (пропуск при навигации, ресайз), чтобы окно пропало с экрана
+    /// навсегда, хотя браузер в нём продолжал работать. Замер 14.10.2026 на SolverVM01: пять
+    /// браузеров, пять соединений с хостом — и одно видимое окно. Окна, которым больше не отвечает
+    /// ни одно окно браузера, закрывает ReleaseUnusedPresentations.
+    /// </remarks>
     private bool PresentGroups(Dictionary<int, List<Presentation.WaylandSceneLayer>> layerGroups)
     {
         var presentedAny = false;
@@ -293,14 +302,7 @@ public sealed class WaylandCompositor : IAsyncDisposable
         foreach (var (windowIndex, window) in presentations)
         {
             if (!layerGroups.TryGetValue(windowIndex, out var group))
-            {
-                window.SetVisible(isVisible: false);
                 continue;
-            }
-
-            // Свёрнутое окно возвращается, как только его слои снова есть: клиент мог пропустить
-            // кадр при ресайзе, и без возврата вкладка навсегда пропадала бы из таскбара.
-            window.SetVisible(isVisible: true);
 
             group.Sort(static (first, second) => first.Depth.CompareTo(second.Depth));
 

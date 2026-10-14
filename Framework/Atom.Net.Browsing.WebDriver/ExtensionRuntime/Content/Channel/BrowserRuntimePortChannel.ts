@@ -142,12 +142,29 @@ export class BrowserRuntimePortChannel implements ITabRuntimeChannel {
         });
     }
 
+    /**
+     * Отправляет событие вкладки; без порта событие теряется, а не бросает.
+     *
+     * ★ Событие — уведомление без ответа, и его потеря безопасна. Бросать здесь нельзя: этот метод
+     * зовут обработчики 'error' и 'unhandledrejection' самого контент-скрипта, и при потерянном
+     * порте каждый вызов порождал новое необработанное отклонение, а оно — новый вызов. Цикл не
+     * кончался, пока жив документ, и держал главный поток вкладки на 100%.
+     */
     public async sendEvent(eventName: BridgeEventName, payload?: JsonValue): Promise<void> {
-        this.requirePort().postMessage({
-            action: 'event',
-            event: eventName,
-            data: payload,
-        });
+        const port = this.port;
+        if (port === null) {
+            return;
+        }
+
+        try {
+            port.postMessage({
+                action: 'event',
+                event: eventName,
+                data: payload,
+            });
+        } catch {
+            // Порт отключился между проверкой и отправкой — событие теряется так же.
+        }
     }
 
     public subscribeCommands(handler: TabRuntimeCommandHandler): ContentRuntimeSubscription {

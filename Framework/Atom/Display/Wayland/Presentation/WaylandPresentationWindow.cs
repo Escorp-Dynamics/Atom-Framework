@@ -78,24 +78,6 @@ internal sealed partial class WaylandPresentationWindow : IDisposable
     public bool IsAlive => !host.IsClosed;
 
     /// <summary>
-    /// Показано ли окно в системе: скрытые хост-окна исчезают из таскбара.
-    /// </summary>
-    public bool IsWindowVisible { get; private set; } = true;
-
-    /// <summary>Скрывает или показывает хост-окно (сворачивание через оболочку).</summary>
-    public void SetVisible(bool isVisible)
-    {
-        if (IsWindowVisible == isVisible || toplevel == 0)
-            return;
-
-        IsWindowVisible = isVisible;
-
-        // Оболочка умеет только сворачивать: разворачивает окно сам пользователь через таскбар.
-        if (!isVisible)
-            host.Send(toplevel, XdgToplevelSetMinimized);
-    }
-
-    /// <summary>
     /// Прозрачность четырёх углов сцены.
     /// </summary>
     /// <remarks>
