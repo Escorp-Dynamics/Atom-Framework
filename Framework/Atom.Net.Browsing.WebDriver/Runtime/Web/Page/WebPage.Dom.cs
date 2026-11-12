@@ -1,6 +1,7 @@
 ﻿using System.Drawing;
 using System.Globalization;
 using System.Text.Json;
+using Atom.Hardware.Input;
 
 namespace Atom.Net.Browsing.WebDriver;
 
@@ -193,7 +194,7 @@ public sealed partial class WebPage
         return await MainFrame.GetScreenshotAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async ValueTask<Memory<byte>> TryGetBridgeScreenshotAsync(PageBridgeCommandClient bridge, CancellationToken cancellationToken)
+    private async ValueTask<Memory<byte>> TryGetBridgeScreenshotAsync(IPageCommandClient bridge, CancellationToken cancellationToken)
     {
         string? firstBridgeFailureMessage = null;
 
@@ -252,6 +253,18 @@ public sealed partial class WebPage
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
+
+        // Движок без окна на экране принимает координаты области просмотра напрямую.
+        if (BridgeCommands is IPageDirectControlClient direct)
+        {
+            var viewportPoint = new PointF((float)viewportX, (float)viewportY);
+            if (ResolvedDevice?.HasTouch == true)
+                await direct.TapAsync(viewportPoint, cancellationToken).ConfigureAwait(false);
+            else
+                await direct.ClickAsync(viewportPoint, VirtualMouseButton.Left, clickCount: 1, cancellationToken).ConfigureAwait(false);
+
+            return;
+        }
 
         // Готовим вкладку к доверенному вводу: активируем окно/вкладку и ЖДЁМ подтверждения фокуса
         // документа. Без этого Firefox отбрасывает весь настоящий ввод во вкладке, пока активация

@@ -231,7 +231,7 @@ public sealed partial class WebPage
     public ValueTask SetRequestInterceptionAsync(bool enabled)
         => SetRequestInterceptionAsync(enabled, CancellationToken.None);
 
-    private static async ValueTask<IEnumerable<Cookie>> ReadBridgeCookiesAsync(PageBridgeCommandClient bridge, string contextId, CancellationToken cancellationToken)
+    private static async ValueTask<IEnumerable<Cookie>> ReadBridgeCookiesAsync(IPageCommandClient bridge, string contextId, CancellationToken cancellationToken)
     {
         var payload = await bridge.GetCookiesAsync(contextId, cancellationToken).ConfigureAwait(false);
         return ParseCookies(payload);
@@ -313,6 +313,17 @@ public sealed partial class WebPage
         ResetFrameDetachmentState();
         OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebPageNavigationStarting(TabId, url.ToString(), settings.Kind.ToString());
 
+        // Движок с собственным перехватом (Obscura) подставляет документ сам, без навигационного
+        // прокси; POST воспроизводится той же самоотправляющейся формой, что и у мостовых браузеров.
+        if (BridgeCommands is IPageDirectControlClient direct
+            && settings.Kind == NavigationKind.Default
+            && TryResolveDirectNavigationDocument(url, settings, out var directDocument))
+        {
+            await direct.NavigateWithDocumentAsync(url, directDocument, cancellationToken).ConfigureAwait(false);
+            await SyncTransportEventsAsync().ConfigureAwait(false);
+            return CreateBridgeReloadAcknowledgementResponse(url);
+        }
+
         if (BridgeCommands is { } navigateBridge
             && settings.Kind == NavigationKind.Default
             && TryPrepareBridgeNavigationDocument(url, settings))
@@ -364,6 +375,15 @@ public sealed partial class WebPage
             return true;
 
         return OwnerWindow.OwnerBrowser.TryEnqueueNavigationFulfillment(this, url, settings.Html);
+    }
+
+    private static bool TryResolveDirectNavigationDocument(Uri url, NavigationSettings settings, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? document)
+    {
+        if (!settings.Body.IsEmpty)
+            return BridgePostNavigationForm.TryBuild(url, settings.Body, ResolveContentType(settings.Headers), out document);
+
+        document = settings.Html;
+        return !string.IsNullOrEmpty(document);
     }
 
     private static string? ResolveContentType(IReadOnlyDictionary<string, string>? headers)

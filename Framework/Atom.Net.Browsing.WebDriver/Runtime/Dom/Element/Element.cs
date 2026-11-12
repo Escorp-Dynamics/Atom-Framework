@@ -58,6 +58,13 @@ public sealed class Element : IElement
         cancellationToken.ThrowIfCancellationRequested();
         OwnerPage.OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebElementClickStarting(handle, OwnerPage.TabId);
 
+        if (TryGetDirectControl(out var direct, out var elementId))
+        {
+            var point = await OwnerPage.BridgeCommands!.ResolveElementScreenPointAsync(elementId, scrollIntoView: true, cancellationToken).ConfigureAwait(false);
+            await direct.ClickAsync(point, settings.Button, settings.ClickCount, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         // Подготовка и клик — атомарно относительно других вкладок дисплея: XTEST бьёт по абсолютным
         // экранным координатам, поэтому вклинившаяся активация соседней вкладки увела бы клик в неё.
         using var trustedInput = await OwnerPage.OwnerWindow.AcquireTrustedInputScopeAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
@@ -75,12 +82,43 @@ public sealed class Element : IElement
         cancellationToken.ThrowIfCancellationRequested();
         OwnerPage.OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebElementHoverStarting(handle, OwnerPage.TabId);
 
+        if (TryGetDirectControl(out var direct, out var elementId))
+        {
+            var point = await OwnerPage.BridgeCommands!.ResolveElementScreenPointAsync(elementId, scrollIntoView: true, cancellationToken).ConfigureAwait(false);
+            await direct.MoveMouseAsync(point, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         using var trustedInput = await OwnerPage.OwnerWindow.AcquireTrustedInputScopeAsync(OwnerPage, cancellationToken).ConfigureAwait(false);
         var mouse = await OwnerPage.ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         await ApproachInteractionPointAsync(mouse, await ResolveInteractionPointAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }
 
     public ValueTask HoverAsync() => HoverAsync(CancellationToken.None);
+
+    /// <summary>
+    /// Канал прямого ввода, если страница управляется движком без окна на экране (Obscura).
+    /// </summary>
+    /// <remarks>
+    /// Такому движку ОС-ввод не нужен и невозможен: события доставляются им самим как доверенные,
+    /// поэтому шлюз доверенного ввода дисплея и пересчёт координат в экранные пропускаются.
+    /// </remarks>
+    private bool TryGetDirectControl([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IPageDirectControlClient? direct, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? elementId)
+    {
+        if (OwnerPage.BridgeCommands is IPageDirectControlClient client && BridgeElementId is { } id)
+        {
+            direct = client;
+            elementId = id;
+            return true;
+        }
+
+        direct = null;
+        elementId = null;
+        return false;
+    }
+
+    private async ValueTask PrepareDirectKeyboardInputAsync(string elementId, CancellationToken cancellationToken)
+        => await OwnerPage.BridgeCommands!.FocusElementAsync(elementId, scrollIntoView: true, cancellationToken).ConfigureAwait(false);
 
     private static async ValueTask ApproachInteractionPointAsync(VirtualMouse mouse, Point interactionPoint, CancellationToken cancellationToken)
     {
@@ -206,6 +244,13 @@ public sealed class Element : IElement
 
         // Раскладка проверяется целиком до первого нажатия: иначе неподдерживаемый символ
         // в середине строки оставлял бы в поле наполовину введённый текст.
+        if (TryGetDirectControl(out var direct, out var elementId))
+        {
+            await PrepareDirectKeyboardInputAsync(elementId, cancellationToken).ConfigureAwait(false);
+            await direct.TypeTextAsync(text, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         var keystrokes = MapTextToKeystrokes(text);
 
         await PrepareForTrustedKeyboardInputAsync(requireDocumentFocus: true, cancellationToken).ConfigureAwait(false);
@@ -244,6 +289,13 @@ public sealed class Element : IElement
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
         OwnerPage.OwnerWindow.OwnerBrowser.LaunchSettings.Logger?.LogWebElementPressStarting(handle, OwnerPage.TabId, key.ToString());
+
+        if (TryGetDirectControl(out var direct, out var elementId))
+        {
+            await PrepareDirectKeyboardInputAsync(elementId, cancellationToken).ConfigureAwait(false);
+            await direct.PressKeyAsync(key, default, cancellationToken).ConfigureAwait(false);
+            return;
+        }
 
         await PrepareForTrustedKeyboardInputAsync(requireDocumentFocus: false, cancellationToken).ConfigureAwait(false);
         var keyboard = await OwnerPage.ResolveKeyboardAsync(cancellationToken).ConfigureAwait(false);

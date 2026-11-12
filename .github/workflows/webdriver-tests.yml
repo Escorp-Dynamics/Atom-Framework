@@ -53,6 +53,70 @@ jobs:
           -p:EnableNETAnalyzers=false
           -p:AnalysisMode=None
 
+  webdriver-obscura-live-tests:
+    name: NUnit (Obscura live)
+    runs-on: ubuntu-latest
+    env:
+      # Отдельный каталог кэша, чтобы actions/cache сохранял ровно скачанный релиз.
+      ATOM_WEBDRIVER_OBSCURA_CACHE_DIR: ${{ github.workspace }}/.tmp/obscura-cache
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve pinned Obscura version
+        id: obscura
+        # Версия закреплена в коде провижинера; ключ кэша меняется вместе с ней.
+        run: |
+          set -euo pipefail
+          version="$(grep -oP 'const string Version = "\K[^"]+' Framework/Atom.Net.Browsing.WebDriver/Runtime/Obscura/ObscuraRelease.cs)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Obscura binary cache
+        id: obscura-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.ATOM_WEBDRIVER_OBSCURA_CACHE_DIR }}
+          key: obscura-${{ runner.os }}-${{ steps.obscura.outputs.version }}
+
+      - name: Restore WebDriver test suite
+        run: dotnet restore Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj
+
+      - name: Run Obscura live tests
+        # RunWebDriverBrowserIntegrationTests снимает CI-фильтр csproj (только hardening-набор),
+        # иначе MTP получит два --filter. Провижинер сам скачивает релиз и проверяет SHA-256.
+        run: >-
+          dotnet test --project Tests/Atom.Net.Browsing.WebDriver.Tests/Atom.Net.Browsing.WebDriver.Tests.csproj
+          --verbosity minimal
+          --filter "TestCategory=Obscura"
+          -p:RunWebDriverBrowserIntegrationTests=true
+          -p:RunAnalyzers=false
+          -p:EnforceCodeStyleInBuild=false
+          -p:EnableNETAnalyzers=false
+          -p:AnalysisMode=None
+
+      - name: Verify Obscura binary was provisioned
+        # Без сети live-тесты уходят в Ignore и задача была бы молча зелёной.
+        id: obscura-binary
+        run: |
+          set -euo pipefail
+          binary="$(find "$ATOM_WEBDRIVER_OBSCURA_CACHE_DIR" -type f -name obscura -perm -u+x | head -n 1)"
+          test -n "$binary" || { echo "Obscura binary was not provisioned"; exit 1; }
+          echo "Provisioned: $binary"
+
+      - name: Save Obscura binary cache
+        if: steps.obscura-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.ATOM_WEBDRIVER_OBSCURA_CACHE_DIR }}
+          key: obscura-${{ runner.os }}-${{ steps.obscura.outputs.version }}
+
   webdriver-release-pack:
     name: Pack (Escorp.Atom.Net.Browsing.WebDriver, Release)
     runs-on: ubuntu-latest

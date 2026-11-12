@@ -33,6 +33,9 @@ public sealed partial class WebBrowser
         BridgeBrowserProcessRegistry.SweepAbandoned(settings.Logger);
 
         var launchSettings = settings.Clone();
+        if (launchSettings.Profile is ObscuraProfile obscuraProfile)
+            return await LaunchObscuraAsync(launchSettings, obscuraProfile, cancellationToken).ConfigureAwait(false);
+
         string? materializedProfilePath = null;
         VirtualDisplay? autoDisplay = null;
         var ownsDisplay = false;

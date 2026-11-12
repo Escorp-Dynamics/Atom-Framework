@@ -11,14 +11,16 @@ internal sealed class PageBridgeCommandClient(
     string tabId,
     BridgeCommandClient commands,
     Func<CancellationToken, ValueTask>? reapplyTabContextAsync = null,
-    Action<Uri?>? trackPendingNavigateUrl = null)
+    Action<Uri?>? trackPendingNavigateUrl = null) : IPageCommandClient
 {
     /// <summary>Сколько раз опрашивается готовность вкладки после навигации.</summary>
     private const int BridgeReadinessProbeAttempts = 200;
 
     private static readonly TimeSpan BridgeReadinessProbeDelay = TimeSpan.FromMilliseconds(50);
 
-    internal Uri GetDiscoveryUrl() => commands.GetDiscoveryUrl();
+    public Uri GetDiscoveryUrl() => commands.GetDiscoveryUrl();
+
+    Uri? IPageCommandClient.GetDiscoveryUrl() => GetDiscoveryUrl();
 
     public ValueTask<string> GetTitleAsync(CancellationToken cancellationToken = default)
         => commands.GetTitleAsync(sessionId, tabId, cancellationToken);

@@ -110,6 +110,10 @@ public sealed partial class WebWindow
     {
         ArgumentNullException.ThrowIfNull(page);
 
+        // У движка без окна на экране (Obscura) нет переднего плана: все вкладки получают кадры.
+        if (page.BridgeCommands is IPageDirectControlClient)
+            return;
+
         var mouse = await ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         var gate = TrustedInputGates.GetValue(mouse, static _ => new SemaphoreSlim(1, 1));
 
@@ -134,6 +138,10 @@ public sealed partial class WebWindow
     internal async ValueTask<TrustedInputScope> AcquireTrustedInputScopeAsync(WebPage page, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(page);
+
+        // Ввод движка без окна на экране не идёт через ОС и не делит дисплей — шлюз не нужен.
+        if (page.BridgeCommands is IPageDirectControlClient)
+            return default;
 
         var mouse = await ResolveMouseAsync(cancellationToken).ConfigureAwait(false);
         var gate = TrustedInputGates.GetValue(mouse, static _ => new SemaphoreSlim(1, 1));

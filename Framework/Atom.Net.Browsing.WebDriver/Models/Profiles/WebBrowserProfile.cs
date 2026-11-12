@@ -54,6 +54,11 @@ public abstract class WebBrowserProfile
     public static WebBrowserProfile Firefox { get; } = new FirefoxProfile();
 
     /// <summary>
+    /// Получает профиль headless-движка Obscura по умолчанию (бинарный файл скачивается при первом запуске).
+    /// </summary>
+    public static WebBrowserProfile Obscura { get; } = new ObscuraProfile();
+
+    /// <summary>
     /// Инициализирует профиль браузера с указанным бинарным файлом и каналом.
     /// </summary>
     protected WebBrowserProfile(string binaryPath, WebBrowserChannel channel)

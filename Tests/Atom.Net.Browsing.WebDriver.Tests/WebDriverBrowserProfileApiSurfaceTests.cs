@@ -22,6 +22,7 @@ public sealed class WebDriverBrowserProfileApiSurfaceTests
             AssertPresetProperty(profile, nameof(WebBrowserProfile.Vivaldi));
             AssertPresetProperty(profile, nameof(WebBrowserProfile.Yandex));
             AssertPresetProperty(profile, nameof(WebBrowserProfile.Firefox));
+            AssertPresetProperty(profile, nameof(WebBrowserProfile.Obscura));
 
             PublicApiAssert.RequireProperty(profile, nameof(WebBrowserProfile.Path));
             PublicApiAssert.RequireProperty(profile, nameof(WebBrowserProfile.BinaryPath));

@@ -2975,7 +2975,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         return true;
     }
 
-    private static bool TryParsePointPayload(JsonElement payload, out PointF point)
+    internal static bool TryParsePointPayload(JsonElement payload, out PointF point)
     {
         point = default;
         if (payload.ValueKind is not JsonValueKind.Object)
@@ -3052,7 +3052,7 @@ internal sealed class BridgeServer(BridgeSettings settings) : IAsyncDisposable
         return true;
     }
 
-    private static bool TryParseElementDescriptionPayload(JsonElement payload, out BridgeElementDescriptionPayload description)
+    internal static bool TryParseElementDescriptionPayload(JsonElement payload, out BridgeElementDescriptionPayload description)
     {
         description = default!;
         if (payload.ValueKind is not JsonValueKind.Object)

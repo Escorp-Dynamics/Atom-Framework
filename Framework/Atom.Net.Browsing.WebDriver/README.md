@@ -143,6 +143,7 @@ WebBrowser
 | Chrome | ✅ | Полная поддержка |
 | Edge | ✅ | Полная поддержка |
 | Yandex | ✅ | Полная поддержка |
+| Obscura | ⚠️ | Headless-движок без расширений, управляется напрямую по CDP; ограничения — в разделе [Obscura](#obscura) |
 
 ## API
 
@@ -547,6 +548,29 @@ await page.NavigateAsync(
         Html = "<html><body>Hello from local fulfill</body></html>",
     });
 ```
+
+### Obscura
+
+[Obscura](https://github.com/h4ckf0r0day/obscura) — headless-движок на Rust/V8 с CDP-сервером. Расширения он не поддерживает, поэтому драйвер управляет им напрямую по CDP, а публичный API (`IWebBrowser`/`IWebWindow`/`IWebPage`/`IElement`) остаётся тем же.
+
+```csharp
+await using var browser = await WebBrowser.LaunchAsync(new WebBrowserSettings
+{
+    Profile = new ObscuraProfile
+    {
+        UseStealth = true,            // --stealth
+        AllowPrivateNetwork = true,   // разрешить loopback/частные адреса
+        TimeZone = "Europe/Moscow",
+    },
+});
+```
+
+- **Бинарный файл.** Ищется по явному пути, затем в `ATOM_WEBDRIVER_OBSCURA_PATH`, в `PATH` и в кэше драйвера (`~/.atom-webdriver/obscura/<версия>/`). Если не найден, закреплённый релиз (вариант `ObscuraBuildVariant`) скачивается и проверяется по SHA-256.
+- **Процессы.** Прокси, часовой пояс и геолокация у Obscura действуют на процесс, поэтому окна и вкладки с разными значениями (`WebWindowSettings.Proxy`, `WebPageSettings.Proxy`, `Device.Timezone`/`Device.Geolocation`) получают отдельные процессы `obscura serve`. Каждая вкладка — свой браузерный контекст: cookie не общие.
+- **Ввод.** Щелчки, наведение, набор текста и клавиши доставляются самим движком (`Input.dispatch*`) как доверенные события; виртуальный дисплей и ОС-ввод не нужны.
+- **`NavigateAsync(url, html)` и POST-навигация** подставляют документ через `Fetch` движка, без навигационного прокси; адрес страницы остаётся целевым.
+- **Перехват запросов** (`Request`: continue / redirect / заголовки / abort / fulfill) работает через `Fetch`.
+- **Не поддерживается:** перехват ответов (`Response` не поднимается), замена аргументов и отмена вызова в `Callback` (решение обработчика игнорируется с предупреждением в журнале, исходная функция выполняется как есть), реальные границы окна (окно совпадает с областью просмотра), активация окон и вкладок (у headless-движка нет переднего плана).
 
 ### Матрица возможностей: Chromium vs Firefox
 

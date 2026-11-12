@@ -4,7 +4,7 @@ namespace Atom.Net.Browsing.WebDriver;
 
 public sealed partial class WebPage
 {
-    internal PageBridgeCommandClient? BridgeCommands { get; private set; }
+    internal IPageCommandClient? BridgeCommands { get; private set; }
 
     internal string? BoundBridgeSessionId { get; private set; }
 
@@ -85,11 +85,12 @@ public sealed partial class WebPage
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(tabId);
         ArgumentNullException.ThrowIfNull(commands);
-        ThrowIfDisposed();
 
-        BoundBridgeSessionId = sessionId;
-        BoundBridgeTabId = tabId;
-        BridgeCommands = new PageBridgeCommandClient(
+        BindPageCommands(sessionId, tabId, CreateBridgePageCommands(sessionId, tabId, commands));
+    }
+
+    internal PageBridgeCommandClient CreateBridgePageCommands(string sessionId, string tabId, BridgeCommandClient commands)
+        => new(
             sessionId,
             tabId,
             commands,
@@ -98,6 +99,20 @@ public sealed partial class WebPage
             // транспорта, из-за чего recovery-контур навигации застревал с reapply=false.
             cancellationToken => WebBrowser.ApplyBridgeTabContextAsync(this, cancellationToken),
             trackPendingNavigateUrl: SetPendingBridgeNavigationUrl);
+
+    /// <summary>
+    /// Привязывает страницу к каналу команд конкретного транспорта.
+    /// </summary>
+    internal void BindPageCommands(string sessionId, string tabId, IPageCommandClient commands)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tabId);
+        ArgumentNullException.ThrowIfNull(commands);
+        ThrowIfDisposed();
+
+        BoundBridgeSessionId = sessionId;
+        BoundBridgeTabId = tabId;
+        BridgeCommands = commands;
         appliedRequestInterceptionState = null;
     }
 }

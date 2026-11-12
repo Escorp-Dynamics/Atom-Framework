@@ -83,6 +83,15 @@ internal sealed class BridgeInterceptedRequestPayload
 
     public bool SupportsNavigationFulfillment { get; init; }
 
+    /// <summary>
+    /// Решение применяет сам транспорт (протокол отладки), включая подмену ответа навигации.
+    /// </summary>
+    /// <remarks>
+    /// Такому запросу не нужен локальный навигационный прокси: транспорт держит запрос
+    /// приостановленным и отвечает за него сам, поэтому решение возвращается ему напрямую.
+    /// </remarks>
+    public bool AppliedByTransport { get; init; }
+
     public DateTimeOffset Timestamp { get; init; }
 }
 

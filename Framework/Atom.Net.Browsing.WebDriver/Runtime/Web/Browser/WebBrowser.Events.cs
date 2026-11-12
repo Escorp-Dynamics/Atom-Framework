@@ -422,6 +422,10 @@ public sealed partial class WebBrowser
         ArgumentNullException.ThrowIfNull(effectiveRequest);
         ArgumentNullException.ThrowIfNull(decision);
 
+        // Транспорт протокола отладки держит запрос сам и применяет любое решение без прокси.
+        if (request.AppliedByTransport)
+            return null;
+
         // Запрос от прокси решается прокси же — для любого типа ресурса. Путь блокирующего
         // webRequest по-прежнему отдаёт прокси только main_frame: остальное он применяет сам.
         if (!request.DecidedByNavigationProxy

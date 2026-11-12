@@ -38,6 +38,7 @@ public sealed partial class WebBrowser : IWebBrowser
     private readonly Lock windowGate = new();
     private readonly bool ownsDisplay;
     private readonly BridgeServer? bridgeServer;
+    private readonly IBrowserCommandTransport? commandTransport;
     private readonly string? bridgeSessionId;
     private readonly TimeSpan? bridgeOpenTimeout;
     private readonly CancellationTokenSource? bridgeBootstrapCancellation;
@@ -63,7 +64,9 @@ public sealed partial class WebBrowser : IWebBrowser
         VirtualDisplay? display,
         bool ownsDisplay,
         BridgeServer? bridgeServer = null,
-        BridgeBootstrapPlan? bridgeBootstrap = null)
+        BridgeBootstrapPlan? bridgeBootstrap = null,
+        IBrowserCommandTransport? commandTransport = null,
+        string? transportSessionId = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         LaunchSettings = settings;
@@ -72,8 +75,9 @@ public sealed partial class WebBrowser : IWebBrowser
         Display = display;
         this.ownsDisplay = ownsDisplay;
         this.bridgeServer = bridgeServer;
+        this.commandTransport = commandTransport ?? (bridgeServer is null ? null : new BridgeBrowserCommandTransport(bridgeServer));
         bridgeServer?.ConfigureNavigationProxyDecisions(ProxyNavigationDecisions);
-        bridgeSessionId = bridgeBootstrap?.SessionId;
+        bridgeSessionId = bridgeBootstrap?.SessionId ?? transportSessionId;
         bridgeOpenTimeout = bridgeBootstrap?.ConnectionTimeout;
         publishedManagedPolicyPath = bridgeBootstrap?.ManagedPolicyPublishPath;
         publishedExtensionId = bridgeBootstrap?.ExtensionId;
@@ -84,7 +88,7 @@ public sealed partial class WebBrowser : IWebBrowser
         windows.Push(initialWindow);
         Volatile.Write(ref currentWindow, initialWindow);
 
-        if (bridgeServer is not null && bridgeBootstrap is not null && browserProcess is not null)
+        if (this.commandTransport is not null && bridgeBootstrap is not null && browserProcess is not null)
         {
             bridgeBootstrapCancellation = new CancellationTokenSource();
             bridgeBootstrapTask = BootstrapInitialBridgeSurfaceAsync(
@@ -94,12 +98,12 @@ public sealed partial class WebBrowser : IWebBrowser
                 bridgeBootstrapCancellation.Token);
         }
 
-        if (bridgeServer is not null)
+        if (this.commandTransport is { } transport)
         {
-            bridgeServer.RuntimeEventReceived += OnBridgeServerRuntimeEventReceived;
-            bridgeServer.CallbackRequested += OnBridgeServerCallbackRequested;
-            bridgeServer.RequestInterceptionRequested += OnBridgeServerRequestInterceptionRequested;
-            bridgeServer.ResponseInterceptionRequested += OnBridgeServerResponseInterceptionRequested;
+            transport.RuntimeEventReceived += OnBridgeServerRuntimeEventReceived;
+            transport.CallbackRequested += OnBridgeServerCallbackRequested;
+            transport.RequestInterceptionRequested += OnBridgeServerRequestInterceptionRequested;
+            transport.ResponseInterceptionRequested += OnBridgeServerResponseInterceptionRequested;
         }
     }
 
@@ -528,7 +532,7 @@ public sealed partial class WebBrowser : IWebBrowser
         BridgeBootstrapPlan bridgeBootstrap,
         CancellationToken cancellationToken)
     {
-        if (bridgeServer is null)
+        if (commandTransport is null)
             return false;
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -561,10 +565,10 @@ public sealed partial class WebBrowser : IWebBrowser
         WebPage initialPage,
         BridgeBootstrapPlan bridgeBootstrap)
     {
-        if (bridgeServer is null)
+        if (commandTransport is null)
             return false;
 
-        var initialTab = await TryGetInitialRegisteredTabAsync(bridgeBootstrap.SessionId).ConfigureAwait(false);
+        var initialTab = await commandTransport.TryGetRegisteredTabAsync(bridgeBootstrap.SessionId, static _ => true).ConfigureAwait(false);
         if (initialTab is null)
             return false;
 
@@ -573,7 +577,7 @@ public sealed partial class WebBrowser : IWebBrowser
 
         if (!initialPage.IsDisposed)
         {
-            initialPage.BindBridgeCommands(bridgeBootstrap.SessionId, initialTab.TabId, bridgeServer.Commands);
+            BindTransportPageCommands(initialPage, bridgeBootstrap.SessionId, initialTab.TabId);
             await ApplyBridgeTabContextAsync(initialPage, CancellationToken.None).ConfigureAwait(false);
             await initialPage.ApplyEffectiveRequestInterceptionAsync(CancellationToken.None).ConfigureAwait(false);
         }
@@ -581,17 +585,12 @@ public sealed partial class WebBrowser : IWebBrowser
         return !initialWindow.IsDisposed && !initialPage.IsDisposed;
     }
 
-    private async ValueTask<BridgeTabChannelSnapshot?> TryGetInitialRegisteredTabAsync(string sessionId)
+    private void BindTransportPageCommands(WebPage page, string sessionId, string tabId)
     {
-        if (bridgeServer is null)
-            return null;
+        var transport = commandTransport
+            ?? throw new InvalidOperationException("Браузер не привязан к транспорту команд");
 
-        var session = await bridgeServer.CreateSessionSnapshotAsync(sessionId).ConfigureAwait(false);
-        if (session is not { IsConnected: true })
-            return null;
-
-        var tabs = await bridgeServer.GetTabsForSessionAsync(sessionId).ConfigureAwait(false);
-        return tabs.FirstOrDefault(static tab => tab.IsRegistered);
+        page.BindPageCommands(sessionId, tabId, transport.CreatePageCommands(page, sessionId, tabId));
     }
 
     private async ValueTask DisposeBridgeBootstrapAsync()
@@ -625,14 +624,14 @@ public sealed partial class WebBrowser : IWebBrowser
 
     private async ValueTask DisposeBridgeServerAsync()
     {
-        if (bridgeServer is null)
+        if (commandTransport is null)
             return;
 
-        bridgeServer.RuntimeEventReceived -= OnBridgeServerRuntimeEventReceived;
-        bridgeServer.CallbackRequested -= OnBridgeServerCallbackRequested;
-        bridgeServer.RequestInterceptionRequested -= OnBridgeServerRequestInterceptionRequested;
-        bridgeServer.ResponseInterceptionRequested -= OnBridgeServerResponseInterceptionRequested;
-        await bridgeServer.DisposeAsync().ConfigureAwait(false);
+        commandTransport.RuntimeEventReceived -= OnBridgeServerRuntimeEventReceived;
+        commandTransport.CallbackRequested -= OnBridgeServerCallbackRequested;
+        commandTransport.RequestInterceptionRequested -= OnBridgeServerRequestInterceptionRequested;
+        commandTransport.ResponseInterceptionRequested -= OnBridgeServerResponseInterceptionRequested;
+        await commandTransport.DisposeAsync().ConfigureAwait(false);
     }
 
     private void OnBridgeServerRuntimeEventReceived(string sessionId, BridgeMessage message)
@@ -765,7 +764,7 @@ public sealed partial class WebBrowser : IWebBrowser
 
     internal WebPage? GetBridgeCommandPage(WebWindow? excludedWindow = null)
     {
-        if (bridgeServer is null || string.IsNullOrWhiteSpace(bridgeSessionId))
+        if (commandTransport is null || string.IsNullOrWhiteSpace(bridgeSessionId))
             return null;
 
         var livePages = Pages.OfType<WebPage>()
@@ -786,7 +785,7 @@ public sealed partial class WebBrowser : IWebBrowser
     {
         ArgumentNullException.ThrowIfNull(window);
 
-        if (bridgeServer is null
+        if (commandTransport is null
             || string.IsNullOrWhiteSpace(bridgeSessionId)
             || string.IsNullOrWhiteSpace(window.BoundBridgeWindowId))
         {
@@ -802,13 +801,15 @@ public sealed partial class WebBrowser : IWebBrowser
     {
         var currentPage = (WebPage)window.CurrentPage;
         var position = window.Settings?.Position;
-        var (openedTabId, openedWindowId) = await OpenBridgeSurfaceAsync(
-            sourcePage,
-            (commands, token) => commands.OpenWindowAsync(position, token),
-            cancellationToken).ConfigureAwait(false);
+        var (openedTabId, openedWindowId) = commandTransport is ISurfaceProvisioningTransport provisioning
+            ? await provisioning.OpenWindowAsync(new SurfaceProvisioningRequest(ResolveBridgeProxy(currentPage), currentPage.ResolvedDevice), cancellationToken).ConfigureAwait(false)
+            : await OpenBridgeSurfaceAsync(
+                sourcePage,
+                (commands, token) => commands.OpenWindowAsync(position, token),
+                cancellationToken).ConfigureAwait(false);
         var registeredTab = await WaitForRegisteredTabAsync(openedTabId, cancellationToken).ConfigureAwait(false);
         window.BindBridgeWindowId(registeredTab.WindowId ?? openedWindowId);
-        currentPage.BindBridgeCommands(bridgeSessionId!, registeredTab.TabId, bridgeServer!.Commands);
+        BindTransportPageCommands(currentPage, bridgeSessionId!, registeredTab.TabId);
         await ApplyBridgeTabContextAsync(currentPage, cancellationToken).ConfigureAwait(false);
         await currentPage.ApplyEffectiveRequestInterceptionAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -821,7 +822,7 @@ public sealed partial class WebBrowser : IWebBrowser
     // страницу-отправитель: исходная могла и не восстановиться, а мост держит любая живая.
     private async ValueTask<(string TabId, string? WindowId)> OpenBridgeSurfaceAsync(
         WebPage preferredSourcePage,
-        Func<PageBridgeCommandClient, CancellationToken, ValueTask<(string TabId, string? WindowId)>> open,
+        Func<IPageCommandClient, CancellationToken, ValueTask<(string TabId, string? WindowId)>> open,
         CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow + BridgeSurfaceRecoveryBudget;
@@ -859,16 +860,18 @@ public sealed partial class WebBrowser : IWebBrowser
     {
         var bridgeWindowId = window.BoundBridgeWindowId
             ?? throw new InvalidOperationException("Bridge-backed OpenPageAsync requires a bound browser window identifier");
-        var (openedTabId, _) = await OpenBridgeSurfaceAsync(
-            sourcePage,
-            (commands, token) => commands.OpenTabAsync(bridgeWindowId, token),
-            cancellationToken).ConfigureAwait(false);
+        var (openedTabId, _) = commandTransport is ISurfaceProvisioningTransport provisioning
+            ? await provisioning.OpenTabAsync(bridgeWindowId, new SurfaceProvisioningRequest(ResolveBridgeProxy(page), page.ResolvedDevice), cancellationToken).ConfigureAwait(false)
+            : await OpenBridgeSurfaceAsync(
+                sourcePage,
+                (commands, token) => commands.OpenTabAsync(bridgeWindowId, token),
+                cancellationToken).ConfigureAwait(false);
         var registeredTab = await WaitForRegisteredTabAsync(openedTabId, cancellationToken).ConfigureAwait(false);
 
         if (!string.IsNullOrWhiteSpace(registeredTab.WindowId))
             window.BindBridgeWindowId(registeredTab.WindowId);
 
-        page.BindBridgeCommands(bridgeSessionId!, registeredTab.TabId, bridgeServer!.Commands);
+        BindTransportPageCommands(page, bridgeSessionId!, registeredTab.TabId);
         await ApplyBridgeTabContextAsync(page, cancellationToken).ConfigureAwait(false);
         await page.ApplyEffectiveRequestInterceptionAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -1638,7 +1641,7 @@ public sealed partial class WebBrowser : IWebBrowser
 
     private async ValueTask<BridgeTabChannelSnapshot> WaitForRegisteredTabAsync(string rawTabId, CancellationToken cancellationToken)
     {
-        if (bridgeServer is null || string.IsNullOrWhiteSpace(bridgeSessionId))
+        if (commandTransport is null || string.IsNullOrWhiteSpace(bridgeSessionId))
             throw new InvalidOperationException("Bridge-backed open requires an active bridge session");
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -1661,17 +1664,12 @@ public sealed partial class WebBrowser : IWebBrowser
         }
     }
 
-    private async ValueTask<BridgeTabChannelSnapshot?> TryGetRegisteredTabAsync(string sessionId, string rawTabId)
+    private ValueTask<BridgeTabChannelSnapshot?> TryGetRegisteredTabAsync(string sessionId, string rawTabId)
     {
-        if (bridgeServer is null)
-            return null;
+        if (commandTransport is null)
+            return ValueTask.FromResult<BridgeTabChannelSnapshot?>(null);
 
-        var session = await bridgeServer.CreateSessionSnapshotAsync(sessionId).ConfigureAwait(false);
-        if (session is not { IsConnected: true })
-            return null;
-
-        var tabs = await bridgeServer.GetTabsForSessionAsync(sessionId).ConfigureAwait(false);
-        return tabs.FirstOrDefault(tab => tab.IsRegistered && IsMatchingBridgeTabId(tab.TabId, rawTabId));
+        return commandTransport.TryGetRegisteredTabAsync(sessionId, tab => IsMatchingBridgeTabId(tab.TabId, rawTabId));
     }
 
     private static bool IsMatchingBridgeTabId(string registeredTabId, string rawTabId)
