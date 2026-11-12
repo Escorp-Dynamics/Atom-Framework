@@ -289,8 +289,8 @@ internal sealed class CdpPageCommandClient(CdpBrowserCommandTransport transport,
             cancellationToken.ThrowIfCancellationRequested();
 
             var candidate = await TryFindWaitCandidateAsync(payload, cancellationToken).ConfigureAwait(false);
-            if (IsSatisfied(candidate, requireVisible, requireStable, stability, deadline.Elapsed))
-                return candidate.Value.Id;
+            if (IsSatisfied(candidate, requireVisible, requireStable, stability, deadline.Elapsed) && candidate is { } found)
+                return found.Id;
 
             if (deadline.Elapsed >= waitTimeout)
                 return null;
